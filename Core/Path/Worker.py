@@ -25,6 +25,12 @@ class Worker:
         Platform = (Ctx.Platform if Ctx else None) or "linux"
         return cls(Name=Name, Platform=Platform, Db=Db)
 
+    @classmethod
+    # directive: path-class-perfection | # see path.C21
+    def Current(cls, Db=None) -> "Worker":
+        """Ergonomic alias for FromWorkerContext; preferred for constructor-injection defaults."""
+        return cls.FromWorkerContext(Db=Db)
+
     # directive: path-worker-class | # see path.S3
     def ResolveStorageRoot(self, StorageRootId: int) -> Optional[str]:
         """Return the worker-local AbsolutePath for the given StorageRootId, or None if no active resolution exists. Cached per-instance for the lifetime of this Worker; reconstruct the Worker to pick up operator changes to StorageRootResolutions."""

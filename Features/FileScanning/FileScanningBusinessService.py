@@ -60,18 +60,20 @@ def _CanonicalToPath(CanonicalValue: str) -> Optional[Path]:
         return None
 
 
-# directive: filescanning-uses-path | # see path.S5
+# directive: path-class-perfection | # see path.C21
 def _CanonicalExists(CanonicalValue: str) -> bool:
+    from Core.Path.PathFs import Exists as _FsExists
     P = _CanonicalToPath(CanonicalValue)
-    return False if P is None else P.Exists(_GetWorker())
+    return False if P is None else _FsExists(P, _GetWorker())
 
 
-# directive: filescanning-uses-path | # see path.S5
+# directive: path-class-perfection | # see path.C21
 def _CanonicalGetSize(CanonicalValue: str) -> int:
+    from Core.Path.PathFs import GetSize as _FsGetSize
     P = _CanonicalToPath(CanonicalValue)
     if P is None:
         raise PathError(f"_CanonicalGetSize: cannot parse canonical {CanonicalValue!r}")
-    return P.GetSize(_GetWorker())
+    return _FsGetSize(P, _GetWorker())
 
 
 # directive: paths-canonical-completion

@@ -431,10 +431,10 @@ class FileScanningViewModel:
             if not MediaFile:
                 return {'Success': False, 'Message': 'Media file not found'}
 
-            # Step 1: Check if exact file still exists
+            # directive: path-class-perfection | # see path.C21
             from Core.Path.Path import Path as _PathMF
             from Core.Path.Worker import Worker as _WMF
-            if _Exists(_PathMF(MediaFile.StorageRootId, MediaFile.RelativePath or ''), _WMF.FromWorkerContext()):
+            if _Exists(_PathMF(MediaFile.StorageRootId, MediaFile.RelativePath or ''), _WMF.Current()):
                 # File exists - refresh it directly
                 self.BusinessService.ProcessSingleMediaFile(
                     FilePath=MediaFile.FilePath,

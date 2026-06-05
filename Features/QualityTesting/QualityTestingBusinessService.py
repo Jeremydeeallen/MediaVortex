@@ -1317,11 +1317,10 @@ class QualityTestingBusinessService:
                 else:
                     TranscodedCanonical = os.path.join(Dir, f"{Stem}-mv.mp4")
                     OriginalStem = Stem
-                # directive: path-perfect-implementation | # see path.S11
+                # directive: path-class-perfection | # see path.C21
                 from Core.Path.Path import Path as _PathQT, PathError as _PEQT
                 from Core.Path.PathStorageRoots import GetStorageRoots as _GSRQT
-                from Core.Path.Worker import Worker as _WQT
-                _WkQT = _WQT.FromWorkerContext()
+                _WkQT = self._GetWorker()
                 _SrsQT = _GSRQT()
                 def TranslateProbe(P):
                     try:
@@ -1380,11 +1379,10 @@ class QualityTestingBusinessService:
         - 'native': no filter; PNGs are at the file's native dimensions.
         Cache key MUST include ViewMode so the two views cache independently.
         """
-        # directive: path-perfect-implementation | # see path.S11
+        # directive: path-class-perfection | # see path.C21
         from Core.Path.Path import Path as _PathCS, PathError as _PECS
         from Core.Path.PathStorageRoots import GetStorageRoots as _GSRCS
-        from Core.Path.Worker import Worker as _WCS
-        _WkCS = _WCS.FromWorkerContext()
+        _WkCS = self._GetWorker()
         _SrsCS = _GSRCS()
         def Translate(P):
             try:
@@ -1575,12 +1573,11 @@ class QualityTestingBusinessService:
             # 2. Delete the staged transcoded file (per Stage 8 contract).
             if LocalOutputPath:
                 try:
-                    # directive: path-perfect-implementation | # see path.S11
+                    # directive: path-class-perfection | # see path.C21
                     from Core.Path.Path import Path as _PathRQ, PathError as _PERQ
                     from Core.Path.PathStorageRoots import GetStorageRoots as _GSRRQ
-                    from Core.Path.Worker import Worker as _WRQ
                     try:
-                        StagedLocal = _PathRQ.FromLegacyString(LocalOutputPath, _GSRRQ()).Resolve(_WRQ.FromWorkerContext())
+                        StagedLocal = _PathRQ.FromLegacyString(LocalOutputPath, _GSRRQ()).Resolve(self._GetWorker())
                     except _PERQ:
                         StagedLocal = LocalOutputPath
                     if os.path.exists(StagedLocal):

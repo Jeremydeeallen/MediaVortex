@@ -11,6 +11,7 @@ from Repositories.DatabaseManager import DatabaseManager
 from Features.QualityTesting.QualityTestRepository import QualityTestRepository
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
+from Core.Path.PathFs import Exists as _PathFsExists
 from Services.QualityTestQueueService import QualityTestQueueService
 
 QualityTestBlueprint = Blueprint('QualityTest', __name__)
@@ -1056,11 +1057,12 @@ def OverrideQualityTest():
         DeletedPath = None
         if TfpRows:
             try:
-                Wk = Worker.FromWorkerContext()
+                # directive: path-class-perfection | # see path.C21
+                Wk = Worker.Current()
                 OutPath = Path.FromRow(TfpRows[0], Prefix="Output")
                 if OutPath is not None:
                     LocalOut = OutPath.Resolve(Wk)
-                    if LocalOut and OutPath.Exists(Wk):
+                    if LocalOut and _PathFsExists(OutPath, Wk):
                         os.remove(LocalOut)
                         DeletedPath = LocalOut
             except Exception as DelEx:
