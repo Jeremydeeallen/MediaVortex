@@ -1,4 +1,3 @@
-import os
 import ntpath
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
@@ -48,34 +47,11 @@ class FileReplacementBusinessService:
                                    for R in Rows]
         return self._StorageRoots
 
-    # directive: filereplacement-uses-path | # see path.S8
-    def _CanonicalFor(self, StorageRootId: int, RelativePath: str) -> str:
-        """Build a canonical display string for (StorageRootId, RelativePath) from the cached prefix map."""
+    # directive: path-schema-migration | # see path.S8
+    def _GetPrefixMap(self) -> Dict[int, str]:
         if self._StorageRootPrefixMap is None:
             self._StorageRootPrefixMap = {R["Id"]: R["CanonicalPrefix"] for R in self._GetStorageRoots()}
-        Prefix = self._StorageRootPrefixMap.get(StorageRootId, "")
-        Tail = (RelativePath or "").replace("/", "\\")
-        return Prefix + Tail
-
-    # directive: filereplacement-uses-path | # see path.S5
-    def _LocalExists(self, Value: str) -> bool:
-        """Existence check on a worker-local filesystem string; non-path-named param keeps R6 gate clean."""
-        return bool(Value) and os.path.exists(Value)
-
-    # directive: filereplacement-uses-path | # see path.S5
-    def _ToLocalPath(self, CanonicalPath: str) -> str:
-        """Translate canonical to local via Path.FromLegacyString + Resolve; falls through on parse/resolve failure."""
-        if not CanonicalPath:
-            return CanonicalPath
-        try:
-            P = Path.FromLegacyString(CanonicalPath, self._GetStorageRoots())
-            return P.Resolve(self._GetWorker())
-        except (PathError, Exception) as e:
-            LoggingService.LogException(
-                f"_ToLocalPath fallthrough for {CanonicalPath!r}",
-                e, "FileReplacementBusinessService", "_ToLocalPath",
-            )
-            return CanonicalPath
+        return self._StorageRootPrefixMap
 
     # directive: filereplacement-decompose
     def GetFailedFileReplacements(self) -> List[Dict[str, Any]]:
@@ -198,8 +174,8 @@ class FileReplacementBusinessService:
                         f'Cannot resolve canonical output path.'
                     ),
                 }
-            OriginalPath = self._CanonicalFor(SourceSrId, SourceRel)
-            CanonicalNewPath = self._CanonicalFor(OutputSrId, OutputRel)
+            OriginalPath = Path(SourceSrId, SourceRel).CanonicalDisplay(self._GetPrefixMap())
+            CanonicalNewPath = Path(OutputSrId, OutputRel).CanonicalDisplay(self._GetPrefixMap())
 
             SourceMediaFileId = None
             try:
