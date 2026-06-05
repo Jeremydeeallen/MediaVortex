@@ -7,8 +7,7 @@ from Core.Path.PathStorageRoots import GetStorageRoots, GetPrefixMap
 
 
 # directive: path-schema-migration | # see path.S8
-def _LookupTypedPair(CanonicalString: str):
-    """Parse a legacy FilePath into (StorageRootId, RelativePath); returns (None, None) on parse failure."""
+def _SafeLookupTypedPair(CanonicalString: str):
     if not CanonicalString:
         return (None, None)
     try:
@@ -19,8 +18,7 @@ def _LookupTypedPair(CanonicalString: str):
 
 
 # directive: path-schema-migration | # see path.S8
-def _SynthesizeFilePath(StorageRootId, RelativePath) -> str:
-    """Render canonical FilePath via Path.CanonicalDisplay."""
+def _SafeCanonical(StorageRootId, RelativePath) -> str:
     if StorageRootId is None:
         return ""
     try:
@@ -59,7 +57,7 @@ class ShowSettingsRepository(BaseRepository):
     def GetShowSettingByFolder(self, ShowFolder: str) -> Optional[ShowSettingModel]:
         """Get show setting for a specific folder via typed-pair lookup."""
         try:
-            Sid, Rel = _LookupTypedPair(ShowFolder)
+            Sid, Rel = _SafeLookupTypedPair(ShowFolder)
             if Sid is None or Rel is None:
                 return None
             query = (
@@ -80,7 +78,7 @@ class ShowSettingsRepository(BaseRepository):
     def SaveShowSetting(self, Setting: ShowSettingModel) -> int:
         """Insert or update a show setting via typed-pair. Returns the Id."""
         try:
-            Sid, Rel = _LookupTypedPair(Setting.ShowFolder)
+            Sid, Rel = _SafeLookupTypedPair(Setting.ShowFolder)
             if Sid is None or Rel is None:
                 LoggingService.LogException(
                     f"Cannot resolve ShowFolder to typed pair: {Setting.ShowFolder!r}",
@@ -114,7 +112,7 @@ class ShowSettingsRepository(BaseRepository):
     def SetSeriesAssignedProfile(self, ShowFolder: str, AssignedProfile: Optional[str]) -> int:
         """Set or clear the per-show AssignedProfile via typed-pair WHERE."""
         try:
-            Sid, Rel = _LookupTypedPair(ShowFolder)
+            Sid, Rel = _SafeLookupTypedPair(ShowFolder)
             if Sid is None or Rel is None:
                 LoggingService.LogException(
                     f"Cannot resolve ShowFolder to typed pair: {ShowFolder!r}",
@@ -163,7 +161,7 @@ class ShowSettingsRepository(BaseRepository):
     def DeleteShowSetting(self, ShowFolder: str) -> bool:
         """Delete a show setting via typed-pair WHERE (reverts to default)."""
         try:
-            Sid, Rel = _LookupTypedPair(ShowFolder)
+            Sid, Rel = _SafeLookupTypedPair(ShowFolder)
             if Sid is None or Rel is None:
                 return False
             query = "DELETE FROM ShowSettings WHERE StorageRootId = %s AND RelativePath = %s"
@@ -274,7 +272,7 @@ class ShowSettingsRepository(BaseRepository):
         """Map a database row to a ShowSettingModel; synthesizes ShowFolder from typed pair."""
         Sid = Row.get('StorageRootId') if hasattr(Row, 'get') else Row['StorageRootId']
         Rel = Row.get('RelativePath') if hasattr(Row, 'get') else Row['RelativePath']
-        ShowFolder = _SynthesizeFilePath(Sid, Rel) if (Sid is not None and Rel) else ""
+        ShowFolder = _SafeCanonical(Sid, Rel) if (Sid is not None and Rel) else ""
         return ShowSettingModel(
             Id=Row['Id'],
             StorageRootId=Sid,
