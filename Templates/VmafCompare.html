@@ -480,7 +480,7 @@
                             : '<span class="text-muted">-</span>';
                         return '<tr class="table-info">' +
                             '<td><span class="badge bg-info">test</span></td>' +
-                            '<td><div style="max-width:560px;" title="' + EscapeHtml(First.FilePath || '') + '"><small class="text-muted d-block text-truncate">' + EscapeHtml((First.FilePath || '').substring(0, (First.FilePath || '').length - (First.FileName || '').length).replace(/[\\/]+$/, '')) + '</small><strong class="d-block text-truncate">' + EscapeHtml(First.FileName) + '</strong><small class="text-muted">' + EscapeHtml(First.TestVariantSetName || '?') + ' &middot; ' + G.Items.length + ' variants</small></div></td>' +
+                            '<td><div style="max-width:560px;" title="' + EscapeHtml(First.FilePath || '') + '"><small class="text-muted d-block text-truncate">' + EscapeHtml(First.Directory || '') + '</small><strong class="d-block text-truncate">' + EscapeHtml(First.FileName) + '</strong><small class="text-muted">' + EscapeHtml(First.TestVariantSetName || '?') + ' &middot; ' + G.Items.length + ' variants</small></div></td>' +
                             '<td><small>' + EscapeHtml(First.ProfileName || '-') + '</small></td>' +
                             '<td>' + VmafBadge + '</td>' +
                             '<td colspan="2"><span class="badge bg-secondary" title="test mode: source preserved">test mode</span></td>' +
@@ -502,7 +502,7 @@
                     var Date_ = R.AttemptDate ? R.AttemptDate.replace('T', ' ').substring(0, 19) : '-';
                     return '<tr>' +
                         '<td>' + R.Id + '</td>' +
-                        '<td><div style="max-width:560px;" title="' + EscapeHtml(R.FilePath || '') + '"><small class="text-muted d-block text-truncate">' + EscapeHtml((R.FilePath || '').substring(0, (R.FilePath || '').length - (R.FileName || '').length).replace(/[\\/]+$/, '')) + '</small><span class="d-block text-truncate">' + EscapeHtml(R.FileName) + '</span></div></td>' +
+                        '<td><div style="max-width:560px;" title="' + EscapeHtml(R.FilePath || '') + '"><small class="text-muted d-block text-truncate">' + EscapeHtml(R.Directory || '') + '</small><span class="d-block text-truncate">' + EscapeHtml(R.FileName) + '</span></div></td>' +
                         '<td><small>' + EscapeHtml(R.ProfileName || '-') + '</small></td>' +
                         '<td>' + VmafBadge + '</td>' +
                         '<td>' + DispBadge + '</td>' +

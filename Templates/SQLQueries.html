@@ -710,7 +710,7 @@ class SQLQueriesManager {
                     `;
 
                     data.StuckJobs.forEach(job => {
-                        const FileName = job.FilePath ? job.FilePath.split('/').pop() : job.FileName;
+                        const FileName = job.FileName || (job.FilePath || '').split(/[\\/]/).pop() || 'Unknown';
 
                         html += `
                             <tr>

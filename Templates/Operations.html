@@ -702,7 +702,7 @@ class OperationsManager {
                     `;
 
                     data.Results.forEach(item => {
-                        const FileName = item.FilePath ? item.FilePath.split('/').pop().split('\\').pop() : 'Unknown';
+                        const FileName = item.FileName || (item.FilePath || '').split(/[\\/]/).pop() || 'Unknown';
                         const Reduction = item.SizeReductionPercent != null ? item.SizeReductionPercent.toFixed(1) : 'N/A';
                         let ReductionBadge;
                         if (item.SizeReductionPercent != null) {
@@ -935,7 +935,7 @@ class OperationsManager {
                     `;
 
                     data.StuckJobs.forEach(job => {
-                        const FileName = job.FilePath ? job.FilePath.split('/').pop() : job.FileName;
+                        const FileName = job.FileName || (job.FilePath || '').split(/[\\/]/).pop() || 'Unknown';
 
                         html += `
                             <tr>

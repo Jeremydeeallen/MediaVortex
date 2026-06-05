@@ -497,11 +497,17 @@ def GetRecentSuccesses():
 
         results = SharedDatabaseManager.DatabaseService.ExecuteQuery(query, [Limit])
 
+        import ntpath as _ntpathSQ2
         if results:
             rows = []
             for row in results:
                 _D = dict(row)
-                _D['FilePath'] = _SynthSQ2(_D.get('tastoragerootid'), _D.get('tarelativepath'))
+                _Sid = _D.get('TaStorageRootId') if 'TaStorageRootId' in _D else _D.get('tastoragerootid')
+                _Rel = _D.get('TaRelativePath') if 'TaRelativePath' in _D else _D.get('tarelativepath')
+                _Display = _SynthSQ2(_Sid, _Rel)
+                _D['FilePath'] = _Display
+                _D['FileName'] = _ntpathSQ2.basename(_Display) if _Display else ''
+                _D['Directory'] = _ntpathSQ2.dirname(_Display) if _Display else ''
                 rows.append(_D)
         else:
             rows = []
@@ -625,12 +631,17 @@ def GetStuckJobs():
 
         TranscodeResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(TranscodeQuery)
 
+        import ntpath as _ntpathSJ
         for row in TranscodeResults:
+            _Sid = row.get('TqStorageRootId') if 'TqStorageRootId' in row else row.get('tqstoragerootid')
+            _Rel = row.get('TqRelativePath') if 'TqRelativePath' in row else row.get('tqrelativepath')
+            _Display = _SynthSJ(_Sid, _Rel)
             StuckJobs.append({
                 "JobType": row['jobtype'],
                 "JobId": row['id'],
-                "FilePath": _SynthSJ(row.get('tqstoragerootid'), row.get('tqrelativepath')),
+                "FilePath": _Display,
                 "FileName": row['filename'],
+                "Directory": _ntpathSJ.dirname(_Display) if _Display else '',
                 "Status": row['status'],
                 "StartedAt": str(row['datestarted']),
                 "Duration": row['durationminutes']
@@ -672,11 +683,13 @@ def GetStuckJobs():
         QualityTestResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(QualityTestQuery)
 
         for row in QualityTestResults:
+            _OrigPath = row['originalfilepath'] or ''
             StuckJobs.append({
                 "JobType": row['jobtype'],
                 "JobId": row['id'],
-                "FilePath": row['originalfilepath'],
+                "FilePath": _OrigPath,
                 "FileName": f"QualityTest-{row['transcodeattemptid']}",
+                "Directory": _ntpathSJ.dirname(_OrigPath) if _OrigPath else '',
                 "Status": "Running",
                 "StartedAt": str(row['datestarted']),
                 "Duration": row['durationminutes']

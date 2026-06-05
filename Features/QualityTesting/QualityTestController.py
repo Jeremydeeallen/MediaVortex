@@ -516,6 +516,7 @@ def RecentAttempts():
                 'Id': R['Id'],
                 'FilePath': _Fp,
                 'FileName': _ntpathRA.basename(_Fp),
+                'Directory': _ntpathRA.dirname(_Fp),
                 'ProfileName': R['ProfileName'],
                 'AttemptDate': R['AttemptDate'].isoformat() if R['AttemptDate'] else None,
                 'Success': R['Success'],
