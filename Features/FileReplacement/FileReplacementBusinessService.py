@@ -164,8 +164,7 @@ class FileReplacementBusinessService:
             file_paths_result = self.DatabaseManager.DatabaseService.ExecuteQuery(
                 """
                 SELECT SourceStorageRootId, SourceRelativePath,
-                       OutputStorageRootId, OutputRelativePath,
-                       LocalOutputPath
+                       OutputStorageRootId, OutputRelativePath
                 FROM TemporaryFilePaths
                 WHERE TranscodeAttemptId = %s
                 """,
@@ -181,22 +180,27 @@ class FileReplacementBusinessService:
             SourceRel = FP.get('SourceRelativePath')
             OutputSrId = FP.get('OutputStorageRootId')
             OutputRel = FP.get('OutputRelativePath')
-            LocalOutputPathStr = FP.get('LocalOutputPath')
 
             if SourceSrId is None or SourceRel is None:
                 return {
                     'Success': False,
                     'ErrorMessage': (
                         f'TemporaryFilePaths for attempt {TranscodeAttemptId} is '
-                        f'missing SourceStorageRootId / SourceRelativePath (legacy row?). '
+                        f'missing SourceStorageRootId / SourceRelativePath. '
                         f'Cannot resolve canonical source path.'
                     ),
                 }
+            if OutputSrId is None or OutputRel is None:
+                return {
+                    'Success': False,
+                    'ErrorMessage': (
+                        f'TemporaryFilePaths for attempt {TranscodeAttemptId} is '
+                        f'missing OutputStorageRootId / OutputRelativePath. '
+                        f'Cannot resolve canonical output path.'
+                    ),
+                }
             OriginalPath = self._CanonicalFor(SourceSrId, SourceRel)
-            if OutputSrId is not None and OutputRel is not None:
-                CanonicalNewPath = self._CanonicalFor(OutputSrId, OutputRel)
-            else:
-                CanonicalNewPath = None
+            CanonicalNewPath = self._CanonicalFor(OutputSrId, OutputRel)
 
             SourceMediaFileId = None
             try:
@@ -213,22 +217,18 @@ class FileReplacementBusinessService:
                 )
 
             TranscodedPath = CanonicalNewPath
-            if OutputSrId is not None and OutputRel is not None:
-                try:
-                    OutPathObj = Path(OutputSrId, OutputRel)
-                    LocalTranscodedPath = OutPathObj.Resolve(self._GetWorker())
-                except PathError as ResolveEx:
-                    LoggingService.LogError(
-                        f"Cannot resolve output path for worker {self.WorkerName!r}: {ResolveEx}",
-                        "FileReplacementBusinessService", "ProcessFileReplacement",
-                    )
-                    return {
-                        'Success': False,
-                        'ErrorMessage': f"No StorageRootResolutions row for (StorageRootId={OutputSrId}, Worker={self.WorkerName}); cannot translate output path."
-                    }
-            else:
-                TranscodedPath = LocalOutputPathStr
-                LocalTranscodedPath = self._ToLocalPath(TranscodedPath) if TranscodedPath else None
+            try:
+                OutPathObj = Path(OutputSrId, OutputRel)
+                LocalTranscodedPath = OutPathObj.Resolve(self._GetWorker())
+            except PathError as ResolveEx:
+                LoggingService.LogError(
+                    f"Cannot resolve output path for worker {self.WorkerName!r}: {ResolveEx}",
+                    "FileReplacementBusinessService", "ProcessFileReplacement",
+                )
+                return {
+                    'Success': False,
+                    'ErrorMessage': f"No StorageRootResolutions row for (StorageRootId={OutputSrId}, Worker={self.WorkerName}); cannot translate output path."
+                }
 
             if not LocalTranscodedPath or not self.FileManager.ValidateFileExists(LocalTranscodedPath):
                 return {
