@@ -150,12 +150,6 @@ def _SplitExt(Value: str) -> tuple:
     return LocalSplitExt(Value)
 
 
-# directive: filescanning-uses-path | # see path.S5
-def _Normalize(Value: str) -> str:
-    """Backslash-normalize a canonical Windows-shape path."""
-    return (Value or "").replace("/", "\\")
-
-
 # directive: paths-canonical-completion
 def _CurrentWorkerName():
     # see filescanning.ST1
@@ -1018,7 +1012,7 @@ class FileScanningBusinessService:
             if not Path:
                 return Path
 
-            normalized_path = _Normalize(Path)
+            normalized_path = ntpath.normpath(Path or "")
 
             # Check if path exists
             if not _LocalExists(normalized_path):
@@ -1251,7 +1245,7 @@ class FileScanningBusinessService:
         """Process a single media file with fuzzy matching and optional metadata extraction; FilePath param is the canonical path string."""
         try:
             # Canonicalize path string for DB consistency (lookups vs inserts).
-            FilePath = _Normalize(FilePath)
+            FilePath = ntpath.normpath(FilePath or "")
             LocalPath = self._ToLocalPath(FilePath)
 
             # Existence check uses the translated local path.
