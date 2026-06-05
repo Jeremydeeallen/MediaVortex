@@ -6,20 +6,18 @@ import ntpath
 
 # directive: path-schema-migration | # see path.S8
 def ParentDir(Value):
-    """ntpath.dirname for canonical Windows-shape paths."""
-    return ntpath.dirname(Value or "")
+    Local = Value or ""
+    return os.path.dirname(Local)
 
 
 # directive: path-schema-migration | # see path.S8
 def Normalize(Value):
-    """Backslash-normalize a canonical Windows-shape path."""
-    return (Value or "").replace("/", "\\")
+    return (Value or "").strip().strip('"')
 
 
 # directive: path-schema-migration | # see path.S8
 def PathsEqual(A, B):
-    """Compare two paths case-insensitively after backslash normalization."""
-    return Normalize(A).lower() == Normalize(B).lower()
+    return os.path.normcase(Normalize(A)) == os.path.normcase(Normalize(B))
 from Models.TranscodeQueueModel import TranscodeQueueModel
 from Models.MediaFileModel import MediaFileModel
 from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
