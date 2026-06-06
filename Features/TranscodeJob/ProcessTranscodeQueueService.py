@@ -21,6 +21,7 @@ from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalJoin, LocalSpl
 
 from Core.DateTimeHelpers import ToUtcIsoZ
 from Features.TranscodeQueue.TranscodeQueueRepository import TranscodeQueueRepository
+from Core.Database.CodecFlagsRepository import CodecFlagsRepository
 # directive: transcodejob-uses-path | # see path.S5
 class ProcessTranscodeQueueService:
     """Orchestrates the complete transcoding queue processing workflow using MVVM architecture."""
@@ -32,7 +33,7 @@ class ProcessTranscodeQueueService:
                  QueueManagementInstance: QueueManagementService = None,
                  DispositionInstance: PostTranscodeDispositionService = None,
                  WorkerName: str = None,
-                 WorkerConfig: dict = None, TranscodeQueueRepositoryInstance: Optional[TranscodeQueueRepository] = None):
+                 WorkerConfig: dict = None, TranscodeQueueRepositoryInstance: Optional[TranscodeQueueRepository] = None, CodecFlagsRepositoryInstance: Optional[CodecFlagsRepository] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.CommandBuilder = CommandBuilderInstance or CommandBuilder()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
@@ -98,6 +99,7 @@ class ProcessTranscodeQueueService:
         self.StuckJobMonitoringThread = None
         self.StuckJobMonitoringActive = False
         self.TranscodeQueueRepository = TranscodeQueueRepositoryInstance or TranscodeQueueRepository()
+        self.CodecFlagsRepository = CodecFlagsRepositoryInstance or CodecFlagsRepository()
 
     # directive: nvenc-rate-anchored-remediation
     def Run(self, MaxConcurrentJobs: int = 1) -> Dict[str, Any]:
@@ -1212,12 +1214,12 @@ class ProcessTranscodeQueueService:
                 )
 
             # Get codec flags
-            CodecFlags = self.DatabaseManager.GetCodecFlagsByCodecName(ProfileSettings.get('Codec'))
+            CodecFlags = self.CodecFlagsRepository.GetCodecFlagsByCodecName(ProfileSettings.get('Codec'))
             if not CodecFlags:
                 return None
 
             # Get codec parameters
-            CodecParameters = self.DatabaseManager.GetCodecParametersByCodecFlagsId(CodecFlags['Id'])
+            CodecParameters = self.CodecFlagsRepository.GetCodecParametersByCodecFlagsId(CodecFlags['Id'])
             if not CodecParameters:
                 return None
 
