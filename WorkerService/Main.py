@@ -30,6 +30,7 @@ from Core.Database.DatabaseService import EscapeLikePattern
 import os as _os_path_for_v2_helpers
 from typing import Optional
 from Features.ServiceControl.ServiceControlRepository import ServiceControlRepository
+from Features.Workers.WorkersRepository import WorkersRepository
 
 
 # directive: path-schema-migration | # see path.S8
@@ -47,7 +48,7 @@ def LocalIsDir(Value):
 class WorkerServiceApp:
     """Unified worker application that runs transcode, quality test, and scan capabilities."""
 
-    def __init__(self, ServiceControlRepositoryInstance: Optional[ServiceControlRepository] = None, SystemSettingsRepositoryInstance: Optional[SystemSettingsRepository] = None):
+    def __init__(self, ServiceControlRepositoryInstance: Optional[ServiceControlRepository] = None, SystemSettingsRepositoryInstance: Optional[SystemSettingsRepository] = None, WorkersRepositoryInstance: Optional[WorkersRepository] = None):
         """Initialize the WorkerService application."""
         CurrentPid = os.getpid()
         LoggingService.LogInfo(f"WorkerServiceApp __init__ started. PID: {CurrentPid}", "WorkerService", "__init__")
@@ -110,6 +111,7 @@ class WorkerServiceApp:
         LoggingService.LogInfo(f"WorkerServiceApp __init__ completed. PID: {CurrentPid}", "WorkerService", "__init__")
         self.ServiceControlRepository = ServiceControlRepositoryInstance or ServiceControlRepository()
         self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
+        self.WorkersRepository = WorkersRepositoryInstance or WorkersRepository()
 
     def _ResolveWorkerName(self) -> str:
         """Determine this worker's name.
@@ -209,7 +211,7 @@ class WorkerServiceApp:
             Version, BuildInfo = self._ResolveWorkerVersion()
 
             # Register worker (UPSERT - creates or updates)
-            self.DatabaseManager.RegisterWorker(
+            self.WorkersRepository.RegisterWorker(
                 WorkerName=self.WorkerName,
                 Platform=self.WorkerPlatform,
                 FFmpegPath=FFmpegPath,
@@ -248,7 +250,7 @@ class WorkerServiceApp:
             )
 
             # Load worker config from DB
-            Config = self.DatabaseManager.GetWorkerConfig(self.WorkerName)
+            Config = self.WorkersRepository.GetWorkerConfig(self.WorkerName)
             if Config:
                 LoggingService.LogInfo(
                     f"Worker config loaded: FFmpegPath={Config.get('FFmpegPath') or Config.get('ffmpegpath') or '(default)'}",
@@ -550,7 +552,7 @@ class WorkerServiceApp:
         summary into Workers.MountValidationError for UI surfacing.
         """
         if not Failures:
-            self.DatabaseManager.SetWorkerMountValidationError(self.WorkerName, None)
+            self.WorkersRepository.SetWorkerMountValidationError(self.WorkerName, None)
             return True
 
         Reason = "; ".join(f"{P}: {R}" for P, R in Failures)
@@ -559,8 +561,8 @@ class WorkerServiceApp:
                 f"Mount validation FAILED for worker '{self.WorkerName}': {Path} -- {Detail}",
                 "WorkerService", "_ValidateStorageMounts"
             )
-        self.DatabaseManager.SetWorkerMountValidationError(self.WorkerName, Reason)
-        self.DatabaseManager.UpdateWorkerStatus(self.WorkerName, "Paused")
+        self.WorkersRepository.SetWorkerMountValidationError(self.WorkerName, Reason)
+        self.WorkersRepository.UpdateWorkerStatus(self.WorkerName, "Paused")
         self.WorkerStatus = "Paused"
         return False
 
@@ -597,7 +599,7 @@ class WorkerServiceApp:
             # stay Paused.  Only default to Online when the DB row has no
             # explicit status (first-ever start).
             if self.WorkerStatus == "Online" and MountsOk:
-                self.DatabaseManager.UpdateWorkerStatus(self.WorkerName, "Online")
+                self.WorkersRepository.UpdateWorkerStatus(self.WorkerName, "Online")
             elif not MountsOk:
                 LoggingService.LogError(
                     f"Worker forced to Paused due to mount validation failure -- no jobs will be claimed until mounts are fixed",
@@ -887,7 +889,7 @@ class WorkerServiceApp:
                 self.ServiceControlRepository.UpdateServiceStatus("WorkerService", {
                     'HealthStatus': 'Healthy'
                 })
-                self.DatabaseManager.UpdateWorkerHeartbeat(self.WorkerName)
+                self.WorkersRepository.UpdateWorkerHeartbeat(self.WorkerName)
                 self.ShutdownEvent.wait(30)
             except Exception as e:
                 LoggingService.LogException("Error in health check", e, "WorkerService", "_HealthCheckLoop")

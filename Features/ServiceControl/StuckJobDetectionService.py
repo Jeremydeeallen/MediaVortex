@@ -220,7 +220,7 @@ class StuckJobDetectionService:
     def _IsWorkerOffline(self, WorkerName: str) -> tuple[bool, str]:
         """Check if a worker's heartbeat is stale (indicating it's offline/crashed)."""
         try:
-            WorkerConfig = self.DatabaseManager.GetWorkerConfig(WorkerName)
+            WorkerConfig = self.WorkersRepository.GetWorkerConfig(WorkerName)
             if not WorkerConfig:
                 # No worker record found - might be a legacy job from before distributed mode
                 return False, "No worker record (legacy job)"
