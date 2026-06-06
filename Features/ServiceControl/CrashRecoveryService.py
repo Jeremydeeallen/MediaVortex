@@ -13,18 +13,20 @@ from Core.Logging.LoggingService import LoggingService
 from Core.DateTimeHelpers import ToUtcIsoZ
 from Core.Path.LocalPath import LocalExists
 from Services.ProcessManagementService import ProcessManagementService
+from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
 
 
 # directive: path-schema-migration | # see path.S9
 class CrashRecoveryService:
     """Service for automated crash recovery of stuck jobs."""
 
-    def __init__(self, DatabaseManagerInstance, WorkerName: str = None):
+    def __init__(self, DatabaseManagerInstance, WorkerName: str = None, ActiveJobRepositoryInstance: Optional[ActiveJobRepository] = None):
         """Initialize the crash recovery service."""
         self.DatabaseManager = DatabaseManagerInstance
         self.ProcessManager = ProcessManagementService()
         self.WorkerName = WorkerName
         LoggingService.LogInfo(f"CrashRecoveryService initialized (worker={WorkerName or 'all'})", "CrashRecoveryService", "__init__")
+        self.ActiveJobRepository = ActiveJobRepositoryInstance or ActiveJobRepository()
 
     def RecoverServiceJobs(self, ServiceName: str) -> Dict:
         """Recover stuck jobs for a specific service, scoped to this worker's jobs only."""
@@ -32,7 +34,7 @@ class CrashRecoveryService:
             LoggingService.LogInfo(f"Starting crash recovery for service: {ServiceName}, worker: {self.WorkerName or 'all'}", "CrashRecoveryService", "RecoverServiceJobs")
 
             # Get active jobs scoped to this worker (all statuses for recovery)
-            active_jobs = self.DatabaseManager.GetActiveJobsByService(ServiceName, WorkerName=self.WorkerName, RunningOnly=False)
+            active_jobs = self.ActiveJobRepository.GetActiveJobsByService(ServiceName, WorkerName=self.WorkerName, RunningOnly=False)
 
             if not active_jobs:
                 LoggingService.LogInfo(f"No active jobs found for service {ServiceName}", "CrashRecoveryService", "RecoverServiceJobs")
@@ -509,7 +511,7 @@ class CrashRecoveryService:
         try:
             # This could be enhanced to query the Logs table for recovery statistics
             # For now, return basic info
-            active_jobs = self.DatabaseManager.GetActiveJobsByService(ServiceName)
+            active_jobs = self.ActiveJobRepository.GetActiveJobsByService(ServiceName)
 
             return {
                 "ServiceName": ServiceName,

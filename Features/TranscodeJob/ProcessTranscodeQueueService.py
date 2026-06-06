@@ -20,6 +20,10 @@ from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalJoin, LocalSpl
 
 
 from Core.DateTimeHelpers import ToUtcIsoZ
+from Features.TranscodeQueue.TranscodeQueueRepository import TranscodeQueueRepository
+from Core.Database.CodecFlagsRepository import CodecFlagsRepository
+from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
 # directive: transcodejob-uses-path | # see path.S5
 class ProcessTranscodeQueueService:
     """Orchestrates the complete transcoding queue processing workflow using MVVM architecture."""
@@ -31,7 +35,7 @@ class ProcessTranscodeQueueService:
                  QueueManagementInstance: QueueManagementService = None,
                  DispositionInstance: PostTranscodeDispositionService = None,
                  WorkerName: str = None,
-                 WorkerConfig: dict = None):
+                 WorkerConfig: dict = None, TranscodeQueueRepositoryInstance: Optional[TranscodeQueueRepository] = None, CodecFlagsRepositoryInstance: Optional[CodecFlagsRepository] = None, SystemSettingsRepositoryInstance: Optional[SystemSettingsRepository] = None, ActiveJobRepositoryInstance: Optional[ActiveJobRepository] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.CommandBuilder = CommandBuilderInstance or CommandBuilder()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
@@ -96,6 +100,10 @@ class ProcessTranscodeQueueService:
         # Stuck job monitoring
         self.StuckJobMonitoringThread = None
         self.StuckJobMonitoringActive = False
+        self.TranscodeQueueRepository = TranscodeQueueRepositoryInstance or TranscodeQueueRepository()
+        self.CodecFlagsRepository = CodecFlagsRepositoryInstance or CodecFlagsRepository()
+        self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
+        self.ActiveJobRepository = ActiveJobRepositoryInstance or ActiveJobRepository()
 
     # directive: nvenc-rate-anchored-remediation
     def Run(self, MaxConcurrentJobs: int = 1) -> Dict[str, Any]:
@@ -341,7 +349,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogInfo(f"Starting job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessJob")
 
             # CREATE ACTIVE JOB RECORD
-            ActiveJobId = self.DatabaseManager.CreateActiveJob(
+            ActiveJobId = self.ActiveJobRepository.CreateActiveJob(
                 ServiceName="TranscodeService",
                 JobType="Transcode",
                 QueueId=Job.Id,
@@ -376,7 +384,7 @@ class ProcessTranscodeQueueService:
                     LoggingService.LogException("Failed to delete queue item for missing source", DelEx, "ProcessTranscodeQueueService", "ProcessJob")
                 if ActiveJobId:
                     try:
-                        self.DatabaseManager.DeleteActiveJob(ActiveJobId)
+                        self.ActiveJobRepository.DeleteActiveJob(ActiveJobId)
                     except Exception as DelEx:
                         LoggingService.LogException("Failed to delete active job for missing source", DelEx, "ProcessTranscodeQueueService", "ProcessJob")
                 return
@@ -514,7 +522,7 @@ class ProcessTranscodeQueueService:
                 "ProcessTranscodeQueueService", "ProcessTestVariantJob",
             )
 
-            VariantSet = self.DatabaseManager.GetTestVariantSet(Job.TestVariantSetId)
+            VariantSet = self.TranscodeQueueRepository.GetTestVariantSet(Job.TestVariantSetId)
             if not VariantSet or not VariantSet.get('Variants'):
                 self.HandleJobFailure(Job, f"TestVariantSet {Job.TestVariantSetId} not found or empty", None, None)
                 return
@@ -524,7 +532,7 @@ class ProcessTranscodeQueueService:
                 "ProcessTranscodeQueueService", "ProcessTestVariantJob",
             )
 
-            ActiveJobId = self.DatabaseManager.CreateActiveJob(
+            ActiveJobId = self.ActiveJobRepository.CreateActiveJob(
                 ServiceName="TranscodeService",
                 JobType="TestVariant",
                 QueueId=Job.Id,
@@ -768,7 +776,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Failed to delete test queue row", Ex, "ProcessTranscodeQueueService", "_CleanupTestQueueRow")
         if ActiveJobId:
             try:
-                self.DatabaseManager.DeleteActiveJob(ActiveJobId)
+                self.ActiveJobRepository.DeleteActiveJob(ActiveJobId)
             except Exception:
                 pass
 
@@ -796,7 +804,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogInfo(f"Starting remux job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessRemuxJob")
 
             # Create active job record
-            ActiveJobId = self.DatabaseManager.CreateActiveJob(
+            ActiveJobId = self.ActiveJobRepository.CreateActiveJob(
                 ServiceName="TranscodeService",
                 JobType="Remux",
                 QueueId=Job.Id,
@@ -827,7 +835,7 @@ class ProcessTranscodeQueueService:
                     LoggingService.LogException("Failed to delete queue item for missing source", DelEx, "ProcessTranscodeQueueService", "ProcessRemuxJob")
                 if ActiveJobId:
                     try:
-                        self.DatabaseManager.DeleteActiveJob(ActiveJobId)
+                        self.ActiveJobRepository.DeleteActiveJob(ActiveJobId)
                     except Exception as DelEx:
                         LoggingService.LogException("Failed to delete active job for missing source", DelEx, "ProcessTranscodeQueueService", "ProcessRemuxJob")
                 return
@@ -935,7 +943,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogInfo(f"Starting subtitle fix job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessSubtitleFixJob")
 
             # Create active job record
-            ActiveJobId = self.DatabaseManager.CreateActiveJob(
+            ActiveJobId = self.ActiveJobRepository.CreateActiveJob(
                 ServiceName="TranscodeService",
                 JobType="SubtitleFix",
                 QueueId=Job.Id,
@@ -1066,7 +1074,7 @@ class ProcessTranscodeQueueService:
             self.DatabaseManager.DeleteTranscodeProgress(TranscodeAttemptId)
 
             if ActiveJobId:
-                self.DatabaseManager.CompleteActiveJob(ActiveJobId, Success=True)
+                self.ActiveJobRepository.CompleteActiveJob(ActiveJobId, Success=True)
 
             LoggingService.LogInfo(f"Remux job {Job.Id} completed successfully", "ProcessTranscodeQueueService", "HandleRemuxResult")
 
@@ -1210,12 +1218,12 @@ class ProcessTranscodeQueueService:
                 )
 
             # Get codec flags
-            CodecFlags = self.DatabaseManager.GetCodecFlagsByCodecName(ProfileSettings.get('Codec'))
+            CodecFlags = self.CodecFlagsRepository.GetCodecFlagsByCodecName(ProfileSettings.get('Codec'))
             if not CodecFlags:
                 return None
 
             # Get codec parameters
-            CodecParameters = self.DatabaseManager.GetCodecParametersByCodecFlagsId(CodecFlags['Id'])
+            CodecParameters = self.CodecFlagsRepository.GetCodecParametersByCodecFlagsId(CodecFlags['Id'])
             if not CodecParameters:
                 return None
 
@@ -1240,19 +1248,19 @@ class ProcessTranscodeQueueService:
 
             # Try full path first
             overrideKey = f"CRFOverride_{normalizedPath}"
-            crfOverride = self.DatabaseManager.GetSystemSetting(overrideKey)
+            crfOverride = self.SystemSettingsRepository.GetSystemSetting(overrideKey)
 
             # If not found, try with just filename (for overrides set from attempt records)
             if not crfOverride:
                 overrideKey = f"CRFOverride_{fileName}"
-                crfOverride = self.DatabaseManager.GetSystemSetting(overrideKey)
+                crfOverride = self.SystemSettingsRepository.GetSystemSetting(overrideKey)
 
             # If still not found, try with drive letter and filename only (Z:filename.mp4 format)
             if not crfOverride and ':' in normalizedPath:
                 driveAndFile = normalizedPath.split(':', 1)[1].lstrip('/').replace('/', '')
                 if driveAndFile:
                     overrideKey = f"CRFOverride_{normalizedPath[0]}:{driveAndFile}"
-                    crfOverride = self.DatabaseManager.GetSystemSetting(overrideKey)
+                    crfOverride = self.SystemSettingsRepository.GetSystemSetting(overrideKey)
 
             # Track if override was successfully applied
             overrideApplied = False
@@ -1531,7 +1539,7 @@ class ProcessTranscodeQueueService:
 
                 # Complete active job if it exists
                 if ActiveJobId:
-                    self.DatabaseManager.CompleteActiveJob(ActiveJobId, Success=True)
+                    self.ActiveJobRepository.CompleteActiveJob(ActiveJobId, Success=True)
                     LoggingService.LogInfo(f"Completed active job {ActiveJobId} for queue ID {Job.Id}",
                                           "ProcessTranscodeQueueService", "HandleTranscodingResult")
 
@@ -1606,7 +1614,7 @@ class ProcessTranscodeQueueService:
 
             # Complete active job if it exists
             if ActiveJobId:
-                self.DatabaseManager.CompleteActiveJob(ActiveJobId, Success=False, ErrorMessage=ErrorMessage)
+                self.ActiveJobRepository.CompleteActiveJob(ActiveJobId, Success=False, ErrorMessage=ErrorMessage)
                 LoggingService.LogInfo(f"Completed failed active job {ActiveJobId}",
                                       "ProcessTranscodeQueueService", "HandleJobFailure")
 
@@ -2056,7 +2064,7 @@ class ProcessTranscodeQueueService:
             # 1. Kill FFmpeg process via ActiveJobs PID
             from Services.ProcessManagementService import ProcessManagementService
             process_mgmt = ProcessManagementService()
-            active_jobs = self.DatabaseManager.GetActiveJobsByService("TranscodeService")
+            active_jobs = self.ActiveJobRepository.GetActiveJobsByService("TranscodeService")
             for active_job in active_jobs:
                 if active_job.get('QueueId') == job_id:
                     pid = active_job.get('ProcessId')
@@ -2068,7 +2076,7 @@ class ProcessTranscodeQueueService:
                         except Exception as e:
                             LoggingService.LogException(f"Error killing FFmpeg process PID {pid}", e,
                                                       "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-                    self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user")
+                    self.ActiveJobRepository.CompleteActiveJob(active_job['Id'], False, "Cancelled by user")
                     break
 
             # 2. Mark TranscodeAttempts as cancelled

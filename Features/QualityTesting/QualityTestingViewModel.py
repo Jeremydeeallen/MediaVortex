@@ -14,16 +14,21 @@ sys.path.insert(0, project_root)
 
 from Features.QualityTesting.QualityTestingBusinessService import QualityTestingBusinessService
 from Core.Logging.LoggingService import LoggingService
+from typing import Optional
+from Features.QualityTesting.QualityTestRepository import QualityTestRepository
+from Features.ServiceControl.ServiceControlRepository import ServiceControlRepository
 
 
 class QualityTestingViewModel:
     """Quality Testing ViewModel - Presentation logic layer."""
 
-    def __init__(self, DatabaseManagerInstance=None, QualityTestingInstance=None, ThreadingInstance=None):
+    def __init__(self, DatabaseManagerInstance=None, QualityTestingInstance=None, ThreadingInstance=None, QualityTestRepositoryInstance: Optional[QualityTestRepository] = None, ServiceControlRepositoryInstance: Optional[ServiceControlRepository] = None):
         """Initialize the ViewModel with dependencies."""
         self.DatabaseManager = DatabaseManagerInstance
         self.QualityTestingBusinessService = QualityTestingBusinessService(DatabaseManagerInstance)
         self.ThreadingService = ThreadingInstance
+        self.QualityTestRepository = QualityTestRepositoryInstance or QualityTestRepository()
+        self.ServiceControlRepository = ServiceControlRepositoryInstance or ServiceControlRepository()
 
         # LoggingService.LogInfo("QualityTestingViewModel initialized", "QualityTestingViewModel", "__init__")
 
@@ -59,7 +64,7 @@ class QualityTestingViewModel:
                     "QualityTestingViewModel", "ClaimJob",
                 )
                 return None
-            job = self.DatabaseManager.ClaimQualityTestJob(WorkerName)
+            job = self.QualityTestRepository.ClaimQualityTestJob(WorkerName)
             return job
 
         except Exception as e:
@@ -118,7 +123,7 @@ class QualityTestingViewModel:
         """Check if the service should be running."""
         try:
             # Get service status from database
-            service_status = self.DatabaseManager.GetServiceStatus('QualityTestingService')
+            service_status = self.ServiceControlRepository.GetServiceStatus('QualityTestingService')
 
             return service_status
 

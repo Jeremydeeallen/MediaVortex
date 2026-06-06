@@ -8,12 +8,13 @@ import time
 import threading
 from typing import Dict, Any, Optional
 from Core.Logging.LoggingService import LoggingService
+from Features.ServiceControl.ServiceControlRepository import ServiceControlRepository
 
 
 class GracefulStopService:
     """Shared service for graceful shutdown of microservices."""
 
-    def __init__(self, ServiceName: str, DatabaseManagerInstance, ProcessQueueService):
+    def __init__(self, ServiceName: str, DatabaseManagerInstance, ProcessQueueService, ServiceControlRepositoryInstance: Optional[ServiceControlRepository] = None):
         """
         Initialize the graceful stop service.
 
@@ -26,6 +27,7 @@ class GracefulStopService:
         self.DatabaseManager = DatabaseManagerInstance
         self.ProcessQueue = ProcessQueueService
         LoggingService.LogInfo(f"GracefulStopService initialized for {ServiceName}", "GracefulStopService", "__init__")
+        self.ServiceControlRepository = ServiceControlRepositoryInstance or ServiceControlRepository()
 
     def MonitorGracefulStop(self, ShutdownEvent: threading.Event, UpdateStatusCallback=None) -> Dict[str, Any]:
         """
@@ -81,7 +83,7 @@ class GracefulStopService:
                 UpdateStatusCallback("Stopped", "Stopped", 0, False)
             else:
                 # Fallback to direct database update
-                self.DatabaseManager.UpdateServiceStatus(self.ServiceName, {
+                self.ServiceControlRepository.UpdateServiceStatus(self.ServiceName, {
                     'Status': 'Stopped',
                     'ProcessId': 0,
                     'IsProcessing': False,

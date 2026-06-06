@@ -7,6 +7,7 @@ from pathlib import Path
 from Services.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
 from Core.Path.LocalPath import LocalExists
+from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 
 
 class FFmpegService:
@@ -17,7 +18,7 @@ class FFmpegService:
     _cached_ffprobe_path = None
     _logged_initialization = False
     
-    def __init__(self, FFprobePath: str = None):
+    def __init__(self, FFprobePath: str = None, SystemSettingsRepositoryInstance: Optional[SystemSettingsRepository] = None):
         # Initialize DatabaseManager
         self.DatabaseManager = DatabaseManager()
 
@@ -52,6 +53,7 @@ class FFmpegService:
                 LoggingService.LogWarning("FFprobe not found. Media analysis will not be available.", '__init__', 'FFmpegService')
             
             FFmpegService._logged_initialization = True
+        self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
     
     # directive: path-schema-migration | # see path.S8
     def FindFFmpegPath(self) -> Optional[str]:
@@ -399,7 +401,7 @@ class FFmpegService:
         """Get maximum CPU threads from system settings or use default."""
         try:
             # Get CPU thread limit from system settings
-            MaxCpuThreads = self.DatabaseManager.GetSystemSetting('MaxCpuThreads')
+            MaxCpuThreads = self.SystemSettingsRepository.GetSystemSetting('MaxCpuThreads')
             if MaxCpuThreads and MaxCpuThreads.isdigit():
                 ThreadCount = int(MaxCpuThreads)
                 # Validate thread count (1-32 for safety)

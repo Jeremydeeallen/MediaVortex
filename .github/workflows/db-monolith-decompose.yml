@@ -1,0 +1,108 @@
+name: db-monolith-decompose
+
+on:
+  workflow_dispatch:
+    inputs:
+      aggregate:
+        description: Aggregate name (matches inventory.csv target_aggregate column)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout db-monolith-decompose branch
+        uses: actions/checkout@v4
+        with:
+          ref: db-monolith-decompose
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create migration branch
+        id: branch
+        run: |
+          AGG="${{ inputs.aggregate }}"
+          BR="db-monolith-decompose/migrate-${AGG}"
+          git switch --force-create "$BR"
+          echo "branch=$BR" >> "$GITHUB_OUTPUT"
+          echo "aggregate=$AGG" >> "$GITHUB_OUTPUT"
+
+      - name: Run Inventory
+        run: python Scripts/DbMgrMigrate/Inventory.py
+
+      - name: Run Move
+        run: python Scripts/DbMgrMigrate/Move.py --aggregate "${{ steps.branch.outputs.aggregate }}"
+
+      - name: Run CallerSweep
+        run: python Scripts/DbMgrMigrate/CallerSweep.py --aggregate "${{ steps.branch.outputs.aggregate }}"
+
+      - name: Run Verify
+        run: python Scripts/DbMgrMigrate/Verify.py --aggregate "${{ steps.branch.outputs.aggregate }}"
+
+      - name: Detect changes
+        id: changes
+        run: |
+          if [ -z "$(git status --porcelain -- ':!Scripts/DbMgrMigrate/inventory.csv')" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No file changes after migration; nothing to commit."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit + push
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          AGG="${{ steps.branch.outputs.aggregate }}"
+          BR="${{ steps.branch.outputs.branch }}"
+          git add -A -- ':!Scripts/DbMgrMigrate/inventory.csv'
+          git commit -m "chore(db-monolith-decompose): migrate ${AGG}"
+          git push --force-with-lease origin "$BR"
+
+      - name: Open PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          AGG="${{ steps.branch.outputs.aggregate }}"
+          BR="${{ steps.branch.outputs.branch }}"
+          BODY_FILE=$(mktemp)
+          {
+            echo "Mechanical aggregate migration produced by the db-monolith-decompose toolchain."
+            echo ""
+            echo "## Aggregate"
+            echo ""
+            echo "\`${AGG}\`"
+            echo ""
+            echo "## Toolchain steps run"
+            echo ""
+            echo "- \`Inventory.py\` produced inventory.csv (gitignored)"
+            echo "- \`Move.py --aggregate ${AGG}\`"
+            echo "- \`CallerSweep.py --aggregate ${AGG}\`"
+            echo "- \`Verify.py --aggregate ${AGG}\` (residual-grep + import-sanity + pytest -k)"
+            echo ""
+            echo "## Diff"
+            echo ""
+            echo "\`\`\`diff"
+            git diff db-monolith-decompose...HEAD --stat
+            echo "\`\`\`"
+          } > "$BODY_FILE"
+          if gh pr view "$BR" --json number >/dev/null 2>&1; then
+            gh pr edit "$BR" --body-file "$BODY_FILE"
+          else
+            gh pr create --base db-monolith-decompose --head "$BR" --title "chore(db-monolith-decompose): migrate ${AGG}" --body-file "$BODY_FILE"
+          fi

@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
 from Core.Path.LocalPath import LocalExists
+from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
+from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 
 
 # directive: path-schema-migration | # see path.S8
@@ -28,9 +30,11 @@ class QualityTestingBusinessService:
     """Quality Testing Business Service - Business logic layer."""
 
     # directive: qualitytesting-uses-path | # see path.S5
-    def __init__(self, DatabaseManagerInstance=None, worker: Optional[Worker] = None):
+    def __init__(self, DatabaseManagerInstance=None, worker: Optional[Worker] = None, ActiveJobRepositoryInstance: Optional[ActiveJobRepository] = None, SystemSettingsRepositoryInstance: Optional[SystemSettingsRepository] = None):
         """Initialize the business service with dependencies; lazy Worker + StorageRoots for path resolution."""
         self.DatabaseManager = DatabaseManagerInstance
+        self.ActiveJobRepository = ActiveJobRepositoryInstance or ActiveJobRepository()
+        self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
         self.ActiveFFmpegProcess = None
         self.ActiveFFmpegThread = None
         self._Worker: Worker = worker if worker is not None else Worker.Current()
@@ -136,7 +140,7 @@ class QualityTestingBusinessService:
                 _WorkerName = (_Ctx.WorkerName if _Ctx else None) or _socket.gethostname()
             except Exception:
                 _WorkerName = _socket.gethostname()
-            active_job_id = self.DatabaseManager.CreateActiveJob(
+            active_job_id = self.ActiveJobRepository.CreateActiveJob(
                 ServiceName="QualityTestService",
                 JobType="QualityTest",
                 QueueId=JobId,
@@ -163,7 +167,7 @@ class QualityTestingBusinessService:
                         {"QualityTestCompleted": True, "VMAF": result["VMAFScore"]}
                     )
                     self.UpdateProgressRecord(progress_id, "Completed", 100, "VMAF analysis completed successfully", result["VMAFScore"])
-                    self.DatabaseManager.CompleteActiveJob(active_job_id, True)
+                    self.ActiveJobRepository.CompleteActiveJob(active_job_id, True)
                     return {"Success": True, "VMAFScore": result["VMAFScore"]}
                 else:
                     # Update result with failure
@@ -172,7 +176,7 @@ class QualityTestingBusinessService:
                         result.get("Error", "Unknown error")
                     )
                     self.UpdateProgressRecord(progress_id, "Failed", 0, result.get("Error", "Unknown error"))
-                    self.DatabaseManager.CompleteActiveJob(active_job_id, False, result.get("Error", "Unknown error"))
+                    self.ActiveJobRepository.CompleteActiveJob(active_job_id, False, result.get("Error", "Unknown error"))
                     self._CleanupTemporaryFilePathsForVmafFailure(job_details['TranscodeAttemptId'])
                     return {"Success": False, "Message": result.get("Error", "Unknown error")}
 
@@ -185,7 +189,7 @@ class QualityTestingBusinessService:
                     )
                 if 'progress_id' in locals():
                     self.UpdateProgressRecord(progress_id, "Failed", 0, str(e))
-                self.DatabaseManager.CompleteActiveJob(active_job_id, False, str(e))
+                self.ActiveJobRepository.CompleteActiveJob(active_job_id, False, str(e))
                 self._CleanupTemporaryFilePathsForVmafFailure(job_details['TranscodeAttemptId'])
                 raise
 
@@ -706,7 +710,7 @@ class QualityTestingBusinessService:
             Exception: If database access fails
         """
         # Get QualityTestMaxCores setting
-        QualityTestMaxCores = self.DatabaseManager.GetSystemSetting('QualityTestMaxCores')
+        QualityTestMaxCores = self.SystemSettingsRepository.GetSystemSetting('QualityTestMaxCores')
         if not QualityTestMaxCores:
             raise ValueError("QualityTestMaxCores setting is missing from SystemSettings. Please add it to the database.")
 
@@ -890,7 +894,7 @@ class QualityTestingBusinessService:
             # Update ActiveJob with FFmpeg child process PID (use FFmpeg PID if available, otherwise shell PID)
             ProcessPIDToUse = FFmpegPID if FFmpegPID else Process.pid
             if JobDetails and 'active_job_id' in JobDetails and JobDetails['active_job_id']:
-                self.DatabaseManager.UpdateActiveJobProcessId(
+                self.ActiveJobRepository.UpdateActiveJobProcessId(
                     JobDetails['active_job_id'],
                     ProcessPIDToUse
                 )
@@ -1740,7 +1744,7 @@ class QualityTestingBusinessService:
                 )
 
                 # Complete the active job
-                self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user skip request")
+                self.ActiveJobRepository.CompleteActiveJob(active_job['Id'], False, "Cancelled by user skip request")
 
             LoggingService.LogInfo(f"Quality test skipped for TranscodeAttempt {TranscodeAttemptId}, deciding disposition",
                                  "QualityTestingBusinessService", "SkipQualityTest")
@@ -1830,7 +1834,7 @@ class QualityTestingBusinessService:
             )
 
             # Complete the active job
-            self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user")
+            self.ActiveJobRepository.CompleteActiveJob(active_job['Id'], False, "Cancelled by user")
 
             LoggingService.LogInfo(f"Successfully cancelled quality test for TranscodeAttempt {transcode_attempt_id}",
                                  "QualityTestingBusinessService", "CancelActiveQualityTest")
