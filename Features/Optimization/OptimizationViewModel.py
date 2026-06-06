@@ -6,6 +6,7 @@ from Services.FileManagerService import FileManagerService
 from Core.Path import Path, Worker, PathError
 from Core.Path.LocalPath import LocalExists, LocalGetSize
 from Features.TranscodeJob.TranscodeJobRepository import TranscodeJobRepository
+from Features.JellyfinIntegration.JellyfinRepository import JellyfinRepository
 
 
 # directive: path-schema-migration | # see path.S9
@@ -18,12 +19,13 @@ class OptimizationViewModel:
     ]
 
     # directive: path-class-perfection | # see path.C26
-    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, worker: Optional[Worker] = None, TranscodeJobRepositoryInstance: Optional[TranscodeJobRepository] = None):
+    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, worker: Optional[Worker] = None, TranscodeJobRepositoryInstance: Optional[TranscodeJobRepository] = None, JellyfinRepositoryInstance: Optional[JellyfinRepository] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.IsLoading = False
         self.ErrorMessage = ""
         self._Worker: Worker = worker if worker is not None else Worker.Current()
         self.TranscodeJobRepository = TranscodeJobRepositoryInstance or TranscodeJobRepository()
+        self.JellyfinRepository = JellyfinRepositoryInstance or JellyfinRepository()
 
     # directive: path-class-perfection | # see path.C26
     def _GetWorker(self) -> Worker:
@@ -157,7 +159,7 @@ class OptimizationViewModel:
         """Get detailed file list for a Jellyfin FFmpeg operation type from local DB."""
         try:
             LoggingService.LogFunctionEntry("GetOperationDetails", "OptimizationViewModel", OperationType)
-            result = self.DatabaseManager.GetJellyfinOperationsByType(OperationType, Limit)
+            result = self.JellyfinRepository.GetJellyfinOperationsByType(OperationType, Limit)
             if not result.get("Success"):
                 return result
 
@@ -251,7 +253,7 @@ class OptimizationViewModel:
             LoggingService.LogFunctionEntry("GetJellyfinAnalysis", "OptimizationViewModel")
 
             # Read operation counts from local DB
-            dbCounts = self.DatabaseManager.GetJellyfinOperationCounts()
+            dbCounts = self.JellyfinRepository.GetJellyfinOperationCounts()
             if not dbCounts.get("Success"):
                 return {"Success": False, "ErrorMessage": dbCounts.get("ErrorMessage", "No data")}
 
@@ -268,7 +270,7 @@ class OptimizationViewModel:
                 opCounts["NewestDate"] = dbCounts["NewestDate"]
 
             # Get transcode reasons from DB
-            transcodeData = self.DatabaseManager.GetJellyfinOperationsByType("Transcode", 200)
+            transcodeData = self.JellyfinRepository.GetJellyfinOperationsByType("Transcode", 200)
             transcodeReasons = transcodeData.get("Reasons", {}) if transcodeData.get("Success") else {}
 
             # Try server info via REST (fast, no SSH needed)
@@ -311,14 +313,14 @@ class OptimizationViewModel:
 
             # Check if existing records are missing destination format data (stale schema)
             # If so, clear them to force a full re-import with the new fields
-            existingNames = self.DatabaseManager.GetExistingLogFileNames()
+            existingNames = self.JellyfinRepository.GetExistingLogFileNames()
             if existingNames:
-                staleCount = self.DatabaseManager.GetStaleJellyfinRecordCount()
+                staleCount = self.JellyfinRepository.GetStaleJellyfinRecordCount()
                 if staleCount > 0:
                     LoggingService.LogInfo(
                         f"Clearing {len(existingNames)} stale Jellyfin records (missing destination format data)",
                         "OptimizationViewModel", "RefreshJellyfinData")
-                    self.DatabaseManager.ClearJellyfinOperations()
+                    self.JellyfinRepository.ClearJellyfinOperations()
                     existingNames = set()
 
             # Fetch only new entries from Jellyfin server
@@ -329,7 +331,7 @@ class OptimizationViewModel:
             entries = result.get("Entries", [])
             newCount = 0
             if entries:
-                newCount = self.DatabaseManager.InsertJellyfinOperationsBatch(entries)
+                newCount = self.JellyfinRepository.InsertJellyfinOperationsBatch(entries)
 
             return {
                 "Success": True,
