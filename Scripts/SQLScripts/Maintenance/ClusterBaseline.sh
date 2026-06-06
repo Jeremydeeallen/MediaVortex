@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# directive: db-maintenance-standard-tools
+# directive: db-maintenance-no-partition
 # One-time PostgreSQL cluster bringup for the standard maintenance stack.
 # Run AS ROOT on the database host (CT 203 for the MediaVortex cluster).
 # Idempotent: re-running on an already-configured cluster makes no changes.
@@ -30,7 +30,6 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq \
   "postgresql-${PG_VERSION}-cron" \
-  "postgresql-${PG_VERSION}-partman" \
   "postgresql-${PG_VERSION}-repack"
 
 echo "==> [2/5] postgresql.conf edit (idempotent)"
@@ -43,7 +42,7 @@ else
   sed -i -E "/^[#[:space:]]*shared_preload_libraries\s*=/d" "${PG_CONF}"
   {
     echo ""
-    echo "# directive: db-maintenance-standard-tools (${TS})"
+    echo "# directive: db-maintenance-no-partition (${TS})"
     echo "shared_preload_libraries = 'pg_cron'"
     echo "cron.database_name = '${PG_DBNAME}'"
     echo "cron.timezone = 'UTC'"
@@ -76,7 +75,6 @@ done
 echo "==> [5/5] CREATE EXTENSION (idempotent)"
 sudo -u postgres psql -d "${PG_DBNAME}" -v ON_ERROR_STOP=1 <<-SQL
   CREATE EXTENSION IF NOT EXISTS pg_cron;
-  CREATE EXTENSION IF NOT EXISTS pg_partman;
   CREATE EXTENSION IF NOT EXISTS pgstattuple;
 SQL
 
@@ -85,7 +83,7 @@ SQL
 sudo -u postgres psql -d "${PG_DBNAME}" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pg_repack;"
 
 echo "==> Audit"
-sudo -u postgres psql -d "${PG_DBNAME}" -c "SELECT extname, extversion FROM pg_extension WHERE extname IN ('pg_cron','pg_partman','pg_repack','pgstattuple') ORDER BY extname;"
+sudo -u postgres psql -d "${PG_DBNAME}" -c "SELECT extname, extversion FROM pg_extension WHERE extname IN ('pg_cron','pg_repack','pgstattuple') ORDER BY extname;"
 sudo -u postgres psql -d "${PG_DBNAME}" -c "SHOW shared_preload_libraries;"
 sudo -u postgres psql -d "${PG_DBNAME}" -c "SHOW cron.database_name;"
 sudo -u postgres psql -d "${PG_DBNAME}" -c "SHOW cron.timezone;"

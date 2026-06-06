@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(find:*)",
       "Bash(sqlite3:*)",
@@ -109,7 +110,8 @@
       "Read(C:\\Code\\claude-rails\\*)",
       "Skill(update-config)",
       "Write(.claude/commands/**)",
-      "Edit(.claude/commands/**)"
+      "Edit(.claude/commands/**)",
+      "Bash(scp *)"
     ]
   }
 }

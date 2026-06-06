@@ -6,6 +6,37 @@
 
 *Per-entry area subsection assignment deferred to follow-up directive `migrate-bugs-compliance-deep`. Consult `memory/BUG-INDEX.md` for per-bug area metadata and the operationally-correct active/resolved classification (several entries below still bear `RESOLVED`/`FIXED` annotations in their headers despite living under `## Active`; the INDEX classifies them correctly).*
 
+### [BUG-0044] CpuAffinityService loses its SystemSettingsRepository wiring on every worker startup -- config knobs silently ignored
+**Date:** 2026-06-06 | **Area:** worker-lifecycle
+
+**What breaks:** On every WorkerService startup, `CpuAffinityService._LoadConfig()` raises `AttributeError: 'CpuAffinityService' object has no attribute 'SystemSettingsRepository'`. The exception is caught -- the service then logs `INFO CpuAffinityService initialized` 4 ms later and proceeds to pin P-cores correctly using hardcoded defaults. But the SystemSettings-driven knobs covered by `Features/SystemSettings/SystemSettings.feature.md` criterion 3 (temperature threshold, monitoring interval, cooling wait) never actually take effect on the worker. Whatever is configured in the SystemSettings table is silently overridden.
+
+**Repro:** Restart WorkerService on any host (observed on I9-2024). Within ~15 s of `Worker is Online`:
+```sql
+SELECT TimeStamp, Message FROM logs
+WHERE FunctionName='CpuAffinityService' AND LogLevel='ERROR'
+ORDER BY TimeStamp DESC LIMIT 1;
+```
+returns the AttributeError. Observed timestamps this session: `2026-06-06 22:01:31.540373` on PID 21252.
+
+**Evidence:** Adjacent commit `d0d48b3 fix(worker-init-ordering): move repo field assignments before _RegisterAndLoadWorkerConfig() call` (2026-06-06) fixed the same shape of bug on a different service. The CpuAffinityService init path apparently expects `self.SystemSettingsRepository` to be assigned before `_LoadConfig()` runs, and that assignment is either missing or happening in the wrong order. After the AttributeError, the service still emits `Hybrid=True, Detection=GetSystemCpuSetInformation, P-cores=[0..15], E-cores=[16..31]` and successfully pins both concurrent transcode jobs (30344, 30345) -- so the regression is observability-only at runtime, not functional. The hidden cost is that operator-configured thermal knobs do nothing.
+
+**Violates:** `Features/SystemSettings/SystemSettings.feature.md` criterion 13 (added with this bug). Indirect impact on criterion 3 (configured values are not actually controlling behavior).
+
+**Same shape, sibling case — broaden the fix to cover both:** `StuckJobDetectionService` raises `'StuckJobDetectionService' object has no attribute 'ActiveJobRepository'` on every sweep cycle (observed 26 occurrences in a 35-minute window 2026-06-06 21:10:17 - 21:45:48). Each stuck-job check for a candidate job ID raises and is caught, so the sweep silently no-ops on every candidate. Same root cause class: a repo attribute the service expects is not assigned before the method that reads it runs. Fix scope for `/t BUG-0044` should be "audit every WorkerService-owned service `__init__` for missing repo attributes that `_LoadConfig` / sweep methods rely on," not just CpuAffinityService.
+
+**Look first:**
+1. `Services/CpuAffinityService.py` -- `__init__` and `_LoadConfig`. Look for the line that references `self.SystemSettingsRepository`; trace where the attribute is supposed to be assigned and confirm the call ordering matches the d0d48b3 fix pattern.
+2. `Services/StuckJobDetectionService.py` -- same audit: `self.ActiveJobRepository` is referenced but never assigned in `__init__` (or assigned after the method that uses it).
+3. `WorkerService/Main.py` -- service wiring during worker boot; compare to the sibling fix in d0d48b3 to see which repos are now assigned pre-config-load and which were missed.
+4. `Repositories/SystemSettingsRepository.py` + `Repositories/ActiveJobRepository.py` -- confirm the expected interfaces both services are trying to call.
+
+**Flow doc:** `WorkerService/WorkerService.flow.md` covers worker startup including service init -- `/t` should verify the init-ordering contract is captured there before fixing.
+
+**Fix with:** `/t BUG-0044`.
+
+---
+
 ### [BUG-0020] Workers must own their processes end-to-end, and `-mv` must only be appended when the output is actually compliant
 **Date:** 2026-05-26 | **Area:** worker-lifecycle / file-replacement
 
