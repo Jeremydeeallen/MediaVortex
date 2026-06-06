@@ -1638,26 +1638,6 @@ class DatabaseManager(
             LoggingService.LogException("Exception getting system setting", e, "DatabaseManager", "GetSystemSetting")
             return None
 
-    def PrivateNormalizeFilePath(self, FilePath: str) -> str:
-        """Private method to normalize file paths to use single backslashes."""
-        try:
-            if not FilePath:
-                return FilePath
-
-            # Replace double backslashes with single backslashes
-            # This handles cases where paths might be escaped
-            NormalizedPath = FilePath.replace('\\\\', '\\')
-
-            # Log the normalization for debugging
-            if NormalizedPath != FilePath:
-                LoggingService.LogInfo(f"Normalized file path: '{FilePath}' -> '{NormalizedPath}'",
-                                     "DatabaseManager", "PrivateNormalizeFilePath")
-
-            return NormalizedPath
-
-        except Exception as e:
-            LoggingService.LogException("Exception normalizing file path", e, "DatabaseManager", "PrivateNormalizeFilePath")
-            return FilePath
     
     def GetActiveJobDetails(self, JobId: int) -> Optional[Dict[str, Any]]:
         """Get detailed information about a specific active job."""
