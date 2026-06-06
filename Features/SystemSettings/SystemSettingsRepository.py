@@ -151,3 +151,18 @@ class SystemSettingsRepository(BaseRepository):
                 self.DatabaseService.CloseConnection(connection)
         except Exception as e:
             LoggingService.LogWarning(f"Migration warning: {e}", "SystemSettingsRepository", "RunMigrations")
+
+    def GetMaxConcurrentJobs(self) -> int:
+        """Get the maximum concurrent jobs limit from ServiceStatus."""
+        try:
+            query = "SELECT MaxConcurrentJobs FROM ServiceStatus WHERE ServiceName = 'QualityTestingService'"
+            result = self.DatabaseService.ExecuteQuery(query)
+            
+            if result and len(result) > 0:
+                return result[0]['maxconcurrentjobs'] or 1  # Default to 1 if not set
+            
+            return 1  # Default value
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting max concurrent jobs", e, "DatabaseManager", "GetMaxConcurrentJobs")
+            return 1

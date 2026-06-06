@@ -7,6 +7,7 @@ from Core.Path import Path, Worker, PathError
 from Core.Path.LocalPath import LocalExists, LocalGetSize
 from Features.TranscodeJob.TranscodeJobRepository import TranscodeJobRepository
 from Features.JellyfinIntegration.JellyfinRepository import JellyfinRepository
+from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 
 
 # directive: path-schema-migration | # see path.S9
@@ -19,13 +20,14 @@ class OptimizationViewModel:
     ]
 
     # directive: path-class-perfection | # see path.C26
-    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, worker: Optional[Worker] = None, TranscodeJobRepositoryInstance: Optional[TranscodeJobRepository] = None, JellyfinRepositoryInstance: Optional[JellyfinRepository] = None):
+    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, worker: Optional[Worker] = None, TranscodeJobRepositoryInstance: Optional[TranscodeJobRepository] = None, JellyfinRepositoryInstance: Optional[JellyfinRepository] = None, SystemSettingsRepositoryInstance: Optional[SystemSettingsRepository] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.IsLoading = False
         self.ErrorMessage = ""
         self._Worker: Worker = worker if worker is not None else Worker.Current()
         self.TranscodeJobRepository = TranscodeJobRepositoryInstance or TranscodeJobRepository()
         self.JellyfinRepository = JellyfinRepositoryInstance or JellyfinRepository()
+        self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
 
     # directive: path-class-perfection | # see path.C26
     def _GetWorker(self) -> Worker:
@@ -359,7 +361,7 @@ class OptimizationViewModel:
         try:
             settings = {}
             for key in self.JELLYFIN_SETTINGS_KEYS:
-                settings[key] = self.DatabaseManager.GetSystemSetting(key) or ""
+                settings[key] = self.SystemSettingsRepository.GetSystemSetting(key) or ""
             return {"Success": True, "Settings": settings}
         except Exception as e:
             LoggingService.LogException("Error getting connection settings", e, "OptimizationViewModel", "GetConnectionSettings")
@@ -378,7 +380,7 @@ class OptimizationViewModel:
             }
             for key in self.JELLYFIN_SETTINGS_KEYS:
                 if key in Settings:
-                    self.DatabaseManager.AddOrUpdateSystemSetting(
+                    self.SystemSettingsRepository.AddOrUpdateSystemSetting(
                         key, Settings[key], descriptions.get(key, ''), 'string'
                     )
             return {"Success": True, "Message": "Settings saved"}
@@ -637,15 +639,15 @@ class OptimizationViewModel:
     def _GetJellyfinService(self) -> Optional[JellyfinService]:
         """Create JellyfinService from saved settings."""
         try:
-            host = self.DatabaseManager.GetSystemSetting('JellyfinHost')
+            host = self.SystemSettingsRepository.GetSystemSetting('JellyfinHost')
             if not host:
                 return None
 
-            port = int(self.DatabaseManager.GetSystemSetting('JellyfinSSHPort') or '22')
-            user = self.DatabaseManager.GetSystemSetting('JellyfinSSHUser') or 'root'
-            keyPath = self.DatabaseManager.GetSystemSetting('JellyfinSSHKeyPath') or ''
-            apiKey = self.DatabaseManager.GetSystemSetting('JellyfinApiKey') or ''
-            apiPort = int(self.DatabaseManager.GetSystemSetting('JellyfinApiPort') or '8096')
+            port = int(self.SystemSettingsRepository.GetSystemSetting('JellyfinSSHPort') or '22')
+            user = self.SystemSettingsRepository.GetSystemSetting('JellyfinSSHUser') or 'root'
+            keyPath = self.SystemSettingsRepository.GetSystemSetting('JellyfinSSHKeyPath') or ''
+            apiKey = self.SystemSettingsRepository.GetSystemSetting('JellyfinApiKey') or ''
+            apiPort = int(self.SystemSettingsRepository.GetSystemSetting('JellyfinApiPort') or '8096')
 
             return JellyfinService(
                 Host=host, SSHPort=port, SSHUser=user,

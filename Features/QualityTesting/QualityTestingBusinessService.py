@@ -706,7 +706,7 @@ class QualityTestingBusinessService:
             Exception: If database access fails
         """
         # Get QualityTestMaxCores setting
-        QualityTestMaxCores = self.DatabaseManager.GetSystemSetting('QualityTestMaxCores')
+        QualityTestMaxCores = self.SystemSettingsRepository.GetSystemSetting('QualityTestMaxCores')
         if not QualityTestMaxCores:
             raise ValueError("QualityTestMaxCores setting is missing from SystemSettings. Please add it to the database.")
 

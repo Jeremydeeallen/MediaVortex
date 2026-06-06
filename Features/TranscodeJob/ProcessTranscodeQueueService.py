@@ -22,6 +22,7 @@ from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalJoin, LocalSpl
 from Core.DateTimeHelpers import ToUtcIsoZ
 from Features.TranscodeQueue.TranscodeQueueRepository import TranscodeQueueRepository
 from Core.Database.CodecFlagsRepository import CodecFlagsRepository
+from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 # directive: transcodejob-uses-path | # see path.S5
 class ProcessTranscodeQueueService:
     """Orchestrates the complete transcoding queue processing workflow using MVVM architecture."""
@@ -33,7 +34,7 @@ class ProcessTranscodeQueueService:
                  QueueManagementInstance: QueueManagementService = None,
                  DispositionInstance: PostTranscodeDispositionService = None,
                  WorkerName: str = None,
-                 WorkerConfig: dict = None, TranscodeQueueRepositoryInstance: Optional[TranscodeQueueRepository] = None, CodecFlagsRepositoryInstance: Optional[CodecFlagsRepository] = None):
+                 WorkerConfig: dict = None, TranscodeQueueRepositoryInstance: Optional[TranscodeQueueRepository] = None, CodecFlagsRepositoryInstance: Optional[CodecFlagsRepository] = None, SystemSettingsRepositoryInstance: Optional[SystemSettingsRepository] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.CommandBuilder = CommandBuilderInstance or CommandBuilder()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
@@ -100,6 +101,7 @@ class ProcessTranscodeQueueService:
         self.StuckJobMonitoringActive = False
         self.TranscodeQueueRepository = TranscodeQueueRepositoryInstance or TranscodeQueueRepository()
         self.CodecFlagsRepository = CodecFlagsRepositoryInstance or CodecFlagsRepository()
+        self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
 
     # directive: nvenc-rate-anchored-remediation
     def Run(self, MaxConcurrentJobs: int = 1) -> Dict[str, Any]:
@@ -1244,19 +1246,19 @@ class ProcessTranscodeQueueService:
 
             # Try full path first
             overrideKey = f"CRFOverride_{normalizedPath}"
-            crfOverride = self.DatabaseManager.GetSystemSetting(overrideKey)
+            crfOverride = self.SystemSettingsRepository.GetSystemSetting(overrideKey)
 
             # If not found, try with just filename (for overrides set from attempt records)
             if not crfOverride:
                 overrideKey = f"CRFOverride_{fileName}"
-                crfOverride = self.DatabaseManager.GetSystemSetting(overrideKey)
+                crfOverride = self.SystemSettingsRepository.GetSystemSetting(overrideKey)
 
             # If still not found, try with drive letter and filename only (Z:filename.mp4 format)
             if not crfOverride and ':' in normalizedPath:
                 driveAndFile = normalizedPath.split(':', 1)[1].lstrip('/').replace('/', '')
                 if driveAndFile:
                     overrideKey = f"CRFOverride_{normalizedPath[0]}:{driveAndFile}"
-                    crfOverride = self.DatabaseManager.GetSystemSetting(overrideKey)
+                    crfOverride = self.SystemSettingsRepository.GetSystemSetting(overrideKey)
 
             # Track if override was successfully applied
             overrideApplied = False

@@ -410,88 +410,10 @@ class DatabaseManager(
         return affected_rows > 0
     
     # Root Folder Management Methods
-    def GetSystemSetting(self, SettingKey: str) -> Optional[str]:
-        """Get a system setting value by key."""
-        query = "SELECT SettingValue FROM SystemSettings WHERE SettingKey = %s"
-        rows = self.DatabaseService.ExecuteQuery(query, (SettingKey,))
-        
-        if not rows:
-            return None
-        
-        return rows[0]['SettingValue']
     
-    def GetAllSystemSettings(self) -> List[Dict[str, Any]]:
-        """Get all system settings."""
-        query = "SELECT Id, SettingKey, SettingValue, Description, DataType, LastModified FROM SystemSettings ORDER BY SettingKey"
-        rows = self.DatabaseService.ExecuteQuery(query)
-        
-        settings = []
-        for row in rows:
-            settings.append({
-                'Id': row['Id'],
-                'SettingKey': row['SettingKey'],
-                'SettingValue': row['SettingValue'],
-                'Description': row['Description'],
-                'DataType': row['DataType'],
-                'LastModified': row['LastModified']
-            })
-        
-        return settings
     
-    def GetScanDirectories(self) -> List[Dict[str, str]]:
-        """Get all scan directory settings (ScanDir1, ScanDir2, etc.)."""
-        query = "SELECT SettingKey, SettingValue, Description FROM SystemSettings WHERE SettingKey LIKE 'ScanDir%%' ORDER BY SettingKey"
-        rows = self.DatabaseService.ExecuteQuery(query)
-        
-        scanDirs = []
-        for row in rows:
-            if row['SettingValue'] and row['SettingValue'].strip():  # Only include non-empty directories
-                scanDirs.append({
-                    'Key': row['SettingKey'],
-                    'Path': row['SettingValue'],
-                    'Description': row['Description']
-                })
-        
-        return scanDirs
     
-    def AddOrUpdateSystemSetting(self, SettingKey: str, SettingValue: str, Description: str, DataType: str = 'string') -> bool:
-        """Add or update a system setting."""
-        try:
-            # Check if setting already exists
-            existingValue = self.GetSystemSetting(SettingKey)
-            
-            if existingValue is not None:
-                # Update existing setting
-                query = """
-                    UPDATE SystemSettings 
-                    SET SettingValue = %s, Description = %s, DataType = %s, LastModified = NOW()
-                    WHERE SettingKey = %s
-                """
-                self.DatabaseService.ExecuteNonQuery(query, (SettingValue, Description, DataType, SettingKey))
-            else:
-                # Insert new setting
-                query = """
-                    INSERT INTO SystemSettings (SettingKey, SettingValue, Description, DataType, LastModified)
-                    VALUES (%s, %s, %s, %s, NOW())
-                """
-                self.DatabaseService.ExecuteNonQuery(query, (SettingKey, SettingValue, Description, DataType))
-            
-            return True
-            
-        except Exception as e:
-            LoggingService.LogException(f"Error adding/updating system setting {SettingKey}", e, "AddOrUpdateSystemSetting", "DatabaseManager")
-            return False
     
-    def DeleteSystemSetting(self, SettingKey: str) -> bool:
-        """Delete a system setting."""
-        try:
-            query = "DELETE FROM SystemSettings WHERE SettingKey = %s"
-            affectedRows = self.DatabaseService.ExecuteNonQuery(query, (SettingKey,))
-            return affectedRows > 0
-            
-        except Exception as e:
-            LoggingService.LogException(f"Error deleting system setting {SettingKey}", e, "DeleteSystemSetting", "DatabaseManager")
-            return False
     
     # TranscodeQueue Management Methods
 
@@ -1207,20 +1129,6 @@ class DatabaseManager(
             LoggingService.LogException("Exception cancelling active job", e, "DatabaseManager", "CancelActiveJob")
             return False
     
-    def GetMaxConcurrentJobs(self) -> int:
-        """Get the maximum concurrent jobs limit from ServiceStatus."""
-        try:
-            query = "SELECT MaxConcurrentJobs FROM ServiceStatus WHERE ServiceName = 'QualityTestingService'"
-            result = self.DatabaseService.ExecuteQuery(query)
-            
-            if result and len(result) > 0:
-                return result[0]['maxconcurrentjobs'] or 1  # Default to 1 if not set
-            
-            return 1  # Default value
-            
-        except Exception as e:
-            LoggingService.LogException("Exception getting max concurrent jobs", e, "DatabaseManager", "GetMaxConcurrentJobs")
-            return 1
     
     def CancelActiveJobs(self, service_name: str) -> bool:
         """Cancel all active jobs for a specific service."""
@@ -1251,27 +1159,6 @@ class DatabaseManager(
     
     
     
-    def GetSystemSetting(self, SettingKey: str) -> Optional[str]:
-        """Get a system setting value by key."""
-        try:
-            LoggingService.LogFunctionEntry("GetSystemSetting", "DatabaseManager", SettingKey)
-            
-            query = "SELECT SettingValue FROM SystemSettings WHERE SettingKey = %s"
-            results = self.DatabaseService.ExecuteQuery(query, (SettingKey,))
-            
-            if results:
-                SettingValue = results[0]['SettingValue']
-                LoggingService.LogInfo(f"Retrieved system setting '{SettingKey}': '{SettingValue}'", 
-                                     "DatabaseManager", "GetSystemSetting")
-                return SettingValue
-            else:
-                LoggingService.LogDebug(f"System setting not found: {SettingKey}",
-                                      "DatabaseManager", "GetSystemSetting")
-                return None
-                
-        except Exception as e:
-            LoggingService.LogException("Exception getting system setting", e, "DatabaseManager", "GetSystemSetting")
-            return None
 
     
     def GetActiveJobDetails(self, JobId: int) -> Optional[Dict[str, Any]]:

@@ -47,7 +47,7 @@ def LocalIsDir(Value):
 class WorkerServiceApp:
     """Unified worker application that runs transcode, quality test, and scan capabilities."""
 
-    def __init__(self, ServiceControlRepositoryInstance: Optional[ServiceControlRepository] = None):
+    def __init__(self, ServiceControlRepositoryInstance: Optional[ServiceControlRepository] = None, SystemSettingsRepositoryInstance: Optional[SystemSettingsRepository] = None):
         """Initialize the WorkerService application."""
         CurrentPid = os.getpid()
         LoggingService.LogInfo(f"WorkerServiceApp __init__ started. PID: {CurrentPid}", "WorkerService", "__init__")
@@ -109,6 +109,7 @@ class WorkerServiceApp:
 
         LoggingService.LogInfo(f"WorkerServiceApp __init__ completed. PID: {CurrentPid}", "WorkerService", "__init__")
         self.ServiceControlRepository = ServiceControlRepositoryInstance or ServiceControlRepository()
+        self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
 
     def _ResolveWorkerName(self) -> str:
         """Determine this worker's name.
@@ -471,7 +472,7 @@ class WorkerServiceApp:
             # Read scan interval from SystemSettings
             IntervalMinutes = 60
             try:
-                IntervalSetting = self.DatabaseManager.GetSystemSetting('ContinuousScanIntervalMinutes')
+                IntervalSetting = self.SystemSettingsRepository.GetSystemSetting('ContinuousScanIntervalMinutes')
                 if IntervalSetting:
                     IntervalMinutes = int(IntervalSetting)
             except Exception:
@@ -977,7 +978,7 @@ class WorkerServiceApp:
     def _LoadCapabilityPollingInterval(self) -> int:
         """Read CapabilityPollingIntervalSec from SystemSettings. Default 15."""
         try:
-            Value = self.DatabaseManager.GetSystemSetting('CapabilityPollingIntervalSec')
+            Value = self.SystemSettingsRepository.GetSystemSetting('CapabilityPollingIntervalSec')
             if Value:
                 Parsed = int(Value)
                 return max(5, min(120, Parsed))

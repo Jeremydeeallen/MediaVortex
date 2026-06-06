@@ -16,6 +16,7 @@ from Core.Logging.LoggingService import LoggingService
 from Services.SystemMonitoringService import SystemMonitoringService
 from Services.CoreTopologyService import CoreTopologyService
 from Repositories.DatabaseManager import DatabaseManager
+from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 
 
 class CpuAffinityService:
@@ -25,7 +26,7 @@ class CpuAffinityService:
     _Lock = threading.Lock()
 
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
-                 SystemMonitoringServiceInstance: SystemMonitoringService = None):
+                 SystemMonitoringServiceInstance: SystemMonitoringService = None, SystemSettingsRepositoryInstance: Optional[SystemSettingsRepository] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.SystemMonitoringService = SystemMonitoringServiceInstance or SystemMonitoringService()
         self.Topology = CoreTopologyService.GetInstance()
@@ -59,6 +60,7 @@ class CpuAffinityService:
             f"Detection={self.Topology.DetectionMethod}, "
             f"P-cores={self.Topology.PCoreLogicalIds}, E-cores={self.Topology.ECoreLogicalIds}",
             "CpuAffinityService", "__init__")
+        self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
     
     @classmethod
     def GetInstance(cls, DatabaseManagerInstance: DatabaseManager = None,
@@ -73,51 +75,51 @@ class CpuAffinityService:
     def _LoadConfiguration(self):
         """Load configuration from SystemSettings table."""
         try:
-            EnabledStr = self.DatabaseManager.GetSystemSetting('CpuAffinityEnabled')
+            EnabledStr = self.SystemSettingsRepository.GetSystemSetting('CpuAffinityEnabled')
             if EnabledStr:
                 self.CpuAffinityEnabled = EnabledStr.lower() in ('true', '1', 'yes')
 
-            TranscodeCoreTierStr = self.DatabaseManager.GetSystemSetting('TranscodeCoreTier')
+            TranscodeCoreTierStr = self.SystemSettingsRepository.GetSystemSetting('TranscodeCoreTier')
             if TranscodeCoreTierStr and TranscodeCoreTierStr.lower() in ('performance', 'efficiency', 'all'):
                 self.TranscodeCoreTier = TranscodeCoreTierStr.lower()
 
-            QualityTestCoreTierStr = self.DatabaseManager.GetSystemSetting('QualityTestCoreTier')
+            QualityTestCoreTierStr = self.SystemSettingsRepository.GetSystemSetting('QualityTestCoreTier')
             if QualityTestCoreTierStr and QualityTestCoreTierStr.lower() in ('performance', 'efficiency', 'all'):
                 self.QualityTestCoreTier = QualityTestCoreTierStr.lower()
 
-            ThermalGateEnabledStr = self.DatabaseManager.GetSystemSetting('ThermalGateEnabled')
+            ThermalGateEnabledStr = self.SystemSettingsRepository.GetSystemSetting('ThermalGateEnabled')
             if ThermalGateEnabledStr:
                 self.ThermalGateEnabled = ThermalGateEnabledStr.lower() in ('true', '1', 'yes')
 
-            ThermalGateMaxTempStr = self.DatabaseManager.GetSystemSetting('ThermalGateMaxTemp')
+            ThermalGateMaxTempStr = self.SystemSettingsRepository.GetSystemSetting('ThermalGateMaxTemp')
             if ThermalGateMaxTempStr:
                 try:
                     self.ThermalGateMaxTemp = float(ThermalGateMaxTempStr)
                 except ValueError:
                     pass
 
-            ThermalGateMinCoolCoresStr = self.DatabaseManager.GetSystemSetting('ThermalGateMinCoolCores')
+            ThermalGateMinCoolCoresStr = self.SystemSettingsRepository.GetSystemSetting('ThermalGateMinCoolCores')
             if ThermalGateMinCoolCoresStr:
                 try:
                     self.ThermalGateMinCoolCores = int(ThermalGateMinCoolCoresStr)
                 except ValueError:
                     pass
 
-            ThermalPauseCriticalTempStr = self.DatabaseManager.GetSystemSetting('ThermalPauseCriticalTemp')
+            ThermalPauseCriticalTempStr = self.SystemSettingsRepository.GetSystemSetting('ThermalPauseCriticalTemp')
             if ThermalPauseCriticalTempStr:
                 try:
                     self.ThermalPauseCriticalTemp = float(ThermalPauseCriticalTempStr)
                 except ValueError:
                     pass
 
-            ThermalGateMaxWaitSecondsStr = self.DatabaseManager.GetSystemSetting('ThermalGateMaxWaitSeconds')
+            ThermalGateMaxWaitSecondsStr = self.SystemSettingsRepository.GetSystemSetting('ThermalGateMaxWaitSeconds')
             if ThermalGateMaxWaitSecondsStr:
                 try:
                     self.ThermalGateMaxWaitSeconds = int(ThermalGateMaxWaitSecondsStr)
                 except ValueError:
                     pass
 
-            ThermalGateCheckIntervalStr = self.DatabaseManager.GetSystemSetting('ThermalGateCheckInterval')
+            ThermalGateCheckIntervalStr = self.SystemSettingsRepository.GetSystemSetting('ThermalGateCheckInterval')
             if ThermalGateCheckIntervalStr:
                 try:
                     self.ThermalGateCheckInterval = max(5, int(ThermalGateCheckIntervalStr))
