@@ -156,7 +156,7 @@ class StuckJobDetectionService:
             import socket
 
             # Get active job record for this transcode job
-            activeJobs = self.DatabaseManager.GetActiveJobsByService("TranscodeService")
+            activeJobs = self.ActiveJobRepository.GetActiveJobsByService("TranscodeService")
 
             # Find the active job for this queue item
             relevantActiveJob = None
@@ -376,7 +376,7 @@ class StuckJobDetectionService:
             try:
                 import socket as _socket
                 LocalHostname = _socket.gethostname()
-                activeJobs = self.DatabaseManager.GetActiveJobsByService("TranscodeService")
+                activeJobs = self.ActiveJobRepository.GetActiveJobsByService("TranscodeService")
                 for activeJob in activeJobs:
                     if activeJob.get('QueueId') != QueueId:
                         continue
@@ -648,7 +648,7 @@ class StuckJobDetectionService:
             # Get all running quality test jobs
             # For quality test jobs, we need to get them differently since there's no status filter method
             qualityTestQueue = self.DatabaseManager.GetQualityTestQueue()
-            activeQualityJobs = self.DatabaseManager.GetActiveJobsByService("QualityTest")
+            activeQualityJobs = self.ActiveJobRepository.GetActiveJobsByService("QualityTest")
 
             # Filter quality test jobs that are actually running (have active jobs)
             runningJobs = []
@@ -744,7 +744,7 @@ class StuckJobDetectionService:
         """Check if a specific quality test job is stuck by verifying if the FFmpeg process is still alive."""
         try:
             # Get active job record for this quality test job
-            activeJobs = self.DatabaseManager.GetActiveJobsByService("QualityTest")
+            activeJobs = self.ActiveJobRepository.GetActiveJobsByService("QualityTest")
 
             # Find the active job for this queue item
             relevantActiveJob = None
@@ -1047,7 +1047,7 @@ class StuckJobDetectionService:
                 }
 
             # Get all tracked PIDs from ActiveJobs
-            trackedPids = self.DatabaseManager.GetAllActiveJobProcessIds()
+            trackedPids = self.ActiveJobRepository.GetAllActiveJobProcessIds()
 
             # Find orphaned processes (FFmpeg running but not tracked)
             orphanedProcesses = []
@@ -1170,7 +1170,7 @@ class StuckJobDetectionService:
             runningTranscodeJobs = self.DatabaseManager.GetTranscodeQueueItemsByStatus("Running")
             # For quality test jobs, we need to get them differently since there's no status filter method
             qualityTestQueue = self.DatabaseManager.GetQualityTestQueue()
-            activeQualityJobs = self.DatabaseManager.GetActiveJobsByService("QualityTest")
+            activeQualityJobs = self.ActiveJobRepository.GetActiveJobsByService("QualityTest")
 
             # Filter quality test jobs that are actually running (have active jobs)
             runningQualityJobs = []
@@ -1184,7 +1184,7 @@ class StuckJobDetectionService:
                             break
 
             # Get tracked PIDs
-            trackedPids = self.DatabaseManager.GetAllActiveJobProcessIds()
+            trackedPids = self.ActiveJobRepository.GetAllActiveJobProcessIds()
 
             # Categorize results
             orphanedProcesses = []

@@ -13,15 +13,18 @@ from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
 from Core.Path.PathFs import Exists as _PathFsExists
 from Services.QualityTestQueueService import QualityTestQueueService
+from typing import Optional
+from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
 
 QualityTestBlueprint = Blueprint('QualityTest', __name__)
 
 class QualityTestController:
-    def __init__(self):
+    def __init__(self, ActiveJobRepositoryInstance: Optional[ActiveJobRepository] = None):
         self.DatabaseManager = DatabaseManager()
         self.LoggingService = LoggingService()
         self.QualityTestQueueService = QualityTestQueueService(self.DatabaseManager)
         self.QualityTestRepository = QualityTestRepository(self.DatabaseManager.DatabaseService)
+        self.ActiveJobRepository = ActiveJobRepositoryInstance or ActiveJobRepository()
 
     def StartQualityTest(self, JobId: int) -> dict:
         """Trigger quality test processing - the job is already in the queue, just verify it exists."""
@@ -81,7 +84,7 @@ class QualityTestController:
         """Get overall quality test service status"""
         try:
             # Check if there are any active quality test jobs
-            ActiveJobs = self.DatabaseManager.GetActiveJobsByService("QualityTest")
+            ActiveJobs = self.ActiveJobRepository.GetActiveJobsByService("QualityTest")
             IsRunning = len(ActiveJobs) > 0
 
             return {"Success": True, "IsRunning": IsRunning, "ActiveJobs": len(ActiveJobs)}

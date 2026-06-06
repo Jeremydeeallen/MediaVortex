@@ -136,7 +136,7 @@ class QualityTestingBusinessService:
                 _WorkerName = (_Ctx.WorkerName if _Ctx else None) or _socket.gethostname()
             except Exception:
                 _WorkerName = _socket.gethostname()
-            active_job_id = self.DatabaseManager.CreateActiveJob(
+            active_job_id = self.ActiveJobRepository.CreateActiveJob(
                 ServiceName="QualityTestService",
                 JobType="QualityTest",
                 QueueId=JobId,
@@ -163,7 +163,7 @@ class QualityTestingBusinessService:
                         {"QualityTestCompleted": True, "VMAF": result["VMAFScore"]}
                     )
                     self.UpdateProgressRecord(progress_id, "Completed", 100, "VMAF analysis completed successfully", result["VMAFScore"])
-                    self.DatabaseManager.CompleteActiveJob(active_job_id, True)
+                    self.ActiveJobRepository.CompleteActiveJob(active_job_id, True)
                     return {"Success": True, "VMAFScore": result["VMAFScore"]}
                 else:
                     # Update result with failure
@@ -172,7 +172,7 @@ class QualityTestingBusinessService:
                         result.get("Error", "Unknown error")
                     )
                     self.UpdateProgressRecord(progress_id, "Failed", 0, result.get("Error", "Unknown error"))
-                    self.DatabaseManager.CompleteActiveJob(active_job_id, False, result.get("Error", "Unknown error"))
+                    self.ActiveJobRepository.CompleteActiveJob(active_job_id, False, result.get("Error", "Unknown error"))
                     self._CleanupTemporaryFilePathsForVmafFailure(job_details['TranscodeAttemptId'])
                     return {"Success": False, "Message": result.get("Error", "Unknown error")}
 
@@ -185,7 +185,7 @@ class QualityTestingBusinessService:
                     )
                 if 'progress_id' in locals():
                     self.UpdateProgressRecord(progress_id, "Failed", 0, str(e))
-                self.DatabaseManager.CompleteActiveJob(active_job_id, False, str(e))
+                self.ActiveJobRepository.CompleteActiveJob(active_job_id, False, str(e))
                 self._CleanupTemporaryFilePathsForVmafFailure(job_details['TranscodeAttemptId'])
                 raise
 
@@ -890,7 +890,7 @@ class QualityTestingBusinessService:
             # Update ActiveJob with FFmpeg child process PID (use FFmpeg PID if available, otherwise shell PID)
             ProcessPIDToUse = FFmpegPID if FFmpegPID else Process.pid
             if JobDetails and 'active_job_id' in JobDetails and JobDetails['active_job_id']:
-                self.DatabaseManager.UpdateActiveJobProcessId(
+                self.ActiveJobRepository.UpdateActiveJobProcessId(
                     JobDetails['active_job_id'],
                     ProcessPIDToUse
                 )
@@ -1740,7 +1740,7 @@ class QualityTestingBusinessService:
                 )
 
                 # Complete the active job
-                self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user skip request")
+                self.ActiveJobRepository.CompleteActiveJob(active_job['Id'], False, "Cancelled by user skip request")
 
             LoggingService.LogInfo(f"Quality test skipped for TranscodeAttempt {TranscodeAttemptId}, deciding disposition",
                                  "QualityTestingBusinessService", "SkipQualityTest")
@@ -1830,7 +1830,7 @@ class QualityTestingBusinessService:
             )
 
             # Complete the active job
-            self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user")
+            self.ActiveJobRepository.CompleteActiveJob(active_job['Id'], False, "Cancelled by user")
 
             LoggingService.LogInfo(f"Successfully cancelled quality test for TranscodeAttempt {transcode_attempt_id}",
                                  "QualityTestingBusinessService", "CancelActiveQualityTest")
