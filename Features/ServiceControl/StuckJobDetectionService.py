@@ -11,13 +11,17 @@ from Repositories.DatabaseManager import DatabaseManager
 from Core.Logging.LoggingService import LoggingService
 from Core.DateTimeHelpers import AsAwareUtc
 from Services.ProcessManagementService import ProcessManagementService
+from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
+from Features.Workers.WorkersRepository import WorkersRepository
 
 
 class StuckJobDetectionService:
     """Service for detecting and cleaning up stuck transcode jobs."""
 
-    def __init__(self, DatabaseManagerInstance: DatabaseManager = None):
+    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, ActiveJobRepositoryInstance: Optional[ActiveJobRepository] = None, WorkersRepositoryInstance: Optional[WorkersRepository] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
+        self.ActiveJobRepository = ActiveJobRepositoryInstance or ActiveJobRepository()
+        self.WorkersRepository = WorkersRepositoryInstance or WorkersRepository()
         self.ProcessManagementService = ProcessManagementService()
 
     def DetectAndCleanStuckTranscodeJobs(self) -> Dict[str, Any]:

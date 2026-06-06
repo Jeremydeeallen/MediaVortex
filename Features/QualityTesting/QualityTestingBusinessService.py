@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
 from Core.Path.LocalPath import LocalExists
+from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
+from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 
 
 # directive: path-schema-migration | # see path.S8
@@ -28,9 +30,11 @@ class QualityTestingBusinessService:
     """Quality Testing Business Service - Business logic layer."""
 
     # directive: qualitytesting-uses-path | # see path.S5
-    def __init__(self, DatabaseManagerInstance=None, worker: Optional[Worker] = None):
+    def __init__(self, DatabaseManagerInstance=None, worker: Optional[Worker] = None, ActiveJobRepositoryInstance: Optional[ActiveJobRepository] = None, SystemSettingsRepositoryInstance: Optional[SystemSettingsRepository] = None):
         """Initialize the business service with dependencies; lazy Worker + StorageRoots for path resolution."""
         self.DatabaseManager = DatabaseManagerInstance
+        self.ActiveJobRepository = ActiveJobRepositoryInstance or ActiveJobRepository()
+        self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
         self.ActiveFFmpegProcess = None
         self.ActiveFFmpegThread = None
         self._Worker: Worker = worker if worker is not None else Worker.Current()

@@ -23,9 +23,18 @@ from Features.QualityTesting.QualityTestRepository import QualityTestRepository
 from Features.ShowSettings.ShowSettingsRepository import ShowSettingsRepository
 from Features.FileScanning.FileScanningRepository import FileScanningRepository
 from Features.Activity.ActivityRepository import ActivityRepository
+from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+from Features.ServiceControl.ServiceControlRepository import ServiceControlRepository
+from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
+from Features.Profiles.ProfileRepository import ProfileRepository
+from Features.Workers.WorkersRepository import WorkersRepository
+from Features.JellyfinIntegration.JellyfinRepository import JellyfinRepository
+from Core.Database.MaintenanceRepository import MaintenanceRepository
+from Core.Database.CodecFlagsRepository import CodecFlagsRepository
+from Core.Database.PathNormalizer import PathNormalizer
 
 
-# directive: path-schema-migration | # see path.S8
+# directive: db-monolith-decompose | # directive: path-schema-migration | # see path.S8
 class DatabaseManager(
     MediaFilesRepository,
     TranscodeQueueRepository,
@@ -34,6 +43,15 @@ class DatabaseManager(
     ShowSettingsRepository,
     FileScanningRepository,
     ActivityRepository,
+    SystemSettingsRepository,
+    ServiceControlRepository,
+    ActiveJobRepository,
+    ProfileRepository,
+    WorkersRepository,
+    JellyfinRepository,
+    MaintenanceRepository,
+    CodecFlagsRepository,
+    PathNormalizer,
 ):
     """Facade aggregating per-aggregate Repositories; legacy callers use this; per-aggregate code should use the specific Repository."""
     
