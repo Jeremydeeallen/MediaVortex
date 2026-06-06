@@ -15,7 +15,7 @@ This is a small addition: a build-time stamp, a startup read, a new nullable col
 
 ## Concern
 
-Just deployed (2026-05-09): rebuilt the worker image, recreated 4 LXC containers. The Windows worker (I9-2024) is on the same code repo but is a Python process not a Docker container and does not get redeployed by `docker compose up`. Today the operator has no way to confirm "is I9-2024 running the same commit as the LXC workers?" without SSHing each host and `git log`ing. Two specific gaps this closes:
+Just deployed (2026-05-09): rebuilt the worker image, recreated 4 LXC containers. I9-2024 is not redeployed by the LXC path -- it runs from source per `deploy/worker-deploy.feature.md` Surface, so today's commits only landed on LXC. Today the operator has no way to confirm "is I9-2024 running the same commit as the LXC workers?" without SSHing each host and `git log`ing. Two specific gaps this closes:
 
 1. After today's two-commit pair (`a9e1c19` + `c18ced3`, fixing the queue priority bypass paths and the worker claim ORDER BY), only the LXC workers got the new code. The Windows worker is still on the old binary until manually restarted. There is currently no signal in the DB or UI that says so.
 2. A future container that fails to restart cleanly (image not pulled, hostname collision, etc.) could quietly stay on the prior version while heartbeating normally. Pure heartbeat freshness gives no version signal.
