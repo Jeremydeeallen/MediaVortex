@@ -55,6 +55,10 @@ class WorkerServiceApp:
         LoggingService.LogInfo(f"WorkerServiceApp __init__ started. PID: {CurrentPid}", "WorkerService", "__init__")
 
         self.DatabaseManager = DatabaseManager()
+        self.ServiceControlRepository = ServiceControlRepositoryInstance or ServiceControlRepository()
+        self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
+        self.WorkersRepository = WorkersRepositoryInstance or WorkersRepository()
+
 
         # Worker identity
         self.WorkerName = self._ResolveWorkerName()
@@ -110,9 +114,6 @@ class WorkerServiceApp:
         self.TranscodeManuallyStopped = False
 
         LoggingService.LogInfo(f"WorkerServiceApp __init__ completed. PID: {CurrentPid}", "WorkerService", "__init__")
-        self.ServiceControlRepository = ServiceControlRepositoryInstance or ServiceControlRepository()
-        self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
-        self.WorkersRepository = WorkersRepositoryInstance or WorkersRepository()
 
     def _ResolveWorkerName(self) -> str:
         """Determine this worker's name.
