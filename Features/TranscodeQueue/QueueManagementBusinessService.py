@@ -16,6 +16,7 @@ from Core.Path import Path, PathError
 from Core.Path.LocalPath import LocalExists
 from Services.FileManagerService import FileManagerService
 from Repositories.DatabaseManager import DatabaseManager
+from Features.Profiles.ProfileRepository import ProfileRepository
 
 
 # directive: path-class-perfection | # see path.C18
@@ -59,7 +60,7 @@ class QueueManagementBusinessService:
     # marginal-savings-gate.feature.md.
     RESOLUTION_RANK = {'480p': 0, '720p': 1, '1080p': 2, '2160p': 3}
 
-    def __init__(self, RepositoryInstance: TranscodeQueueRepository = None):
+    def __init__(self, RepositoryInstance: TranscodeQueueRepository = None, ProfileRepositoryInstance: Optional[ProfileRepository] = None):
         self.Repository = RepositoryInstance or TranscodeQueueRepository()
         self.DatabaseManager = DatabaseManager()
         self.FileManager = FileManagerService()
@@ -68,6 +69,7 @@ class QueueManagementBusinessService:
         self.CrfBitrateEstimateRepo = CrfBitrateEstimateRepository()
         self.QueueAdmissionConfigRepo = QueueAdmissionConfigRepository()
         self.CodecCompatibilityRepo = CodecCompatibilityRepository()
+        self.ProfileRepository = ProfileRepositoryInstance or ProfileRepository()
 
     def PopulateQueueFromMediaFiles(self, RootFolderPath: str = None, ProfileId: int = None, CompatibilityOnly: bool = False) -> Dict[str, Any]:
         """Populate transcoding queue from MediaFiles that have assigned profiles, ordered by largest disk space."""
@@ -499,7 +501,7 @@ class QueueManagementBusinessService:
             # has no profile by design (cascade pre-decided no-re-encode).
             ProfileName = None
             if Mode == 'Transcode' and ProfileId is not None:
-                Profile = self.DatabaseManager.GetProfileById(ProfileId)
+                Profile = self.ProfileRepository.GetProfileById(ProfileId)
                 if not Profile:
                     return {"Success": False, "ErrorMessage": f"Profile with ID {ProfileId} not found", "ItemsAdded": 0}
                 ProfileName = Profile.ProfileName
@@ -749,13 +751,13 @@ class QueueManagementBusinessService:
             LoggingService.LogFunctionEntry("GetMediaFilesByFolderAndResolutionFilter", "QueueManagementBusinessService", RootFolderPath, ProfileId)
 
             # Get the profile
-            profile = self.DatabaseManager.GetProfileById(ProfileId)
+            profile = self.ProfileRepository.GetProfileById(ProfileId)
             if not profile:
                 LoggingService.LogError(f"Profile with ID {ProfileId} not found", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
                 return []
 
             # Get profile thresholds
-            profileThresholds = self.DatabaseManager.GetThresholdsByProfileId(ProfileId)
+            profileThresholds = self.ProfileRepository.GetThresholdsByProfileId(ProfileId)
             if not profileThresholds:
                 LoggingService.LogWarning(f"No profile thresholds found for profile {profile.ProfileName}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
                 return []
@@ -943,7 +945,7 @@ class QueueManagementBusinessService:
             targetVideoKbps = None
             targetAudioKbps = None
             try:
-                profileSettings = self.DatabaseManager.GetProfileSettingsForTargetResolution(
+                profileSettings = self.ProfileRepository.GetProfileSettingsForTargetResolution(
                     MediaFile.AssignedProfile, MediaFile.Resolution
                 )
                 if profileSettings:
@@ -1198,7 +1200,7 @@ class QueueManagementBusinessService:
             # Check 2: Skip if source resolution <= target resolution
             try:
                 # Get profile name from ProfileId
-                profile = self.DatabaseManager.GetProfileById(Threshold.ProfileId)
+                profile = self.ProfileRepository.GetProfileById(Threshold.ProfileId)
                 if profile and profile.ProfileName:
                     # Marginal-savings gate (replaces ShouldSkipDueToResolution).
                     shouldSkip, reason = self.EvaluateQueueAdmissionForProfile(MediaFile, profile.ProfileName)
@@ -1911,7 +1913,7 @@ class QueueManagementBusinessService:
         if not ProfileName or not getattr(MediaFile, 'Resolution', None):
             return (True, 'MissingProfile')
         try:
-            ProfileSettings = self.DatabaseManager.GetProfileSettingsForTargetResolution(
+            ProfileSettings = self.ProfileRepository.GetProfileSettingsForTargetResolution(
                 ProfileName, MediaFile.Resolution
             )
         except Exception as Ex:
@@ -1942,7 +1944,7 @@ class QueueManagementBusinessService:
             targetAudioKbps = None
             if mediaFile.AssignedProfile and mediaFile.Resolution:
                 try:
-                    profileSettings = self.DatabaseManager.GetProfileSettingsForTargetResolution(
+                    profileSettings = self.ProfileRepository.GetProfileSettingsForTargetResolution(
                         mediaFile.AssignedProfile, mediaFile.Resolution
                     )
                     if profileSettings:
@@ -2213,7 +2215,7 @@ class QueueManagementBusinessService:
             # Handle profile assignment if ProfileId is provided (user selected a profile)
             if ProfileId is not None:
                 # Get the profile and update the media file's assigned profile
-                profile = self.DatabaseManager.GetProfileById(ProfileId)
+                profile = self.ProfileRepository.GetProfileById(ProfileId)
                 if not profile:
                     errorMsg = f"Profile with ID {ProfileId} not found"
                     LoggingService.LogError(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
