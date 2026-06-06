@@ -12,13 +12,14 @@ import os
 from Repositories.DatabaseManager import DatabaseManager
 from Features.QualityTesting.QualityTestingBusinessService import QualityTestingBusinessService
 from Core.Logging.LoggingService import LoggingService
+from Features.QualityTesting.QualityTestRepository import QualityTestRepository
 
 
 class ProcessQualityTestQueueService:
     """Orchestrates the complete quality testing queue processing workflow using MVVM architecture."""
 
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
-                 QualityTestingBusinessInstance: QualityTestingBusinessService = None):
+                 QualityTestingBusinessInstance: QualityTestingBusinessService = None, QualityTestRepositoryInstance: Optional[QualityTestRepository] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.QualityTestingBusiness = QualityTestingBusinessInstance or QualityTestingBusinessService(self.DatabaseManager)
 
@@ -32,6 +33,7 @@ class ProcessQualityTestQueueService:
         # Stuck job monitoring
         self.StuckJobMonitoringThread = None
         self.StuckJobMonitoringActive = False
+        self.QualityTestRepository = QualityTestRepositoryInstance or QualityTestRepository()
 
     def Run(self, MaxConcurrentJobs: int = 1) -> Dict[str, Any]:
         """Start processing the quality testing queue with specified concurrent jobs."""
@@ -195,7 +197,7 @@ class ProcessQualityTestQueueService:
                 )
                 return None
 
-            job = self.DatabaseManager.ClaimQualityTestJob(WorkerName)
+            job = self.QualityTestRepository.ClaimQualityTestJob(WorkerName)
 
             if job:
                 LoggingService.LogInfo(f"Claimed quality test job {job['Id']}",
