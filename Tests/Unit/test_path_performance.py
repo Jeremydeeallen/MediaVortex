@@ -54,8 +54,8 @@ def test_identity_methods_do_not_touch_filesystem():
     try:
         assert P == Q
         assert hash(P) == hash(Q)
+        # C20: repr() is diagnostic and does NOT read DB; str() now returns CanonicalDisplay which is exercised in test_str_p99_under_10us_with_scope.
         assert repr(P) == "<Path #7:Show/Season 1/Episode 1.mkv>"
-        assert str(P) == "<Path #7:Show/Season 1/Episode 1.mkv>"
         Payload = P.ToJsonDict()
         assert Payload == {"StorageRootId": 7, "RelativePath": "Show/Season 1/Episode 1.mkv"}
         assert Path.FromJsonDict(Payload) == P
@@ -96,12 +96,14 @@ def test_repr_p99_under_10us():
 
 
 @pytest.mark.perf
-# directive: path-performance-budget | # see path.C5
-def test_str_p99_under_10us():
-    """C6: __str__ p99 < 10 us."""
+# directive: path-class-perfection | # see path.C20
+def test_str_p99_under_10us_with_scope():
+    """C20: __str__ p99 < 10 us WHEN a PrefixMapScope is active (the cache eliminates per-call DB read). Outside scope, str(Path) reads DB and is slower by design (D8)."""
+    from Core.Path.PathStorageRoots import PrefixMapScope
     P = Path(7, "Show/Season 1/Episode 1.mkv")
-    Med, P99 = _MeasureP99(lambda: str(P))
-    print(f"\n[perf] __str__ median={Med}ns p99={P99}ns")
+    with PrefixMapScope():
+        Med, P99 = _MeasureP99(lambda: str(P))
+    print(f"\n[perf] __str__ in scope median={Med}ns p99={P99}ns")
     assert P99 < 10_000
 
 

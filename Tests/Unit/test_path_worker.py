@@ -124,12 +124,12 @@ def test_path_resolve_raises_path_error_when_worker_returns_none():
 
 # directive: path-worker-class | # see path.S3
 def test_from_worker_context_uses_singleton():
-    """C7: FromWorkerContext reads WorkerContext.Current() for Name + Platform."""
+    """C7: Worker.Current reads WorkerContext.Current() for Name + Platform."""
     from Core.WorkerContext import WorkerContext
     WorkerContext.Reset()
     try:
         WorkerContext.Initialize(WorkerName="test-worker-name", Platform="linux")
-        W = Worker.FromWorkerContext(Db=_MockDbReturning([]))
+        W = Worker.Current(Db=_MockDbReturning([]))
         assert W.Name == "test-worker-name"
         assert W.Platform == "linux"
     finally:
@@ -138,11 +138,11 @@ def test_from_worker_context_uses_singleton():
 
 # directive: path-worker-class | # see path.S3
 def test_from_worker_context_falls_back_to_hostname_when_uninitialized():
-    """C7: FromWorkerContext falls back to socket.gethostname() when WorkerContext is uninitialized."""
+    """C7: Worker.Current falls back to socket.gethostname() when WorkerContext is uninitialized."""
     import socket
     from Core.WorkerContext import WorkerContext
     WorkerContext.Reset()
-    W = Worker.FromWorkerContext(Db=_MockDbReturning([]))
+    W = Worker.Current(Db=_MockDbReturning([]))
     assert W.Name == socket.gethostname()
     assert W.Platform == "linux"
 

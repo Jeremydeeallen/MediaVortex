@@ -15,8 +15,8 @@ class Worker:
         self._Cache: dict = {}
 
     @classmethod
-    # directive: path-worker-class | # see path.S3
-    def FromWorkerContext(cls, Db=None) -> "Worker":
+    # directive: path-class-perfection | # see path.C21
+    def Current(cls, Db=None) -> "Worker":
         """Build a Worker from the process-singleton WorkerContext; falls back to socket.gethostname() if uninitialized."""
         import socket
         from Core.WorkerContext import WorkerContext
@@ -24,12 +24,6 @@ class Worker:
         Name = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
         Platform = (Ctx.Platform if Ctx else None) or "linux"
         return cls(Name=Name, Platform=Platform, Db=Db)
-
-    @classmethod
-    # directive: path-class-perfection | # see path.C21
-    def Current(cls, Db=None) -> "Worker":
-        """Ergonomic alias for FromWorkerContext; preferred for constructor-injection defaults."""
-        return cls.FromWorkerContext(Db=Db)
 
     # directive: path-worker-class | # see path.S3
     def ResolveStorageRoot(self, StorageRootId: int) -> Optional[str]:

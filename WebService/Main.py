@@ -148,6 +148,7 @@ class WebServiceApp:
         self._register_routes()
         self._register_blueprints()
         self._register_error_handlers()
+        self._register_path_scope_middleware()
         
         # Start service status tracking
         self.PrivateStartServiceStatusTracking()
@@ -263,6 +264,29 @@ class WebServiceApp:
             LoggingService.LogException("Exception checking for existing WebService instances", e, "WebService", "PrivateIsServiceAlreadyRunning")
             return True  # Prevent startup on error
     
+    def _register_path_scope_middleware(self):
+        """Pin a StorageRoots snapshot per request -- str(path)/CanonicalDisplay/GetPrefixMap reuse one DB read."""
+        # directive: path-class-perfection | # see path.C25
+        from Core.Path.PathStorageRoots import PrefixMapScope, _ScopeStorageRoots, _ScopePrefixMap, _LoadFresh
+
+        @self.App.before_request
+        def _OpenPathScope():
+            from flask import g
+            Roots = _LoadFresh()
+            Pm = {R["Id"]: R["CanonicalPrefix"] for R in Roots}
+            g._PathScopeRootsToken = _ScopeStorageRoots.set(Roots)
+            g._PathScopeMapToken = _ScopePrefixMap.set(Pm)
+
+        @self.App.teardown_request
+        def _ClosePathScope(_Exc):
+            from flask import g
+            Token = getattr(g, '_PathScopeRootsToken', None)
+            if Token is not None:
+                _ScopeStorageRoots.reset(Token)
+            MapToken = getattr(g, '_PathScopeMapToken', None)
+            if MapToken is not None:
+                _ScopePrefixMap.reset(MapToken)
+
     def _register_error_handlers(self):
         """Register global error handlers for the Flask app."""
         @self.App.errorhandler(404)

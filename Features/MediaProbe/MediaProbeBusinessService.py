@@ -14,16 +14,14 @@ class MediaProbeBusinessService:
 
     MaxFFprobeFailures = 3  # Files exceeding this are skipped until manually reset
 
-    # directive: mediaprobe-uses-path | # see path.S3
-    def __init__(self, RepositoryInstance=None, FileManagerInstance=None):
+    # directive: path-class-perfection | # see path.C26
+    def __init__(self, RepositoryInstance=None, FileManagerInstance=None, worker: Optional[Worker] = None):
         self.Repository = RepositoryInstance or MediaProbeRepository()
         self.FileManager = FileManagerInstance or FileManagerService()
-        self._Worker: Optional[Worker] = None
+        self._Worker: Worker = worker if worker is not None else Worker.Current()
 
-    # directive: path-class-perfection | # see path.C21
+    # directive: path-class-perfection | # see path.C26
     def _GetWorker(self) -> Worker:
-        if self._Worker is None:
-            self._Worker = Worker.FromWorkerContext()
         return self._Worker
 
     # directive: path-class-perfection | # see path.C18

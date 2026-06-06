@@ -1,8 +1,18 @@
 # Current Directive
 
 **Set:** 2026-06-05
-**Status:** Active -- phase: IMPLEMENTING
-**Reopened:** 2026-06-05 -- premature close: AC #1 and AC #8 were NARROWED rather than completed. "Perfect" is the contract; narrowed != perfect. The narrowings get unwound and the directive ships with the full sweep.
+**Status:** Closed -- 8 original ACs + reopened-completion of AC #1/#8 narrowings + AC #2 cache decomposition + 6 round-2 ACs (v2-AC1 contextvars cache, v2-AC4 Worker constructor injection, v2-AC5 FromWorkerContext deletion, v2-AC6 case-sensitive prefix match, v2-AC7 stale-tests rewritten/deleted, v2-AC8 RootFolderModel kwarg removed). 2026-06-05.
+**Reopened (round 2):** 2026-06-05 -- post-close honest review surfaced 6 more gaps. All landed.
+
+## Round-2 ACs (in addition to the 8 already landed)
+
+- **v2-AC1**: contextvars-based prefix-map cache so str(Path) doesn't hit DB every call within a request scope. Flask middleware invalidates per request. db-is-authority holds across requests.
+- **v2-AC4**: Worker constructor injection -- 6 stateful services accept worker: Optional[Worker] = None defaulting to Worker.Current().
+- **v2-AC5**: Delete Worker.FromWorkerContext. Sweep all callers to Worker.Current.
+- **v2-AC6**: FromLegacyString prefix match becomes case-sensitive (consistent with D2 Path identity).
+- **v2-AC7**: Stale tests classified -- test_path_existence rewritten to test PathFs; test_filereplacement_uses_path silent-helper tests + test_filescanning_uses_path helper-presence test DELETED with reason.
+- **v2-AC8**: RootFolderModel.__init__ RootFolder= kwarg removed (callers swept to typed-pair construction).
+- Comment promoted (R12 deletion in FileScanningBusinessService.py:890-893 was the right move; behavioral note moved to filescanning.feature.md).
 **Plan:** `C:\Users\jerem\.claude\plans\flickering-yawning-aurora.md` (approved 2026-06-05; batched as A live-safe / B restart-only / C drain)
 **Slug:** path-class-perfection
 **Predecessor:** `.claude/directives/closed/2026-06-05-path-schema-migration.md` (closed; 10 legacy columns dropped, but the inlined `path-perfect-implementation` plan's "perfect" contract was not honored — see Findings of that directive vs the 8 design weaknesses listed below)

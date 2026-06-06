@@ -93,18 +93,17 @@ class Path:
         return cls(Sid, Rel)
 
     @classmethod
-    # directive: path-class-implementation | # see path.S6
+    # directive: path-class-perfection | # see path.C24
     def FromLegacyString(cls, Canonical: str, StorageRoots: list) -> "Path":
-        """Parse a v1-shape canonical string against pre-sorted StorageRoots; raise PathError on no match (D10)."""
+        """Parse a v1-shape canonical string against pre-sorted StorageRoots; case-sensitive prefix match (consistent with D2 case-sensitive Path identity); raise PathError on no match (D10)."""
         if not Canonical or not isinstance(Canonical, str):
             raise PathError(f"FromLegacyString: empty or non-str input: {Canonical!r}")
-        Upper = Canonical.upper()
         for Sr in StorageRoots:
             Prefix = Sr.get("CanonicalPrefix") if hasattr(Sr, "get") else Sr["CanonicalPrefix"]
             Id = Sr.get("Id") if hasattr(Sr, "get") else Sr["Id"]
             if Prefix is None:
                 continue
-            if Upper.startswith(Prefix.upper()):
+            if Canonical.startswith(Prefix):
                 Tail = Canonical[len(Prefix):]
                 if Tail == "":
                     return cls(Id, "")

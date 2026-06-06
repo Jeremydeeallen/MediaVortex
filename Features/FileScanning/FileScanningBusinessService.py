@@ -29,7 +29,7 @@ _FS_WORKER_HOLDER: dict = {"_Worker": None}
 def _GetWorker() -> Worker:
     """Module-level lazy Worker. Worker holds only Name + Platform from the process-singleton WorkerContext; no DB read at construction; per-call resolves go through Worker.ResolveStorageRoot which is DB-fresh."""
     if _FS_WORKER_HOLDER["_Worker"] is None:
-        _FS_WORKER_HOLDER["_Worker"] = Worker.FromWorkerContext()
+        _FS_WORKER_HOLDER["_Worker"] = Worker.Current()
     return _FS_WORKER_HOLDER["_Worker"]
 
 
@@ -123,7 +123,7 @@ class FileScanningBusinessService:
             from Core.Path.Path import Path as _Path, PathError as _PE
             from Core.Path.PathStorageRoots import GetStorageRoots as _GSR
             from Core.Path.Worker import Worker as _W
-            return _Path.FromLegacyString(CanonicalPath, _GSR()).Resolve(_W.FromWorkerContext(Db=self.Repository.DatabaseService))
+            return _Path.FromLegacyString(CanonicalPath, _GSR()).Resolve(_W.Current(Db=self.Repository.DatabaseService))
         except Exception:
             return CanonicalPath
 
@@ -132,7 +132,7 @@ class FileScanningBusinessService:
         try:
             from Core.Path.PathStorageRoots import GetPrefixMap as _GPM
             from Core.Path.Worker import Worker as _W
-            P = _W.FromWorkerContext(Db=self.Repository.DatabaseService).LocalToPath(LocalPath)
+            P = _W.Current(Db=self.Repository.DatabaseService).LocalToPath(LocalPath)
             if P is None:
                 return LocalPath
             return P.CanonicalDisplay(_GPM())
@@ -914,8 +914,11 @@ class FileScanningBusinessService:
                 except Exception:
                     continue
 
+            # directive: path-class-perfection | # see path.C27
+            _ParsedNew = _PathFS.FromLegacyString(CanonicalPath, _Srs)
             NewFolder = RootFolderModel(
-                RootFolder=CanonicalPath,
+                StorageRootId=_ParsedNew.StorageRootId,
+                RelativePath=_ParsedNew.RelativePath,
                 LastScannedDate=datetime.now(timezone.utc),
                 TotalSizeGB=TotalSizeGB
             )
@@ -1428,9 +1431,14 @@ class FileScanningBusinessService:
                 if _Display.lower().rstrip('\\') == RootFolderPath.lower().rstrip('\\'):
                     return {'Success': False, 'Message': f'Root folder already exists: {_Display}'}
 
+            # directive: path-class-perfection | # see path.C27
+            from Core.Path.Path import Path as _PathAdd
+            from Core.Path.PathStorageRoots import GetStorageRoots as _GSRAdd
+            _ParsedAdd = _PathAdd.FromLegacyString(RootFolderPath, _GSRAdd())
             NewFolder = RootFolderModel(
                 Id=None,
-                RootFolder=RootFolderPath,
+                StorageRootId=_ParsedAdd.StorageRootId,
+                RelativePath=_ParsedAdd.RelativePath,
                 LastScannedDate=None,
                 TotalSizeGB=0.0,
                 PreferredWorkerName=PreferredWorkerName,

@@ -11,16 +11,14 @@ from Core.Path import Path, Worker, PathError
 class QualityTestQueueService:
     """Business service for quality testing queue operations."""
 
-    # directive: path-schema-migration | # see path.S1
-    def __init__(self, DatabaseManagerInstance: DatabaseManager = None):
-        """Initialize the service with dependencies."""
+    # directive: path-class-perfection | # see path.C26
+    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, worker: Optional[Worker] = None):
+        """Initialize the service with dependencies; worker defaults to Worker.Current() for prod, override in tests."""
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
-        self._Worker: Optional[Worker] = None
+        self._Worker: Worker = worker if worker is not None else Worker.Current()
 
-    # directive: path-class-perfection | # see path.C21
+    # directive: path-class-perfection | # see path.C26
     def _GetWorker(self) -> Worker:
-        if self._Worker is None:
-            self._Worker = Worker.FromWorkerContext()
         return self._Worker
 
     # directive: path-class-perfection | # see path.C18

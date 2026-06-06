@@ -16,17 +16,15 @@ class OptimizationViewModel:
         'JellyfinSSHKeyPath', 'JellyfinApiKey', 'JellyfinApiPort'
     ]
 
-    # directive: path-schema-migration | # see path.S5
-    def __init__(self, DatabaseManagerInstance: DatabaseManager = None):
+    # directive: path-class-perfection | # see path.C26
+    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, worker: Optional[Worker] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.IsLoading = False
         self.ErrorMessage = ""
-        self._Worker: Optional[Worker] = None
+        self._Worker: Worker = worker if worker is not None else Worker.Current()
 
-    # directive: path-class-perfection | # see path.C21
+    # directive: path-class-perfection | # see path.C26
     def _GetWorker(self) -> Worker:
-        if self._Worker is None:
-            self._Worker = Worker.FromWorkerContext()
         return self._Worker
 
     # directive: path-class-perfection | # see path.C18

@@ -322,7 +322,7 @@ class ContinuousScanService:
             from Core.Path.Worker import Worker as _WCS
             _SrsCS = _GSRCS()
             _PmCS = _GPMCS()
-            _WkCS = _WCS.FromWorkerContext()
+            _WkCS = _WCS.Current()
 
             for RootFolder in EligibleFolders:
                 if self.StopEvent.is_set():

@@ -13,10 +13,11 @@ from Core.Path.LocalPath import LocalBasename, LocalExists, LocalGetSize, LocalG
 class TranscodedOutputPlacement:
     """Owns .inprogress rename, MediaFiles refresh, original delete; see transcoded-output-placement.feature.md."""
 
-    # directive: filereplacement-uses-path | # see path.S5
+    # directive: path-class-perfection | # see path.C26
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  FileManagerInstance: FileManagerService = None,
-                 FFprobePath: str = None, WorkerName: str = None):
+                 FFprobePath: str = None, WorkerName: str = None,
+                 worker: Optional[Worker] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or FileManagerService(FFprobePath=FFprobePath)
         if WorkerName is None:
@@ -25,12 +26,10 @@ class TranscodedOutputPlacement:
             Ctx = WorkerContext.Current()
             WorkerName = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
         self.WorkerName = WorkerName
-        self._Worker: Optional[Worker] = None
+        self._Worker: Worker = worker if worker is not None else Worker.Current(Db=self.DatabaseManager.DatabaseService)
 
-    # directive: path-class-perfection | # see path.C21
+    # directive: path-class-perfection | # see path.C26
     def _GetWorker(self) -> Worker:
-        if self._Worker is None:
-            self._Worker = Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService)
         return self._Worker
 
     # directive: path-class-perfection | # see path.C18

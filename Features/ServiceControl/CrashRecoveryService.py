@@ -389,7 +389,7 @@ class CrashRecoveryService:
             from Core.Path.PathStorageRoots import GetPrefixMap as _GPMCR
             from Core.Path.Worker import Worker as _WorkerCR
             _PmCR = _GPMCR()
-            _CtxCR = _WorkerCR.FromWorkerContext(Db=self.DatabaseManager.DatabaseService)
+            _CtxCR = _WorkerCR.Current(Db=self.DatabaseManager.DatabaseService)
             Query = (
                 "SELECT tfp.Id AS tfp_id, tfp.TranscodeAttemptId AS ta_id, "
                 "tfp.SourceStorageRootId AS src_sid, tfp.SourceRelativePath AS src_rel, "

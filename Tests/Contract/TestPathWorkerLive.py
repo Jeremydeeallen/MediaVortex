@@ -72,7 +72,7 @@ def test_end_to_end_path_resolve_with_live_worker(Db, WorkerName):
 
 # directive: path-worker-class | # see path.S3
 def test_from_worker_context_constructs_usable_worker(Db):
-    """C7: FromWorkerContext yields a Worker with non-empty Name and Platform."""
-    W = Worker.FromWorkerContext(Db=Db)
+    """C7: Worker.Current yields a Worker with non-empty Name and Platform."""
+    W = Worker.Current(Db=Db)
     assert isinstance(W.Name, str) and len(W.Name) > 0
     assert isinstance(W.Platform, str) and len(W.Platform) > 0

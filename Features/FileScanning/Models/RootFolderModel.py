@@ -4,8 +4,8 @@ from typing import Optional
 
 # directive: path-class-perfection | # see path.C23
 class RootFolderModel:
-    # directive: path-class-perfection | # see path.C23
-    def __init__(self, Id: Optional[int] = None, RootFolder: str = "",
+    # directive: path-class-perfection | # see path.C27
+    def __init__(self, Id: Optional[int] = None,
                  LastScannedDate: Optional[datetime] = None,
                  TotalSizeGB: float = 0.0,
                  PreferredWorkerName: Optional[str] = None,
@@ -17,17 +17,6 @@ class RootFolderModel:
         self.PreferredWorkerName = PreferredWorkerName
         self.StorageRootId = StorageRootId
         self.RelativePath = RelativePath or ""
-        if (StorageRootId is None or not self.RelativePath) and RootFolder:
-            from Core.Path.Path import Path, PathError
-            from Core.Path.PathStorageRoots import GetStorageRoots
-            try:
-                Parsed = Path.FromLegacyString(RootFolder, GetStorageRoots())
-                if self.StorageRootId is None:
-                    self.StorageRootId = Parsed.StorageRootId
-                if not self.RelativePath:
-                    self.RelativePath = Parsed.RelativePath
-            except PathError:
-                raise
 
     # directive: path-class-perfection | # see path.C23
     @property

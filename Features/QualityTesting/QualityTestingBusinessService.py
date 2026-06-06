@@ -28,17 +28,15 @@ class QualityTestingBusinessService:
     """Quality Testing Business Service - Business logic layer."""
 
     # directive: qualitytesting-uses-path | # see path.S5
-    def __init__(self, DatabaseManagerInstance=None):
+    def __init__(self, DatabaseManagerInstance=None, worker: Optional[Worker] = None):
         """Initialize the business service with dependencies; lazy Worker + StorageRoots for path resolution."""
         self.DatabaseManager = DatabaseManagerInstance
         self.ActiveFFmpegProcess = None
         self.ActiveFFmpegThread = None
-        self._Worker: Optional[Worker] = None
+        self._Worker: Worker = worker if worker is not None else Worker.Current()
 
-    # directive: path-class-perfection | # see path.C21
+    # directive: path-class-perfection | # see path.C26
     def _GetWorker(self) -> Worker:
-        if self._Worker is None:
-            self._Worker = Worker.FromWorkerContext()
         return self._Worker
 
     # directive: path-class-perfection | # see path.C18

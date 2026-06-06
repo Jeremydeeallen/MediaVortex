@@ -23,7 +23,7 @@ def Db():
 # directive: mediaprobe-uses-path | # see path.S5
 def ProbableMediaFile(Db):
     """Find a MediaFile with typed-pair populated whose Resolve-able path exists on disk; skip if none available on this host."""
-    Worker_ = Worker.FromWorkerContext(Db=Db)
+    Worker_ = Worker.Current(Db=Db)
     Rows = Db.ExecuteQuery(
         "SELECT Id, FilePath, StorageRootId, RelativePath FROM MediaFiles "
         "WHERE StorageRootId IS NOT NULL AND RelativePath IS NOT NULL "

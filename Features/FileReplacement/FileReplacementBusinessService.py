@@ -12,10 +12,11 @@ from Core.Path import Path, Worker, PathError
 class FileReplacementBusinessService:
     """Orchestration + read-only queries for FileReplacement; see FileReplacement.feature.md."""
 
-    # directive: path-perfect-implementation | # see path.S11
+    # directive: path-class-perfection | # see path.C26
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  FileManagerInstance: FileManagerService = None,
-                 FFprobePath: str = None, WorkerName: str = None):
+                 FFprobePath: str = None, WorkerName: str = None,
+                 worker: Optional[Worker] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or FileManagerService(FFprobePath=FFprobePath)
         if WorkerName is None:
@@ -24,12 +25,10 @@ class FileReplacementBusinessService:
             Ctx = WorkerContext.Current()
             WorkerName = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
         self.WorkerName = WorkerName
-        self._Worker: Optional[Worker] = None
+        self._Worker: Worker = worker if worker is not None else Worker.Current(Db=self.DatabaseManager.DatabaseService)
 
-    # directive: path-class-perfection | # see path.C21
+    # directive: path-class-perfection | # see path.C26
     def _GetWorker(self) -> Worker:
-        if self._Worker is None:
-            self._Worker = Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService)
         return self._Worker
 
     # directive: path-class-perfection | # see path.C18

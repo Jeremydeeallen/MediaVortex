@@ -365,7 +365,7 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to get media file data", FallbackAttemptId, ActiveJobId)
                 return
 
-            LocalSourcePath = Path(MediaFile.StorageRootId, MediaFile.RelativePath).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
+            LocalSourcePath = Path(MediaFile.StorageRootId, MediaFile.RelativePath).Resolve(Worker.Current(Db=self.DatabaseManager.DatabaseService))
             if not LocalExists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessJob")
@@ -543,7 +543,7 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to get media file data (test mode)", None, ActiveJobId)
                 return
 
-            LocalSourcePath = Path(MediaFile.StorageRootId, MediaFile.RelativePath).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
+            LocalSourcePath = Path(MediaFile.StorageRootId, MediaFile.RelativePath).Resolve(Worker.Current(Db=self.DatabaseManager.DatabaseService))
             if not LocalExists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessTestVariantJob")
@@ -816,7 +816,7 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to get media file data for remux", None, ActiveJobId)
                 return
 
-            LocalSourcePath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
+            LocalSourcePath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker.Current(Db=self.DatabaseManager.DatabaseService))
             if not LocalExists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessRemuxJob")
@@ -1157,7 +1157,7 @@ class ProcessTranscodeQueueService:
         the source directly from the NFS/SMB mount; no copy step.
         Returns the effective input path, or None on failure."""
         try:
-            SourcePath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
+            SourcePath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker.Current(Db=self.DatabaseManager.DatabaseService))
             LoggingService.LogInfo(f"Resolved source path: {SourcePath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
             return SourcePath
 
@@ -1171,7 +1171,7 @@ class ProcessTranscodeQueueService:
     def ComputeCanonicalOutputPath(self, OutputPath: str) -> str:
         from Core.Path.Worker import Worker as _W
         from Core.Path.PathStorageRoots import GetPrefixMap as _GPM
-        P = _W.FromWorkerContext(Db=self.DatabaseManager.DatabaseService).LocalToPath(OutputPath)
+        P = _W.Current(Db=self.DatabaseManager.DatabaseService).LocalToPath(OutputPath)
         if P is None:
             return OutputPath
         return P.CanonicalDisplay(_GPM())
@@ -1633,7 +1633,7 @@ class ProcessTranscodeQueueService:
                 ActualPath = None
                 if OutSid is not None and OutRel is not None:
                     try:
-                        ActualPath = Path(OutSid, OutRel).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
+                        ActualPath = Path(OutSid, OutRel).Resolve(Worker.Current(Db=self.DatabaseManager.DatabaseService))
                     except PathError:
                         ActualPath = None
                 if ActualPath:
