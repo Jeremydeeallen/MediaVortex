@@ -13,6 +13,7 @@ from Features.FileScanning.Models.SeasonModel import SeasonModel
 from Features.FileScanning.Models.FileScanResultModel import FileScanResultModel
 from Services.FileManagerService import FileManagerService
 from Features.FileScanning.FileScanningRepository import FileScanningRepository
+from Features.MediaFiles.MediaFilesRepository import MediaFilesRepository
 from Features.MediaProbe.MediaProbeBusinessService import MediaProbeBusinessService
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
@@ -88,6 +89,7 @@ class FileScanningBusinessService:
     def __init__(self, RepositoryInstance=None, FileManagerInstance=None):
         # see filescanning.ST1
         self.Repository = RepositoryInstance or FileScanningRepository()
+        self.MediaFilesRepository = MediaFilesRepository(self.Repository.DatabaseService)
         self.FileManager = FileManagerInstance or FileManagerService()
         self.MediaProbeService = MediaProbeBusinessService()
         self.CurrentJobId = None
@@ -624,7 +626,7 @@ class FileScanningBusinessService:
                         FileSize=SizeBytes,
                         LastScannedDate=datetime.now(timezone.utc),
                     )
-                    RowId = self.Repository.SaveMediaFile(NewFile)
+                    RowId = self.MediaFilesRepository.SaveMediaFile(NewFile)
 
                 if RowId is not None:
                     Records.append({
@@ -670,7 +672,7 @@ class FileScanningBusinessService:
                 LoggingService.LogInfo("SizeSurvey probe loop interrupted by soft-stop", 'FileScanningBusinessService', '_RunSizeSurvey')
                 break
             try:
-                MediaFile = self.Repository.GetMediaFileById(Rec['Id'])
+                MediaFile = self.MediaFilesRepository.GetMediaFileById(Rec['Id'])
                 if MediaFile is not None:
                     # Skip the probe if the file already has full metadata. The
                     # operator still sees this entry roll off TopFiles, but we
@@ -1179,10 +1181,10 @@ class FileScanningBusinessService:
             if not LocalExists(LocalPath):
                 LoggingService.LogWarning(f"File does not exist on disk: {FilePath} (local: {LocalPath})", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
 
-                ExistingFile = self.Repository.GetMediaFileByPath(FilePath)
+                ExistingFile = self.MediaFilesRepository.GetMediaFileByPath(FilePath)
                 if ExistingFile:
                     LoggingService.LogInfo(f"Deleting database entry for missing file: {FilePath} (ID: {ExistingFile.Id})", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
-                    self.Repository.DeleteMediaFile(ExistingFile.Id)
+                    self.MediaFilesRepository.DeleteMediaFile(ExistingFile.Id)
                 else:
                     LoggingService.LogDebug(f"No database entry found for missing file: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
 
@@ -1199,7 +1201,7 @@ class FileScanningBusinessService:
                 FileSize = int(FileSizeMB * 1024 * 1024) if FileSizeMB else 0
 
             # Check if this file already exists in database (exact match)
-            ExistingFile = self.Repository.GetMediaFileByPath(FilePath)
+            ExistingFile = self.MediaFilesRepository.GetMediaFileByPath(FilePath)
             if ExistingFile:
                 # OPTIMIZATION: Quick check using LastModifiedDate and FileSize
                 # This is MUCH faster than re-extracting metadata
@@ -1220,7 +1222,7 @@ class FileScanningBusinessService:
                     if ExtractMetadata and self.ShouldExtractMetadata(ExistingFile):
                         self.ExtractAndUpdateMetadata(ExistingFile, LocalPath)
 
-                    self.Repository.SaveMediaFile(ExistingFile)
+                    self.MediaFilesRepository.SaveMediaFile(ExistingFile)
                     self.ScanResults.TotalFilesProcessed += 1
                     self.ScanResults.UpdatedFilesCount += 1
                 else:
@@ -1255,7 +1257,7 @@ class FileScanningBusinessService:
                     if ExtractMetadata and self.ShouldExtractMetadata(FuzzyMatch):
                         self.ExtractAndUpdateMetadata(FuzzyMatch, LocalPath)
 
-                    self.Repository.SaveMediaFile(FuzzyMatch)
+                    self.MediaFilesRepository.SaveMediaFile(FuzzyMatch)
                     self.ScanResults.TotalFilesProcessed += 1
                     self.ScanResults.UpdatedFilesCount += 1
                 else:
@@ -1279,7 +1281,7 @@ class FileScanningBusinessService:
                     if ExtractMetadata:
                         self.ExtractAndUpdateMetadata(NewFile, LocalPath)
 
-                    self.Repository.SaveMediaFile(NewFile)
+                    self.MediaFilesRepository.SaveMediaFile(NewFile)
                     self.ScanResults.TotalFilesProcessed += 1
                     self.ScanResults.NewFilesCount += 1
 
@@ -1462,7 +1464,7 @@ class FileScanningBusinessService:
     def DeleteMediaFile(self, MediaFileId: int) -> bool:
         """Delete a media file."""
         try:
-            return self.Repository.DeleteMediaFile(MediaFileId)
+            return self.MediaFilesRepository.DeleteMediaFile(MediaFileId)
         except Exception as e:
             LoggingService.LogException("Error deleting media file", e)
             return False
@@ -1913,7 +1915,7 @@ class FileScanningBusinessService:
                 DbFile.StorageRootId = CandidateSid
                 DbFile.RelativePath = CandidateRel
                 DbFile.LastScannedDate = datetime.now(timezone.utc)
-                self.Repository.SaveMediaFile(DbFile)
+                self.MediaFilesRepository.SaveMediaFile(DbFile)
                 MovedCount += 1
                 self.ScanResults.UpdatedFilesCount += 1
             for DbFile in ToDelete:
@@ -1921,7 +1923,7 @@ class FileScanningBusinessService:
                     f"Deleting DB row for missing file: {DbFile.FilePath} (Id={DbFile.Id})",
                     'ReconcileWithDisk', 'FileScanningBusinessService'
                 )
-                self.Repository.DeleteMediaFile(DbFile.Id)
+                self.MediaFilesRepository.DeleteMediaFile(DbFile.Id)
                 DeletedCount += 1
                 self.ScanResults.DeletedFilesCount += 1
 
@@ -2105,7 +2107,7 @@ class FileScanningBusinessService:
                         DbFile.RelativePath = _P.RelativePath
                         DbFile.FileName = ntpath.basename(MovedFile['NewPath'])  # canonical display
                         DbFile.LastScannedDate = datetime.now(timezone.utc)
-                        self.Repository.SaveMediaFile(DbFile)
+                        self.MediaFilesRepository.SaveMediaFile(DbFile)
                         MovedFiles.append({
                             'OldPath': MovedFile['OldPath'],
                             'NewPath': MovedFile['NewPath'],
@@ -2273,7 +2275,7 @@ class FileScanningBusinessService:
                     try:
                         # Extract metadata and update file
                         self.ExtractAndUpdateMetadata(File, File.FilePath)
-                        self.Repository.SaveMediaFile(File)
+                        self.MediaFilesRepository.SaveMediaFile(File)
                         ProcessedCount += 1
 
                         LoggingService.LogDebug(f"Extracted metadata for: {File.FilePath}", 'ExtractMetadataForExistingFiles', 'FileScanningBusinessService')

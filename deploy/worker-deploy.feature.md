@@ -14,6 +14,7 @@ Operator-facing CLI on the dev workstation, plus two colocated flow docs and a t
 
 - `deploy/deploy-linux-worker.py <target>` -- Docker on Linux. Covers LXC hosts (Larry), bare-metal workstations (Wakko), and bare-metal servers (dot). Same script -- per-host differences (SSH user, compose file path, mount style) come from `inventory.toml`, not script branching.
 - `deploy/deploy-windows-worker.py <target>` -- Task Scheduler + SMB on Windows (I9-2024).
+- **Code updates on I9-2024 (Windows worker)** -- the WorkerService runs as a Python process directly from the `C:\Code\MediaVortex` source tree. After initial bring-up, code changes apply by stopping and restarting the service; no re-deploy script needed. Linux workers require re-running `deploy-linux-worker.py <target>` (or `deploy-fleet.py` for the whole fleet) per change because Docker bakes the source into the container image at build time.
 - `deploy/bringup.md` -- one-page runbook that picks the OS family and points at the right command.
 - `deploy/worker-deploy-{linux,windows}.flow.md` -- per-OS-family flow docs with parity sections.
 

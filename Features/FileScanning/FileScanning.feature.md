@@ -225,6 +225,7 @@ Features/FileScanning/**
 | File | Role |
 |------|------|
 | Features/FileScanning/FileScanningController.py | Flask Blueprint -- scan endpoints |
-| Features/FileScanning/FileScanningBusinessService.py | Scan logic, duplicate detection, incremental filtering |
-| Features/FileScanning/FileScanningRepository.py | MediaFiles and RootFolders database queries |
+| Features/FileScanning/FileScanningBusinessService.py | Scan logic, duplicate detection, incremental filtering. Holds two repository handles: `self.Repository` (FileScanningRepository for RootFolders + scan-state + MediaFiles list/lookup queries) and `self.MediaFilesRepository` (MediaFilesRepository for per-row MediaFile CRUD -- Get/Save/Delete by id and by Path). Both share one DatabaseService instance. |
+| Features/FileScanning/FileScanningRepository.py | RootFolders CRUD, scan-state queries (GetRunningScans, etc.), MediaFiles list/lookup queries (GetMediaFilesPaginated, GetMediaFileByFileName, GetTranscodeCandidates*). Does not own per-row MediaFile CRUD -- that lives in MediaFilesRepository. |
+| Features/MediaFiles/MediaFilesRepository.py | Per-row MediaFile CRUD (GetMediaFileById, GetMediaFileByPath, SaveMediaFile, DeleteMediaFile, DeleteMediaFileByPath). Accepts canonical-string paths or Path objects; typed-pair WHERE clauses. |
 | Templates/FileScanning.html | Scanning UI page |
