@@ -28,6 +28,8 @@ from Services.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
 from Core.Database.DatabaseService import EscapeLikePattern
 import os as _os_path_for_v2_helpers
+from typing import Optional
+from Features.ServiceControl.ServiceControlRepository import ServiceControlRepository
 
 
 # directive: path-schema-migration | # see path.S8
@@ -45,7 +47,7 @@ def LocalIsDir(Value):
 class WorkerServiceApp:
     """Unified worker application that runs transcode, quality test, and scan capabilities."""
 
-    def __init__(self):
+    def __init__(self, ServiceControlRepositoryInstance: Optional[ServiceControlRepository] = None):
         """Initialize the WorkerService application."""
         CurrentPid = os.getpid()
         LoggingService.LogInfo(f"WorkerServiceApp __init__ started. PID: {CurrentPid}", "WorkerService", "__init__")
@@ -106,6 +108,7 @@ class WorkerServiceApp:
         self.TranscodeManuallyStopped = False
 
         LoggingService.LogInfo(f"WorkerServiceApp __init__ completed. PID: {CurrentPid}", "WorkerService", "__init__")
+        self.ServiceControlRepository = ServiceControlRepositoryInstance or ServiceControlRepository()
 
     def _ResolveWorkerName(self) -> str:
         """Determine this worker's name.
@@ -703,7 +706,7 @@ class WorkerServiceApp:
     def _UpdateServiceStatus(self, Status, Health="Healthy", ActiveJobs=0, IsProcessing=False):
         """Update service status in database."""
         try:
-            self.DatabaseManager.UpdateServiceStatus("WorkerService", {
+            self.ServiceControlRepository.UpdateServiceStatus("WorkerService", {
                 'Status': Status,
                 'HealthStatus': Health,
                 'ActiveJobsCount': ActiveJobs,
@@ -880,7 +883,7 @@ class WorkerServiceApp:
         """Health monitoring loop - updates heartbeat."""
         while not self.ShutdownEvent.is_set():
             try:
-                self.DatabaseManager.UpdateServiceStatus("WorkerService", {
+                self.ServiceControlRepository.UpdateServiceStatus("WorkerService", {
                     'HealthStatus': 'Healthy'
                 })
                 self.DatabaseManager.UpdateWorkerHeartbeat(self.WorkerName)
@@ -1083,7 +1086,7 @@ class WorkerServiceApp:
             # operator see "was Online but died" vs "was Paused and stopped".
 
             # Update service status
-            self.DatabaseManager.UpdateServiceStatus("WorkerService", {
+            self.ServiceControlRepository.UpdateServiceStatus("WorkerService", {
                 'Status': 'Stopped',
                 'ProcessId': 0,
                 'IsProcessing': False,

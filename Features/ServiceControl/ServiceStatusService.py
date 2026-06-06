@@ -10,15 +10,17 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from Repositories.DatabaseManager import DatabaseManager
 from Core.Logging.LoggingService import LoggingService
+from Features.ServiceControl.ServiceControlRepository import ServiceControlRepository
 
 
 class ServiceStatusService:
     """Generic service for managing ServiceStatus records and process detection."""
 
-    def __init__(self, DatabaseManagerInstance: DatabaseManager = None):
+    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, ServiceControlRepositoryInstance: Optional[ServiceControlRepository] = None):
         """Initialize the ServiceStatusService."""
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         LoggingService.LogInfo("ServiceStatusService initialized", "ServiceStatusService", "__init__")
+        self.ServiceControlRepository = ServiceControlRepositoryInstance or ServiceControlRepository()
 
     def EnsureServiceStatusExists(self, ServiceName: str, MaxConcurrentJobs: int = 1) -> bool:
         """Ensure ServiceStatus record exists, create with defaults if missing."""
@@ -26,7 +28,7 @@ class ServiceStatusService:
             LoggingService.LogFunctionEntry("EnsureServiceStatusExists", "ServiceStatusService", ServiceName)
 
             # Check if record exists
-            existing_status = self.DatabaseManager.GetServiceStatus(ServiceName)
+            existing_status = self.ServiceControlRepository.GetServiceStatus(ServiceName)
 
             if existing_status is None:
                 # Create new ServiceStatus record with defaults
@@ -53,7 +55,7 @@ class ServiceStatusService:
                     'MaxConcurrentJobs': MaxConcurrentJobs
                 }
 
-                result = self.DatabaseManager.SaveServiceStatus(service_status)
+                result = self.ServiceControlRepository.SaveServiceStatus(service_status)
                 if result:
                     LoggingService.LogInfo(f"ServiceStatus record created for {ServiceName} with MaxConcurrentJobs={MaxConcurrentJobs}",
                                          "ServiceStatusService", "EnsureServiceStatusExists")
@@ -77,7 +79,7 @@ class ServiceStatusService:
         try:
             LoggingService.LogFunctionEntry("IsServiceRunningInDatabase", "ServiceStatusService", ServiceName)
 
-            service_status = self.DatabaseManager.GetServiceStatus(ServiceName)
+            service_status = self.ServiceControlRepository.GetServiceStatus(ServiceName)
             if service_status:
                 status = service_status.get('Status', 'Stopped')
                 is_running = status in ['Running', 'Starting']
@@ -148,7 +150,7 @@ class ServiceStatusService:
             # Step 2: Check if service is marked as running in database
             if self.IsServiceRunningInDatabase(ServiceName):
                 # Get the ProcessId from database
-                service_status = self.DatabaseManager.GetServiceStatus(ServiceName)
+                service_status = self.ServiceControlRepository.GetServiceStatus(ServiceName)
                 process_id = service_status.get('ProcessId', 0) if service_status else 0
                 LoggingService.LogInfo(f"Service {ServiceName} marked as running in database with PID {process_id}. Current PID: {current_pid}",
                                      "ServiceStatusService", "RegisterServiceStartup")
@@ -162,7 +164,7 @@ class ServiceStatusService:
                     # Process not running, clean up stale record
                     LoggingService.LogInfo(f"Cleaning up stale ServiceStatus record for {ServiceName} (PID {process_id} not running). Current PID: {current_pid}",
                                          "ServiceStatusService", "RegisterServiceStartup")
-                    self.DatabaseManager.UpdateServiceStatus(ServiceName, {
+                    self.ServiceControlRepository.UpdateServiceStatus(ServiceName, {
                         'Status': 'Stopped',
                         'ProcessId': 0,
                         'IsProcessing': False,
@@ -173,7 +175,7 @@ class ServiceStatusService:
                                      "ServiceStatusService", "RegisterServiceStartup")
 
             # Step 4: Register this service startup
-            self.DatabaseManager.UpdateServiceStatus(ServiceName, {
+            self.ServiceControlRepository.UpdateServiceStatus(ServiceName, {
                 'Status': 'Starting',
                 'ProcessId': current_pid,
                 'IsProcessing': False,
@@ -194,7 +196,7 @@ class ServiceStatusService:
         try:
             LoggingService.LogFunctionEntry("UpdateServiceStatus", "ServiceStatusService", ServiceName)
 
-            result = self.DatabaseManager.UpdateServiceStatus(ServiceName, StatusData)
+            result = self.ServiceControlRepository.UpdateServiceStatus(ServiceName, StatusData)
             if result:
                 LoggingService.LogInfo(f"Service status updated for {ServiceName}",
                                      "ServiceStatusService", "UpdateServiceStatus")
@@ -213,7 +215,7 @@ class ServiceStatusService:
         try:
             LoggingService.LogFunctionEntry("GetServiceStatus", "ServiceStatusService", ServiceName)
 
-            return self.DatabaseManager.GetServiceStatus(ServiceName)
+            return self.ServiceControlRepository.GetServiceStatus(ServiceName)
 
         except Exception as e:
             LoggingService.LogException(f"Error getting service status for {ServiceName}", e,
