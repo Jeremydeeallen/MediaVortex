@@ -36,11 +36,10 @@ class FileReplacementBusinessService:
         from Core.Path.PathStorageRoots import GetStorageRoots
         return GetStorageRoots()
 
-    # directive: path-schema-migration | # see path.S8
+       # directive: path-class-perfection | # see path.C18
     def _GetPrefixMap(self) -> Dict[int, str]:
-        if self._StorageRootPrefixMap is None:
-            self._StorageRootPrefixMap = {R["Id"]: R["CanonicalPrefix"] for R in self._GetStorageRoots()}
-        return self._StorageRootPrefixMap
+        from Core.Path.PathStorageRoots import GetPrefixMap
+        return GetPrefixMap()  
 
     # directive: filereplacement-decompose
     def GetFailedFileReplacements(self) -> List[Dict[str, Any]]:
