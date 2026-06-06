@@ -540,3 +540,31 @@ class TranscodeQueueRepository(BaseRepository):
         except Exception as e:
             LoggingService.LogException("Exception resetting queue jobs to pending", e, "TranscodeQueueRepository", "ResetQueueJobsToPending")
             return 0
+
+    def GetTestVariantSet(self, VariantSetId: int) -> Optional[Dict[str, Any]]:
+        """Fetch a TestVariantSet row by Id. Returns dict with Id, Name, Description,
+        and Variants (parsed from VariantsJson). Returns None if not found."""
+        try:
+            Rows = self.DatabaseService.ExecuteQuery(
+                "SELECT Id, Name, Description, VariantsJson FROM TestVariantSets WHERE Id = %s",
+                (VariantSetId,),
+            )
+            if not Rows:
+                return None
+            R = Rows[0]
+            Vj = R.get('VariantsJson')
+            if isinstance(Vj, str):
+                import json as _json
+                try:
+                    Vj = _json.loads(Vj)
+                except (ValueError, TypeError):
+                    Vj = []
+            return {
+                'Id': R.get('Id'),
+                'Name': R.get('Name'),
+                'Description': R.get('Description'),
+                'Variants': Vj or [],
+            }
+        except Exception as e:
+            LoggingService.LogException(f"Exception fetching TestVariantSet {VariantSetId}", e, "DatabaseManager", "GetTestVariantSet")
+            return None

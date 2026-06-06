@@ -20,6 +20,7 @@ from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalJoin, LocalSpl
 
 
 from Core.DateTimeHelpers import ToUtcIsoZ
+from Features.TranscodeQueue.TranscodeQueueRepository import TranscodeQueueRepository
 # directive: transcodejob-uses-path | # see path.S5
 class ProcessTranscodeQueueService:
     """Orchestrates the complete transcoding queue processing workflow using MVVM architecture."""
@@ -31,7 +32,7 @@ class ProcessTranscodeQueueService:
                  QueueManagementInstance: QueueManagementService = None,
                  DispositionInstance: PostTranscodeDispositionService = None,
                  WorkerName: str = None,
-                 WorkerConfig: dict = None):
+                 WorkerConfig: dict = None, TranscodeQueueRepositoryInstance: Optional[TranscodeQueueRepository] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.CommandBuilder = CommandBuilderInstance or CommandBuilder()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
@@ -96,6 +97,7 @@ class ProcessTranscodeQueueService:
         # Stuck job monitoring
         self.StuckJobMonitoringThread = None
         self.StuckJobMonitoringActive = False
+        self.TranscodeQueueRepository = TranscodeQueueRepositoryInstance or TranscodeQueueRepository()
 
     # directive: nvenc-rate-anchored-remediation
     def Run(self, MaxConcurrentJobs: int = 1) -> Dict[str, Any]:
@@ -514,7 +516,7 @@ class ProcessTranscodeQueueService:
                 "ProcessTranscodeQueueService", "ProcessTestVariantJob",
             )
 
-            VariantSet = self.DatabaseManager.GetTestVariantSet(Job.TestVariantSetId)
+            VariantSet = self.TranscodeQueueRepository.GetTestVariantSet(Job.TestVariantSetId)
             if not VariantSet or not VariantSet.get('Variants'):
                 self.HandleJobFailure(Job, f"TestVariantSet {Job.TestVariantSetId} not found or empty", None, None)
                 return
