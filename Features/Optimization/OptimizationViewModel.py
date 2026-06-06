@@ -5,6 +5,7 @@ from Core.Logging.LoggingService import LoggingService
 from Services.FileManagerService import FileManagerService
 from Core.Path import Path, Worker, PathError
 from Core.Path.LocalPath import LocalExists, LocalGetSize
+from Features.TranscodeJob.TranscodeJobRepository import TranscodeJobRepository
 
 
 # directive: path-schema-migration | # see path.S9
@@ -17,11 +18,12 @@ class OptimizationViewModel:
     ]
 
     # directive: path-class-perfection | # see path.C26
-    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, worker: Optional[Worker] = None):
+    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, worker: Optional[Worker] = None, TranscodeJobRepositoryInstance: Optional[TranscodeJobRepository] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.IsLoading = False
         self.ErrorMessage = ""
         self._Worker: Worker = worker if worker is not None else Worker.Current()
+        self.TranscodeJobRepository = TranscodeJobRepositoryInstance or TranscodeJobRepository()
 
     # directive: path-class-perfection | # see path.C26
     def _GetWorker(self) -> Worker:
@@ -281,7 +283,7 @@ class OptimizationViewModel:
                     pass
 
             # Get destination format summary
-            destSummary = self.DatabaseManager.GetTranscodeDestinationSummary()
+            destSummary = self.TranscodeJobRepository.GetTranscodeDestinationSummary()
 
             return {
                 "Success": True,
@@ -436,7 +438,7 @@ class OptimizationViewModel:
                             lines.append(f"  {reason}: {count}")
 
             # Add destination format summary
-            destSummary = self.DatabaseManager.GetTranscodeDestinationSummary()
+            destSummary = self.TranscodeJobRepository.GetTranscodeDestinationSummary()
             if destSummary.get("Success") and destSummary.get("Formats"):
                 lines.append("")
                 lines.append("Transcode destination formats (what Jellyfin transcodes TO):")

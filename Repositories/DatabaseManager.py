@@ -921,22 +921,6 @@ class DatabaseManager(
         except (ValueError, IndexError):
             return PixelDimensions
     
-    def CleanupOldLogs(self, DaysToKeep: int = 30) -> int:
-        """Clean up old log entries to prevent database bloat."""
-        try:
-            query = """
-                DELETE FROM Logs
-                WHERE Timestamp < NOW() - INTERVAL '{} days'
-            """.format(DaysToKeep)
-
-            rowsAffected = self.DatabaseService.ExecuteNonQuery(query)
-
-            LoggingService.LogInfo(f"Cleaned up {rowsAffected} old log records (older than {DaysToKeep} days)", "DatabaseManager", "CleanupOldLogs")
-            return rowsAffected
-
-        except Exception as e:
-            LoggingService.LogException("Exception cleaning up old logs", e, "DatabaseManager", "CleanupOldLogs")
-            return 0
 
     def ConvertStringToDateTime(self, DateString) -> Optional[datetime]:
         """Convert date string from database to datetime object. Pass through if already datetime."""
@@ -1959,33 +1943,3 @@ class DatabaseManager(
             LoggingService.LogException("Error getting Jellyfin operations by type", e, "DatabaseManager", "GetJellyfinOperationsByType")
             return {"Success": False, "ErrorMessage": str(e)}
 
-    def GetTranscodeDestinationSummary(self) -> Dict[str, Any]:
-        """Aggregate destination formats from transcode logs to show what Jellyfin transcodes TO."""
-        try:
-            query = """
-                SELECT DestResolution, DestProfile, DestLevel, DestPixelFormat, DestFormat,
-                       COUNT(*) as Count
-                FROM JellyfinOperations
-                WHERE OperationType = 'Transcode'
-                  AND (DestResolution != '' OR DestProfile != '' OR DestLevel != '')
-                GROUP BY DestResolution, DestProfile, DestLevel, DestPixelFormat, DestFormat
-                ORDER BY Count DESC
-            """
-            rows = self.DatabaseService.ExecuteQuery(query)
-            formats = []
-            for row in rows:
-                formats.append({
-                    "DestResolution": row['destresolution'] or "",
-                    "DestProfile": row['destprofile'] or "",
-                    "DestLevel": row['destlevel'] or "",
-                    "DestPixelFormat": row['destpixelformat'] or "",
-                    "DestFormat": row['destformat'] or "",
-                    "Count": row['count']
-                })
-            totalWithDest = sum(f["Count"] for f in formats)
-            return {"Success": True, "Formats": formats, "TotalWithDestInfo": totalWithDest}
-        except Exception as e:
-            LoggingService.LogException("Error getting transcode destination summary", e, "DatabaseManager", "GetTranscodeDestinationSummary")
-            return {"Success": False, "ErrorMessage": str(e)}
-
-            return None

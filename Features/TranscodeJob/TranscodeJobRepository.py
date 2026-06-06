@@ -887,3 +887,33 @@ class TranscodeJobRepository(BaseRepository):
                                       "TranscodeJobRepository", "GetKeepSourceSetting")
             return None
 
+    def GetTranscodeDestinationSummary(self) -> Dict[str, Any]:
+        """Aggregate destination formats from transcode logs to show what Jellyfin transcodes TO."""
+        try:
+            query = """
+                SELECT DestResolution, DestProfile, DestLevel, DestPixelFormat, DestFormat,
+                       COUNT(*) as Count
+                FROM JellyfinOperations
+                WHERE OperationType = 'Transcode'
+                  AND (DestResolution != '' OR DestProfile != '' OR DestLevel != '')
+                GROUP BY DestResolution, DestProfile, DestLevel, DestPixelFormat, DestFormat
+                ORDER BY Count DESC
+            """
+            rows = self.DatabaseService.ExecuteQuery(query)
+            formats = []
+            for row in rows:
+                formats.append({
+                    "DestResolution": row['destresolution'] or "",
+                    "DestProfile": row['destprofile'] or "",
+                    "DestLevel": row['destlevel'] or "",
+                    "DestPixelFormat": row['destpixelformat'] or "",
+                    "DestFormat": row['destformat'] or "",
+                    "Count": row['count']
+                })
+            totalWithDest = sum(f["Count"] for f in formats)
+            return {"Success": True, "Formats": formats, "TotalWithDestInfo": totalWithDest}
+        except Exception as e:
+            LoggingService.LogException("Error getting transcode destination summary", e, "DatabaseManager", "GetTranscodeDestinationSummary")
+            return {"Success": False, "ErrorMessage": str(e)}
+
+            return None

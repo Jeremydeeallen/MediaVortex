@@ -4,11 +4,15 @@
 
 ## Status
 
-BACKLOG -- not on the active feature stack. Drafted 2026-05-27 from a CEO-mode design discussion. Move to active by adding the slug to `.claude/current-feature`.
+ACTIVE -- mechanized migration toolchain ships under directive `db-monolith-decompose` (2026-06-06). Per-aggregate moves now run via `.github/workflows/db-monolith-decompose.yml` (workflow_dispatch `aggregate` input) and `Scripts/DbMgrMigrate/{Inventory,Move,CallerSweep,Verify}.py`. Each workflow run opens one PR targeting `db-monolith-decompose`; main merges as one operator-controlled cutover when the source class is empty.
 
 ### Progress
 
 - [x] Feature doc drafted (this file)
+- [x] Inventory toolchain ships (`Scripts/DbMgrMigrate/Inventory.py`; AST walk + JSON-driven aggregate map)
+- [x] Move + CallerSweep + Verify toolchain ships (`Scripts/DbMgrMigrate/{Move,CallerSweep,Verify}.py`)
+- [x] CI workflow ships (`.github/workflows/db-monolith-decompose.yml`; workflow_dispatch + PR per aggregate)
+- [x] Proof-of-pattern aggregates migrated (`Maintenance` -> new `Core/Database/MaintenanceRepository.py`; `TranscodeJob` -> append into existing `Features/TranscodeJob/TranscodeJobRepository.py` + 2 caller rewrites in `Features/Optimization/OptimizationViewModel.py`)
 - [ ] Operator review + criteria approval
 - [ ] Inventory pass: tag every method in `Repositories/DatabaseManager.py` with its target aggregate home (read-only, no edits)
 - [ ] Extract shared helpers (`PrivateNormalizePathToFilesystemCase`, `EscapeLikePattern`) to `Core/Database/` utility modules; update existing callers
