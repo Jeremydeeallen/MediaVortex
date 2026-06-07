@@ -209,6 +209,7 @@ class ProfileController:
 
                 ThresholdRows = Payload.get('Thresholds') or []
                 ThresholdsUpdated = 0
+                TEXT_NOT_NULL_DEFAULTS = {'TranscodeDownTo': '', 'ContainerType': 'mp4'}
                 for Row in ThresholdRows:
                     Tid = Row.get('Id')
                     if not Tid:
@@ -216,6 +217,9 @@ class ProfileController:
                     Updates = {k: v for k, v in Row.items() if k in THRESHOLD_COLS}
                     if not Updates:
                         continue
+                    for Col, Default in TEXT_NOT_NULL_DEFAULTS.items():
+                        if Col in Updates and Updates[Col] is None:
+                            Updates[Col] = Default
                     Sets = ', '.join(f'{k} = %s' for k in Updates.keys())
                     Db.ExecuteNonQuery(
                         f'UPDATE ProfileThresholds SET {Sets} WHERE Id = %s AND ProfileId = %s',
