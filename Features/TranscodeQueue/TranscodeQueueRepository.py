@@ -332,6 +332,12 @@ class TranscodeQueueRepository(BaseRepository):
                 connection.commit()
 
                 if row:
+                    cursor.execute("SELECT mf.AssignedProfile AS pn, w.AllowedProfiles AS ap FROM MediaFiles mf, Workers w WHERE mf.Id = %s AND w.WorkerName = %s", (row.get('mediafileid'), WorkerName))
+                    _Meta = cursor.fetchone()
+                    _Pn = (_Meta.get('pn') if _Meta else None) or '<unknown>'
+                    _Ap = _Meta.get('ap') if _Meta else None
+                    _ApDisplay = '<all>' if _Ap is None else ('<none>' if _Ap == '' else _Ap)
+                    LoggingService.LogInfo(f"Claimed JobId={row['id']} WorkerName={WorkerName} ProfileName={_Pn} WorkerAllowedProfiles={_ApDisplay}", "TranscodeQueueRepository", "ClaimNextPendingTranscodeJob")
                     NormalizedRow = {
                         'Id': row['id'],
                         'StorageRootId': row.get('storagerootid'),

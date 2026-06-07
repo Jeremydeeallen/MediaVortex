@@ -65,8 +65,9 @@ class ProfileRepository(BaseRepository):
             UseNvidiaHardware=row['UseNvidiaHardware'] if row['UseNvidiaHardware'] is not None else 0
         )
 
+    # directive: worker-routing | # see worker-routing.C10
     def SaveProfile(self, Profile: TranscodeProfileModel) -> int:
-        """Save a profile (insert or update) and return the profile ID."""
+        """Save a profile (insert or update); rename sweeps Workers.AllowedProfiles in the same tx."""
         try:
             LoggingService.LogFunctionEntry("SaveProfile", "ProfileRepository", Profile.Id, Profile.ProfileName, Profile.Description)
 
@@ -94,6 +95,10 @@ class ProfileRepository(BaseRepository):
                     return profile_id
                 else:
                     LoggingService.LogInfo("Updating existing profile with ID: {}", "ProfileRepository", "SaveProfile", Profile.Id)
+                    cursor.execute("SELECT ProfileName FROM Profiles WHERE Id = %s", (Profile.Id,))
+                    _OldRow = cursor.fetchone()
+                    if _OldRow and _OldRow[0] and _OldRow[0] != Profile.ProfileName:
+                        cursor.execute("UPDATE Workers SET AllowedProfiles = array_to_string(array_replace(string_to_array(AllowedProfiles, ','), %s, %s), ',') WHERE AllowedProfiles IS NOT NULL AND %s = ANY(string_to_array(AllowedProfiles, ','))", (_OldRow[0], Profile.ProfileName, _OldRow[0]))
                     # allow: R12 -- SQL string literal
                     query = """
                         UPDATE Profiles
@@ -116,12 +121,26 @@ class ProfileRepository(BaseRepository):
             LoggingService.LogException("Exception in SaveProfile", e, "ProfileRepository", "SaveProfile")
             raise
 
+    # directive: worker-routing | # see worker-routing.C10
     def DeleteProfile(self, ProfileId: int) -> bool:
-        """Delete a profile and its associated thresholds."""
+        """Delete a profile + thresholds and sweep its name from Workers.AllowedProfiles in the same tx."""
         try:
-            self.ExecuteNonQuery("DELETE FROM ProfileThresholds WHERE ProfileId = %s", (ProfileId,))
-            affected_rows = self.ExecuteNonQuery("DELETE FROM Profiles WHERE Id = %s", (ProfileId,))
-            return affected_rows > 0
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor()
+                cursor.execute("SELECT ProfileName FROM Profiles WHERE Id = %s", (ProfileId,))
+                _Row = cursor.fetchone()
+                if _Row and _Row[0]:
+                    _Old = _Row[0]
+                    cursor.execute("UPDATE Workers SET AllowedProfiles = array_to_string(array_remove(string_to_array(AllowedProfiles, ','), %s), ',') WHERE AllowedProfiles IS NOT NULL AND %s = ANY(string_to_array(AllowedProfiles, ','))", (_Old, _Old))
+                cursor.execute("DELETE FROM ProfileThresholds WHERE ProfileId = %s", (ProfileId,))
+                cursor.execute("DELETE FROM Profiles WHERE Id = %s", (ProfileId,))
+                affected_rows = cursor.rowcount
+                cursor.execute("UPDATE Workers SET AllowedProfiles = NULL WHERE AllowedProfiles IS NOT NULL AND AllowedProfiles <> '' AND ARRAY(SELECT unnest(string_to_array(AllowedProfiles, ',')) ORDER BY 1) = (SELECT array_agg(ProfileName ORDER BY ProfileName) FROM Profiles)")
+                connection.commit()
+                return affected_rows > 0
+            finally:
+                self.DatabaseService.CloseConnection(connection)
         except Exception:
             return False
 

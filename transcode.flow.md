@@ -28,7 +28,7 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 
 | ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
 |---|---|---|---|---|---|
-| S1 | `ST5 -> ST6` (QUEUE -> TRANSCODE) | `QueueManagementBusinessService` | `TranscodeQueue.(Id BIGINT, StorageRootId BIGINT, RelativePath TEXT, AssignedProfile TEXT, ProcessingMode TEXT, AcceptsInterlaced BOOLEAN) Status='Pending'` | `DatabaseManager.ClaimNextPendingTranscodeJob` -- atomic claim via `FOR UPDATE OF tq SKIP LOCKED`; NVENC profiles additionally require `Workers.nvenccapable=TRUE` | `SELECT COUNT(*) FROM TranscodeQueue WHERE Status='Pending'` decrements by 1 per claim |
+| S1 | `ST5 -> ST6` (QUEUE -> TRANSCODE) | `QueueManagementBusinessService` | `TranscodeQueue.(Id BIGINT, StorageRootId BIGINT, RelativePath TEXT, AssignedProfile TEXT, ProcessingMode TEXT, AcceptsInterlaced BOOLEAN) Status='Pending'` | `Features/TranscodeQueue/TranscodeQueueRepository.ClaimNextPendingTranscodeJob` -- atomic claim via `FOR UPDATE OF tq SKIP LOCKED`; gated by three additive filters (a) `BuildClaimPredicate` for `TranscodeEnabled` + `Status='Online'`, (b) NVENC EXISTS gate (`Profiles.usenvidiahardware=0` OR `Workers.nvenccapable=TRUE`), (c) `BuildAllowedProfilesPredicate` for the per-worker profile allowlist (`Workers.AllowedProfiles IS NULL` OR `mf.AssignedProfile = ANY(string_to_array(...))` -- NULL = accept all, `""` = accept none, CSV = explicit allowlist) | `SELECT COUNT(*) FROM TranscodeQueue WHERE Status='Pending'` decrements by 1 per claim; `Tests/Contract/TestClaimAuthority.py` + `Tests/Contract/TestWorkerAllowedProfiles.py` |
 | S2 | `ST6 -> ST7` (TRANSCODE -> DISPOSITION) | `ProcessTranscodeQueueService` (on encode success) | `TranscodeAttempts.(Id BIGINT, Success=NULL, QualityTestRequired BOOLEAN)` + `TemporaryFilePaths.(TranscodeAttemptId, SourceStorageRootId BIGINT, SourceRelativePath TEXT, OutputStorageRootId BIGINT, OutputRelativePath TEXT)`. Paths stored as typed pair `(StorageRootId, RelativePath)`. Worker resolves to local via `Path.Resolve(Worker)`; UI/logs use `Path.CanonicalDisplay(GetPrefixMap())`. In-place output: resolved output path ends in `-mv.mp4.inprogress` adjacent to source on shared mount | `ShouldQualityTest.ProcessTranscodedFile(AttemptId)` reads `QualityTestRequired`; dispatches to `QualityTestQueueService.AddToQualityTestQueue` (ST8) or `FileReplacementBusinessService.ProcessFileReplacement` (ST9) | `SELECT COUNT(*) FROM TemporaryFilePaths WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE Success IS NULL)` -> in-flight count |
 | S3 | `ST7 -> ST8` (DISPOSITION -> VMAF) | `ShouldQualityTestService` when `QualityTestRequired=TRUE` | `QualityTestingQueue.(Id BIGINT, TranscodeAttemptId BIGINT) Status='Pending'`; `TranscodeAttempts.ForceDisposition IS NULL` | `DatabaseManager.ClaimQualityTestJob` -- atomic claim; `QualityTestingBusinessService.ExecuteVMAF` reads source+output paths from `TemporaryFilePaths` | `SELECT COUNT(*) FROM QualityTestingQueue WHERE Status='Pending'` decrements by 1 per claim |
 | S4 | `ST8 -> ST9` (VMAF -> ACTION) | `QualityTestingBusinessService` | `TranscodeAttempts.vmaf DOUBLE PRECISION NOT NULL, QualityTestCompleted=TRUE`; `ForceDisposition TEXT NULL` (operator override) | `PostTranscodeDispositionService._DecideFromInputs` -- Replace when `VMAF >= 80.0` and `ForceDisposition IS NULL`; operator `ForceDisposition` bypasses the threshold | `SELECT COUNT(*) FROM TranscodeAttempts WHERE QualityTestCompleted=TRUE AND VMAF IS NULL` -> 0 |
@@ -501,13 +501,20 @@ WorkerService/Main.py
 
 ### Job Claiming Mechanism
 
-Current (single-worker) flow:
+Distributed claim flow (current):
 1. `ProcessQueueLoop()` calls `GetNextJob()` every ~2 seconds when a slot is available
-2. `GetNextJob()` delegates to `DatabaseManager.GetNextPendingTranscodeJob()`
-3. Repository executes: `SELECT ... FROM TranscodeQueue WHERE Status = 'Pending' ORDER BY SizeMB DESC, DateAdded ASC LIMIT 1`
-4. Separate UPDATE sets Status = 'Running' via `UpdateTranscodeQueueStatus(Job.Id, "Running")`
+2. `GetNextJob()` delegates to `Features/TranscodeQueue/TranscodeQueueRepository.ClaimNextPendingTranscodeJob(WorkerName, AcceptsInterlaced)`
+3. Repository executes a single atomic `UPDATE ... WHERE Id = (SELECT ... FOR UPDATE OF tq SKIP LOCKED) RETURNING ...` that:
+   - Filters `tq.Status = 'Pending'` and `tq.ProcessingMode` matches Transcode
+   - Joins MediaFiles (`mf`) + Profiles (`p`) for routing context
+   - Applies `BuildClaimPredicate(WorkerName, 'TranscodeEnabled')` -- worker is Online and TranscodeEnabled
+   - Applies the NVENC EXISTS gate -- `p.usenvidiahardware=0` OR worker has `nvenccapable=TRUE`
+   - Applies `BuildAllowedProfilesPredicate(WorkerName)` -- `w.AllowedProfiles IS NULL` (accept all) OR `mf.AssignedProfile = ANY(string_to_array(w.AllowedProfiles, ','))` (explicit allowlist match). Operator sets per-worker via `POST /api/TeamStatus/Workers/<name>/AllowedProfiles`; takes effect on the next claim tick (db-is-authority single-emitter pattern)
+   - Orders by `tq.Priority DESC, tq.DateAdded ASC`
+   - Locks via `FOR UPDATE OF tq SKIP LOCKED` -- two workers racing the same row is impossible
+4. On successful claim, logs `WorkerName`, `JobId`, `ProfileName`, `WorkerAllowedProfiles` (`<all>` / `<none>` / CSV) for routing observability
 
-Race condition: Steps 3 and 4 are non-atomic. Two workers could SELECT the same row before either UPDATEs it. Fixed in distributed mode with `ClaimNextPendingTranscodeJob()` using `SELECT FOR UPDATE SKIP LOCKED`.
+Legacy (single-worker, non-atomic) flow `GetNextPendingTranscodeJob` is retained for the local dev path but is not used by distributed workers.
 
 ### ActiveJobs Tracking
 
