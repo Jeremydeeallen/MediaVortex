@@ -177,3 +177,26 @@ class WorkersRepository:
         except Exception as e:
             LoggingService.LogException("Exception in UpdateWorkerStatus", e, "DatabaseManager", "UpdateWorkerStatus")
             return False
+
+    # directive: worker-routing | # see worker-routing.C6
+    def UpdateWorkerAllowedProfiles(self, WorkerName: str, AllowedProfilesCsv) -> bool:
+        """Persist Workers.AllowedProfiles (None=accept all, ''=accept none, CSV=explicit allowlist)."""
+        try:
+            query = "UPDATE Workers SET AllowedProfiles = %s WHERE WorkerName = %s"
+            self.DatabaseService.ExecuteNonQuery(query, (AllowedProfilesCsv, WorkerName))
+            return True
+        except Exception as e:
+            LoggingService.LogException("Exception in UpdateWorkerAllowedProfiles", e, "WorkersRepository", "UpdateWorkerAllowedProfiles")
+            return False
+
+    # directive: worker-routing | # see worker-routing.C5
+    def GetWorkerAllowedProfiles(self, WorkerName: str):
+        """Fresh read of Workers.AllowedProfiles for the given worker (None / '' / CSV)."""
+        try:
+            rows = self.DatabaseService.ExecuteQuery("SELECT AllowedProfiles FROM Workers WHERE WorkerName = %s", (WorkerName,))
+            if not rows:
+                return None
+            return rows[0].get('allowedprofiles')
+        except Exception as e:
+            LoggingService.LogException("Exception in GetWorkerAllowedProfiles", e, "WorkersRepository", "GetWorkerAllowedProfiles")
+            return None

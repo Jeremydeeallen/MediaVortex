@@ -429,8 +429,9 @@ def GetSavingsByDay():
 
 
 @TeamStatusBlueprint.route('/Workers', methods=['GET'])
+# directive: worker-routing | # see worker-routing.C5
 def GetWorkers():
-    """Get all registered workers with status and heartbeat info."""
+    """Get all registered workers with status, heartbeat, and AllowedProfiles."""
     try:
         LoggingService.LogFunctionEntry("GetWorkers", "TeamStatusController")
 
@@ -470,6 +471,8 @@ def GetWorkers():
             } for R in ScanPostureRows
         }
         IntervalMin = _GetContinuousScanIntervalMinutes()
+        AllowedProfilesRows = DbManager.DatabaseService.ExecuteQuery("SELECT WorkerName, AllowedProfiles FROM Workers") or []
+        AllowedProfilesByWorker = {(R.get('WorkerName') or ''): R.get('allowedprofiles') for R in AllowedProfilesRows}
 
         Workers = []
         for Row in (Rows or []):
@@ -510,6 +513,7 @@ def GetWorkers():
                 "LastScanCompleted": str(LastScanCompleted) if LastScanCompleted else None,
                 "NextScanEstimate": str(NextScanEstimate) if NextScanEstimate else None,
                 "CurrentScanRootFolder": ScanPosture.get('CurrentScanRootFolder'),
+                "AllowedProfiles": AllowedProfilesByWorker.get(WorkerName),
             })
 
         return jsonify({"Success": True, "Data": Workers})
@@ -764,6 +768,53 @@ def SetWorkerConcurrency(WorkerName):
     except Exception as e:
         ErrorMsg = f"Exception in SetWorkerConcurrency: {str(e)}"
         LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "SetWorkerConcurrency")
+        return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
+
+@TeamStatusBlueprint.route('/Workers/<WorkerName>/AllowedProfiles', methods=['POST'])
+# directive: worker-routing | # see worker-routing.C6
+def SetWorkerAllowedProfiles(WorkerName):
+    """Set per-worker profile allowlist (None=accept all, []=accept none, [names]=allowlist)."""
+    try:
+        LoggingService.LogFunctionEntry("SetWorkerAllowedProfiles", "TeamStatusController")
+        Data = request.get_json() or {}
+        if 'AllowedProfiles' not in Data:
+            return jsonify({"Success": False, "Message": "AllowedProfiles is required (list of profile names; [] = accept none)"}), 400
+        Submitted = Data['AllowedProfiles']
+        if not isinstance(Submitted, list):
+            return jsonify({"Success": False, "Message": "AllowedProfiles must be a JSON list of profile names"}), 400
+        DbManager = DatabaseManager()
+        CheckRows = DbManager.DatabaseService.ExecuteQuery("SELECT 1 FROM Workers WHERE WorkerName = %s", (WorkerName,))
+        if not CheckRows:
+            return jsonify({"Success": False, "Message": f"Worker '{WorkerName}' not found"}), 404
+        Cleaned = []
+        for Item in Submitted:
+            if not isinstance(Item, str):
+                return jsonify({"Success": False, "Message": f"Profile names must be strings; got {type(Item).__name__}"}), 400
+            Stripped = Item.strip()
+            if Stripped and Stripped not in Cleaned:
+                Cleaned.append(Stripped)
+        ProfileRows = DbManager.DatabaseService.ExecuteQuery("SELECT ProfileName FROM Profiles") or []
+        ExistingProfiles = {(R.get('profilename') or '').strip() for R in ProfileRows}
+        for Name in Cleaned:
+            if Name not in ExistingProfiles:
+                return jsonify({"Success": False, "Message": f"Unknown profile: {Name}"}), 400
+        Cleaned.sort()
+        if not Cleaned:
+            ToPersist = ""
+        elif set(Cleaned) == ExistingProfiles:
+            ToPersist = None
+        else:
+            ToPersist = ",".join(Cleaned)
+        from Features.Workers.WorkersRepository import WorkersRepository
+        Ok = WorkersRepository().UpdateWorkerAllowedProfiles(WorkerName, ToPersist)
+        if not Ok:
+            return jsonify({"Success": False, "Message": "Database update failed"}), 500
+        LoggingService.LogInfo(f"Worker '{WorkerName}' AllowedProfiles set to {ToPersist!r}", "TeamStatusController", "SetWorkerAllowedProfiles")
+        return jsonify({"Success": True, "Message": f"Worker '{WorkerName}' AllowedProfiles updated", "Data": {"AllowedProfiles": ToPersist}})
+    except Exception as e:
+        ErrorMsg = f"Exception in SetWorkerAllowedProfiles: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "SetWorkerAllowedProfiles")
         return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
 
 

@@ -16,20 +16,20 @@ Both (UI changes + API changes)
 ## Success Criteria
 
 ### Active Transcode Jobs -- per-worker attribution
-1. Each row in the Active Transcode Jobs table shows the worker name (e.g. "I9-2024", "mediavortex-transcode") that claimed the job. Source: TranscodeQueue.ClaimedBy.
-2. The /api/TeamStatus/Overview response includes ClaimedBy in each ActiveJobs entry.
+C1. Each row in the Active Transcode Jobs table shows the worker name (e.g. "I9-2024", "mediavortex-transcode") that claimed the job. Source: TranscodeQueue.ClaimedBy.
+C2. The /api/TeamStatus/Overview response includes ClaimedBy in each ActiveJobs entry.
 
 ### Active Transcode Jobs -- stuck job cleanup
-3. A job is "stuck" when: TranscodeQueue.Status = 'Running' AND the claiming worker's LastHeartbeat is older than 5 minutes (or worker row does not exist).
-4. Stuck jobs display a visual indicator (e.g. warning badge, different row color) instead of the spinning progress icon.
-5. Each stuck job row has a "Reset" button that sets the queue item back to Pending (Status='Pending', ClaimedBy=NULL, ClaimedAt=NULL, DateStarted=NULL) and removes the corresponding ActiveJob.
-6. The reset action is a POST to /api/TeamStatus/ResetStuckJob with the QueueId. Returns Success/Failure JSON.
+C3. A job is "stuck" when: TranscodeQueue.Status = 'Running' AND the claiming worker's LastHeartbeat is older than 5 minutes (or worker row does not exist).
+C4. Stuck jobs display a visual indicator (e.g. warning badge, different row color) instead of the spinning progress icon.
+C5. Each stuck job row has a "Reset" button that sets the queue item back to Pending (Status='Pending', ClaimedBy=NULL, ClaimedAt=NULL, DateStarted=NULL) and removes the corresponding ActiveJob.
+C6. The reset action is a POST to /api/TeamStatus/ResetStuckJob with the QueueId. Returns Success/Failure JSON.
 
 ### Services section -- worker listing
-7. The Services section includes a card for each row in the Workers table (in addition to existing ServiceStatus entries).
-8. Each worker card shows: WorkerName, Status (Online/Offline), LastHeartbeat (relative time, e.g. "2 min ago"), MaxConcurrentJobs, and whether it AcceptsInterlaced.
-9. A worker is displayed as "Offline" if LastHeartbeat is older than 5 minutes.
-10. The /api/TeamStatus/Workers endpoint returns the Workers table rows.
+C7. The Services section includes a card for each row in the Workers table (in addition to existing ServiceStatus entries).
+C8. Each worker card shows: WorkerName, Status (Online/Offline), LastHeartbeat (relative time, e.g. "2 min ago"), MaxConcurrentJobs, and whether it AcceptsInterlaced.
+C9. A worker is displayed as "Offline" if LastHeartbeat is older than 5 minutes.
+C10. The /api/TeamStatus/Workers endpoint returns the Workers table rows.
 
 ## Status
 
