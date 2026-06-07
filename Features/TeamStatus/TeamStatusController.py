@@ -473,6 +473,8 @@ def GetWorkers():
         IntervalMin = _GetContinuousScanIntervalMinutes()
         AllowedProfilesRows = DbManager.DatabaseService.ExecuteQuery("SELECT WorkerName, AllowedProfiles FROM Workers") or []
         AllowedProfilesByWorker = {(R.get('WorkerName') or ''): R.get('allowedprofiles') for R in AllowedProfilesRows}
+        ProfileCatalogRows = DbManager.DatabaseService.ExecuteQuery("SELECT ProfileName FROM Profiles ORDER BY ProfileName") or []
+        ProfileCatalog = [(R.get('profilename') or '').strip() for R in ProfileCatalogRows if R.get('profilename')]
 
         Workers = []
         for Row in (Rows or []):
@@ -516,7 +518,7 @@ def GetWorkers():
                 "AllowedProfiles": AllowedProfilesByWorker.get(WorkerName),
             })
 
-        return jsonify({"Success": True, "Data": Workers})
+        return jsonify({"Success": True, "Data": Workers, "ProfileCatalog": ProfileCatalog})
 
     except Exception as e:
         ErrorMsg = f"Exception in GetWorkers: {str(e)}"

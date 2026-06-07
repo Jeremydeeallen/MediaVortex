@@ -209,6 +209,7 @@
 <script>
 var ActivityPage = (function() {
     var Workers = [];
+    var ProfileCatalog = [];
     var AutoRefreshEnabled = true;
     var OverviewInterval = null;
     // QT-specific polling moved to /Queue page; only OverviewInterval remains here.
@@ -712,6 +713,7 @@ var ActivityPage = (function() {
             .then(function(Data) {
                 if (Data.Success && Data.Data) {
                     Workers = Data.Data;
+                    if (Array.isArray(Data.ProfileCatalog)) ProfileCatalog = Data.ProfileCatalog;
                     RenderWorkers(Workers);
                 }
             })
@@ -840,6 +842,12 @@ var ActivityPage = (function() {
             }
         }
 
+        var ProfilesLabel = FormatAllowedProfilesShort(W.AllowedProfiles);
+        var ProfilesTooltip = FormatAllowedProfilesTooltip(W.AllowedProfiles);
+        var ProfilesLineHtml = '<div class="small text-muted mb-1" title="' + ProfilesTooltip + '">' +
+            '<i class="fas fa-filter me-1"></i>Profiles: <strong>' + ProfilesLabel + '</strong>' +
+            '</div>';
+
         var Col = document.createElement('div');
         Col.className = 'col-6 col-lg-4 col-xl-3';
         Col.innerHTML = '<div class="' + CardCls + '" style="cursor:pointer" onclick="ActivityPage.OpenWorkerSettings(\'' + WorkerNameJs + '\')">' +
@@ -850,12 +858,27 @@ var ActivityPage = (function() {
                 '</h6>' +
                 MountErrorHtml +
                 ScanLineHtml +
+                ProfilesLineHtml +
                 '<button class="btn btn-sm w-100 ' + ToggleClass + '" onclick="event.stopPropagation(); ActivityPage.SetWorkerStatus(\'' + WorkerNameJs + '\', \'' + ToggleTarget + '\')">' +
                     '<i class="fas ' + ToggleIcon + ' me-1"></i>' + ToggleLabel +
                 '</button>' +
             '</div>' +
         '</div>';
         return Col;
+    }
+
+    function FormatAllowedProfilesShort(Raw) {
+        if (Raw === null || Raw === undefined) return '&lt;all&gt;';
+        if (Raw === '') return '&lt;none&gt;';
+        var Joined = String(Raw);
+        if (Joined.length > 80) Joined = Joined.substring(0, 77) + '...';
+        return EscapeHtml(Joined);
+    }
+
+    function FormatAllowedProfilesTooltip(Raw) {
+        if (Raw === null || Raw === undefined) return 'All profiles allowed (worker has no allowlist set).';
+        if (Raw === '') return 'No profiles allowed -- worker is parked.';
+        return EscapeHtml(String(Raw).split(',').join(', '));
     }
 
     function RenderWorkers(WorkerList) {
@@ -920,10 +943,73 @@ var ActivityPage = (function() {
                 CapabilityRow('RemuxEnabled', 'Quick (audio + remux)', W.RemuxEnabled, 'MaxConcurrentRemuxJobs', W.MaxConcurrentRemuxJobs || 2, WorkerNameJs) +
                 CapabilityRow('ScanEnabled', 'Scan', W.ScanEnabled, null, null, WorkerNameJs) +
             '</div>' +
-            '<div class="form-text small">Capability and concurrency changes apply within one polling interval (no restart).</div>';
+            ProfilesSection(W, WorkerNameJs) +
+            '<div class="form-text small">Capability changes apply within one polling interval (no restart). AllowedProfiles takes effect on the next claim tick.</div>';
 
         var Modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('WorkerSettingsModal'));
         Modal.show();
+    }
+
+    function ProfilesSection(W, WorkerNameJs) {
+        if (!ProfileCatalog || ProfileCatalog.length === 0) {
+            return '<div class="mb-3"><label class="form-label small fw-bold">Profiles Allowed</label><div class="text-muted small">No profiles defined; nothing to allow.</div></div>';
+        }
+        var Raw = W.AllowedProfiles;
+        var Allowed;
+        if (Raw === null || Raw === undefined) {
+            Allowed = new Set(ProfileCatalog);
+        } else if (Raw === '') {
+            Allowed = new Set();
+        } else {
+            Allowed = new Set(String(Raw).split(',').map(function(s){ return s.trim(); }));
+        }
+        var CheckboxesHtml = ProfileCatalog.map(function(P, i) {
+            var Checked = Allowed.has(P) ? 'checked' : '';
+            var PEsc = EscapeHtml(P);
+            var PId = 'AllowedProfile-' + i;
+            return '<div class="form-check" style="min-width: 240px">' +
+                     '<input class="form-check-input WorkerAllowedProfileCheckbox" type="checkbox" id="' + PId + '" value="' + PEsc + '" ' + Checked + '>' +
+                     '<label class="form-check-label small" for="' + PId + '">' + PEsc + '</label>' +
+                   '</div>';
+        }).join('');
+        return '<div class="mb-3">' +
+                 '<label class="form-label small fw-bold">Profiles Allowed (unchecked = blocked from claim)</label>' +
+                 '<div class="d-flex gap-2 mb-2">' +
+                     '<button class="btn btn-sm btn-outline-secondary" onclick="ActivityPage.CheckAllProfiles()">Check all</button>' +
+                     '<button class="btn btn-sm btn-outline-secondary" onclick="ActivityPage.UncheckAllProfiles()">Uncheck all</button>' +
+                     '<button class="btn btn-sm btn-primary ms-auto" onclick="ActivityPage.SaveWorkerAllowedProfiles(\'' + WorkerNameJs + '\')">Save Profiles</button>' +
+                 '</div>' +
+                 '<div class="d-flex flex-wrap gap-2" style="max-height: 280px; overflow-y: auto">' + CheckboxesHtml + '</div>' +
+               '</div>';
+    }
+
+    function CheckAllProfiles() {
+        document.querySelectorAll('.WorkerAllowedProfileCheckbox').forEach(function(cb) { cb.checked = true; });
+    }
+
+    function UncheckAllProfiles() {
+        document.querySelectorAll('.WorkerAllowedProfileCheckbox').forEach(function(cb) { cb.checked = false; });
+    }
+
+    function SaveWorkerAllowedProfiles(WorkerName) {
+        var Checked = Array.from(document.querySelectorAll('.WorkerAllowedProfileCheckbox'))
+            .filter(function(cb) { return cb.checked; })
+            .map(function(cb) { return cb.value; });
+        fetch('/api/TeamStatus/Workers/' + encodeURIComponent(WorkerName) + '/AllowedProfiles', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({AllowedProfiles: Checked})
+        })
+        .then(function(R) { return R.json(); })
+        .then(function(Result) {
+            if (Result.Success) {
+                showToastAlert('Profiles updated.', 'success');
+                LoadWorkers();
+            } else {
+                showToastAlert(Result.Message || Result.ErrorMessage || 'Failed to save profiles.', 'danger');
+            }
+        })
+        .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
     }
 
     function CapabilityRow(FlagKey, Label, Enabled, ConcurrencyKey, ConcurrencyValue, WorkerNameJs) {
@@ -1207,6 +1293,9 @@ var ActivityPage = (function() {
         SetAllWorkersStatus: SetAllWorkersStatus,
         SetMachineStatus: SetMachineStatus,
         ToggleWorkerCapability: ToggleWorkerCapability,
+        SaveWorkerAllowedProfiles: SaveWorkerAllowedProfiles,
+        CheckAllProfiles: CheckAllProfiles,
+        UncheckAllProfiles: UncheckAllProfiles,
         SetWorkerConcurrency: SetWorkerConcurrency,
         OpenWorkerSettings: OpenWorkerSettings,
         DisableFromModal: DisableFromModal,
