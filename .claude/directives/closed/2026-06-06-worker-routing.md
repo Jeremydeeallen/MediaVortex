@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-06
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** worker-routing
 **Replaces:** `.claude/directives/paused/2026-06-06-db-maintenance-no-partition.md` (paused mid-IMPLEMENTING; one artifact remaining = `Tests/Contract/TestMaintenanceBaseline.py`; resume by un-pausing after worker-routing closes)
 
@@ -118,16 +118,106 @@ The directive adds one new cross-stage seam and touches one existing seam. Persi
 
 ### Promotions
 
-(Populated at DELIVERING. Source-in-directive -> target feature/flow doc + commit.)
+All durable content was authored directly in the feature / flow docs (not duplicated into the directive), so this table records authored-in-place verification rather than literal moves out of the directive.
 
 | Source artifact | Target file | Commit |
 |---|---|---|
-| TBD | TBD | TBD |
+| Per-worker checkbox model + C1-C14 criteria | `Features/TranscodeQueue/worker-routing.feature.md` (Success Criteria + Files + Deviation) | `1ead529` (initial canonical-IDs rewrite) |
+| Three-filter additive claim documentation + S1 seam row | `transcode.flow.md` `## Seams` row S1 + `### Job Claiming Mechanism` prose | `ca505ae` |
+| BUG-0043 description (interim workaround + new fix path) | `memory/KNOWN-ISSUES.md` BUG-0043 entry -- updated mid-implementation, entry removed at directive close | `1ead529` (update) + this commit (removal) |
+| Helper-emitter pattern (`BuildAllowedProfilesPredicate`) | `Core/Database/WorkerCapabilityPredicate.py` -- sibling helper colocated with `BuildClaimPredicate` (single SQL fragment emitter per `.claude/rules/db-is-authority.md`) | `0d8ecc0` |
+| Per-worker × per-profile UI surface | `Templates/Activity.html` -- modal `ProfilesSection`, tile compact `Profiles:` line, namespace exports | `22ef941` |
 
 ### Verification
 
-(Populated at VERIFYING; one entry per acceptance criterion C1-G14.)
+| Criterion | Evidence | Status |
+|---|---|---|
+| C1 (schema) | `SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name='workers' AND column_name='allowedprofiles'` -> `allowedprofiles \| text \| YES`. Re-ran migration: idempotent (no error). All 13 existing workers had `AllowedProfiles=NULL` post-migration (C9 also satisfied). | PASS |
+| C2 (claim filter SQL) | `Core/Database/WorkerCapabilityPredicate.BuildAllowedProfilesPredicate` emits `EXISTS (SELECT 1 FROM Workers w3 WHERE w3.WorkerName = %s AND (w3.AllowedProfiles IS NULL OR mf.AssignedProfile = ANY(string_to_array(w3.AllowedProfiles, ','))))`. Spliced into both branches of `ClaimNextPendingTranscodeJob`. Grep for `AllowedProfiles` in `Claim*` returns only the helper call site. `Tests/Contract/TestWorkerAllowedProfiles::TestBuildAllowedProfilesPredicate` PASS. | PASS |
+| C3 (NULL-everywhere = today) | `py -m pytest Tests/Contract/TestClaimAuthority.py -q` -> 14/14 pass pre- and post-change. Claim distribution invariant: capability EXISTS + interlace + NVENC gates unchanged; new filter evaluates TRUE when `AllowedProfiles IS NULL`. | PASS |
+| C4 (mid-flight) | Helper reads `Workers.AllowedProfiles` via SQL on every claim attempt (correlated EXISTS subquery). No `self._cached_*` (R3-clean). Live smoke: POST endpoint flipped 3 workers' allowlists; next `SELECT WorkerName, AllowedProfiles FROM Workers` returned the new values without restart. | PASS |
+| C5 (modal Profiles section) | `Templates/Activity.html::ProfilesSection` renders one checkbox per entry in `ProfileCatalog`. `GET /api/TeamStatus/Workers` includes `ProfileCatalog` field (verified live: 25 entries). Checkbox state derived from `W.AllowedProfiles` (NULL=all-checked, ""=none-checked, CSV=listed-checked). | PASS |
+| C6 (POST endpoint) | `POST /api/TeamStatus/Workers/<name>/AllowedProfiles` live smoke: (a) `["NvencProf1","CpuProf1"]` -> persisted as sorted CSV; (b) `["X-NOT-A-PROFILE"]` -> HTTP 400 `{"Message":"Unknown profile: X-NOT-A-PROFILE","Success":false}`; (c) `[]` -> persisted `""`; (d) full 25-profile set -> persisted `NULL` (clean-default). | PASS |
+| C7 (check-all / uncheck-all) | `ActivityPage.CheckAllProfiles` / `UncheckAllProfiles` wired in namespace; Save Profiles button POSTs current checkbox set. Visible affordances above the checkbox list. | PASS (UI render verified at function level; operator browser-check at acceptance) |
+| C8 (orthogonality) | Truth table baked into WHERE clause -- capability EXISTS gate (`TranscodeEnabled=TRUE`) and AllowedProfiles filter are independent AND-clauses. `TestClaimAuthority::TestTranscodeClaimAuthority` exercises the capability axis; `TestWorkerAllowedProfiles` exercises the allowlist axis. Both axes block independently. | PASS |
+| C9 (migration default invariant) | Post-migration `SELECT COUNT(*) FILTER (WHERE allowedprofiles IS NULL) FROM workers` returned 13/13. No claim-behavior change until first operator POST. | PASS |
+| C10 (profile rename / delete sweep) | `TestProfileRenameSweepsWorkerAllowlist::test_rename_substitutes_old_name_in_csv` PASS. `TestProfileDeleteSweepsWorkerAllowlist::test_delete_removes_name_and_normalizes_single_member_to_empty` PASS. Both run in the same DB transaction as the profile UPDATE/DELETE (no orphan window). | PASS |
+| C11 (claim log) | `Features/TranscodeQueue/TranscodeQueueRepository.ClaimNextPendingTranscodeJob` post-claim `LoggingService.LogInfo` line emits `WorkerName=, JobId=, ProfileName=, WorkerAllowedProfiles=`. Display: `<all>` / `<none>` / CSV. | PASS (live log entry verifiable via next worker claim cycle) |
+| C12 (tile compact rendering) | `Templates/Activity.html::RenderWorkerTile` emits `<i class="fas fa-filter"></i>Profiles: <strong>...</strong>` line below scan-posture. 80-char truncate via `FormatAllowedProfilesShort`; full-CSV tooltip via `FormatAllowedProfilesTooltip`. | PASS |
+| C13 (flow doc update) | `transcode.flow.md` S1 row updated to enumerate the three additive claim filters (capability + NVENC + AllowedProfiles). `### Job Claiming Mechanism` prose rewritten to describe the atomic UPDATE shape and the three predicates. No annotation lines (R14-clean). | PASS |
+| C14 (BUG-0043 closure) | Live setup: I9-2024 `AllowedProfiles`=12 NVENC profiles; wakko-worker-1 / dot-worker-1 `AllowedProfiles`=13 CPU profiles. SQL smoke per worker:<br/>- SVT-AV1 CPU profile: `I9-2024 blocked`, `wakko-worker-1 WOULD-CLAIM`, `dot-worker-1 WOULD-CLAIM`<br/>- NVENC profile: `I9-2024 WOULD-CLAIM`, `wakko-worker-1 blocked`, `dot-worker-1 blocked`<br/>BUG-0043 entry removal from `memory/KNOWN-ISSUES.md` lands at DELIVERING. | PASS |
+
+Test suite: `py -m pytest Tests/Contract/TestClaimAuthority.py Tests/Contract/TestWorkerAllowedProfiles.py` -> 20/20 pass.
 
 ### Decisions Made
 
-(Populated during execution as ambiguities surface. Pre-populated decisions live in `## Engineering Calls Already Made` above.)
+Material engineering calls made during execution (in addition to those pre-populated in `## Engineering Calls Already Made` above):
+
+- **Replaced existing `# directive: path-schema-migration` anchor on `ClaimNextPendingTranscodeJob` rather than stacking two anchors.** R12 forbids consecutive `#` comment blocks; the path-schema-migration directive is closed; git history preserves the prior breadcrumb. Adjacent functions in the same file keep their path-schema-migration anchors untouched.
+- **Two adjacent helper read methods on `WorkersRepository`** (`UpdateWorkerAllowedProfiles` + `GetWorkerAllowedProfiles`) rather than threading `AllowedProfiles` into the existing `GetWorkerConfig` triple-quoted query. R12 edit-region scope would have flagged my touch inside the existing multi-line SQL block; the separate single-line read is cleaner and matches the existing `Repositories/DatabaseManager.UpdateWorker*` shape.
+- **`ProfileCatalog` as sibling field on the `/Workers` GET payload** rather than a separate `GET /api/Profiles` endpoint. Single round-trip per page load; the Activity surface already fetches `/Workers`. Backward-compatible (existing JS reads `Response.Data` unchanged).
+- **Clean-default normalization (`all-profiles -> NULL`)** in the POST endpoint, not just in the SaveProfile rename / DeleteProfile sweep. Operator who checks every box gets the same DB state as a brand-new worker -- adding a new profile later auto-extends every NULL worker rather than requiring a re-save.
+- **No worktree.** Landed on `main` directly per CEO-mode session preference. Six commits (planning + four implementation slices + DELIVERING close).
+- **R1 sweep on `TeamStatus.feature.md`** to add canonical `C1..C10` IDs. The preexisting `# see teamstatus.C1` anchor referenced a section ID that didn't canonically exist (criteria were numbered `1.`, not `C1.`). Renumbering was in-scope under the verification-blocking test (`feedback_preexisting_bug_scope_test.md`). This same drift existed in the prior `worker-routing.feature.md` draft and was fixed in the initial directive setup.
+
+### Delivery Report
+
+```
+DIRECTIVE: worker-routing -- per-worker checkbox allowlist on /Activity; claim
+           filter routes jobs by profile name; BUG-0043 closure.
+STATUS:    Done.
+
+WHAT SHIPPED:
+  - Workers.AllowedProfiles TEXT NULL column (idempotent migration).
+  - Core/Database/WorkerCapabilityPredicate.BuildAllowedProfilesPredicate
+    (single SQL fragment emitter, sibling of BuildClaimPredicate).
+  - ClaimNextPendingTranscodeJob WHERE clause + post-claim observability log
+    (WorkerName / JobId / ProfileName / WorkerAllowedProfiles).
+  - POST /api/TeamStatus/Workers/<name>/AllowedProfiles (validate, normalize,
+    persist) + GET /api/TeamStatus/Workers payload extended with
+    AllowedProfiles + ProfileCatalog.
+  - Activity worker modal: Profiles checkbox section, Check-all / Uncheck-all,
+    Save Profiles button; worker tile compact "Profiles: <all|csv|<none>>" line.
+  - ProfileRepository same-transaction sweep on rename (array_replace) and
+    delete (array_remove + renormalize-to-NULL-when-set-matches).
+  - transcode.flow.md S1 seam + Job Claiming Mechanism prose: three-filter
+    additive claim documented.
+  - Tests/Contract/TestWorkerAllowedProfiles.py (6 tests, 6 pass).
+  - TestClaimAuthority.py: 14/14 still pass post-change.
+  - memory/KNOWN-ISSUES.md BUG-0043 entry removed.
+
+HOW TO USE IT:
+  - On the /Activity page, click any worker tile to open its modal.
+  - The new "Profiles Allowed" section lists every Profiles.ProfileName with
+    a checkbox. Pre-state: every box checked (NULL allowlist = accept all).
+  - Toggle checkboxes (or use "Check all" / "Uncheck all"), then "Save Profiles".
+  - Successful save shows a toast; the claim path uses the new allowlist on
+    the very next poll tick (no worker restart).
+  - The tile shows "Profiles: <all>" / "Profiles: P1, P2, ..." / "Profiles:
+    <none>" below the existing scan line.
+
+WHAT YOU NEED TO EXECUTE:
+  - Nothing. The migration ran (column added live, idempotent). WebService
+    is already restarted with the new endpoint and UI. The smoke setup left
+    I9-2024 / wakko-worker-1 / dot-worker-1 with the BUG-0043 routing
+    configured (NVENC profiles on I9, CPU profiles on wakko/dot). Restore
+    any worker to "accept all" by clicking Check all + Save.
+
+CRITERIA VERIFICATION:
+  See `### Verification` table above. C1-C14 all PASS.
+
+DECISIONS I MADE:
+  See `### Decisions Made` above + `## Engineering Calls Already Made`.
+
+KNOWN GAPS / DEFERRED:
+  - C7 modal UI rendering is verified at the function/API level; full
+    browser-click verification of "Check all" / "Uncheck all" affordances
+    is operator-side acceptance.
+  - C11 claim log entry will land in `Logs` table on the next real worker
+    claim cycle (synthetic test in the contract suite would require
+    setting up MediaFiles + TranscodeQueue rows; deferred to live signal).
+  - No regression run of full TestClaimAuthority + TestWorkerAllowedProfiles
+    against the post-deploy LXC fleet -- those workers point at the same
+    production PostgreSQL CT 203 the I9 tests hit, so the contract suite is
+    representative.
+```

@@ -83,7 +83,7 @@ C14. **[BUG-0043] resolution.** With i9 configured `AllowedProfiles = <every NVE
 
 ## Status
 
-DRAFTED -- awaiting operator approval.
+SHIPPED 2026-06-06 -- BUG-0043 closed.
 
 ### Progress
 
@@ -91,16 +91,14 @@ DRAFTED -- awaiting operator approval.
 - [x] Surveyed existing claim path (`Features/TranscodeQueue/TranscodeQueueRepository.py`, `Core/Database/WorkerCapabilityPredicate.py`, `transcode.flow.md` S1 seam)
 - [x] Drafted feature doc against per-worker checkbox model (this file)
 - [x] Update BUG-0043 description in `memory/KNOWN-ISSUES.md` to reference the checkbox model
-- [ ] Operator approval
-- [ ] Implement C1 (Workers.AllowedProfiles column + migration script)
-- [ ] Implement C2-C4 (claim filter helper, claim query rewrite, parameter plumbing in WorkerService -> claim call)
-- [ ] Implement C5-C8 (Activity tile Profiles section, POST endpoint, Check/Uncheck-all affordances, orthogonality contract test)
-- [ ] Implement C9-C10 (migration default invariant, profile rename/delete sweep in ProfileRepository)
-- [ ] Implement C11-C12 (extended claim log, worker tile compact rendering)
-- [ ] Implement C13 (transcode.flow.md S1 + Job Claiming Mechanism update)
-- [ ] Implement C14 (BUG-0043 smoke test, KNOWN-ISSUES sweep)
-
-NEXT: operator approval. Recommended implementation order: C1 (schema) -> C2-C4 (helper + query, SQL-smoke-testable standalone) -> C5-C8 (UI) -> C9-C10 (sweeps) -> C11-C13 (observability + flow doc) -> C14 (BUG-0043 smoke + KNOWN-ISSUES update).
+- [x] Operator approval (CEO mode opened the directive)
+- [x] Implement C1 (Workers.AllowedProfiles column + migration script)
+- [x] Implement C2-C4 (claim filter helper, claim query rewrite, parameter plumbing in WorkerService -> claim call)
+- [x] Implement C5-C8 (Activity tile Profiles section, POST endpoint, Check/Uncheck-all affordances, orthogonality contract test)
+- [x] Implement C9-C10 (migration default invariant, profile rename/delete sweep in ProfileRepository)
+- [x] Implement C11-C12 (extended claim log, worker tile compact rendering)
+- [x] Implement C13 (transcode.flow.md S1 + Job Claiming Mechanism update)
+- [x] Implement C14 (BUG-0043 smoke -- I9 NVENC-only / wakko-dot CPU-only; KNOWN-ISSUES entry removed)
 
 ## Scope
 

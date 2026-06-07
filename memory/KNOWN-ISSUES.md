@@ -64,34 +64,6 @@ returns the AttributeError. Observed timestamps this session: `2026-06-06 22:01:
 
 ---
 
-### [BUG-0043] TranscodeQueue claim has no codec-affinity preference -- NVENC-capable workers grab CPU-profile jobs and burn GPU-worker compute
-**Date:** 2026-06-03 | **Area:** transcode-queue
-
-**What breaks:** `DatabaseManager.ClaimNextPendingTranscodeJob` orders strictly by `Priority DESC, DateAdded ASC`. A worker with `nvenccapable=TRUE` (e.g. i9) is eligible to claim both NVENC-profile (`Profiles.usenvidiahardware=1`) and CPU-profile (`usenvidiahardware=0`) rows. The CPU-side EXISTS-gate only blocks CPU workers from grabbing NVENC profiles -- nothing blocks NVENC workers from grabbing CPU profiles. So the moment a CPU profile row reaches the top of priority/date order, the i9 claims it and spends 20+ minutes of GPU-worker time running a CPU encode (~6x slower than NVENC for the same job).
-
-**Operational repro:** Queue any show under `SVT-AV1 P6 FG8 CRF36 >720p` while i9 has spare claim slots and the NVENC queue happens to be drained or lower-priority. i9 will claim the SVT row; check `TranscodeAttempts.workername='I9-2024' AND profilename LIKE 'SVT-AV1%'` after one full claim cycle and you will see the misroute. The intended split is i9 -> NVENC profiles only, wakko/dot -> CPU profiles only.
-
-**Why this surfaced today:** Operator was about to queue SVT-AV1 CRF36 work for wakko/dot's CPU encoding and asked "i9 will ignore the SVT jobs unless the NVENC queue is empty, right?" The answer is no -- there is no codec-tiebreaker in claim ordering. The fix is the unimplemented `worker-routing.feature.md` (DRAFTED) which adds `Workers.AllowedProfiles` (per-worker CSV allowlist), a per-worker checkbox UI on the `/Activity` modal, and a claim-query WHERE filter `(w.AllowedProfiles IS NULL OR mf.AssignedProfile = ANY(string_to_array(w.AllowedProfiles, ',')))`.
-
-**Interim workaround (no code change):** Queue CPU-profile jobs at a lower `Priority` value than NVENC-profile jobs. Since the ORDER BY is `Priority DESC, DateAdded ASC`, i9 will exhaust all NVENC work before touching the low-priority SVT rows. wakko/dot still see them at their priority and consume them normally. Operator tested pattern:
-```sql
-UPDATE TranscodeQueue SET Priority = -10
-WHERE Status='queued' AND MediaFileId IN (... the SVT batch ...);
-```
-
-**Violates:** `Features/TranscodeQueue/worker-routing.feature.md` criterion C14 (the bug-closure criterion). The feature itself is DRAFTED but unimplemented; this bug captures the first concrete operational case demanding it ship.
-
-**Look first:**
-1. `Features/TranscodeQueue/TranscodeQueueRepository.ClaimNextPendingTranscodeJob` -- the ORDER BY clause and the NVENC EXISTS-gate. Note the asymmetry: gate blocks CPU workers from NVENC jobs, but not NVENC workers from CPU jobs.
-2. `Features/TranscodeQueue/worker-routing.feature.md` C2 -- the new claim WHERE clause that resolves this.
-3. `transcode.flow.md` S1 seam (`ST5 -> ST6`) and `### Job Claiming Mechanism` -- documents the current (non-routing-aware) claim path; needs update per worker-routing.feature.md C13.
-
-**Flow doc:** `transcode.flow.md` exists and covers the claim path at the S1 seam (`ST5 -> ST6`) + the `### Job Claiming Mechanism` subsection but does not reflect routing yet. `/t` should update both alongside implementing the feature.
-
-**Fix with:** `/t BUG-0043` (promotes `worker-routing.feature.md` from DRAFTED to in-flight; not a one-line patch).
-
----
-
 ### [BUG-0007] Worker capability toggle does not refresh UI until modal is closed and reopened
 **Date:** 2026-05-22 | **Area:** activity-page
 
