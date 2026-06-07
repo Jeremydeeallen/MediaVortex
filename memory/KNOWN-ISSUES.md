@@ -71,7 +71,7 @@ returns the AttributeError. Observed timestamps this session: `2026-06-06 22:01:
 
 **Operational repro:** Queue any show under `SVT-AV1 P6 FG8 CRF36 >720p` while i9 has spare claim slots and the NVENC queue happens to be drained or lower-priority. i9 will claim the SVT row; check `TranscodeAttempts.workername='I9-2024' AND profilename LIKE 'SVT-AV1%'` after one full claim cycle and you will see the misroute. The intended split is i9 -> NVENC profiles only, wakko/dot -> CPU profiles only.
 
-**Why this surfaced today:** Operator was about to queue SVT-AV1 CRF36 work for wakko/dot's CPU encoding and asked "i9 will ignore the SVT jobs unless the NVENC queue is empty, right?" The answer is no -- there is no codec-tiebreaker in claim ordering. The fix is the unimplemented `worker-routing.feature.md` (DRAFTED) which adds `Workers.Tags`, `Profiles.{Preferred,Required}WorkerTags`, and a routing-aware ORDER BY clause.
+**Why this surfaced today:** Operator was about to queue SVT-AV1 CRF36 work for wakko/dot's CPU encoding and asked "i9 will ignore the SVT jobs unless the NVENC queue is empty, right?" The answer is no -- there is no codec-tiebreaker in claim ordering. The fix is the unimplemented `worker-routing.feature.md` (DRAFTED) which adds `Workers.AllowedProfiles` (per-worker CSV allowlist), a per-worker checkbox UI on the `/Activity` modal, and a claim-query WHERE filter `(w.AllowedProfiles IS NULL OR mf.AssignedProfile = ANY(string_to_array(w.AllowedProfiles, ',')))`.
 
 **Interim workaround (no code change):** Queue CPU-profile jobs at a lower `Priority` value than NVENC-profile jobs. Since the ORDER BY is `Priority DESC, DateAdded ASC`, i9 will exhaust all NVENC work before touching the low-priority SVT rows. wakko/dot still see them at their priority and consume them normally. Operator tested pattern:
 ```sql
@@ -79,16 +79,16 @@ UPDATE TranscodeQueue SET Priority = -10
 WHERE Status='queued' AND MediaFileId IN (... the SVT batch ...);
 ```
 
-**Violates:** `Features/TranscodeQueue/worker-routing.feature.md` criterion 15 (added with this bug). The feature itself is DRAFTED but unimplemented; this bug captures the first concrete operational case demanding it ship.
+**Violates:** `Features/TranscodeQueue/worker-routing.feature.md` criterion G14 (the bug-closure criterion). The feature itself is DRAFTED but unimplemented; this bug captures the first concrete operational case demanding it ship.
 
 **Look first:**
 1. `Repositories/DatabaseManager.ClaimNextPendingTranscodeJob` -- the ORDER BY clause and the NVENC EXISTS-gate. Note the asymmetry: gate blocks CPU workers from NVENC jobs, but not NVENC workers from CPU jobs.
-2. `Features/TranscodeQueue/worker-routing.feature.md` C4 -- pseudocode for the routing-aware ORDER BY that resolves this.
-3. `transcode.flow.md` Stage 2.2 -- documents the current (non-routing-aware) claim path; needs update per worker-routing.feature.md C14.
+2. `Features/TranscodeQueue/worker-routing.feature.md` B2 -- the new claim WHERE clause that resolves this.
+3. `transcode.flow.md` Stage 2 (`ST2`) -- documents the current (non-routing-aware) claim path; needs update per worker-routing.feature.md F13.
 
-**Flow doc:** `transcode.flow.md` exists and covers the claim path at Stage 2.2 but does not reflect routing yet. `/t` should update Stage 2.2 alongside implementing the feature.
+**Flow doc:** `transcode.flow.md` exists and covers the claim path at Stage 2 (`ST2`) but does not reflect routing yet. `/t` should update Stage 2 alongside implementing the feature.
 
-**Fix with:** `/t BUG-0043` (likely promotes `worker-routing.feature.md` from DRAFTED to in-flight; not a one-line patch).
+**Fix with:** `/t BUG-0043` (promotes `worker-routing.feature.md` from DRAFTED to in-flight; not a one-line patch).
 
 ---
 

@@ -2,94 +2,108 @@
 
 **Set:** 2026-06-06
 **Status:** Active -- phase: IMPLEMENTING
-**Slug:** db-maintenance-no-partition
-**Replaces:** `.claude/directives/paused/2026-06-06-db-maintenance-standard-tools.md` (paused -- partitioned design abandoned after `filescanning-repo-attrerror-fix` (commit 99275ad) cut log volume 50x; the paused directive's premise of "logs grows unbounded at 1.4M rows/day" no longer applies)
+**Slug:** worker-routing
+**Replaces:** `.claude/directives/paused/2026-06-06-db-maintenance-no-partition.md` (paused mid-IMPLEMENTING; one artifact remaining = `Tests/Contract/TestMaintenanceBaseline.py`; resume by un-pausing after worker-routing closes)
 
 ## Outcome
 
-The MediaVortex PostgreSQL cluster (CT 203) gets the **right-sized** version of the industry-standard maintenance stack: `pg_cron` for in-DB scheduling, `pg_repack` for on-demand bloat removal, `pgstattuple` for bloat measurement, plus per-table autovacuum tuning. **`pg_partman` and `logs` partitioning are deliberately excluded** -- at the new steady-state log volume (~30-60K rows/day vs. the 1.4M/day pre-fix), a plain `logs` table with default autovacuum sustains for years. The same three deployable artifacts (`ClusterBaseline.sh`, `MaintenancePolicies.sql`, `AutovacuumTuning.sql`) constitute the operator's portable fleet baseline -- copy to any other PostgreSQL cluster they own and apply with table-name substitutions. Partitioning is in the runbook as a "if/when you outgrow this" recipe rather than as installed infrastructure.
+The operator can pin each worker to a specific subset of `Profiles` via per-worker checkboxes on the `/Activity` modal. The TranscodeQueue claim path filters Pending rows to the calling worker's allowlist. Today's "every transcode-enabled worker is interchangeable" race becomes a per-machine routing decision that takes two clicks to set up and two clicks to change -- including when a new NVENC card lands on a different host later this week. BUG-0043 (NVENC-capable i9 grabbing CPU-only SVT-AV1 jobs) closes as the operator unchecks SVT profiles on i9.
+
+The full criteria contract lives in `Features/TranscodeQueue/worker-routing.feature.md` (C1-G14, last edited this directive). This directive doc accretes design rationale, in-flight state, and verification evidence; promotions at DELIVERING move durable content back to the feature doc and `transcode.flow.md`.
 
 ## Acceptance Criteria
 
-1. **Extensions installed.** `\dx` in `mediavortex` lists `pg_cron`, `pg_repack`, `pgstattuple`. `pg_partman` is intentionally NOT installed. Verifiable:
-   ```sql
-   SELECT extname FROM pg_extension
-   WHERE extname IN ('pg_cron','pg_repack','pgstattuple');
-   ```
-   Returns three rows.
+Authoritative: `Features/TranscodeQueue/worker-routing.feature.md` sections A-G (14 criteria). Restated here in compact form for the hook + reviewer:
 
-2. **`pg_cron` wired to the application database.** `SHOW shared_preload_libraries` contains `pg_cron`; `SHOW cron.database_name` returns `mediavortex`; `SHOW cron.timezone` returns `UTC`.
-
-3. **Per-table autovacuum reloptions on high-churn tables.** `activejobs`, `transcodeprogress`, `qualitytestingqueue`, `qualitytestprogress`, `servicestatus`, `workers` each have `autovacuum_vacuum_scale_factor=0.05`, `autovacuum_vacuum_threshold=10`, `autovacuum_analyze_scale_factor=0.05`, `autovacuum_analyze_threshold=10` in their `reloptions`. Verifiable:
-   ```sql
-   SELECT relname, reloptions FROM pg_class
-   WHERE relname IN ('activejobs','transcodeprogress','qualitytestingqueue',
-                     'qualitytestprogress','servicestatus','workers');
-   ```
-   Every row's `reloptions` contains the four required keys.
-
-4. **Three deployable scripts exist and are runnable on a throwaway cluster.** Files exist:
-   - `Scripts/SQLScripts/Maintenance/ClusterBaseline.sh`
-   - `Scripts/SQLScripts/Maintenance/MaintenancePolicies.sql`
-   - `Scripts/SQLScripts/Maintenance/AutovacuumTuning.sql`
-
-   A smoke run against an empty PostgreSQL 16 container reproduces criteria 1+2+3 on a fresh DB. Scripts are idempotent -- re-running produces no errors and no duplicate state.
-
-5. **MaintenancePolicies.sql is a non-empty template.** No active cron jobs scheduled today (volume doesn't warrant any), but the file contains a commented-out example `cron.schedule(...)` for "delete logs older than N days" plus the syntax for scheduling any `partman.run_maintenance_proc` style job, so a future operator can uncomment + edit + apply without re-reading documentation.
-
-6. **Fleet baseline doc exists.** `Docs/PostgreSQLMaintenance.md` describes (a) what the stack is and why pg_partman is omitted at MediaVortex's current scale, (b) the one-time per-cluster `apt install` + `postgresql.conf` edit + extension creates, (c) per-DB SQL deploy, (d) operator runbook for "this DB is bloated" / "what's scheduled" / "force-run a job" / "if log volume ever crosses 100K/day, here is how to add partitioning later", (e) rollback path. Links to the three scripts.
-
-7. **Contract test exists and is green.** `Tests/Contract/TestMaintenanceBaseline.py` exercises criteria 1, 2, 3, skipping with informative messages on a dev box that hasn't applied the baseline. After cluster baseline applied: every test passes.
+1. **A1.** `Workers.AllowedProfiles TEXT NULL` via idempotent migration `Scripts/SQLScripts/AddWorkerAllowedProfiles.py`. NULL = accept all. CSV = explicit allowlist. `""` = accept none.
+2. **B2.** `ClaimNextPendingTranscodeJob` WHERE clause gains `(w.AllowedProfiles IS NULL OR mf.AssignedProfile = ANY(string_to_array(w.AllowedProfiles, ',')))`. Single emitter in `Core/Database/WorkerCapabilityPredicate.BuildAllowedProfilesPredicate`.
+3. **B3.** NULL-everywhere = today's behavior. EXPLAIN plan parity + 30-min parallel-claim soak within 5% of baseline.
+4. **B4.** Mid-flight changes honored within one poll tick (db-is-authority -- no boot cache).
+5. **C5.** `/Activity` worker modal renders one checkbox per `Profiles.Name`, state reflects current `AllowedProfiles` (all-checked when NULL, listed when CSV, none when `""`).
+6. **C6.** `POST /api/TeamStatus/Workers/<name>/AllowedProfiles` validates against `Profiles.Name` (400 on unknown), normalizes (sort/dedupe; empty list -> `""`; all profiles -> NULL).
+7. **C7.** Check-all / Uncheck-all affordances above checkbox list.
+8. **C8.** Orthogonality truth table: capability switch AND allowlist must both permit to claim.
+9. **D9.** Migration leaves every existing Worker at `AllowedProfiles=NULL` (no behavior change until operator saves).
+10. **D10.** Profile rename / delete sweeps every `Workers.AllowedProfiles` CSV in the same transaction.
+11. **E11.** Claim log row includes `WorkerName`, `JobId`, `ProfileName`, `WorkerAllowedProfiles` (`<all>` / `<none>` / CSV).
+12. **E12.** Worker tile compact one-line rendering of allowlist below capability row (80-char truncate + tooltip).
+13. **F13.** `transcode.flow.md` updates land in two places: (a) the `## Seams` table S1 row (transition `ST5 -> ST6`) is extended to mention the AllowedProfiles filter as a second gating condition on the claim, OR a new S6 row is added for `Workers.AllowedProfiles -> claim filter` -- engineering call at edit time, single-row preferred; (b) the `### Job Claiming Mechanism` prose subsection under `## Service Architecture` notes the new WHERE-clause filter alongside the existing FOR UPDATE SKIP LOCKED note. The earlier draft's "Stage 2 (ST2)" reference was wrong -- ST2 is PROBE; the claim path is the S1 seam at `ST5 -> ST6`.
+14. **G14.** BUG-0043 smoke (i9 unchecks SVT profiles -> wakko/dot claim the row within one tick); `memory/KNOWN-ISSUES.md` BUG-0043 entry removed at directive close.
 
 ## Out of Scope
 
-- `pg_partman` installation or any partitioning work. Re-evaluate only if `logs` daily growth crosses ~100K rows/day for a sustained week. Recipe to add partitioning later is in the runbook (criterion 6).
-- `pg_repack` scheduled runs. Installed only; operator-driven when a specific table is unhealthy.
-- `postgres_exporter` / Prometheus / Grafana. Recommended in the runbook as the next observability layer; not built here.
-- Partitioning of `scanjobs`, `transcodeattempts`, `mediafilesarchive`, `jellyfinoperations`. All <100 MB; default autovacuum is fine.
-- Log shipping to external systems (Loki, Elasticsearch).
-- Backup strategy (pgBackRest, pg_dump scheduling). Distinct concern.
-- A bespoke `/Maintenance` UI in MediaVortex. Observability lives in `cron.job_run_details` / `pgstattuple` / pgAdmin.
-- Changes to LoggingService or the `logs` schema. The bug fix in `filescanning-repo-attrerror-fix` (commit 99275ad) addressed the actual log growth problem; this directive is fleet hygiene, not pressure relief.
+- Per-job (TranscodeQueue row-level) overrides. Routing is per-worker × per-profile; if a per-job exception ever justifies itself, that is a separate directive.
+- Tag-based indirection (the prior `worker-routing` draft's model). Replaced by the direct checkbox matrix; feature doc rewritten to match.
+- Other claim paths (`ClaimNextPendingRemuxJob`, `ClaimQualityTestJob`). Same model could extend later; out of scope here.
+- Profile-side preference UI ("which workers prefer this profile"). The matrix is per-worker; the other direction would be a derived view, not a separate config surface.
+- Load balancing / least-loaded scheduling. This is routing, not scheduling.
+- Resuming `db-maintenance-no-partition` -- separate concern; operator un-pauses after this closes.
 
 ## Constraints
 
-- **Cluster restart required once.** Adding `pg_cron` to `shared_preload_libraries` needs `systemctl restart postgresql@16-main`. WebService + WorkerService must be stopped (or tolerant of brief DB downtime). Operator schedules the window (~2-4 min).
-- **No migration window required.** With partitioning removed, there is no `logs` cutover. Per-table autovacuum reloptions are metadata-only changes -- applied live.
-- **PostgreSQL 16.13 on Ubuntu 24.04** -- PGDG repos provide all three extensions.
-- **Idempotency invariant** (`.claude/rules/data-integrity.md`): every script in `Scripts/SQLScripts/Maintenance/` re-runs cleanly.
-- **Three of the four files already exist on disk** from the prior (paused) maintenance directive: `AutovacuumTuning.sql` (unchanged), `MaintenancePolicies.sql` (needs trim -- remove `partman_maintenance` job, add commented template), `ClusterBaseline.sh` (needs trim -- remove `postgresql-16-partman` apt install + `pg_partman` CREATE EXTENSION).
+- **db-is-authority** (`.claude/rules/db-is-authority.md`): `Workers.AllowedProfiles` reads fresh on every claim. No `self._cached_allowed_profiles` in `ProcessTranscodeQueueService`.
+- **R10** (`.claude/standards/index.md`): `ClaimNextPendingTranscodeJob` continues to call `BuildClaimPredicate`. New `BuildAllowedProfilesPredicate` is additive.
+- **R11**: migration uses `ADD COLUMN IF NOT EXISTS`; runnable repeatedly.
+- **R19**: claim query rewrite lands in `Features/TranscodeQueue/TranscodeQueueRepository.py`, not `Repositories/DatabaseManager.py`.
+- **R15**: every edited function/class in the `## Files` list gets `# directive: worker-routing` directly above the `def` / `class`.
+- **Data integrity** (`.claude/rules/data-integrity.md`): new column is nullable with NULL default (backward compatible). Profile rename/delete sweep runs in the same transaction as the profile mutation (no orphan window).
+- **Seam verification** (`.claude/rules/seam-verification.md`): the cross-stage seam `Workers.AllowedProfiles -> claim filter` is enumerated below in `### Seams Crossed` and round-tripped at VERIFYING.
 
 ## Escalation Defaults
 
-- **Cluster restart** -> operator decides timing. Claude prepares the runbook and stops services.
-- **Re-introduce partitioning** -> operator decision when/if log volume warrants. The recipe is in the runbook; not Claude's call.
-- **Risk tolerance: low** for the cluster restart (one-time); medium for autovacuum tuning (reversible reloptions).
+- **Schema column add** -> Claude executes (`ADD COLUMN IF NOT EXISTS` is reversible; rollback is `ALTER TABLE Workers DROP COLUMN IF EXISTS AllowedProfiles`).
+- **Claim-query rewrite** -> Claude executes; runs `TestClaimAuthority.py` + new `TestWorkerAllowedProfiles.py` before declaring done. Live worker restart is operator-executed (memory: I9 services owned by Claude on dev workstation, container workers operator-executed; both via the worker-restart protocol).
+- **BUG-0043 smoke** -> Claude executes the synthetic-queue test; reports `TranscodeAttempts.workername` observation per criterion.
+- **Risk tolerance:** low for the live worker restart (one cycle, well-defined); medium for the claim-query change (covered by contract test + EXPLAIN-plan parity check).
 
 ## Engineering Calls Already Made
 
-- **Drop `pg_partman` entirely.** At 30-60K rows/day, the default autovacuum sustains `logs` for years. `pg_partman`'s value scales with row velocity; at low velocity, it's complexity without benefit. The runbook documents the "add partitioning if volume ever exceeds 100K/day" path for symmetry with the fleet template.
-- **Schedule zero cron jobs today.** Without `pg_partman`, the only candidate jobs would be DELETE-based retention -- premature at this volume. Leaving `MaintenancePolicies.sql` as a populated template means future operator changes are SQL-only, not "re-read all the docs" work.
-- **Keep `pg_cron` extension install in scope despite no scheduled jobs.** Pays the one-time cluster-restart cost up front so future scheduling work is SQL-only and the fleet baseline is symmetric across DBs (one apt+restart recipe per cluster).
-- **Carry over the three existing artifacts.** `AutovacuumTuning.sql` is unchanged. `ClusterBaseline.sh` + `MaintenancePolicies.sql` are trimmed in place. `MigrateLogsToPartitioned.py` is deleted from the prior plan (it was never written to disk after the R-rule hook refusals, so there's nothing to remove).
+- **CSV column, not junction table.** `Workers.AllowedProfiles TEXT NULL`. Cleaner for 10×20 = 200 cells, single ALTER, matches the existing `Workers.Tags` precedent the earlier draft considered. Junction-table refactor is a one-paragraph migration if profile count ever grows past ~100.
+- **Single SQL fragment emitter.** `BuildAllowedProfilesPredicate` sibling of `BuildClaimPredicate`. R10 plus operator memory ("db-is-authority single emitter") plus seam discipline -- one place to edit, one place to test, one place to grep.
+- **NULL = accept all** (not `""` = accept all). NULL preserves the migration default and is distinguishable from "operator unchecked everything." `""` is a meaningful operator state (parked worker).
+- **Clean-default normalization.** When the operator checks every existing profile, the endpoint stores NULL, not the exhaustive CSV. This keeps backward-compat (NULL semantics) and survives adding a new profile later (a NULL worker auto-accepts new profiles; a CSV worker would need re-saving).
+- **Profile rename/delete sweep in same transaction.** Avoids orphan window. Implemented in `ProfileRepository.SaveProfile` (rename path) and `ProfileRepository.DeleteProfile`.
+- **Worker tile compact rendering on the tile, full checkbox UI in the modal.** Tile is a glance surface; modal is the editor. Putting checkboxes on the tile would scale poorly and clutter the dashboard.
+- **No worktree.** Landing on `main` directly. The change is well-scoped (10 files), high-priority (BUG-0043), and worktree session-handoff cost outweighs the isolation benefit at this scale.
 
 ## Status
 
-Active 2026-06-06 -- phase: IMPLEMENTING. Three carry-over files trimmed (ClusterBaseline.sh, MaintenancePolicies.sql) or kept (AutovacuumTuning.sql); runbook created at Docs/PostgreSQLMaintenance.md. TestMaintenanceBaseline.py contract test is the last artifact.
+Active 2026-06-06 -- phase: NEEDS_PLAN. Directive doc just opened; criteria + files list written. Next phase: NEEDS_DOC_PREREAD (read every `*.feature.md` / `*.flow.md` ancestor of files in `### Files` below).
 
 ### Files
 
 ```
-Scripts/SQLScripts/Maintenance/ClusterBaseline.sh             -- EDIT: remove pg_partman apt install + CREATE EXTENSION
-Scripts/SQLScripts/Maintenance/MaintenancePolicies.sql        -- EDIT: remove partman_maintenance job; add commented retention template
-Scripts/SQLScripts/Maintenance/AutovacuumTuning.sql           -- KEEP: unchanged from paused directive
-Docs/PostgreSQLMaintenance.md                                  -- CREATE: trimmed runbook (no partitioning chapter; partitioning recipe in "future" section)
-Tests/Contract/TestMaintenanceBaseline.py                      -- CREATE: skip-when-not-deployed assertions for criteria 1-3
+Scripts/SQLScripts/AddWorkerAllowedProfiles.py               -- NEW: idempotent ADD COLUMN IF NOT EXISTS Workers.AllowedProfiles TEXT NULL
+Core/Database/WorkerCapabilityPredicate.py                   -- ADD BuildAllowedProfilesPredicate sibling helper
+Features/TranscodeQueue/TranscodeQueueRepository.py          -- ClaimNextPendingTranscodeJob WHERE clause + helper call (R19 home for Claim* methods)
+Features/Workers/WorkersRepository.py                        -- ADD UpdateWorkerAllowedProfiles; extend worker payload with AllowedProfiles
+Features/TranscodeJob/ProcessTranscodeQueueService.py        -- pass worker name into claim call (helper reads AllowedProfiles fresh)
+Features/TeamStatus/TeamStatusController.py                  -- NEW: POST /api/TeamStatus/Workers/<name>/AllowedProfiles; extend /Workers GET payload
+Features/Profiles/ProfileRepository.py                       -- sweep Workers.AllowedProfiles on profile rename / delete (same-tx)
+Templates/Activity.html                                      -- worker modal Profiles section (checkbox list + Check/Uncheck-all); tile compact rendering
+Tests/Contract/TestWorkerAllowedProfiles.py                  -- NEW: claim filter, orthogonality, mid-flight change, profile rename/delete sweep, clean-default normalization
+transcode.flow.md                                            -- Stage 2 (ST2) WHERE clause + Seams row
+memory/KNOWN-ISSUES.md                                       -- update BUG-0043 mid-implementation; remove entry at directive close
+Features/TranscodeQueue/worker-routing.feature.md             -- the contract; Progress checklist marked off as criteria land; Status -> SHIPPED at DELIVERING
 ```
+
+### Seams Crossed (per `.claude/rules/seam-verification.md`)
+
+The directive adds one new cross-stage seam and touches one existing seam. Persistent home is `transcode.flow.md`'s `## Seams` table (F13 puts the new row there).
+
+| Seam | Producer | Wire shape | Consumer expects | Verification |
+|---|---|---|---|---|
+| `Workers.AllowedProfiles -> ClaimNextPendingTranscodeJob filter` | `POST /api/TeamStatus/Workers/<name>/AllowedProfiles` (operator UI) writes `Workers.AllowedProfiles TEXT NULL` (NULL / CSV / `""`) | TEXT column; NULL OR CSV-of-profile-names | `BuildAllowedProfilesPredicate` emits `(w.AllowedProfiles IS NULL OR mf.AssignedProfile = ANY(string_to_array(w.AllowedProfiles, ',')))` | `Tests/Contract/TestWorkerAllowedProfiles.py` |
+| `Profiles.Name rename/delete -> Workers.AllowedProfiles sweep` | `ProfileRepository.SaveProfile` (rename) / `DeleteProfile` | Same-transaction UPDATE sweeps every CSV containing the affected name | `BuildAllowedProfilesPredicate` continues to match on the post-sweep CSV | `Tests/Contract/TestWorkerAllowedProfiles.py::test_profile_rename_sweep` + `::test_profile_delete_sweep` |
+| `Activity modal -> POST /Workers/<name>/AllowedProfiles` (existing UI surface, new field) | `Templates/Activity.html` (existing modal) | JSON `{"AllowedProfiles": ["P1","P2"] | []}` | `TeamStatusController` validates against `Profiles.Name`, normalizes, persists | Manual modal CRUD round-trip + `TestWorkerAllowedProfiles.py::test_post_endpoint_*` |
+
+### R18 overrides
+
+(None yet. R18 caps `*.feature.md` Reads at limit<=50; partial reads via the `## Files` index. Override entries land here when full reads are genuinely required.)
 
 ### Promotions
 
-(Populated at DELIVERING.)
+(Populated at DELIVERING. Source-in-directive -> target feature/flow doc + commit.)
 
 | Source artifact | Target file | Commit |
 |---|---|---|
@@ -97,8 +111,8 @@ Tests/Contract/TestMaintenanceBaseline.py                      -- CREATE: skip-w
 
 ### Verification
 
-(Populated at VERIFYING; one entry per acceptance criterion.)
+(Populated at VERIFYING; one entry per acceptance criterion C1-G14.)
 
 ### Decisions Made
 
-(Populated during execution as ambiguities surface.)
+(Populated during execution as ambiguities surface. Pre-populated decisions live in `## Engineering Calls Already Made` above.)
