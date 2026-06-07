@@ -79,14 +79,14 @@ UPDATE TranscodeQueue SET Priority = -10
 WHERE Status='queued' AND MediaFileId IN (... the SVT batch ...);
 ```
 
-**Violates:** `Features/TranscodeQueue/worker-routing.feature.md` criterion G14 (the bug-closure criterion). The feature itself is DRAFTED but unimplemented; this bug captures the first concrete operational case demanding it ship.
+**Violates:** `Features/TranscodeQueue/worker-routing.feature.md` criterion C14 (the bug-closure criterion). The feature itself is DRAFTED but unimplemented; this bug captures the first concrete operational case demanding it ship.
 
 **Look first:**
-1. `Repositories/DatabaseManager.ClaimNextPendingTranscodeJob` -- the ORDER BY clause and the NVENC EXISTS-gate. Note the asymmetry: gate blocks CPU workers from NVENC jobs, but not NVENC workers from CPU jobs.
-2. `Features/TranscodeQueue/worker-routing.feature.md` B2 -- the new claim WHERE clause that resolves this.
-3. `transcode.flow.md` Stage 2 (`ST2`) -- documents the current (non-routing-aware) claim path; needs update per worker-routing.feature.md F13.
+1. `Features/TranscodeQueue/TranscodeQueueRepository.ClaimNextPendingTranscodeJob` -- the ORDER BY clause and the NVENC EXISTS-gate. Note the asymmetry: gate blocks CPU workers from NVENC jobs, but not NVENC workers from CPU jobs.
+2. `Features/TranscodeQueue/worker-routing.feature.md` C2 -- the new claim WHERE clause that resolves this.
+3. `transcode.flow.md` S1 seam (`ST5 -> ST6`) and `### Job Claiming Mechanism` -- documents the current (non-routing-aware) claim path; needs update per worker-routing.feature.md C13.
 
-**Flow doc:** `transcode.flow.md` exists and covers the claim path at Stage 2 (`ST2`) but does not reflect routing yet. `/t` should update Stage 2 alongside implementing the feature.
+**Flow doc:** `transcode.flow.md` exists and covers the claim path at the S1 seam (`ST5 -> ST6`) + the `### Job Claiming Mechanism` subsection but does not reflect routing yet. `/t` should update both alongside implementing the feature.
 
 **Fix with:** `/t BUG-0043` (promotes `worker-routing.feature.md` from DRAFTED to in-flight; not a one-line patch).
 

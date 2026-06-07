@@ -13,22 +13,22 @@ The full criteria contract lives in `Features/TranscodeQueue/worker-routing.feat
 
 ## Acceptance Criteria
 
-Authoritative: `Features/TranscodeQueue/worker-routing.feature.md` sections A-G (14 criteria). Restated here in compact form for the hook + reviewer:
+Authoritative: `Features/TranscodeQueue/worker-routing.feature.md` criteria `C1`-`C14` (canonical IDs grouped under section letters A-G for readability; the IDs themselves are `C<N>` per `.claude/rules/feature-docs.md`). Restated here in compact form for the hook + reviewer:
 
-1. **A1.** `Workers.AllowedProfiles TEXT NULL` via idempotent migration `Scripts/SQLScripts/AddWorkerAllowedProfiles.py`. NULL = accept all. CSV = explicit allowlist. `""` = accept none.
-2. **B2.** `ClaimNextPendingTranscodeJob` WHERE clause gains `(w.AllowedProfiles IS NULL OR mf.AssignedProfile = ANY(string_to_array(w.AllowedProfiles, ',')))`. Single emitter in `Core/Database/WorkerCapabilityPredicate.BuildAllowedProfilesPredicate`.
-3. **B3.** NULL-everywhere = today's behavior. EXPLAIN plan parity + 30-min parallel-claim soak within 5% of baseline.
-4. **B4.** Mid-flight changes honored within one poll tick (db-is-authority -- no boot cache).
-5. **C5.** `/Activity` worker modal renders one checkbox per `Profiles.Name`, state reflects current `AllowedProfiles` (all-checked when NULL, listed when CSV, none when `""`).
-6. **C6.** `POST /api/TeamStatus/Workers/<name>/AllowedProfiles` validates against `Profiles.Name` (400 on unknown), normalizes (sort/dedupe; empty list -> `""`; all profiles -> NULL).
-7. **C7.** Check-all / Uncheck-all affordances above checkbox list.
-8. **C8.** Orthogonality truth table: capability switch AND allowlist must both permit to claim.
-9. **D9.** Migration leaves every existing Worker at `AllowedProfiles=NULL` (no behavior change until operator saves).
-10. **D10.** Profile rename / delete sweeps every `Workers.AllowedProfiles` CSV in the same transaction.
-11. **E11.** Claim log row includes `WorkerName`, `JobId`, `ProfileName`, `WorkerAllowedProfiles` (`<all>` / `<none>` / CSV).
-12. **E12.** Worker tile compact one-line rendering of allowlist below capability row (80-char truncate + tooltip).
-13. **F13.** `transcode.flow.md` updates land in two places: (a) the `## Seams` table S1 row (transition `ST5 -> ST6`) is extended to mention the AllowedProfiles filter as a second gating condition on the claim, OR a new S6 row is added for `Workers.AllowedProfiles -> claim filter` -- engineering call at edit time, single-row preferred; (b) the `### Job Claiming Mechanism` prose subsection under `## Service Architecture` notes the new WHERE-clause filter alongside the existing FOR UPDATE SKIP LOCKED note. The earlier draft's "Stage 2 (ST2)" reference was wrong -- ST2 is PROBE; the claim path is the S1 seam at `ST5 -> ST6`.
-14. **G14.** BUG-0043 smoke (i9 unchecks SVT profiles -> wakko/dot claim the row within one tick); `memory/KNOWN-ISSUES.md` BUG-0043 entry removed at directive close.
+- **C1** (A. Schema). `Workers.AllowedProfiles TEXT NULL` via idempotent migration `Scripts/SQLScripts/AddWorkerAllowedProfiles.py`. NULL = accept all. CSV = explicit allowlist. `""` = accept none.
+- **C2** (B. Claim). `ClaimNextPendingTranscodeJob` WHERE clause gains `(w.AllowedProfiles IS NULL OR mf.AssignedProfile = ANY(string_to_array(w.AllowedProfiles, ',')))`. Single emitter in `Core/Database/WorkerCapabilityPredicate.BuildAllowedProfilesPredicate`.
+- **C3** (B. Claim). NULL-everywhere = today's behavior. EXPLAIN plan parity + 30-min parallel-claim soak within 5% of baseline.
+- **C4** (B. Claim). Mid-flight changes honored within one poll tick (db-is-authority -- no boot cache).
+- **C5** (C. Surface). `/Activity` worker modal renders one checkbox per `Profiles.Name`, state reflects current `AllowedProfiles` (all-checked when NULL, listed when CSV, none when `""`).
+- **C6** (C. Surface). `POST /api/TeamStatus/Workers/<name>/AllowedProfiles` validates against `Profiles.Name` (400 on unknown), normalizes (sort/dedupe; empty list -> `""`; all profiles -> NULL).
+- **C7** (C. Surface). Check-all / Uncheck-all affordances above checkbox list.
+- **C8** (C. Surface). Orthogonality truth table: capability switch AND allowlist must both permit to claim.
+- **C9** (D. Compat). Migration leaves every existing Worker at `AllowedProfiles=NULL` (no behavior change until operator saves).
+- **C10** (D. Compat). Profile rename / delete sweeps every `Workers.AllowedProfiles` CSV in the same transaction.
+- **C11** (E. Observability). Claim log row includes `WorkerName`, `JobId`, `ProfileName`, `WorkerAllowedProfiles` (`<all>` / `<none>` / CSV).
+- **C12** (E. Observability). Worker tile compact one-line rendering of allowlist below capability row (80-char truncate + tooltip).
+- **C13** (F. Flow doc). `transcode.flow.md` updates: (a) the `## Seams` table S1 row (`ST5 -> ST6`) is extended to mention the AllowedProfiles filter alongside the existing `nvenccapable` gate, OR a new S6 row is added for `Workers.AllowedProfiles -> claim filter` -- single-row preferred; (b) the `### Job Claiming Mechanism` prose subsection under `## Service Architecture` notes the new WHERE-clause filter.
+- **C14** (G. Bug closure). BUG-0043 smoke (i9 unchecks SVT profiles -> wakko/dot claim the row within one tick); `memory/KNOWN-ISSUES.md` BUG-0043 entry removed at directive close.
 
 ## Out of Scope
 
@@ -72,20 +72,35 @@ Active 2026-06-06 -- phase: NEEDS_PLAN. Directive doc just opened; criteria + fi
 
 ### Files
 
-```
-Scripts/SQLScripts/AddWorkerAllowedProfiles.py               -- NEW: idempotent ADD COLUMN IF NOT EXISTS Workers.AllowedProfiles TEXT NULL
-Core/Database/WorkerCapabilityPredicate.py                   -- ADD BuildAllowedProfilesPredicate sibling helper
-Features/TranscodeQueue/TranscodeQueueRepository.py          -- ClaimNextPendingTranscodeJob WHERE clause + helper call (R19 home for Claim* methods)
-Features/Workers/WorkersRepository.py                        -- ADD UpdateWorkerAllowedProfiles; extend worker payload with AllowedProfiles
-Features/TranscodeJob/ProcessTranscodeQueueService.py        -- pass worker name into claim call (helper reads AllowedProfiles fresh)
-Features/TeamStatus/TeamStatusController.py                  -- NEW: POST /api/TeamStatus/Workers/<name>/AllowedProfiles; extend /Workers GET payload
-Features/Profiles/ProfileRepository.py                       -- sweep Workers.AllowedProfiles on profile rename / delete (same-tx)
-Templates/Activity.html                                      -- worker modal Profiles section (checkbox list + Check/Uncheck-all); tile compact rendering
-Tests/Contract/TestWorkerAllowedProfiles.py                  -- NEW: claim filter, orthogonality, mid-flight change, profile rename/delete sweep, clean-default normalization
-transcode.flow.md                                            -- Stage 2 (ST2) WHERE clause + Seams row
-memory/KNOWN-ISSUES.md                                       -- update BUG-0043 mid-implementation; remove entry at directive close
-Features/TranscodeQueue/worker-routing.feature.md             -- the contract; Progress checklist marked off as criteria land; Status -> SHIPPED at DELIVERING
-```
+| # | File | Action | Criterion anchor (`# directive: worker-routing \| # see worker-routing.<ID>`) | R-rule notes |
+|---|---|---|---|---|
+| 1 | `Scripts/SQLScripts/AddWorkerAllowedProfiles.py` | NEW | `C1` on `Run()` | R11: `ADD COLUMN IF NOT EXISTS`. R12: no module docstring, no triple-quoted SQL -- single-line ALTER string. |
+| 2 | `Core/Database/WorkerCapabilityPredicate.py` | EDIT (ADD function) | `C2` on `BuildAllowedProfilesPredicate()` | R12: edit region is the new function only; one-line docstring max. SQL fragment is single-line string. Whitelist not needed -- helper takes no column-name argument. |
+| 3 | `Features/TranscodeQueue/TranscodeQueueRepository.py` | EDIT | `C2`+`C11` on `ClaimNextPendingTranscodeJob()` | R10: keep `BuildClaimPredicate` call. R12: existing triple-quoted SQL is preexisting; edit must NOT extend the multi-line block -- splice the new fragment as f-string interpolation on the same line where `BuildClaimPredicate`'s fragment is interpolated, OR introduce a single-line concatenation. R6: not path-bearing. |
+| 4 | `Features/Workers/WorkersRepository.py` | EDIT (ADD methods) | `C6` on `UpdateWorkerAllowedProfiles()`; `C5`/`C6` on the read-path method that exposes `AllowedProfiles` in `GetWorkerConfig` (or sibling getter) | R12: one-line docstrings max. R3: no `self._cached_*` (db-is-authority -- repo is a stateless query wrapper). |
+| 5 | `Features/TranscodeJob/ProcessTranscodeQueueService.py` | EDIT | `C4` on the `GetNextJob` method that calls the claim | R3: no `self._cached_allowed_profiles` -- repo reads fresh. R12: existing docstrings are preexisting; edit-region scope. |
+| 6 | `Features/TeamStatus/TeamStatusController.py` | EDIT (ADD endpoint + payload field) | `C6` on `POST /AllowedProfiles` handler; `C5` on the `/Workers` GET handler edit | R9: any `LIKE` queries (none expected) would need `EscapeLikePattern`. R12: one-line docstrings. |
+| 7 | `Features/Profiles/ProfileRepository.py` | EDIT | `C10` on `SaveProfile()` (rename path) + `DeleteProfile()` | R12: existing triple-quoted SQL is preexisting; the sweep UPDATE is a single-line string. R9: rewrite UPDATE uses simple `string_to_array` + `array_to_string`, no LIKE. R7: not polymorphic. |
+| 8 | `Templates/Activity.html` | EDIT | N/A (HTML; R15 does not apply to non-Python) | R1: colocated `*.feature.md` preread satisfied via `Features/Activity/` ancestor docs (already in scope this session). |
+| 9 | `Tests/Contract/TestWorkerAllowedProfiles.py` | NEW | `C2`/`C3`/`C4`/`C8`/`C9`/`C10` distributed across `test_*` functions | R8: under `Tests/Contract/`. R12: one-line docstrings on each test. |
+| 10 | `transcode.flow.md` | EDIT | N/A (flow doc; R15 does not apply) | R16: `**Slug:** transcode` already present. R14: no annotation lines (replace S1 row in place; do not annotate "extended for routing"). |
+| 11 | `memory/KNOWN-ISSUES.md` | EDIT (mid-flight) + DELETE entry (at close) | N/A (memory; no anchors) | Entry removed at C14 verify; commit message captures the close. |
+| 12 | `Features/TranscodeQueue/worker-routing.feature.md` | EDIT (Progress checkmarks as criteria land; Status -> SHIPPED at DELIVERING) | N/A (feature doc; R15 does not apply) | R14: no annotation lines. R16: `**Slug:** worker-routing` already present. R18: any further edits use `limit<=50` Reads. |
+
+### Hook Conformance Pre-Flight (so we don't bounce off the hook mid-implementation)
+
+The accepted code-anchor syntax is **`# directive: worker-routing | # see worker-routing.C<N>`** -- the second `#` after the pipe is required (per `Test-R15-DirectiveAnchor` regex `#\s*see\s+[a-z0-9-]+\.(S|W|C|ST)\d+`). Working examples in tree: `Core/WorkerContext.py:4`, `Features/MediaFiles/MediaFilesRepository.py:8`. Place this comment on the line **immediately above** each `def` / `class` the directive edits.
+
+Phase: edits land in `IMPLEMENTING`. `VERIFYING` allows directive-doc-only edits + read-only Bash. `DELIVERING` re-opens all tools (R13 relaxed) so any `.feature.md` / `.flow.md` create-needs can happen at close.
+
+R-rules that are easy to forget on this directive:
+- **R3** -- no `self._cached_allowed_profiles` anywhere. `Workers.AllowedProfiles` is read in the SQL fragment per-claim. No Python-side cache. This is the load-bearing invariant the operator chose this design for.
+- **R10** -- `ClaimNextPendingTranscodeJob` must still call `BuildClaimPredicate`. Adding `BuildAllowedProfilesPredicate` is additive, not a replacement.
+- **R11** -- migration `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. Re-runnable.
+- **R12 edit-region trap** -- when editing existing triple-quoted SQL in `TranscodeQueueRepository.py` / `ProfileRepository.py`, the surrounding lines may already contain triple-quoted strings. R12 fires when violations fall in the edit region. Splice strategy: introduce the new fragment as a Python `+`-concatenation or f-string interpolation on a single new line; do NOT add lines INSIDE the existing `"""..."""` block.
+- **R14** -- when updating `transcode.flow.md` S1 seam, REPLACE the row in place. Do not add an annotation like `(extended for routing 2026-06-06)`. The seam table is the durable contract.
+- **R15** -- every edited `def` / `class` in the table above gets the two-line anchor exactly as specified.
+- **R19** -- claim-query edit lands in `TranscodeQueueRepository.py`, not `DatabaseManager.py` (already correct per aggregate-map row 10).
 
 ### Seams Crossed (per `.claude/rules/seam-verification.md`)
 

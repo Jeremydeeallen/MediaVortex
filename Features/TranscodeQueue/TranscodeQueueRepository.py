@@ -266,13 +266,14 @@ class TranscodeQueueRepository(BaseRepository):
             return None
         return self._MapRowToQueueItem(rows[0])
 
-    # directive: path-schema-migration | # see path.S8
+    # directive: worker-routing | # see worker-routing.C2
     def ClaimNextPendingTranscodeJob(self, WorkerName: str, AcceptsInterlaced: bool = True) -> Optional[TranscodeQueueModel]:
-        """Atomically claim the next pending Transcode-mode job (NULL or 'Transcode'); honors capability + NVENC gates."""
+        """Atomically claim the next pending Transcode-mode job (NULL or 'Transcode'); honors capability + NVENC + AllowedProfiles gates."""
         try:
             import psycopg2.extras
-            from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate
+            from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate, BuildAllowedProfilesPredicate
             CapabilityFragment, CapabilityParams = BuildClaimPredicate(WorkerName, "TranscodeEnabled")
+            AllowedProfilesFragment, AllowedProfilesParams = BuildAllowedProfilesPredicate(WorkerName)
             NvencGate = (
                 "p.profilename IS NOT NULL "
                 "AND (p.usenvidiahardware = 0 "
@@ -299,6 +300,7 @@ class TranscodeQueueRepository(BaseRepository):
                         "    AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode = 'Transcode') "
                         f"    AND {CapabilityFragment} "
                         f"    AND {NvencGate} "
+                        f"    AND {AllowedProfilesFragment} "
                         "  ORDER BY tq.Priority DESC, tq.DateAdded ASC "
                         "  LIMIT 1 "
                         "  FOR UPDATE OF tq SKIP LOCKED "
@@ -318,13 +320,14 @@ class TranscodeQueueRepository(BaseRepository):
                         "    AND (mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0') "
                         f"    AND {CapabilityFragment} "
                         f"    AND {NvencGate} "
+                        f"    AND {AllowedProfilesFragment} "
                         "  ORDER BY tq.Priority DESC, tq.DateAdded ASC "
                         "  LIMIT 1 "
                         "  FOR UPDATE OF tq SKIP LOCKED "
                         ") "
                         f"RETURNING {ReturningCols}"
                     )
-                cursor.execute(query, (WorkerName,) + CapabilityParams + (WorkerName,))
+                cursor.execute(query, (WorkerName,) + CapabilityParams + (WorkerName,) + AllowedProfilesParams)
                 row = cursor.fetchone()
                 connection.commit()
 

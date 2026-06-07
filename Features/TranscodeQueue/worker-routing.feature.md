@@ -20,26 +20,26 @@ The earlier draft of this feature proposed a tag-based indirection (workers carr
 
 ### A. Schema
 
-1. `Workers` table gains a nullable `AllowedProfiles TEXT` column via idempotent migration `Scripts/SQLScripts/AddWorkerAllowedProfiles.py`. NULL is the migration default and means "this worker accepts every profile" (backward-compatibility invariant). A non-NULL value is a comma-separated list of `Profiles.Name` strings; only listed profiles are claimable by this worker. Empty string `""` is a legal state and means "this worker accepts no profile" (operator can park a worker without disabling its capability flags). Verifiable: `\d Workers` shows the column; re-running the migration is a no-op.
+C1. `Workers` table gains a nullable `AllowedProfiles TEXT` column via idempotent migration `Scripts/SQLScripts/AddWorkerAllowedProfiles.py`. NULL is the migration default and means "this worker accepts every profile" (backward-compatibility invariant). A non-NULL value is a comma-separated list of `Profiles.Name` strings; only listed profiles are claimable by this worker. Empty string `""` is a legal state and means "this worker accepts no profile" (operator can park a worker without disabling its capability flags). Verifiable: `\d Workers` shows the column; re-running the migration is a no-op.
 
 ### B. Claim algorithm
 
-2. `DatabaseManager.ClaimNextPendingTranscodeJob` adds the filter
+C2. `ClaimNextPendingTranscodeJob` (in `Features/TranscodeQueue/TranscodeQueueRepository.py`) adds the filter
    ```sql
    (w.AllowedProfiles IS NULL
     OR mf.AssignedProfile = ANY(string_to_array(w.AllowedProfiles, ',')))
    ```
    to the WHERE clause of the inner SELECT. The new filter composes additively with all existing filters: the worker-capability EXISTS gate (`Core/Database/WorkerCapabilityPredicate.py`), the `AcceptsInterlaced` filter, `Status='Pending'`, `Priority DESC, DateAdded ASC` ordering. A single place in the code emits this fragment -- the sibling helper `BuildAllowedProfilesPredicate` in `Core/Database/WorkerCapabilityPredicate.py`. Verifiable: grep for `AllowedProfiles` in any `Claim*` function returns only the helper call site; with worker A allowed `[P1,P2]` and worker B allowed `[P3]`, a Pending row with `AssignedProfile=P3` is claimed only by B; rows with profile P1 are claimed only by A; rows with profile P4 (in neither allowlist) sit unclaimed indefinitely.
 
-3. **NULL-everywhere = today's behavior.** When every worker has `AllowedProfiles IS NULL`, the new clause evaluates `TRUE` for every row and the query plan / claim distribution match today's. Verifiable: `EXPLAIN (ANALYZE, BUFFERS)` on the new query with no allowlists set produces a plan with the same join shape as the pre-change query; a 30-minute parallel-claim soak with three workers and no allowlists shows per-worker claim counts within 5% of a pre-change baseline.
+C3. **NULL-everywhere = today's behavior.** When every worker has `AllowedProfiles IS NULL`, the new clause evaluates `TRUE` for every row and the query plan / claim distribution match today's. Verifiable: `EXPLAIN (ANALYZE, BUFFERS)` on the new query with no allowlists set produces a plan with the same join shape as the pre-change query; a 30-minute parallel-claim soak with three workers and no allowlists shows per-worker claim counts within 5% of a pre-change baseline.
 
-4. **Mid-flight changes honored within one poll tick.** Per `.claude/rules/db-is-authority.md`, the column is read fresh on every claim attempt -- no boot cache, no per-worker instance variable. Operator unchecks profile P on worker W via the modal at T; W's next claim cycle (<= poll-tick seconds after T) skips rows with `AssignedProfile=P`. Verifiable: queue 5 P-profile jobs; flip W's allowlist mid-claim; confirm via `TranscodeAttempts.workername` query that W stopped claiming P within one tick.
+C4. **Mid-flight changes honored within one poll tick.** Per `.claude/rules/db-is-authority.md`, the column is read fresh on every claim attempt -- no boot cache, no per-worker instance variable. Operator unchecks profile P on worker W via the modal at T; W's next claim cycle (<= poll-tick seconds after T) skips rows with `AssignedProfile=P`. Verifiable: queue 5 P-profile jobs; flip W's allowlist mid-claim; confirm via `TranscodeAttempts.workername` query that W stopped claiming P within one tick.
 
 ### C. Operator surface
 
-5. The `/Activity` page worker modal gains a "Profiles" section rendering one checkbox per row in `SELECT Name FROM Profiles ORDER BY Name`. Checkbox state reflects the worker's current `AllowedProfiles`: every box checked when NULL; only listed profiles checked when CSV is set; no boxes checked when empty string. Verifiable: open the modal for any worker; count checkboxes equals `SELECT COUNT(*) FROM Profiles`; add a new profile via the profile editor and reload the modal -- the new profile appears (checked for NULL allowlists, unchecked for explicit CSV allowlists).
+C5. The `/Activity` page worker modal gains a "Profiles" section rendering one checkbox per row in `SELECT Name FROM Profiles ORDER BY Name`. Checkbox state reflects the worker's current `AllowedProfiles`: every box checked when NULL; only listed profiles checked when CSV is set; no boxes checked when empty string. Verifiable: open the modal for any worker; count checkboxes equals `SELECT COUNT(*) FROM Profiles`; add a new profile via the profile editor and reload the modal -- the new profile appears (checked for NULL allowlists, unchecked for explicit CSV allowlists).
 
-6. Saving the checkbox state issues `POST /api/TeamStatus/Workers/<name>/AllowedProfiles` with body `{"AllowedProfiles": ["P1","P2"]}`. The endpoint:
+C6. Saving the checkbox state issues `POST /api/TeamStatus/Workers/<name>/AllowedProfiles` with body `{"AllowedProfiles": ["P1","P2"]}`. The endpoint:
    - rejects names not present in `Profiles.Name` with HTTP 400 `{"Success": false, "Message": "Unknown profile: <name>"}`. Persisted value unchanged on rejection.
    - sorts and dedupes the input (case-sensitive -- profile names are PascalCase per CLAUDE.md).
    - persists the empty list as the empty string `""`.
@@ -48,9 +48,9 @@ The earlier draft of this feature proposed a tag-based indirection (workers carr
 
    Verifiable: POST `["P1","X-DOES-NOT-EXIST"]`; response is 400 with the unknown name in the message; `Workers.AllowedProfiles` is unchanged. POST the full set of existing profile names; `Workers.AllowedProfiles IS NULL` after.
 
-7. The modal Profiles section includes "Check all" and "Uncheck all" affordances above the checkbox list. "Check all" sets every checkbox and submits (endpoint normalizes to NULL). "Uncheck all" clears every checkbox and submits as `""`. Operator flips a worker's policy wholesale in one click without scrolling.
+C7. The modal Profiles section includes "Check all" and "Uncheck all" affordances above the checkbox list. "Check all" sets every checkbox and submits (endpoint normalizes to NULL). "Uncheck all" clears every checkbox and submits as `""`. Operator flips a worker's policy wholesale in one click without scrolling.
 
-8. The capability switches (TranscodeEnabled / QualityTestEnabled / RemuxEnabled / ScanEnabled) and the AllowedProfiles checkboxes are independent and orthogonal. Truth table:
+C8. The capability switches (TranscodeEnabled / QualityTestEnabled / RemuxEnabled / ScanEnabled) and the AllowedProfiles checkboxes are independent and orthogonal. Truth table:
 
    | TranscodeEnabled | AllowedProfiles | Claims transcode rows? |
    |---|---|---|
@@ -63,23 +63,23 @@ The earlier draft of this feature proposed a tag-based indirection (workers carr
 
 ### D. Backward compatibility and referential integrity
 
-9. Migration leaves every existing `Workers` row with `AllowedProfiles=NULL`. No worker's claim behavior changes until the operator explicitly saves a non-default list. Verifiable: per-worker claim rate over a 1-hour window pre-migration vs. post-migration is within noise.
+C9. Migration leaves every existing `Workers` row with `AllowedProfiles=NULL`. No worker's claim behavior changes until the operator explicitly saves a non-default list. Verifiable: per-worker claim rate over a 1-hour window pre-migration vs. post-migration is within noise.
 
-10. **Profile rename / delete sweeps the allowlist in the same transaction.** When a `Profiles` row is renamed or deleted via `ProfileRepository`, every `Workers.AllowedProfiles` CSV is rewritten in the same DB transaction: rename substitutes the new name in place; delete removes the name from the CSV (and renormalizes empty -> `""`, all -> `NULL`). No orphaned references survive. Verifiable: rename profile `P1` -> `P1Renamed`; query `SELECT WorkerName, AllowedProfiles FROM Workers WHERE AllowedProfiles LIKE '%P1%' ESCAPE '!'`; the old name does not appear; the new name does where the old one used to.
+C10. **Profile rename / delete sweeps the allowlist in the same transaction.** When a `Profiles` row is renamed or deleted via `ProfileRepository`, every `Workers.AllowedProfiles` CSV is rewritten in the same DB transaction: rename substitutes the new name in place; delete removes the name from the CSV (and renormalizes empty -> `""`, all -> `NULL`). No orphaned references survive. Verifiable: rename profile `P1` -> `P1Renamed`; query `SELECT WorkerName, AllowedProfiles FROM Workers WHERE AllowedProfiles LIKE '%P1%' ESCAPE '!'`; the old name does not appear; the new name does where the old one used to.
 
 ### E. Observability
 
-11. `ClaimNextPendingTranscodeJob` log entry on a successful claim includes `WorkerName`, `JobId`, `ProfileName`, `WorkerAllowedProfiles` (the literal string `<all>` when NULL, `<none>` when empty, the CSV otherwise). One log row per claim. Verifiable: query `SELECT Message FROM Logs WHERE FunctionName='ClaimNextPendingTranscodeJob' ORDER BY TimeStamp DESC LIMIT 1`; all four fields appear.
+C11. `ClaimNextPendingTranscodeJob` log entry on a successful claim includes `WorkerName`, `JobId`, `ProfileName`, `WorkerAllowedProfiles` (the literal string `<all>` when NULL, `<none>` when empty, the CSV otherwise). One log row per claim. Verifiable: query `SELECT Message FROM Logs WHERE FunctionName='ClaimNextPendingTranscodeJob' ORDER BY TimeStamp DESC LIMIT 1`; all four fields appear.
 
-12. The `/Activity` worker tile shows a compact one-line rendering of the current allowlist below the capability row: `Profiles: <all>` when NULL, `Profiles: P1, P2, P3` when CSV, `Profiles: <none>` when empty. Truncates to 80 characters with a tooltip showing the full list. Verifiable: visual check across the three states; tooltip shows untruncated value.
+C12. The `/Activity` worker tile shows a compact one-line rendering of the current allowlist below the capability row: `Profiles: <all>` when NULL, `Profiles: P1, P2, P3` when CSV, `Profiles: <none>` when empty. Truncates to 80 characters with a tooltip showing the full list. Verifiable: visual check across the three states; tooltip shows untruncated value.
 
 ### F. Flow doc update
 
-13. `transcode.flow.md` Stage 2 (`ST2`, job-claim) is updated to describe the AllowedProfiles filter as part of the claim WHERE clause. The `## Seams` table gains a new row: `Workers.AllowedProfiles -> ClaimNextPendingTranscodeJob filter`, producer = `POST /api/TeamStatus/Workers/<name>/AllowedProfiles`, consumer = `BuildAllowedProfilesPredicate`, wire shape = `TEXT NULL | CSV | ""`, verification = `Tests/Contract/TestWorkerAllowedProfiles.py`. Verifiable: `git diff transcode.flow.md` shows the Stage 2 update and the new seam row.
+C13. `transcode.flow.md` updates land in two places: (a) the `## Seams` table S1 row (transition `ST5 -> ST6`) is extended to mention the AllowedProfiles filter alongside the existing `nvenccapable` gate, OR a new row S6 is added for `Workers.AllowedProfiles -> claim filter` -- engineering call at edit time, single-row preferred; (b) the `### Job Claiming Mechanism` prose subsection under `## Service Architecture` notes the new WHERE-clause filter alongside the existing `SELECT FOR UPDATE SKIP LOCKED` note. Verifiable: `git diff transcode.flow.md` shows both edits.
 
 ### G. Bug closure
 
-14. **[BUG-0043] resolution.** With i9 configured `AllowedProfiles = <every NVENC profile name>` and wakko / dot configured `AllowedProfiles = <every CPU profile name>`, a queued SVT-AV1 row is claimed by wakko or dot within one poll tick; i9 sits idle if no NVENC work is pending. The Priority-based interim workaround is removed from `memory/KNOWN-ISSUES.md`; the BUG-0043 entry itself is removed at directive close. Verifiable: synthetic test queue with one SVT-AV1 row; observe `TranscodeAttempts.workername` after one tick.
+C14. **[BUG-0043] resolution.** With i9 configured `AllowedProfiles = <every NVENC profile name>` and wakko / dot configured `AllowedProfiles = <every CPU profile name>`, a queued SVT-AV1 row is claimed by wakko or dot within one poll tick; i9 sits idle if no NVENC work is pending. The Priority-based interim workaround is removed from `memory/KNOWN-ISSUES.md`; the BUG-0043 entry itself is removed at directive close. Verifiable: synthetic test queue with one SVT-AV1 row; observe `TranscodeAttempts.workername` after one tick.
 
 ## Status
 
@@ -88,33 +88,33 @@ DRAFTED -- awaiting operator approval.
 ### Progress
 
 - [x] Read prior issues (`memory/KNOWN-ISSUES.md` -- BUG-0043 confirmed)
-- [x] Surveyed existing claim path (`DatabaseManager.ClaimNextPendingTranscodeJob`, `Core/Database/WorkerCapabilityPredicate.py`, `transcode.flow.md` Stage 2)
+- [x] Surveyed existing claim path (`Features/TranscodeQueue/TranscodeQueueRepository.py`, `Core/Database/WorkerCapabilityPredicate.py`, `transcode.flow.md` S1 seam)
 - [x] Drafted feature doc against per-worker checkbox model (this file)
-- [ ] Update BUG-0043 description in `memory/KNOWN-ISSUES.md` to reference the checkbox model
+- [x] Update BUG-0043 description in `memory/KNOWN-ISSUES.md` to reference the checkbox model
 - [ ] Operator approval
-- [ ] Implement A1 (Workers.AllowedProfiles column + migration script)
-- [ ] Implement B2-B4 (claim filter helper, claim query rewrite, parameter plumbing in WorkerService -> claim call)
+- [ ] Implement C1 (Workers.AllowedProfiles column + migration script)
+- [ ] Implement C2-C4 (claim filter helper, claim query rewrite, parameter plumbing in WorkerService -> claim call)
 - [ ] Implement C5-C8 (Activity tile Profiles section, POST endpoint, Check/Uncheck-all affordances, orthogonality contract test)
-- [ ] Implement D9-D10 (migration default invariant, profile rename/delete sweep in ProfileRepository)
-- [ ] Implement E11-E12 (extended claim log, worker tile compact rendering)
-- [ ] Implement F13 (transcode.flow.md Stage 2 + Seams update)
-- [ ] Implement G14 (BUG-0043 smoke test, KNOWN-ISSUES sweep)
+- [ ] Implement C9-C10 (migration default invariant, profile rename/delete sweep in ProfileRepository)
+- [ ] Implement C11-C12 (extended claim log, worker tile compact rendering)
+- [ ] Implement C13 (transcode.flow.md S1 + Job Claiming Mechanism update)
+- [ ] Implement C14 (BUG-0043 smoke test, KNOWN-ISSUES sweep)
 
-NEXT: operator approval. Recommended implementation order: A (schema) -> B (helper + query, SQL-smoke-testable standalone) -> C (UI) -> D (sweeps) -> E/F (observability + flow doc) -> G (BUG-0043 smoke + KNOWN-ISSUES update).
+NEXT: operator approval. Recommended implementation order: C1 (schema) -> C2-C4 (helper + query, SQL-smoke-testable standalone) -> C5-C8 (UI) -> C9-C10 (sweeps) -> C11-C13 (observability + flow doc) -> C14 (BUG-0043 smoke + KNOWN-ISSUES update).
 
 ## Scope
 
 ```
-Repositories/DatabaseManager.py                              -- ClaimNextPendingTranscodeJob WHERE clause + helper call
+Scripts/SQLScripts/AddWorkerAllowedProfiles.py               -- NEW: idempotent ADD COLUMN IF NOT EXISTS Workers.AllowedProfiles TEXT NULL
 Core/Database/WorkerCapabilityPredicate.py                   -- ADD: BuildAllowedProfilesPredicate sibling helper
+Features/TranscodeQueue/TranscodeQueueRepository.py          -- ClaimNextPendingTranscodeJob WHERE clause + helper call (R19 home for Claim* methods)
+Features/Workers/WorkersRepository.py                        -- ADD UpdateWorkerAllowedProfiles; extend GetWorkerConfig / worker payload with AllowedProfiles
 Features/TranscodeJob/ProcessTranscodeQueueService.py        -- pass worker name into claim call (helper reads AllowedProfiles fresh)
 Features/TeamStatus/TeamStatusController.py                  -- NEW: POST /api/TeamStatus/Workers/<name>/AllowedProfiles; extend /Workers payload
 Features/Profiles/ProfileRepository.py                       -- sweep Workers.AllowedProfiles on profile rename / delete (same-tx)
-Repositories/WorkerRepository.py                              -- read / UPDATE Workers.AllowedProfiles
 Templates/Activity.html                                      -- worker modal Profiles section (checkbox list + Check/Uncheck-all); tile compact rendering
-Scripts/SQLScripts/AddWorkerAllowedProfiles.py               -- NEW: idempotent ADD COLUMN IF NOT EXISTS Workers.AllowedProfiles TEXT NULL
 Tests/Contract/TestWorkerAllowedProfiles.py                  -- NEW: claim filter, orthogonality, mid-flight change, rename sweep
-transcode.flow.md                                            -- Stage 2 WHERE clause + Seams row
+transcode.flow.md                                            -- S1 seam row + Job Claiming Mechanism prose
 memory/KNOWN-ISSUES.md                                       -- update BUG-0043 mid-implementation; remove entry at directive close
 ```
 
@@ -124,16 +124,16 @@ memory/KNOWN-ISSUES.md                                       -- update BUG-0043 
 |---|---|
 | `Scripts/SQLScripts/AddWorkerAllowedProfiles.py` | NEW. Idempotent `ALTER TABLE Workers ADD COLUMN IF NOT EXISTS AllowedProfiles TEXT NULL`. |
 | `Core/Database/WorkerCapabilityPredicate.py` | ADD `BuildAllowedProfilesPredicate(WorkerName) -> (sql_fragment, params)`. Single emitter for the `(w.AllowedProfiles IS NULL OR mf.AssignedProfile = ANY(...))` fragment. |
-| `Repositories/DatabaseManager.py` | `ClaimNextPendingTranscodeJob` adds a LEFT JOIN to `MediaFiles` (if not already present for the call shape) and calls the new helper to extend WHERE. Existing capability EXISTS gate untouched. |
+| `Features/TranscodeQueue/TranscodeQueueRepository.py` | `ClaimNextPendingTranscodeJob` adds a LEFT JOIN to `MediaFiles` (if not already present for the call shape) and calls the new helper to extend WHERE. Existing capability EXISTS gate untouched. R19 home for `Claim*` methods. |
+| `Features/Workers/WorkersRepository.py` | ADD `UpdateWorkerAllowedProfiles(WorkerName, AllowedProfilesCsv\|None)`. Extend `GetWorkerConfig` / worker payload to expose `AllowedProfiles`. |
 | `Features/TranscodeJob/ProcessTranscodeQueueService.py` | At `GetNextJob`, pass worker name into the claim call. Helper reads `Workers.AllowedProfiles` fresh -- no instance cache. |
 | `Features/TeamStatus/TeamStatusController.py` | NEW endpoint `POST /api/TeamStatus/Workers/<name>/AllowedProfiles`. Validates against `Profiles.Name`, normalizes (sort/dedupe/empty-vs-null/all-vs-null), UPDATEs `Workers.AllowedProfiles`. Extends `GET /api/TeamStatus/Workers` payload with `AllowedProfiles`. |
 | `Features/Profiles/ProfileRepository.py` | On profile rename / delete, sweep `Workers.AllowedProfiles` in the same transaction. |
-| `Repositories/WorkerRepository.py` | Read / UPDATE `Workers.AllowedProfiles`. |
 | `Templates/Activity.html` | Worker modal: Profiles section with checkbox per profile, "Check all" / "Uncheck all" affordances. Worker tile: compact `Profiles: <all\|csv\|<none>>` line below capability row. |
 | `Tests/Contract/TestWorkerAllowedProfiles.py` | NEW. Asserts claim filter, orthogonality truth table (C8), mid-flight change honored within one tick, profile rename / delete sweep, clean-default normalization. |
-| `transcode.flow.md` | Stage 2 WHERE clause updated; `## Seams` row added for `Workers.AllowedProfiles -> claim filter`. |
-| `memory/KNOWN-ISSUES.md` | BUG-0043 description updated mid-implementation; entry removed at directive close once G14 verified. |
+| `transcode.flow.md` | S1 seam row extended (or S6 added) for `Workers.AllowedProfiles -> claim filter`; `### Job Claiming Mechanism` prose updated. |
+| `memory/KNOWN-ISSUES.md` | BUG-0043 description updated mid-implementation; entry removed at directive close once C14 verified. |
 
 ## Deviation from conventions
 
-Criterion B2 quotes the SQL fragment shape directly. Normally criteria avoid implementation detail, but the routing rule **is** the SQL clause -- the precise composition (`IS NULL OR ANY(string_to_array(...))`) is what changes claim semantics, and prose paraphrase loses the verifiability the operator depends on. Each behavioural assertion (filter applies, NULL-everywhere = today, mid-flight change honored, orthogonality with capability flags) is also stated independently and is each independently testable without reading the SQL.
+Criterion C2 quotes the SQL fragment shape directly. Normally criteria avoid implementation detail, but the routing rule **is** the SQL clause -- the precise composition (`IS NULL OR ANY(string_to_array(...))`) is what changes claim semantics, and prose paraphrase loses the verifiability the operator depends on. Each behavioural assertion (filter applies, NULL-everywhere = today, mid-flight change honored, orthogonality with capability flags) is also stated independently and is each independently testable without reading the SQL.
