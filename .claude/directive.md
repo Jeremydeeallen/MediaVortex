@@ -41,22 +41,16 @@ C5. WorkerService startup probes for NVENC capability and persists the result to
 
 C6. The auto-detect probe is idempotent on subsequent startups: if the flag already matches the probe result, no write occurs (defense against pointless DB churn). Verifiable: two consecutive worker restarts produce one `nvenccapable` UPDATE log line (the first); the second restart logs "probe matches stored capability, no write." Implies a per-worker log line on every startup-time probe.
 
-### D. GUI override (worker-routing C15 lands here)
+### D. End-to-end smoke
 
-C7. `/Activity` worker modal gains a `NvencCapable` capability row alongside the existing TranscodeEnabled / QualityTestEnabled / RemuxEnabled / ScanEnabled checkboxes. The row is editable: toggling persists via `POST /api/TeamStatus/Workers/<name>/Capability` with `{"NvencCapable": true|false}`. The endpoint's `AllowedColumns` set is extended to include `NvencCapable`. `GetWorkers` GET payload returns `NvencCapable` as a boolean field on each worker row. Verifiable: open the dot-worker-1 modal; toggle NvencCapable off; query `SELECT nvenccapable FROM Workers WHERE WorkerName='dot-worker-1'` returns FALSE; within one poll tick the worker stops claiming NVENC jobs.
-
-C8. **Operator-visible gating reason on the worker tile.** When `nvenccapable=FALSE` AND `AllowedProfiles` contains at least one profile with `Profiles.usenvidiahardware=1`, the worker tile renders a small warning badge: `NVENC profiles selected but worker has no NVENC capability -- claims will silently no-op until nvenccapable is enabled`. Verifiable: visual check on dot-worker-1 modal AFTER toggling nvenccapable=FALSE while NVENC profiles remain in AllowedProfiles.
-
-### E. End-to-end smoke + cross-feature doc updates
-
-C9. **Smoke test.** With dot configured per C1-C5 + `Status='Online'` + `nvenccapable=TRUE` (auto-detected), a queued NVENC profile job (`NVENC AV1 P7 CANARY VBR -720p` or similar) is claimed and completed by dot-worker-1 within bring-up budget (5 minutes for the encode). Result: `TranscodeAttempts.WorkerName='dot-worker-1' AND Success=TRUE AND NewSizeBytes > 0`; the output `.mp4` plays correctly. Verifiable: synthetic single-row queue test from operator; observe the row.
-
-C10. `Features/Profiles/nvenc-profiles.feature.md` updated to remove the "I9-2024 only" constraint from criteria 2 and 3. Replace with a reference to this directive: "Workers with NVIDIA hardware auto-detect via `linux-nvenc-passthrough` -- nvenccapable is hardware-driven, not host-pinned." Verifiable: `git diff Features/Profiles/nvenc-profiles.feature.md` shows the updated text.
-
-C11. `Tests/Contract/TestClaimAuthority.py` extended with a test that exercises the new `nvenccapable` truth table: NVENC profile + nvenccapable=TRUE -> claim; NVENC profile + nvenccapable=FALSE -> no claim; non-NVENC profile + nvenccapable=any -> claim if other gates pass. Verifiable: `py -m pytest Tests/Contract/TestClaimAuthority.py -v` passes the new test against current main.
+C9. **Smoke test.** With dot configured per C1-C5 + `Status='Online'` + `nvenccapable=TRUE` (set by the probe script), a queued NVENC profile job (`NVENC AV1 P7 CANARY VBR -720p` or similar) is claimed and completed by dot-worker-1 within bring-up budget (5 minutes for the encode). Result: `TranscodeAttempts.WorkerName='dot-worker-1' AND Success=TRUE AND NewSizeBytes > 0`; the output `.mp4` plays correctly. Verifiable: synthetic single-row queue test from operator; observe the row.
 
 ## Out of Scope
 
+- **GUI capability toggle for nvenccapable** (originally drafted as C7). The probe script writes the flag deterministically per host hardware; no operator-visible toggle is required to make dot encode NVENC. Worker-routing C15 (operator-visible gating reason) is reopened separately when the strict NVENC path is shipping; this directive does not bundle that work.
+- **Worker-tile warning badge for misconfig** (originally drafted as C8). Same reason -- this is worker-routing's C15 territory and unrelated to making dot encode.
+- **`nvenc-profiles.feature.md` doc cleanup** (originally drafted as C10). The "I9-only" wording is misleading post-shipping but is doc hygiene, not functional. Lands in a follow-up.
+- **TestClaimAuthority NVENC truth-table test** (originally drafted as C11). Coverage extension; not a precondition for dot encoding NVENC.
 - **wakko NVENC.** wakko (Ryzen 7 3700X) has no NVIDIA hardware. No work needed there. If wakko gets a GPU in the future, this directive's mechanism (inventory `gpu = "nvidia"` + auto-detect) handles it for free.
 - **LXC GPU passthrough.** Larry runs LXC. NVIDIA passthrough into LXC requires kernel module + cgroup config changes on the Proxmox host that are outside the bootstrap script's scope. If larry ever gets NVENC, a separate directive owns that.
 - **AMD VAAPI / Intel QSV.** Other hardware encoders are separate capability flags (not adding `vaapi_capable`, `qsv_capable` columns here). One bridge at a time.
@@ -97,13 +91,8 @@ Active 2026-06-08 -- phase: NEEDS_PLAN. Directive just opened; criteria + Files 
 | 2 | `infrastructure/terraform/inventory.toml` | EDIT (add `gpu = "nvidia"` to dot entry) | N/A (TOML; R15 does not apply) | R11: re-runnable. |
 | 3 | `deploy/compose-templates/dot.yml` | EDIT (add `gpus: all` under x-worker) | N/A (YAML; R15 does not apply) | One-line addition. |
 | 4 | `deploy/Dockerfile` | EDIT or VERIFY (NVENC runtime libs if needed; verify if not) | N/A (Dockerfile; R15 does not apply) | R11: build is idempotent. |
-| 5 | `WorkerService/Main.py` (or equivalent startup module) | EDIT (add `_ProbeNvencCapability()` + persist on startup) | `C5`/`C6` on the probe function | R3: stateless. R12: one-line docstring. |
-| 6 | `Features/TeamStatus/TeamStatusController.py` | EDIT (`GetWorkers` SELECT + payload; `SetWorkerCapability` AllowedColumns + response) | `C7` on each touched def (comma-separated with existing anchors) | R12: edit-region only. |
-| 7 | `Templates/Activity.html` | EDIT (CapabilityRow for NvencCapable + worker-tile warning badge for nvenccapable=FALSE + NVENC-in-AllowedProfiles state) | N/A (HTML; R15 does not apply) | R1: colocated feature doc read this session. |
-| 8 | `Tests/Contract/TestClaimAuthority.py` | EDIT (add `test_nvenccapable_truth_table`) | `C11` on the new test function | R8: under Tests/Contract/. R12: one-line docstring. |
-| 9 | `Tests/Contract/TestNvencPassthrough.py` | NEW | `C5`/`C6`/`C9` distributed | R8: under Tests/Contract/. Smoke test against dot in CI/operator mode. |
-| 10 | `Features/Profiles/nvenc-profiles.feature.md` | EDIT (remove I9-only constraint from C2/C3; cross-link this directive) | N/A (feature doc) | R14: replace in place; no annotation lines. |
-| 11 | `memory/KNOWN-ISSUES.md` | EDIT (remove BUG-0047 at directive close per C8) | N/A (memory) | At DELIVERING, not now. |
+| 5 | `Scripts/ReconcileNvencCapability.py` | NEW | `C5`/`C6` on `Main()` | Standalone. No Main.py edit needed (SRP-clean). Operator runs after deploy; idempotent. |
+| 6 | `memory/KNOWN-ISSUES.md` | EDIT (remove BUG-0047 at directive close if smoke succeeds) | N/A (memory) | At DELIVERING, not now. |
 
 ### Hook Conformance Pre-Flight
 
