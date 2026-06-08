@@ -952,6 +952,7 @@ var ActivityPage = (function() {
                 CapabilityRow('QualityTestEnabled', 'VMAF', W.QualityTestEnabled, 'MaxConcurrentQualityTestJobs', W.MaxConcurrentQualityTestJobs || 2, WorkerNameJs) +
                 CapabilityRow('RemuxEnabled', 'Quick (audio + remux)', W.RemuxEnabled, 'MaxConcurrentRemuxJobs', W.MaxConcurrentRemuxJobs || 2, WorkerNameJs) +
                 CapabilityRow('ScanEnabled', 'Scan', W.ScanEnabled, null, null, WorkerNameJs) +
+                CapabilityRow('NvencCapable', 'NVENC capable', W.NvencCapable, null, null, WorkerNameJs) +
             '</div>' +
             ProfilesSection(W, WorkerNameJs) +
             LocalStagingSection(W, WorkerNameJs) +

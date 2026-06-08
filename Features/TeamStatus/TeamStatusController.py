@@ -7,6 +7,7 @@ from flask import Blueprint, request, jsonify
 from Repositories.DatabaseManager import DatabaseManager
 from Services.LoggingService import LoggingService
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+from Features.TeamStatus.TeamStatusRepository import TeamStatusRepository, CAPABILITY_COLUMNS
 
 # Directive 2026-05-27: cache last (ProcessedFiles, ProbedFiles, LastUpdated)
 # per scan JobId so files-per-second can be computed as a rolling delta against
@@ -436,22 +437,10 @@ def GetWorkers():
         LoggingService.LogFunctionEntry("GetWorkers", "TeamStatusController")
 
         DbManager = DatabaseManager()
+        TeamStatusRepo = TeamStatusRepository(DbManager.DatabaseService)
 
         IncludeDisabled = request.args.get('IncludeDisabled', 'false').lower() == 'true'
-        Query = """
-            SELECT WorkerName, Platform, Status, LastHeartbeat,
-                   MaxConcurrentJobs, MaxCpuThreads, AcceptsInterlaced,
-                   TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled,
-                   MaxConcurrentTranscodeJobs, MaxConcurrentQualityTestJobs, MaxConcurrentRemuxJobs,
-                   Enabled,
-                   Version, BuildInfo,
-                   MountValidationError,
-                   EXTRACT(EPOCH FROM (NOW() - LastHeartbeat)) AS HeartbeatAgeSec
-            FROM Workers
-            {where}
-            ORDER BY WorkerName
-        """.format(where='' if IncludeDisabled else 'WHERE Enabled = TRUE')
-        Rows = DbManager.DatabaseService.ExecuteQuery(Query)
+        Rows = TeamStatusRepo.GetAllWorkerRows(IncludeDisabled)
 
         # Directive 2026-05-27 criterion 20: per-worker scan posture for the
         # /Activity worker-tile "Scan:" line. One round-trip across all workers
@@ -508,6 +497,7 @@ def GetWorkers():
                 "QualityTestEnabled": bool(Row.get('QualityTestEnabled', False)),
                 "ScanEnabled": ScanEnabled,
                 "RemuxEnabled": bool(Row.get('RemuxEnabled', True)),
+                "NvencCapable": bool(Row.get('nvenccapable', False)),
                 "MaxConcurrentTranscodeJobs": Row.get('MaxConcurrentTranscodeJobs') or 1,
                 "MaxConcurrentQualityTestJobs": Row.get('MaxConcurrentQualityTestJobs') or 2,
                 "MaxConcurrentRemuxJobs": Row.get('MaxConcurrentRemuxJobs') or 2,
@@ -676,7 +666,7 @@ def SetWorkerCapability(WorkerName):
         LoggingService.LogFunctionEntry("SetWorkerCapability", "TeamStatusController")
 
         Data = request.get_json() or {}
-        AllowedColumns = {'TranscodeEnabled', 'QualityTestEnabled', 'ScanEnabled', 'RemuxEnabled'}
+        AllowedColumns = set(CAPABILITY_COLUMNS)
         UpdateColumns = {k: v for k, v in Data.items() if k in AllowedColumns}
         if not UpdateColumns:
             return jsonify({"Success": False, "Message": f"Provide at least one of: {', '.join(sorted(AllowedColumns))}"}), 400
@@ -687,27 +677,18 @@ def SetWorkerCapability(WorkerName):
                 return jsonify({"Success": False, "Message": f"{Key} must be true, false, or null"}), 400
 
         DbManager = DatabaseManager()
-        CheckRows = DbManager.DatabaseService.ExecuteQuery("SELECT 1 FROM Workers WHERE WorkerName = %s", (WorkerName,))
-        if not CheckRows:
+        TeamStatusRepo = TeamStatusRepository(DbManager.DatabaseService)
+        if not TeamStatusRepo.WorkerExists(WorkerName):
             return jsonify({"Success": False, "Message": f"Worker '{WorkerName}' not found"}), 404
 
-        SetClauses = ", ".join(f"{Col} = %s" for Col in UpdateColumns.keys())
-        Params = tuple(UpdateColumns.values()) + (WorkerName,)
-        UpdateQuery = f"UPDATE Workers SET {SetClauses} WHERE WorkerName = %s"
-        DbManager.DatabaseService.ExecuteNonQuery(UpdateQuery, Params)
+        TeamStatusRepo.UpdateWorkerCapability(WorkerName, UpdateColumns)
 
         LoggingService.LogInfo(
             f"Worker '{WorkerName}' capabilities updated: {UpdateColumns}",
             "TeamStatusController", "SetWorkerCapability"
         )
 
-        # Return the updated row so the UI can reflect the new state immediately
-        # without re-fetching the whole worker list.
-        FreshRows = DbManager.DatabaseService.ExecuteQuery(
-            "SELECT WorkerName, TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled FROM Workers WHERE WorkerName = %s",
-            (WorkerName,)
-        )
-        Fresh = FreshRows[0] if FreshRows else {}
+        Fresh = TeamStatusRepo.GetWorkerCapabilities(WorkerName)
         return jsonify({
             "Success": True,
             "Message": f"Worker '{WorkerName}' capabilities updated",
@@ -718,6 +699,7 @@ def SetWorkerCapability(WorkerName):
                 "QualityTestEnabled": bool(Fresh.get('QualityTestEnabled')) if Fresh.get('QualityTestEnabled') is not None else None,
                 "ScanEnabled": bool(Fresh.get('ScanEnabled')) if Fresh.get('ScanEnabled') is not None else None,
                 "RemuxEnabled": bool(Fresh.get('RemuxEnabled')) if Fresh.get('RemuxEnabled') is not None else None,
+                "NvencCapable": bool(Fresh.get('nvenccapable')) if Fresh.get('nvenccapable') is not None else None,
             }
         })
 
