@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-08
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Closed 2026-06-08 -- 6/6 IMPLEMENTED (strict path); 4 amended-out items deferred to worker-routing reopen
 **Slug:** linux-nvenc-passthrough
 **Interrupts:** worker-routing (paused at `.claude/directives/paused/2026-06-08-worker-routing.md`; resume by un-pausing after this closes -- the C15 GUI toggle work for nvenccapable lands here as C5 and worker-routing closes when this does)
 
@@ -107,8 +107,28 @@ Easy-to-forget rules:
 
 ### Promotions
 
-(populated at DELIVERING)
+| Source | Target | Commit |
+|---|---|---|
+| C1 host-install logic | `infrastructure/terraform/mediavortex-bare-metal-bootstrap.py` (`ensure_nvidia_container_toolkit`) | `b5ee6bc` (infra `feat/porky-fan-audit`) |
+| C2 inventory `gpu` field | `infrastructure/terraform/inventory.toml` | `e109b52`, `5da6f84` (infra) |
+| C3 compose GPU reservation | `deploy/compose-templates/dot.yml` | `b39030b` (main) |
+| C5/C6 probe | `Scripts/ReconcileNvencCapability.py` | `6b5baf4` (main) |
+| Deploy-time probe SRP win | `memory/feedback_deploy_time_capability_probe.md` | this commit |
 
 ### Verification
 
-(populated at VERIFYING)
+| # | Status | Evidence |
+|---|---|---|
+| C1 | IMPLEMENTED | Bootstrap run on dot installed nvidia-container-toolkit; `ssh root@dot 'docker info'` shows `Runtimes: runc io.containerd.runc.v2 nvidia`; CDI devices exported; `nvidia-smi` on host returns RTX 4060. |
+| C2 | IMPLEMENTED | `gpu = "nvidia"` present on dot entry in `inventory.toml`. |
+| C3 | IMPLEMENTED | `deploy.resources.reservations.devices` with `driver: nvidia` in `dot.yml`; redeploy succeeded; 4 workers running on `6b5baf4`. |
+| C4 | IMPLEMENTED | `ssh root@dot 'docker exec mediavortex-worker-1-1 ffmpeg -encoders'` shows `av1_nvenc`, `h264_nvenc`, `hevc_nvenc`. |
+| C5/C6 | IMPLEMENTED | Probe ran idempotently: 1 row no-change, 3 UPDATEs. Final `SELECT nvenccapable FROM Workers WHERE WorkerName LIKE 'dot-%'` = all TRUE. Re-run = all no-change. |
+| C9 | IMPLEMENTED | Operator-confirmed: "it's claiming and running NVENC now." dot-worker-1 Online + claiming + processing NVENC jobs successfully. |
+
+### Decisions Made
+
+- **Deploy-time probe, not in-process startup probe.** Main.py has accumulated pre-existing R12 violations (multi-line docstrings) that would have blocked a startup-time probe edit. Probe became a standalone `Scripts/ReconcileNvencCapability.py` that the operator (or future deploy script integration) runs post-`docker compose up`. SRP-clean, zero Main.py edits.
+- **Scope amended mid-flight to strict path.** Original C7/C8 (GUI capability toggle + tile warning badge) and C10/C11 (doc cleanup + test coverage) were not required to make dot encode NVENC. Operator redirected ("DO NOT TOUCH OTHER FILES") after the 13-refusal R1-storm on `TeamStatusController.py`. Out-of-scope items move to `worker-routing` reopen.
+- **`inventory.toml` for dot also got fixed inline.** Pre-existing `10.0.0.61`-retired-host fstab entries surfaced during the bootstrap run when the managed block tried to mount the dead hosts. Operator opted to fix inventory to match real porky mounts (commit `5da6f84`) so future bootstrap regenerates a correct managed block.
+- **No worker-routing C15 closure here.** worker-routing reopen owns the operator-visibility GUI work (nvenccapable checkbox + warning badge). This directive closes BUG-0047's *root cause* (dot can now actually run NVENC); BUG-0047's *operator-visibility* fix stays open in worker-routing.
