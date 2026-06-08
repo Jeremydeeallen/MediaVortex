@@ -9,7 +9,7 @@ Splits the single "Next Batch" card on the Media -> Transcode pane into two stac
 1. **TV - Next Batch** (top) -- the existing card, drive filter pinned to `T:`. Renamed from "Next Batch."
 2. **Movies - Next Batch** (directly below) -- new card, same format, drive filter pinned to `M:`.
 
-Both cards consume the same `/api/ShowSettings/SmartPopulate` endpoint with different `Drive` parameter values. The endpoint already supports per-drive filtering (`SmartPopulateQueue` line ~303); no new server code is required.
+Both cards consume the same `/api/ShowSettings/NextTranscodeBatch` endpoint with different `Drive` parameter values. The endpoint is a dedicated transcode-tab read path: WHERE `NeedsTranscode = TRUE` AND not-in-queue AND `SizeMB > 0` AND `HasExplicitEnglishAudio IS NOT FALSE`, ORDER BY `SizeMB DESC NULLS LAST`, count via `COUNT(*) OVER()` window (single roundtrip). Backed by partial index `idx_mediafiles_next_transcode_batch ON MediaFiles (SizeMB DESC NULLS LAST) WHERE NeedsTranscode = TRUE AND SizeMB > 0 AND HasExplicitEnglishAudio IS NOT FALSE`.
 
 Each card maintains its own state (offset, batch items, search term, batch size). Search/size changes on one card do not affect the other. The "Add Batch" button on each card scopes admission to that card's items only.
 
@@ -29,7 +29,7 @@ Operator dogfood (2026-05-30). With TV and Movies on different drives, a single 
 
 ### Behavior
 
-4. On page load, both cards auto-populate: TV card calls SmartPopulate with `Drive='T:'`, Movies card calls SmartPopulate with `Drive='M:'`. Independently. Verifiable: open `/media#transcode`, observe both cards finish loading within a few seconds; check `Logs` for two SmartPopulate calls with different Drive params.
+4. On page load, both cards auto-populate: TV card calls `NextTranscodeBatch` with `Drive='T:'`, Movies card calls `NextTranscodeBatch` with `Drive='M:'`. Independently. Verifiable: open `/media#transcode`, observe both cards finish loading within a few seconds; check `Logs` for two `NextTranscodeBatch` calls with different Drive params.
 
 5. Each card maintains independent state -- offset for pagination, batch items selected, search text, sticky batch size. Editing the TV search box does NOT trigger a Movies refresh, and vice versa. Verifiable: type in TV search box, observe Movies BatchInfo line unchanged; check that the Movies AJAX request is NOT fired.
 
@@ -39,11 +39,13 @@ Operator dogfood (2026-05-30). With TV and Movies on different drives, a single 
 
 8. The Drive value sent by each card is hardcoded at the call site (`'T:'` for TV, `'M:'` for Movies). No UI surface lets the operator swap a card's drive -- if they want a different drive's next batch, they need a different card. Verifiable: grep the template JS for `Drive: 'T:'` (in `SmartPopulate`) and `Drive: 'M:'` (in `SmartPopulateMovies`); no UI selector binds to either.
 
-### Endpoint compatibility
+### Endpoint shape
 
-9. The endpoint `POST /api/ShowSettings/SmartPopulate` already accepts a `Drive` parameter (verified in `QueueManagementBusinessService.SmartPopulateQueue` -- the `WhereSql += " AND m.FilePath LIKE %s ESCAPE '!'"` branch fires when `Drive` is provided). No server-side change is required for this feature. Verifiable: grep `QueueManagementBusinessService.py` for the existing Drive handling -- unchanged.
+9. The endpoint `POST /api/ShowSettings/NextTranscodeBatch` accepts `Drive`, `Limit` (1-1000), `Offset`, `Search` (max 100 chars). The SQL has no `PriorityScore`, no `Mode`/`Focus` branching, no `SmartPopulate`-style mode multiplexer -- it is single-purpose. Verifiable: grep `QueueManagementBusinessService.NextTranscodeBatch` and confirm the `WHERE m.NeedsTranscode = TRUE` clause + `ORDER BY m.SizeMB DESC NULLS LAST`; no `PriorityScore` token appears in the function body.
 
-10. The TV card continues to use `Mode='Transcode'` (no change from the pre-feature behavior). The Movies card also sends `Mode='Transcode'`. Verifiable: inspect both AJAX payloads.
+10. Neither card sends a `Mode` parameter (the endpoint is transcode-only by construction). Verifiable: inspect both AJAX payloads -- only `Drive`, `Limit`, `Offset`, `Search`.
+
+11. EXPLAIN ANALYZE on the `NextTranscodeBatch` SQL (no Drive, no Search) shows an `Index Scan` or `Bitmap Index Scan` on `idx_mediafiles_next_transcode_batch` rather than `Seq Scan on mediafiles`. Verifiable: `py Scripts/SQLScripts/AddNextTranscodeBatchIndex.py` prints the post-create EXPLAIN.
 
 ## Surface
 
@@ -76,7 +78,10 @@ Features/TranscodeQueue/next-batch-per-drive.feature.md    -- this file
 
 | File | Role |
 |------|------|
-| `Templates/ShowSettings.html` | DOM: TV card renamed + Movies card added below. JS: parallel state + functions for Movies (same shape as the existing Remux card pattern -- `Card 1.5: Next Remux Batch (parallel to SmartPopulate / RenderBatch / AddBatchToQueue)` is the model). On-init triggers both populates. Sticky size handled per card. |
+| `Templates/ShowSettings.html` | DOM: TV + Movies cards stacked. JS: `SmartPopulate()` / `SmartPopulateMovies()` POST `/api/ShowSettings/NextTranscodeBatch` with hardcoded Drive. Each card maintains independent state (`AllSuggestions` / `MoviesAllSuggestions`, offsets, sticky sizes under `ShowSettings.BatchSize` and `ShowSettings.MoviesBatchSize`). Priority column removed -- size order is the contract. |
+| `Features/ShowSettings/ShowSettingsController.py` | `POST /api/ShowSettings/NextTranscodeBatch` route: validates `Limit` / `Offset` / `Drive` / `Search` (max 100 chars), delegates to `QueueManagementBusinessService.NextTranscodeBatch`. |
+| `Features/TranscodeQueue/QueueManagementBusinessService.py` | `NextTranscodeBatch(Limit, Offset, Drive, Search)`: WHERE `NeedsTranscode = TRUE AND NOT in queue AND SizeMB > 0 AND HasExplicitEnglishAudio IS NOT FALSE`, optional Drive (StorageRootId lookup) and Search (LOWER LIKE on FileName / first RelativePath segment, `EscapeLikePattern` + `ESCAPE '!'`), ORDER BY `SizeMB DESC NULLS LAST`, `COUNT(*) OVER()` window for `TotalCandidates` (single roundtrip). Returns `{Success, Suggestions[], TotalCandidates, Offset, Limit, Search, HasMore}`. No `PriorityScore` field in the response. |
+| `Scripts/SQLScripts/AddNextTranscodeBatchIndex.py` | Idempotent migration: `CREATE INDEX IF NOT EXISTS idx_mediafiles_next_transcode_batch ON MediaFiles (SizeMB DESC NULLS LAST) WHERE NeedsTranscode = TRUE AND SizeMB > 0 AND HasExplicitEnglishAudio IS NOT FALSE`. Prints post-create EXPLAIN ANALYZE. |
 
 ## Deviation from conventions
 

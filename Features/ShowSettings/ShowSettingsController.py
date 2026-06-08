@@ -192,6 +192,27 @@ def SmartPopulateQueue():
         return jsonify({'Success': False, 'Message': str(Ex)}), 500
 
 
+@ShowSettingsBlueprint.route('/NextTranscodeBatch', methods=['POST'])
+def NextTranscodeBatch():
+    """Largest non-compliant transcode candidates -- WHERE NeedsTranscode ORDER BY SizeMB DESC."""
+    try:
+        Data = request.get_json() or {}
+        Limit = Data.get('Limit', 100)
+        Offset = Data.get('Offset', 0)
+        Drive = Data.get('Drive', '')
+        Search = Data.get('Search', '') or ''
+        if isinstance(Search, str) and len(Search) > 100:
+            Search = Search[:100]
+
+        from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+        Service = QueueManagementBusinessService()
+        Result = Service.NextTranscodeBatch(Limit=Limit, Offset=Offset, Drive=Drive, Search=Search)
+        return jsonify(Result)
+    except Exception as Ex:
+        LoggingService.LogException("Exception in NextTranscodeBatch", Ex, "ShowSettingsController", "NextTranscodeBatch")
+        return jsonify({'Success': False, 'Message': str(Ex)}), 500
+
+
 @ShowSettingsBlueprint.route('/QueueByFolder', methods=['POST'])
 def QueueByFolder():
     """Queue all untranscoded files for specified show/media folders.

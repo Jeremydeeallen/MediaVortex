@@ -19,7 +19,7 @@
                 <div>
                     <h5 class="mb-0 d-inline">TV - Next Batch</h5>
                     <span id="BatchCount" class="badge bg-light text-primary ms-2">0</span>
-                    <small class="fw-normal ms-2 opacity-75" style="font-size: 0.75rem;">Ranked by post-transcode impact</small>
+                    <small class="fw-normal ms-2 opacity-75" style="font-size: 0.75rem;">Largest non-compliant first</small>
                 </div>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <input id="BatchSearch" type="search" class="form-control form-control-sm" placeholder="Search title or file..." style="width: 200px;" maxlength="100">
@@ -51,7 +51,6 @@
                     <thead class="table-light">
                         <tr>
                             <th style="width: 30px;"></th>
-                            <th style="width: 70px;" class="text-center">Priority</th>
                             <th>Title</th>
                             <th>File</th>
                             <th style="width: 90px;" class="text-end">Size</th>
@@ -61,11 +60,11 @@
                         </tr>
                     </thead>
                     <tbody id="BatchTableBody">
-                        <tr><td colspan="8" class="text-center py-3 text-muted">Analyzing...</td></tr>
+                        <tr><td colspan="7" class="text-center py-3 text-muted">Analyzing...</td></tr>
                     </tbody>
                     <tfoot class="table-light">
                         <tr class="fw-bold">
-                            <td colspan="2"></td>
+                            <td></td>
                             <td colspan="2">Batch Total</td>
                             <td id="BatchTotalSize" class="text-end"></td>
                             <td colspan="3"></td>
@@ -83,7 +82,7 @@
                 <div>
                     <h5 class="mb-0 d-inline">Movies - Next Batch</h5>
                     <span id="MoviesBatchCount" class="badge bg-light text-primary ms-2">0</span>
-                    <small class="fw-normal ms-2 opacity-75" style="font-size: 0.75rem;">Ranked by post-transcode impact</small>
+                    <small class="fw-normal ms-2 opacity-75" style="font-size: 0.75rem;">Largest non-compliant first</small>
                 </div>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <input id="MoviesBatchSearch" type="search" class="form-control form-control-sm" placeholder="Search title or file..." style="width: 200px;" maxlength="100">
@@ -115,7 +114,6 @@
                     <thead class="table-light">
                         <tr>
                             <th style="width: 30px;"></th>
-                            <th style="width: 70px;" class="text-center">Priority</th>
                             <th>Title</th>
                             <th>File</th>
                             <th style="width: 90px;" class="text-end">Size</th>
@@ -125,11 +123,11 @@
                         </tr>
                     </thead>
                     <tbody id="MoviesBatchTableBody">
-                        <tr><td colspan="8" class="text-center py-3 text-muted">Analyzing...</td></tr>
+                        <tr><td colspan="7" class="text-center py-3 text-muted">Analyzing...</td></tr>
                     </tbody>
                     <tfoot class="table-light">
                         <tr class="fw-bold">
-                            <td colspan="2"></td>
+                            <td></td>
                             <td colspan="2">Batch Total</td>
                             <td id="MoviesBatchTotalSize" class="text-end"></td>
                             <td colspan="3"></td>
@@ -809,12 +807,11 @@ function SmartPopulate(IsNextPage) {
         Drive: 'T:',
         Limit: BATCH_SIZE,
         Offset: CurrentOffset,
-        Search: CurrentSearch || '',
-        Mode: 'Transcode'
+        Search: CurrentSearch || ''
     };
 
     $.ajax({
-        url: '/api/ShowSettings/SmartPopulate',
+        url: '/api/ShowSettings/NextTranscodeBatch',
         method: 'POST',
         contentType: 'application/json',
         data: JSON.stringify(Payload),
@@ -836,7 +833,7 @@ function SmartPopulate(IsNextPage) {
                 const FilterText = CurrentSearch
                     ? ' matching "' + EscapeHtml(CurrentSearch) + '"'
                     : '';
-                $('#BatchInfo').html('<small><strong>' + TotalCandidates.toLocaleString() + '</strong> candidates' + FilterText + '. Showing top ' + BATCH_SIZE + ' by priority.</small>');
+                $('#BatchInfo').html('<small><strong>' + TotalCandidates.toLocaleString() + '</strong> candidates' + FilterText + '. Showing top ' + BATCH_SIZE + ' by size.</small>');
                 RenderBatch();
             } else {
                 ShowNotification('Batch error: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
@@ -1278,7 +1275,7 @@ function RenderBatch() {
         const EmptyMsg = CurrentSearch
             ? 'No matches for "' + EscapeHtml(CurrentSearch) + '"'
             : 'Batch is empty';
-        Tbody.html('<tr><td colspan="8" class="text-center py-3 text-muted">' + EmptyMsg + '</td></tr>');
+        Tbody.html('<tr><td colspan="7" class="text-center py-3 text-muted">' + EmptyMsg + '</td></tr>');
         $('#BatchTotalSize').text('');
         return;
     }
@@ -1288,12 +1285,8 @@ function RenderBatch() {
 
     BatchItems.forEach(function(S, Idx) {
         TotalSize += S.SizeMB;
-        const PriorityCell = (S.PriorityScore != null)
-            ? '<span class="badge ' + GetPriorityBadgeClass(S.PriorityScore) + '">' + S.PriorityScore + '</span>'
-            : '<span class="text-muted small">-</span>';
         Html += '<tr>'
             + '<td><button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="RemoveFromBatch(' + Idx + ')" title="Remove">x</button></td>'
-            + '<td class="text-center">' + PriorityCell + '</td>'
             + '<td>' + EscapeHtml(S.ShowName) + '</td>'
             + '<td title="' + EscapeAttr(S.FilePath) + '">' + EscapeHtml(S.FileName) + '</td>'
             + '<td class="text-end">' + FormatSize(S.SizeMB) + '</td>'
@@ -1383,12 +1376,11 @@ function SmartPopulateMovies(IsNextPage) {
         Drive: 'M:',
         Limit: MOVIES_BATCH_SIZE,
         Offset: MoviesCurrentOffset,
-        Search: MoviesCurrentSearch || '',
-        Mode: 'Transcode'
+        Search: MoviesCurrentSearch || ''
     };
 
     $.ajax({
-        url: '/api/ShowSettings/SmartPopulate',
+        url: '/api/ShowSettings/NextTranscodeBatch',
         method: 'POST',
         contentType: 'application/json',
         data: JSON.stringify(Payload),
@@ -1410,7 +1402,7 @@ function SmartPopulateMovies(IsNextPage) {
                 const FilterText = MoviesCurrentSearch
                     ? ' matching "' + EscapeHtml(MoviesCurrentSearch) + '"'
                     : '';
-                $('#MoviesBatchInfo').html('<small><strong>' + MoviesTotalCandidates.toLocaleString() + '</strong> candidates' + FilterText + '. Showing top ' + MOVIES_BATCH_SIZE + ' by priority.</small>');
+                $('#MoviesBatchInfo').html('<small><strong>' + MoviesTotalCandidates.toLocaleString() + '</strong> candidates' + FilterText + '. Showing top ' + MOVIES_BATCH_SIZE + ' by size.</small>');
                 RenderMoviesBatch();
             } else {
                 ShowNotification('Movies batch error: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
@@ -1431,7 +1423,7 @@ function RenderMoviesBatch() {
         const EmptyMsg = MoviesCurrentSearch
             ? 'No matches for "' + EscapeHtml(MoviesCurrentSearch) + '"'
             : 'Batch is empty';
-        Tbody.html('<tr><td colspan="8" class="text-center py-3 text-muted">' + EmptyMsg + '</td></tr>');
+        Tbody.html('<tr><td colspan="7" class="text-center py-3 text-muted">' + EmptyMsg + '</td></tr>');
         $('#MoviesBatchTotalSize').text('');
         return;
     }
@@ -1441,12 +1433,8 @@ function RenderMoviesBatch() {
 
     MoviesBatchItems.forEach(function(S, Idx) {
         TotalSize += S.SizeMB;
-        const PriorityCell = (S.PriorityScore != null)
-            ? '<span class="badge ' + GetPriorityBadgeClass(S.PriorityScore) + '">' + S.PriorityScore + '</span>'
-            : '<span class="text-muted small">-</span>';
         Html += '<tr>'
             + '<td><button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="RemoveFromMoviesBatch(' + Idx + ')" title="Remove">x</button></td>'
-            + '<td class="text-center">' + PriorityCell + '</td>'
             + '<td>' + EscapeHtml(S.ShowName) + '</td>'
             + '<td title="' + EscapeAttr(S.FilePath) + '">' + EscapeHtml(S.FileName) + '</td>'
             + '<td class="text-end">' + FormatSize(S.SizeMB) + '</td>'

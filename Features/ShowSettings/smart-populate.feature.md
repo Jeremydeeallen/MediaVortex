@@ -28,6 +28,15 @@ hits routinely.
 User-facing. See `smart-populate.flow.md` for the entry point, stages, and
 failure modes. Criteria below are numbered to map to flow stages.
 
+**Scope note.** The `POST /api/ShowSettings/SmartPopulate` endpoint serves the
+Quick Fix card (`Mode='Quick'` + `Focus`) and the legacy Remux / AudioFix
+modes. The TV / Movies "Next Batch" cards on the Transcode pane are owned by
+`Features/TranscodeQueue/next-batch-per-drive.feature.md` and call the
+purpose-built `POST /api/ShowSettings/NextTranscodeBatch` endpoint (WHERE
+`NeedsTranscode = TRUE`, ORDER BY `SizeMB DESC`). Criteria below that name
+the TV card refer to the surface as it stood when this doc was authored;
+the current Transcode-pane behavior is governed by `next-batch-per-drive`.
+
 ## Success Criteria
 
 ### Stage 1 -- Initial paint

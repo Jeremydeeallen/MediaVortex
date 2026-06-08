@@ -455,6 +455,103 @@ class QueueManagementBusinessService:
             LoggingService.LogException(ErrorMsg, Ex, "QueueManagementBusinessService", "SmartPopulateQueue")
             return {"Success": False, "ErrorMessage": ErrorMsg, "Suggestions": []}
 
+    def NextTranscodeBatch(self, Limit: int = 100, Offset: int = 0, Drive: str = '',
+                            Search: Optional[str] = None) -> Dict[str, Any]:
+        """Largest non-compliant transcode candidates -- WHERE NeedsTranscode ORDER BY SizeMB DESC."""
+        try:
+            LoggingService.LogFunctionEntry("NextTranscodeBatch", "QueueManagementBusinessService", Limit, Offset, Drive, Search)
+            from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
+
+            try:
+                Limit = max(1, min(1000, int(Limit)))
+            except (TypeError, ValueError):
+                Limit = 100
+            try:
+                Offset = max(0, int(Offset))
+            except (TypeError, ValueError):
+                Offset = 0
+
+            Params: List[Any] = []
+            WhereSql = (
+                " WHERE m.NeedsTranscode = TRUE "
+                "AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL) "
+                "AND m.SizeMB > 0 "
+                "AND m.HasExplicitEnglishAudio IS NOT FALSE"
+            )
+
+            if Drive:
+                DrivePrefix = Drive.rstrip(':\\/') + ':'
+                DriveStorageRootId = _ResolveStorageRootIdForDrivePrefixFn(DrivePrefix)
+                if DriveStorageRootId is None:
+                    LoggingService.LogInfo(f"NextTranscodeBatch: Drive {Drive!r} did not match any StorageRoot; returning empty", "QueueManagementBusinessService", "NextTranscodeBatch")
+                    return {"Success": True, "Suggestions": [], "TotalCandidates": 0, "Offset": Offset, "Limit": Limit, "Search": Search or '', "HasMore": False}
+                WhereSql += " AND m.StorageRootId = %s"
+                Params.append(DriveStorageRootId)
+
+            if Search and Search.strip():
+                Term = '%' + EscapeLikePattern(Search.strip().lower()) + '%'
+                WhereSql += (
+                    " AND (LOWER(m.FileName) LIKE %s ESCAPE '!'"
+                    "      OR LOWER(SPLIT_PART(COALESCE(m.RelativePath, ''), '/', 1)) LIKE %s ESCAPE '!')"
+                )
+                Params.append(Term)
+                Params.append(Term)
+
+            Sql = (
+                "SELECT m.Id, m.StorageRootId, m.RelativePath, m.FileName, m.SizeMB, m.VideoBitrateKbps, "
+                "m.Codec, m.Resolution, m.ResolutionCategory, m.ContainerFormat, "
+                "COUNT(*) OVER() AS TotalCount "
+                "FROM MediaFiles m"
+                + WhereSql +
+                " ORDER BY m.SizeMB DESC NULLS LAST "
+                "LIMIT " + str(int(Limit)) + " OFFSET " + str(int(Offset))
+            )
+            Rows = DatabaseService().ExecuteQuery(Sql, tuple(Params))
+
+            TotalCandidates = int(Rows[0].get('TotalCount', 0)) if Rows else 0
+
+            _Prefixes = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _GetStorageRoots()}
+            Suggestions = []
+            for Row in Rows:
+                _Sid = Row.get('StorageRootId')
+                _Rel = Row.get('RelativePath')
+                try:
+                    FilePath = Path(_Sid, _Rel or '').CanonicalDisplay(_Prefixes) if _Sid is not None else ''
+                except PathError:
+                    FilePath = ''
+                FileName = Row.get('FileName', '')
+                ShowName = ExtractShowFolder(FilePath)
+                Suggestions.append({
+                    'MediaFileId': Row.get('Id'),
+                    'FilePath': FilePath,
+                    'FileName': FileName,
+                    'ShowName': ShowName,
+                    'SizeMB': round(float(Row.get('SizeMB', 0) or 0), 1),
+                    'Codec': Row.get('Codec', 'Unknown') or 'Unknown',
+                    'Resolution': Row.get('Resolution', 'Unknown') or 'Unknown',
+                    'ResolutionCategory': Row.get('ResolutionCategory', '') or '',
+                    'BitrateKbps': int(Row.get('VideoBitrateKbps', 0) or 0),
+                    'ContainerFormat': Row.get('ContainerFormat', '') or '',
+                    'Mode': 'Transcode',
+                })
+
+            Result = {
+                "Success": True,
+                "Suggestions": Suggestions,
+                "TotalCandidates": TotalCandidates,
+                "Offset": Offset,
+                "Limit": Limit,
+                "Search": Search or '',
+                "HasMore": (Offset + len(Suggestions)) < TotalCandidates,
+            }
+            LoggingService.LogInfo(f"NextTranscodeBatch: fetched {len(Rows)} of {TotalCandidates} candidates (offset={Offset}, search='{Search or ''}')", "QueueManagementBusinessService", "NextTranscodeBatch")
+            return Result
+
+        except Exception as Ex:
+            ErrorMsg = f"Exception in NextTranscodeBatch: {str(Ex)}"
+            LoggingService.LogException(ErrorMsg, Ex, "QueueManagementBusinessService", "NextTranscodeBatch")
+            return {"Success": False, "ErrorMessage": ErrorMsg, "Suggestions": []}
+
     # PostgreSQL fragment: priority computed inline from MediaFiles.SizeMB
     # using the SizeMB-based fallback formula (matches CalculatePriority's
     # fallback path; verified bit-for-bit against the Python implementation).
