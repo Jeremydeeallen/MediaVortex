@@ -21,7 +21,7 @@ Both use `Profiles.usenvidiahardware=1`. The CommandBuilder NVENC branch hardcod
 ## Success Criteria
 
 1. The two new profiles exist in `Profiles` table with `codec='av1_nvenc'`, `preset=7`, `filmgrain=0`, `usenvidiahardware=1`, and 4 `ProfileThresholds` rows each (one per source resolution tier 480p/720p/1080p/2160p) with `quality=32` and the right `transcodedownto` value.
-2. `Workers.nvenccapable` column exists (boolean, default FALSE). The I9-2024 worker has `nvenccapable=TRUE`. All other workers have `nvenccapable=FALSE`.
+2. `Workers.nvenccapable` column exists (boolean, default FALSE). Workers with NVIDIA hardware are detected via `Scripts/ReconcileNvencCapability.py` (the deploy-time probe shipped in `linux-nvenc-passthrough` 2026-06-08) and reconciled to TRUE; workers without NVENC hardware remain FALSE. Initial migration sets `nvenccapable=TRUE` only for I9-2024 (the original NVENC host); subsequent hosts are auto-detected post-deploy or operator-toggled via the `/Activity` worker modal.
 3. `DatabaseManager.ClaimNextPendingTranscodeJob` claims jobs assigned to NVENC profiles only when the calling worker has `nvenccapable=TRUE`. Non-NVENC profiles claim normally on any TranscodeEnabled worker.
 4. `Models/CommandBuilder.AddCodecParameters` emits the full NVENC quality knob set when `ProfileSettings.UseNvidiaHardware=1`: `-preset p<N> -tune uhq -multipass fullres -rc vbr -b:v 0 -cq <Q> -spatial-aq 1 -temporal-aq 1 -aq-strength 15 -rc-lookahead 32 -bf 7 -b_ref_mode middle`. Preset and Quality come from the profile; the rest are fixed.
 5. `Models/CommandBuilder.AddPixelFormatParameter` emits `-pix_fmt p010le` for NVENC, `-pix_fmt yuv420p10le` for software (existing behavior preserved).
