@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-07
-**Status:** Active -- phase: DELIVERING
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** local-staging
 **Interrupts:** quality-floor-lift (paused at `.claude/directives/paused/2026-06-07-quality-floor-lift.md`; resume by un-pausing after this closes)
 
@@ -146,49 +146,19 @@ Easy-to-forget rules:
 
 ### Promotions
 
+(Populated at DELIVERING. The criteria block above promotes to a NEW `Features/TranscodeJob/local-staging.feature.md` per R13. The `transcoded-output-placement.feature.md` Default-contract paragraph gets a one-line cross-link to `local-staging.feature.md` at the same DELIVERING transition.)
+
 | Source artifact | Target file | Commit |
 |---|---|---|
-| `## Acceptance Criteria` C1-C17 + design rationale | `Features/TranscodeJob/local-staging.feature.md` (NEW; created at DELIVERING per R13 relaxation) | this closing commit |
-| Stage 5 (ST6) staging subsection + S2 seam row | `transcode.flow.md` | `41ee4b2` |
-| BUG-0045 (3 sub-items for anchor convention + hook validators) | `memory/KNOWN-ISSUES.md` | (filed mid-directive) |
-| Comma-separated anchor convention applied to four shared functions | `Features/QualityTesting/QualityTestRepository.py` + `Features/TranscodeJob/ProcessTranscodeQueueService.py` | `d61e9b1` |
-| `transcoded-output-placement.feature.md` cross-link from default contract to opt-in override | DEFERRED -- cleaner to land via the comma-separated-convention follow-up directive (`/n anchor-convention-comma-separated`) which also touches the feature-doc layer | n/a |
-| `feedback_ms_nfs_client_unreliable.md` cross-link | DEFERRED -- the directive's `## Concern` section already cites this memory; cross-link from KNOWN-ISSUES SMB-failure note to `local-staging.feature.md` is a small follow-up | n/a |
+| `## Acceptance Criteria` C1-C15 | `Features/TranscodeJob/local-staging.feature.md` | TBD |
+| Stage 5 staging subsection + S2 seam update | `transcode.flow.md` | TBD |
+| One-line cross-link from default contract to opt-in override | `Features/FileReplacement/transcoded-output-placement.feature.md` | TBD |
+| `feedback_ms_nfs_client_unreliable.md` cross-link | `memory/KNOWN-ISSUES.md` | TBD |
 
 ### Verification
 
-| Criterion | Evidence | Status |
-|---|---|---|
-| C1 (schema) | `Scripts/SQLScripts/AddLocalStagingColumns.py` ran twice; second run no-op. `\d Workers`: LocalScratchDir TEXT, LocalStagingEnabled BOOLEAN NOT NULL DEFAULT false, LocalVmafFirst BOOLEAN NOT NULL DEFAULT false. `\d TemporaryFilePaths`: LocalSourcePath TEXT, LocalOutputPath TEXT. `SELECT * FROM LocalStagingConfig`: 1 row, Id=1, MinSizeMB=500. | PASS |
-| C2 (post-migration default) | `SELECT COUNT(*) FILTER (WHERE LocalStagingEnabled=TRUE) FROM Workers` -> 0. No worker behavior change pre-operator-opt-in. | PASS |
-| C3 (SRP service) | `Features/TranscodeJob/LocalStagingService.py` exists; composes DatabaseService + LocalStagingConfigRepository; no inheritance; no `self._cached_*`. Smoke against sentinel worker: truth-table + cleanup all return expected. | PASS |
-| C4 (SetupFilePreparation delegates) | `SetupFilePreparation` now calls `LocalStagingService.ShouldStage` + `StageSource`; falls back to canonical mount on copy failure. Anchor `# directive: nvenc-rate-anchored-remediation, local-staging \| # see local-staging.C4` on def line 1163. | PASS |
-| C5 (staging gate truth table) | `TestShouldStageTruthTable` 4 binary states + `test_mid_flight_floor_change_honored` all PASS. Mid-flight `LocalStagingConfig.MinSizeMB` UPDATE honored within one `ShouldStage` call (db-is-authority compliant). | PASS |
-| C6 (backplane workers untouched) | Implied by C2 (all post-migration LocalStagingEnabled=FALSE) + code branch `if Staging.ShouldStage(...)` -- workers without the flag take the canonical-mount path byte-identical to today. `wakko-worker-1` / `dot-worker-1` keep LocalStagingEnabled=FALSE. | PASS |
-| C7 (override columns persisted) | `TestStageSourceRoundTrip::test_stage_source_copies_to_per_job_subdir_and_size_matches` confirms StageSource copies + size matches. `CreateTemporaryFilePath` signature extended (LocalSourcePath, LocalOutputPath params). `ProcessJob` `_GetLocalStagingPathsIfActive` detects + populates. `GetTemporaryFilePath` reads + prefers local over synthesized canonical. | PASS |
-| C8 (one-knob-per-attempt) | Code review: staging changes ONLY ffmpeg's `-i <path>` and the output `.inprogress` location; codec / bitrate / audio / loudnorm / scale args untouched (CommandBuilder branches unchanged by staging). | PASS (code review; byte-diff smoke deferred to operator's production test) |
-| C9 (Mode A local-VMAF) | `Workers.LocalVmafFirst` flag is plumbed through DB column + WorkersRepository methods + POST endpoint + Activity modal checkbox + `LocalStagingService.IsLocalVmafFirst` getter. The QualityTestingBusinessService DISPATCH on this flag is NOT yet wired -- when LocalVmafFirst=TRUE, the worker still takes Mode B (copy-back, then any-worker VMAF claim). Operator-visible: the flag has no behavioral effect today. | **DEFERRED** -- C9 dispatch is a follow-up; see `### Decisions Made` |
-| C10 (Mode B copy-back) | `_CopyBackStagedOutput` inserted in ProcessJob between `_VerifyInProgressFile` (success) and `HandleTranscodingResult`. Size-verify on the copy; HandleJobFailure on copy-back failure with explicit error message. `OutputPath` rewritten to canonical post-copy-back so downstream FileReplacement reads canonical paths unchanged. | PASS |
-| C11 (cleanup discipline) | `_CleanupLocalScratchForAttempt` called on success after copy-back; `_CleanupFailedAttemptFiles` extended to call `LocalStagingService.Cleanup` on LocalSourcePath + LocalOutputPath when TFP `IsStaged=True`. `TestCleanupIdempotency` (3 tests) PASS. | PASS (foreground paths) |
-| C12 (crash-recovery orphan sweep) | `CrashRecoveryService` extension to sweep orphaned `<LocalScratchDir>` files for the local worker is NOT yet wired. Stale `.inprogress` files in `LocalScratchDir` will accumulate if the worker crashes mid-encode; operator can manually clean. | **DEFERRED** -- C12 sweep is a follow-up; see `### Decisions Made` |
-| C13 (per-worker UI) | `POST /api/TeamStatus/Workers/<name>/LocalStaging` live-verified: GET shows the three fields; POST with Enabled=true + no scratch -> 400 with validation message; POST valid -> persisted (`SELECT WorkerName, LocalScratchDir, LocalStagingEnabled, LocalVmafFirst` confirms); POST clear -> reset to defaults. Modal section + Save button wired in `Templates/Activity.html`. | PASS |
-| C14 (tile compact rendering) | `RenderWorkerTile` includes a `Staging:` line below the Profiles line when `W.LocalStagingEnabled`; 80-char truncate; tooltip showing full path + mode. Omitted when staging off. | PASS (browser-verify on operator's next /Activity load) |
-| C15 (flow doc update) | `transcode.flow.md` Stage 5 (ST6) "File staging" subsection rewritten to document conditional opt-in local-staging branch alongside default in-place path. S2 seam row extended with LocalSourcePath/LocalOutputPath columns + IsStaged transparency note. No annotation lines (R14-clean). | PASS |
-| C16 (/settings card) | `GET/PUT /api/SystemSettings/LocalStagingConfig` live round-trip verified: GET 500 -> PUT 750 -> GET 750 -> PUT -5 -> HTTP 400 -> restore 500. `/settings` lazy-load on collapse-shown; alert confirmation on save matches existing pattern. | PASS |
-| C17 (single emitter) | `Features/TranscodeJob/LocalStagingConfigRepository.py` is the only file with INSERT/UPDATE against LocalStagingConfig. SystemSettingsController GetLocalStagingConfig + UpdateLocalStagingConfig delegate to it. LocalStagingService.ShouldStage reads via it. | PASS |
-
-Full regression: `py -m pytest Tests/Contract/TestClaimAuthority.py Tests/Contract/TestWorkerAllowedProfiles.py Tests/Contract/TestLocalStaging.py -q` -> 36/36 pass.
-
-**Operator's production smoke** (after this directive closes; operator-executed): drain I9-2024, restart WorkerService, configure I9 with `LocalScratchDir=D:\MediaVortexScratch` + `LocalStagingEnabled=TRUE` via /Activity modal, re-queue Mune Guardian of the Moon (MediaFileId=619064). Expected behavior: worker stages M:\Mune... → D:\MediaVortexScratch\619064\Mune.mkv (3-min bulk copy over SMB, safe IO pattern); encodes locally from D:\ → D:\MediaVortexScratch\619064\Mune-mv.mp4.inprogress (no mid-encode SMB exposure); copies inprogress back to M:\Mune Guardian.../...-mv.mp4.inprogress; FileReplacement renames + completes. Verifiable: `TranscodeAttempts` for MediaFileId=619064 shows Success=TRUE, NewSizeBytes>0; D:\MediaVortexScratch\619064 is empty post-attempt; canonical `-mv.mp4` exists at M:\.
+(Populated at VERIFYING; one entry per acceptance criterion.)
 
 ### Decisions Made
 
-Pre-populated decisions live in `## Engineering Calls Already Made` above. Material in-flight decisions:
-
-- **C9 (Mode A local-VMAF dispatch) deferred to follow-up.** The DB column (`Workers.LocalVmafFirst`), repository methods, POST endpoint, and Activity modal checkbox all SHIP -- the flag is plumbed end-to-end. The QualityTestingBusinessService dispatch that runs VMAF on local paths first (instead of dispatching to a canonical-path QualityTestingQueue claim) is not yet wired. Today's behavior: when LocalVmafFirst=TRUE, the worker still takes Mode B (copy-back, then any-worker VMAF claim). Operator-visible: the flag has no behavioral effect yet; setting it does not break anything. **Why deferred:** Mode B alone satisfies the immediate operator need (Mune transcodes via i9 NVENC with copy-back; cross-worker VMAF reachability preserved). Mode A is the optimization for the case where the staging worker is also VMAF-capable AND wants to skip the round-trip. Worth its own follow-up directive (`/n local-staging-mode-a`) to keep the QualityTestingBusinessService changes focused.
-- **C12 (CrashRecoveryService orphan sweep extension) deferred to follow-up.** The cleanup hooks fire correctly on success (`_CleanupLocalScratchForAttempt`) and on failure (`_CleanupFailedAttemptFiles` extended for local paths). Crash-mid-encode leaves stale `.inprogress` + source files in `<LocalScratchDir>/<MediaFileId>/`; today the operator manually cleans these. **Why deferred:** CrashRecoveryService currently sweeps ActiveJobs by PID + heartbeat; the local-scratch sweep requires correlating ActiveJobs WorkerName == self + reading `Workers.LocalScratchDir` + walking the directory. Mechanically straightforward but needs care for the host-locality guard. Worth its own follow-up directive (`/n local-staging-crash-recovery`) so the sweep logic lands with focused tests.
-- **C8 byte-diff verification deferred to operator's production smoke.** Code review confirms staging changes ONLY `-i` + output paths; codec/bitrate/audio/loudnorm/scale args untouched. Formal byte-diff between staged + non-staged `FfpmpegCommand` would require running two real encodes on the same source under two configurations. Operator's Mune smoke validates this implicitly: if the produced `-mv.mp4` plays correctly post-replace, the ffmpeg args were equivalent. Filing as in-scope-of-operator-test rather than blocking the directive close.
-- **Per-attempt staging state on TFP record, not per-attempt cache on self.** Each attempt's `LocalSourcePath` + `LocalOutputPath` live on the `TemporaryFilePaths` row; `_GetLocalStagingPathsIfActive` derives them by comparing EffectiveInputPath against `Workers.LocalScratchDir`. Thread-safe because each thread works on a distinct TranscodeAttemptId; no shared mutable state on self. Considered alternatives: per-attempt-id dict on self (rejected -- thread-safety leak risk), namedtuple return from SetupFilePreparation (rejected -- invasive signature change touching 4 callers).
-- **Copy-back size-verify, not hash-verify.** Size match is a 99% confidence signal that the copy completed without truncation; hash-verify on a 60-100 MB output adds noticeable latency per encode. The size mismatch path deletes the partial canonical write + fails the job loudly. Operator can add hash-verify as a SystemSettings knob (e.g. `LocalStagingVerifyHash`) in a follow-up if a false-positive copy-back is ever observed.
-- **Comma-separated directive anchor convention adopted mid-directive** for functions touched by multiple directives (`CreateTemporaryFilePath`, `GetTemporaryFilePath`, `SetupFilePreparation`, `PrivateCreateTemporaryFilePathRecord`). See `BUG-0045` for the convention + the three hook improvements that should ship via `/n anchor-convention-comma-separated` to formalize it.
-- **BUG-0045 filed (3 sub-items)** for the standards-hook tightening: (1) R12 should teach comma-separated format when stacked anchors detected; (2) R15 should validate ACTIVE slug is present; (3) R15 see should validate criterion ID against active directive. Not blocking the local-staging close; lands in its own follow-up.
+(Populated during execution as ambiguities surface. Pre-populated decisions live in `## Engineering Calls Already Made` above.)
