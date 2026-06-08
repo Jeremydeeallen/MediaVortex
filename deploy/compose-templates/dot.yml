@@ -1,10 +1,17 @@
-# dot (client-z490v-01, 10.0.0.193, bare-metal)
+# dot (client-z490v-01, 10.0.0.193, bare-metal, NVIDIA RTX 4060)
 # 4 workers on i9-10850K (10C/20T). 5 threads per worker via cpuset (HT pairs).
-# Starting point -- tune cpuset and worker count after first throughput measurement.
+# GPU passthrough: requires nvidia-container-toolkit on the host (per linux-nvenc-passthrough.C1).
 x-worker: &worker-base
   image: mediavortex-worker:latest
   restart: unless-stopped
   stop_grace_period: 30m
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
   environment:
     PYTHONUNBUFFERED: "1"
     MEDIAVORTEX_DB_HOST: "10.0.0.15"
