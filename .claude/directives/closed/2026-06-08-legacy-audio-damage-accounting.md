@@ -124,14 +124,14 @@ Easy-to-forget rules:
 
 | Criterion | Evidence | Status |
 |---|---|---|
-| C1 (identification + CSV) | `Scripts/IdentifyLegacyDamagedMovies.py` ran successfully; `Reports/LegacyAudioDamagedMovies.csv` produced with 22 rows; spot-checked rows pass the targeting predicate (dynamic-mode loudnorm in most-recent attempt, no linear pass since, no SxxEyy in filename, NULL seasonid). | PASS |
-| C2 (KNOWN-ISSUES entry) | `memory/KNOWN-ISSUES.md` BUG-0046 added with all five structured fields: What happened, Scope, Damage profile, Affected file list, Why not remediated. CSV header references BUG-0046. | PASS |
-| C3 (linear-mode happy path test) | `Tests/Contract/TestLinearLoudnormEnforcement.py::test_linear_mode_when_gainable` passes; asserts `linear=true` present, `acompressor` absent, `alimiter` absent. | PASS |
-| C4 (audit tests) | `test_audit_no_legacy_chain_literal` + `test_audit_no_acompressor_in_audio_chains` pass; zero violations in production code; three deferred smoke scripts whitelisted with BUG reference. | PASS |
-| C5 (BuildAudioFilters refuses ungainable-peak) | `test_ungainable_peak_refuses` passes; mock with SourceIntegratedLufs=-30, TruePeak=-3 triggers RuntimeError containing 'ungainable_peak' and the MediaFileId. Code review: dynamic-fallback branch deleted; only linear-mode path remains. | PASS |
-| C6 (admission gate refuses ungainable-peak upstream) | DEFERRED to follow-up. Rationale: C5's RuntimeError holds the safety floor (no silent dynamic-mode emission possible). Upstream gate is defense-in-depth, not damage-prevention. | DEFERRED |
-| C7 (ClipBuilder loudnorm removed) | `Features/ClipBuilder/ClipBuilderBusinessService.py` line 54 hardcoded `-af loudnorm=...` removed; `grep -n loudnorm Features/ClipBuilder/` returns zero matches. | PASS |
-| C8 (smoke scripts loudnorm removed) | 1 of 4 removed (`NewGirlEncodingABC.py`). 3 deferred due to pre-existing R1/R6 hook violations (EncoderShootout.feature.md preread + os.path.exists path-shape on path-named variables). | PARTIAL (1/4 done, 3/4 deferred) |
+| C1 (identification + CSV) | `Scripts/IdentifyLegacyDamagedMovies.py` ran successfully; `Reports/LegacyAudioDamagedMovies.csv` produced with 22 rows; spot-checked rows pass the targeting predicate (dynamic-mode loudnorm in most-recent attempt, no linear pass since, no SxxEyy in filename, NULL seasonid). | IMPLEMENTED |
+| C2 (KNOWN-ISSUES entry) | `memory/KNOWN-ISSUES.md` BUG-0046 added with all five structured fields: What happened, Scope, Damage profile, Affected file list, Why not remediated. CSV header references BUG-0046. | IMPLEMENTED |
+| C3 (linear-mode happy path test) | `Tests/Contract/TestLinearLoudnormEnforcement.py::test_linear_mode_when_gainable` passes; asserts `linear=true` present, `acompressor` absent, `alimiter` absent. | IMPLEMENTED |
+| C4 (audit tests) | `test_audit_no_legacy_chain_literal` + `test_audit_no_acompressor_in_audio_chains` pass; zero violations in production code; three deferred smoke scripts whitelisted with BUG reference. | IMPLEMENTED |
+| C5 (BuildAudioFilters refuses ungainable-peak) | `test_ungainable_peak_refuses` passes; mock with SourceIntegratedLufs=-30, TruePeak=-3 triggers RuntimeError containing 'ungainable_peak' and the MediaFileId. Code review: dynamic-fallback branch deleted; only linear-mode path remains. | IMPLEMENTED |
+| C6 (admission gate refuses ungainable-peak upstream) | DEFERRED to follow-up `/n ungainable-peak-admission-gate`. Rationale: C5's RuntimeError holds the safety floor (no silent dynamic-mode emission possible). Upstream gate is defense-in-depth, not damage-prevention. | NOT STARTED (deferred) |
+| C7 (ClipBuilder loudnorm removed) | `Features/ClipBuilder/ClipBuilderBusinessService.py` line 54 hardcoded `-af loudnorm=...` removed; `grep -n loudnorm Features/ClipBuilder/` returns zero matches. | IMPLEMENTED |
+| C8 (smoke scripts loudnorm removed) | 1 of 4 removed (`NewGirlEncodingABC.py`). 3 deferred to `/n smoke-scripts-cleanup` due to pre-existing R1/R6 hook violations (EncoderShootout.feature.md preread + os.path.exists path-shape on path-named variables). | IMPLEMENTED (1/4); 3/4 NOT STARTED (deferred) |
 
 Full regression: `py -m pytest Tests/Contract/TestLinearLoudnormEnforcement.py Tests/Contract/TestClaimAuthority.py -q` -> 18/18 pass.
 
