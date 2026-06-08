@@ -510,9 +510,9 @@ class CommandBuilder:
         except Exception:
             return Resolution
     
-    # directive: mv-suffix-greedy-collapse
+    # directive: mv-suffix-greedy-collapse, legacy-audio-damage-accounting | # see legacy-audio-damage-accounting.C5
     def BuildAudioFilters(self, MediaFile) -> Optional[str]:
-        """Build the linear-loudnorm audio filter per linear-loudnorm.feature.md. Returns None when AudioNormalizationEnabled is off; raises RuntimeError when measurements missing (defense in depth -- the queue admission gate should have held the file)."""
+        """Build the linear-loudnorm audio filter per linear-loudnorm.feature.md. Returns None when AudioNormalizationEnabled is off; raises RuntimeError when measurements missing or peak is ungainable (defense in depth -- the queue admission gate should have held the file)."""
         from Repositories.DatabaseManager import DatabaseManager
         Db = DatabaseManager()
 
@@ -564,27 +564,24 @@ class CommandBuilder:
             f":{MeasuredArgs}"
         )
 
-        if LinearOk:
-            Filter = f"{Common}:linear=true"
-            LoggingService.LogInfo(
-                f"linear loudnorm: gain={Gain:+.2f} dB, "
-                f"target_LRA={TargetLra:.2f} (source {float(L_Lu):.2f}), "
-                f"MediaFileId={getattr(MediaFile, 'Id', None)}",
-                "CommandBuilder", "BuildAudioFilters",
-            )
-        else:
-            SafetyDb = float(TargetTp) - 2.0
-            SafetyLinear = 10.0 ** (SafetyDb / 20.0)
-            Filter = f"{Common},alimiter=limit={SafetyLinear:.4f}:attack=1:level=0"
-            LoggingService.LogInfo(
-                f"dynamic loudnorm: ungainable peak (would clip at "
-                f"{PredictedPeak:+.2f} dBTP), target_LRA={TargetLra:.2f} "
-                f"(source {float(L_Lu):.2f}), TP-safety alimiter at "
-                f"{SafetyDb:+.1f} dBFS with 1ms attack, "
-                f"MediaFileId={getattr(MediaFile, 'Id', None)}",
-                "CommandBuilder", "BuildAudioFilters",
+        if not LinearOk:
+            MfId = getattr(MediaFile, 'Id', None)
+            raise RuntimeError(
+                f"BuildAudioFilters: ungainable peak for MediaFileId={MfId} "
+                f"(SourceIntegratedLufs={float(I_Lufs):.2f}, gain={Gain:+.2f} dB, "
+                f"predicted_peak={PredictedPeak:+.2f} dBTP > target_TP={TargetTp} dBTP). "
+                f"The admission gate in QueueManagementBusinessService should have deferred "
+                f"this file with AdmissionDeferReason='ungainable_peak'. "
+                f"linear-loudnorm.feature.md: 'Linear or refused -- never quietly different.'"
             )
 
+        Filter = f"{Common}:linear=true"
+        LoggingService.LogInfo(
+            f"linear loudnorm: gain={Gain:+.2f} dB, "
+            f"target_LRA={TargetLra:.2f} (source {float(L_Lu):.2f}), "
+            f"MediaFileId={getattr(MediaFile, 'Id', None)}",
+            "CommandBuilder", "BuildAudioFilters",
+        )
         return Filter
 
     # directive: mv-suffix-greedy-collapse

@@ -51,7 +51,6 @@ class ClipBuilderBusinessService:
                     "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
                     "-g", "120", "-keyint_min", "120",
                     "-c:a", "aac", "-ac", "2", "-b:a", "192k",
-                    "-af", "loudnorm=I=-23:LRA=7:TP=-2",
                     "-movflags", "+faststart",
                     "-y", TempClipPath
                 ]

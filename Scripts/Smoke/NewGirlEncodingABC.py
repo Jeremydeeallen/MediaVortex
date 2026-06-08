@@ -47,7 +47,6 @@ def Encode(V):
         "-svtav1-params", "film-grain=0",
         "-pix_fmt", "yuv420p10le",
         "-c:a", "eac3", "-b:a", "128k",
-        "-af", "loudnorm=I=-23:LRA=7:TP=-2",
         "-movflags", "+faststart",
         "-metadata", "comment=MediaVortex test encode",
         "-y",
