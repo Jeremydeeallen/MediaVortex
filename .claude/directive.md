@@ -1,223 +1,164 @@
 # Current Directive
 
-**Set:** 2026-06-06 (reopened 2026-06-08 to address BUG-0047 -- the C14 claim flow is not actually working as shipped)
-**Status:** Active -- phase: IMPLEMENTING (reopened)
-**Slug:** worker-routing
-**Replaces:** `.claude/directives/paused/2026-06-06-db-maintenance-no-partition.md` (paused mid-IMPLEMENTING; one artifact remaining = `Tests/Contract/TestMaintenanceBaseline.py`; resume by un-pausing after worker-routing closes)
+**Set:** 2026-06-07
+**Status:** Active -- phase: IMPLEMENTING
+**Slug:** local-staging
+**Interrupts:** quality-floor-lift (paused at `.claude/directives/paused/2026-06-07-quality-floor-lift.md`; resume by un-pausing after this closes)
 
 ## Outcome
 
-The operator can pin each worker to a specific subset of `Profiles` via per-worker checkboxes on the `/Activity` modal. The TranscodeQueue claim path filters Pending rows to the calling worker's allowlist. Today's "every transcode-enabled worker is interchangeable" race becomes a per-machine routing decision that takes two clicks to set up and two clicks to change -- including when a new NVENC card lands on a different host later this week. BUG-0043 (NVENC-capable i9 grabbing CPU-only SVT-AV1 jobs) closes as the operator unchecks SVT profiles on i9.
+Re-introduce worker-local staging as an **opt-in, per-worker** pre-flight stage in front of every NVENC (and any other staging-eligible) encode, with the cross-worker VMAF hand-off fix that prevented the original staging design from surviving. A worker with `Workers.LocalStagingEnabled=TRUE` and `Workers.LocalScratchDir` set will (a) bulk-copy the source from the shared mount to local storage before encoding, (b) run ffmpeg with local `-i` and local `.inprogress` output, (c) on encode completion either run VMAF locally first (when `Workers.LocalVmafFirst=TRUE` and the worker is VMAF-capable) or ship the local `.inprogress` back to the canonical side-by-side location so any worker can claim the VMAF row, (d) clean up the local scratch copy on any exit (success, failure, crash recovery). Workers without the flag set follow today's `transcoded-output-placement` contract unchanged -- side-by-side write directly from the shared mount.
 
-The full criteria contract lives in `Features/TranscodeQueue/worker-routing.feature.md` (C1-G14, last edited this directive). This directive doc accretes design rationale, in-flight state, and verification evidence; promotions at DELIVERING move durable content back to the feature doc and `transcode.flow.md`.
+This is the right fix for the I9-2024 / Windows-SMB intermittent-handle failure pattern (Mune Guardian of the Moon: 14 attempts since 2026-05-31, all dying with `EINVAL`-from-mid-encode-SMB-drop). Linux container workers (wakko, dot) on NFS keep the in-place behavior; staging is opt-in and stays off for them.
+
+## Concern
+
+Three concerns motivate this work:
+
+1. **SMB-on-Windows drops long-duration handles.** Per memory `feedback_ms_nfs_client_unreliable.md` (NFS-on-Windows analogue) and operator-confirmed via Mune today: a 4.5 GB Bluray source being read at GPU-paced random-ish IO over SMB drops the file handle ~2 minutes into the encode. FFmpeg returns `AVERROR(EINVAL)` (exit code 4294967274 / -22). Every retry deterministically reproduces the failure. The 10-second probe (short read) succeeds; the long read does not. Bulk sequential copy to local storage uses a different IO pattern that SMB handles reliably.
+
+2. **The original staging design was removed for a real reason.** `Features/FileReplacement/transcoded-output-placement.feature.md` documents the prior removal: "Per-worker scratch dirs were container-local; any other worker that claimed the VMAF row got 'file not found'." The fix back then was to retire staging entirely and write side-by-side on the shared mount so any worker could claim the VMAF row. **This directive does not re-introduce that bug** -- the cross-worker hand-off is solved by either (a) running VMAF on the same worker (Mode A) or (b) shipping the local `.inprogress` back to canonical before enqueueing the VMAF row (Mode B). Operator chooses per worker.
+
+3. **The default-blanket option is wrong.** Forcing every worker through a copy-to-local-then-copy-back roundtrip would cost 1-3 minutes per job for the ~95% of jobs that don't need it (small TV episodes that ffmpeg-over-NFS handles fine). Per-worker opt-in + size-gated activation keeps the cost where the value is. Linux NFS workers stay direct; Windows SMB workers stage.
 
 ## Acceptance Criteria
 
-Authoritative: `Features/TranscodeQueue/worker-routing.feature.md` criteria `C1`-`C14` (canonical IDs grouped under section letters A-G for readability; the IDs themselves are `C<N>` per `.claude/rules/feature-docs.md`). Restated here in compact form for the hook + reviewer:
+### A. Schema
 
-- **C1** (A. Schema). `Workers.AllowedProfiles TEXT NULL` via idempotent migration `Scripts/SQLScripts/AddWorkerAllowedProfiles.py`. NULL = accept all. CSV = explicit allowlist. `""` = accept none.
-- **C2** (B. Claim). `ClaimNextPendingTranscodeJob` WHERE clause gains `(w.AllowedProfiles IS NULL OR mf.AssignedProfile = ANY(string_to_array(w.AllowedProfiles, ',')))`. Single emitter in `Core/Database/WorkerCapabilityPredicate.BuildAllowedProfilesPredicate`.
-- **C3** (B. Claim). NULL-everywhere = today's behavior. EXPLAIN plan parity + 30-min parallel-claim soak within 5% of baseline.
-- **C4** (B. Claim). Mid-flight changes honored within one poll tick (db-is-authority -- no boot cache).
-- **C5** (C. Surface). `/Activity` worker modal renders one checkbox per `Profiles.Name`, state reflects current `AllowedProfiles` (all-checked when NULL, listed when CSV, none when `""`).
-- **C6** (C. Surface). `POST /api/TeamStatus/Workers/<name>/AllowedProfiles` validates against `Profiles.Name` (400 on unknown), normalizes (sort/dedupe; empty list -> `""`; all profiles -> NULL).
-- **C7** (C. Surface). Check-all / Uncheck-all affordances above checkbox list.
-- **C8** (C. Surface). Orthogonality truth table: capability switch AND allowlist must both permit to claim.
-- **C9** (D. Compat). Migration leaves every existing Worker at `AllowedProfiles=NULL` (no behavior change until operator saves).
-- **C10** (D. Compat). Profile rename / delete sweeps every `Workers.AllowedProfiles` CSV in the same transaction.
-- **C11** (E. Observability). Claim log row includes `WorkerName`, `JobId`, `ProfileName`, `WorkerAllowedProfiles` (`<all>` / `<none>` / CSV).
-- **C12** (E. Observability). Worker tile compact one-line rendering of allowlist below capability row (80-char truncate + tooltip).
-- **C13** (F. Flow doc). `transcode.flow.md` updates: (a) the `## Seams` table S1 row (`ST5 -> ST6`) is extended to mention the AllowedProfiles filter alongside the existing `nvenccapable` gate, OR a new S6 row is added for `Workers.AllowedProfiles -> claim filter` -- single-row preferred; (b) the `### Job Claiming Mechanism` prose subsection under `## Service Architecture` notes the new WHERE-clause filter.
-- **C14** (G. Bug closure). BUG-0043 smoke (i9 unchecks SVT profiles -> wakko/dot claim the row within one tick); `memory/KNOWN-ISSUES.md` BUG-0043 entry removed at directive close.
+C1. `Workers` gains three nullable columns via idempotent migration `Scripts/SQLScripts/AddLocalStagingColumns.py`: `LocalScratchDir TEXT NULL`, `LocalStagingEnabled BOOLEAN NOT NULL DEFAULT FALSE`, `LocalVmafFirst BOOLEAN NOT NULL DEFAULT FALSE`. `TemporaryFilePaths` gains `LocalSourcePath TEXT NULL` and `LocalOutputPath TEXT NULL`. The same migration creates `LocalStagingConfig` as a dedicated single-row table: `Id INTEGER PRIMARY KEY DEFAULT 1, MinSizeMB INTEGER NOT NULL DEFAULT 500, LastUpdated TIMESTAMP DEFAULT NOW(), CHECK (Id = 1)` plus a seed `INSERT INTO LocalStagingConfig (Id) VALUES (1) ON CONFLICT DO NOTHING`. All schema operations use `ADD COLUMN IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS` / `ON CONFLICT DO NOTHING`; re-runnable; no-op on second run. Verifiable: `\d Workers`, `\d TemporaryFilePaths`, and `\d LocalStagingConfig` show the columns; `SELECT * FROM LocalStagingConfig` returns one row with `MinSizeMB=500`; re-running the script produces no errors and no duplicate row.
+
+C2. Post-migration default state: every existing Workers row has `LocalStagingEnabled=FALSE`. No worker's behavior changes until operator explicitly enables. Verifiable: `SELECT COUNT(*) FILTER (WHERE LocalStagingEnabled=TRUE) FROM Workers` returns 0 immediately post-migration.
+
+C17. New `Features/TranscodeJob/LocalStagingConfigRepository.py` is the **only emitter of SQL reads/writes against `LocalStagingConfig`**. Shape mirrors `Features/TranscodeQueue/QueueAdmissionConfigRepository.py`: `Get() -> dict` and `Update(MinSizeMB=None) -> bool` (only non-None fields update; `MinSizeMB > 0` validated; `LastUpdated = NOW()` stamped). Composes `DatabaseService`; no inheritance; no caching. Verifiable: `grep -rn 'LocalStagingConfig' --include='*.py'` outside the repository file returns only call-site references (e.g. `LocalStagingConfigRepository().Get()`), zero inline `SELECT` / `UPDATE` statements against the table.
+
+### B. Staging is its own service (SRP)
+
+C3. New `Features/TranscodeJob/LocalStagingService.py` -- single-responsibility module that owns: (a) "should this attempt stage" decision, (b) source copy with verification (size match, SHA-256 optional under `SystemSettings.LocalStagingVerifyHash`), (c) local-path resolution, (d) cleanup on attempt finalize. The service composes `WorkersRepository` + `DatabaseService`; it inherits nothing; it has no `self._cached_*` fields (`.claude/rules/db-is-authority.md`); every staging-decision call reads the Worker config fresh. Verifiable: `grep -n 'class LocalStagingService' Features/TranscodeJob/LocalStagingService.py` returns one match; `grep -n 'self._cached' Features/TranscodeJob/LocalStagingService.py` returns zero.
+
+C4. `ProcessTranscodeQueueService.SetupFilePreparation` delegates the staging decision to `LocalStagingService.ShouldStage(WorkerName, SourceSizeMB) -> bool` and the copy itself to `LocalStagingService.StageSource(WorkerName, MediaFileId, CanonicalSourcePath) -> LocalSourcePath`. Setup code contains no inline path-copy logic. Verifiable: `grep` for `shutil.copy` / `Copy-Item` in `ProcessTranscodeQueueService.py` returns zero matches.
+
+### C. Staging gate (when to stage)
+
+C5. `LocalStagingService.ShouldStage` returns TRUE iff **all three** are true: (i) `Workers.LocalStagingEnabled=TRUE`, (ii) `Workers.LocalScratchDir IS NOT NULL AND <> ''`, (iii) source `SizeMB >= LocalStagingConfig.MinSizeMB` (default 500). Otherwise returns FALSE and the encode proceeds against the canonical path (today's behavior unchanged). The size threshold is read via `LocalStagingConfigRepository.Get()` per call (db-is-authority -- no cache). Verifiable: contract test exercises the 2x2x2 truth table; a mid-test UPDATE of `LocalStagingConfig.MinSizeMB` is honored by the next `ShouldStage` call.
+
+C6. **Backplane / NFS workers untouched by default.** Linux container workers (wakko, dot) keep `LocalStagingEnabled=FALSE` post-migration. Their job-claim and encode paths are byte-identical to today. Verifiable: a soak test against a wakko-claimed job pre- and post-migration shows the same `FfpmpegCommand` (no local path) and the same claim-rate distribution.
+
+### D. Local-path routing through ffmpeg
+
+C7. When staging is active for an attempt, `CommandBuilder` emits ffmpeg `-i <local_source>` and `<local_output>.inprogress` in place of the canonical paths. The canonical paths are recorded on `TemporaryFilePaths.SourceStorageRootId/SourceRelativePath` and `OutputStorageRootId/OutputRelativePath` (unchanged shape); the local paths land in the new `LocalSourcePath/LocalOutputPath` columns. Verifiable: an attempt with staging produces a `FfpmpegCommand` whose `-i` argument matches `Workers.LocalScratchDir/<basename>`; a `TemporaryFilePaths` row exists with both canonical AND local path fields populated.
+
+C8. **One-knob-per-attempt invariant.** Staging changes ONLY the source/output paths the ffmpeg command sees. Every other ffmpeg arg (codec, bitrate, scale, audio, loudnorm, pix_fmt) is byte-identical to the non-staged version of the same profile. Verifiable: diff the `FfpmpegCommand` of a staged attempt vs a non-staged attempt on the same profile + source; the only differences are the `-i` argument, the `-y` output argument, and the `.inprogress` suffix path.
+
+### E. Two-mode VMAF disposition
+
+C9. **Mode A (local-only VMAF) -- when `Workers.LocalVmafFirst=TRUE AND Workers.QualityTestEnabled=TRUE`:** after encode, the same worker runs VMAF against `LocalSourcePath` vs `LocalOutputPath` BEFORE shipping `.inprogress` back to canonical. If VMAF passes the gate (`PostTranscodeGateConfig.VmafAutoReplaceMinThreshold`), worker copies `.inprogress` back to canonical side-by-side, deletes local scratch copies, and `FileReplacement` proceeds. If VMAF fails the gate, worker writes the attempt (`Success=TRUE, VMAF=<score>, FileReplaced=FALSE`), deletes local scratch, no canonical copy-back happens. Verifiable: synthetic attempt with `LocalVmafFirst=TRUE` and a known-fail VMAF profile -- canonical destination has no `.inprogress` file post-attempt; `TranscodeAttempts.VMAF` is populated; local scratch is empty.
+
+C10. **Mode B (cross-worker VMAF hand-off) -- when `Workers.LocalVmafFirst=FALSE` OR `Workers.QualityTestEnabled=FALSE`:** after encode, worker copies local `.inprogress` back to canonical side-by-side path BEFORE inserting the `QualityTestingQueue` row. Any VMAF-capable worker (including a different host) can then claim the row and run VMAF against the canonical input/output paths -- the prior cross-worker reachability failure that killed the original staging design does NOT recur. Verifiable: a synthetic staged attempt on a non-VMAF worker leaves a `.inprogress` file at the canonical location AND a `QualityTestingQueue` row pointing at canonical paths; a different worker can claim and complete VMAF without "file not found".
+
+### F. Cleanup discipline
+
+C11. Local scratch files are deleted on every attempt-finalize code path: encode success (after VMAF disposition or copy-back), encode failure, crash recovery, stuck-job cleanup. Cleanup is idempotent (re-running deletes nothing if files already absent). Verifiable: after a crash-recovery sweep on a host with `LocalScratchDir` set, `ls <LocalScratchDir>/*.inprogress` returns empty.
+
+C12. Crash-recovery (`CrashRecoveryService.RecoverServiceJobs`) extended to also delete orphaned files in `Workers.LocalScratchDir` whose `TemporaryFilePaths` row has been finalized (attempt complete). Only the calling worker's scratch dir is touched -- crash recovery never reaches across hosts. Verifiable: inject a stale `.inprogress` file into a worker's scratch dir with no matching `TemporaryFilePaths` row; run crash recovery; file is deleted (orphan sweep) AND log entry names the deleted path.
+
+### G. Operator surface
+
+C13. The `/Activity` worker modal gains a "Local Staging" section showing: (a) Scratch dir input (`Workers.LocalScratchDir`), (b) "Enable staging" toggle (`Workers.LocalStagingEnabled`), (c) "Local VMAF first" toggle (`Workers.LocalVmafFirst`; disabled in UI when QualityTestEnabled=FALSE since it has no effect). Save button POSTs to `POST /api/TeamStatus/Workers/<name>/LocalStaging` with JSON `{"LocalScratchDir": "...", "LocalStagingEnabled": true, "LocalVmafFirst": true}`. Endpoint validates the scratch dir is non-empty when Enabled=TRUE, persists via `WorkersRepository.UpdateWorkerLocalStaging`, returns `{Success, Message, Data}` envelope. Verifiable: POST with `Enabled=TRUE` + empty path returns HTTP 400; POST with all-NULL clears the config; subsequent `GET /api/TeamStatus/Workers` payload reflects the persisted values.
+
+C14. **Worker-tile compact rendering** below the Profiles line: `Staging: <ScratchDir or "off">` when LocalStagingEnabled, omitted otherwise. Truncates to 80 chars with tooltip showing full path + the two toggles' state. Verifiable: visual check across the four states (off / on+pathonly / on+localvmaf / unconfigured).
+
+C16. `/settings` page gains a "Local staging" collapsible card patterned on the existing "Queue admission" card (`Templates/Settings.html:356-427`). One number input bound to `LocalStagingConfig.MinSizeMB`, one Save button. JS lazy-load on `shown.bs.collapse` event calls `GET /api/SystemSettings/LocalStagingConfig`; Save handler PUTs to the same URL with body `{"MinSizeMB": N}`. Server-side: `Features/SystemSettings/SystemSettingsController.py` adds GET + PUT handlers mirroring `UpdateQueueAdmissionConfig` (lines 222-257), each delegating to `LocalStagingConfigRepository`. Standard `{Success, Message|Error}` envelope; `alert()` confirmation on save (matches existing cards). Verifiable: change MinSizeMB from 500 to 750 via the UI; reload the page; new value persists; the next staging-eligible attempt against a 600 MB file routes direct (size < 750), and a subsequent attempt after lowering back to 500 stages the same file (db-is-authority mid-flight change honored).
+
+### H. Flow doc + observability
+
+C15. `transcode.flow.md` Stage 5 (`ST6`) gets a new "**File staging (worker-configurable)**" subsection that documents the conditional staging branch. The `## Seams` table S2 row (`ST6 -> ST7`) is extended to mention that when staging is active, the consumer path may be either canonical (Mode B) or local-only (Mode A). The successful-attempt log line emitted by `ProcessTranscodeQueueService` gains a `StagedFromCanonical=<TRUE|FALSE>` field and (when TRUE) the `LocalScratchDir` value. Verifiable: `git diff transcode.flow.md` shows the Stage 5 + Seams update; log query for the latest staged attempt shows both new fields.
 
 ## Out of Scope
 
-- Per-job (TranscodeQueue row-level) overrides. Routing is per-worker × per-profile; if a per-job exception ever justifies itself, that is a separate directive.
-- Tag-based indirection (the prior `worker-routing` draft's model). Replaced by the direct checkbox matrix; feature doc rewritten to match.
-- Other claim paths (`ClaimNextPendingRemuxJob`, `ClaimQualityTestJob`). Same model could extend later; out of scope here.
-- Profile-side preference UI ("which workers prefer this profile"). The matrix is per-worker; the other direction would be a derived view, not a separate config surface.
-- Load balancing / least-loaded scheduling. This is routing, not scheduling.
-- Resuming `db-maintenance-no-partition` -- separate concern; operator un-pauses after this closes.
+- **Re-evaluating which workers SHOULD be staged-enabled.** This directive ships the mechanism. Operator decides which workers get `LocalStagingEnabled=TRUE` afterward (I9-2024 is the obvious initial target).
+- **Adaptive staging based on previous attempt failures.** The retry-budget feedback loop (per the paused `quality-floor-lift` directive) is the right home for "auto-flip staging on after N failures." This directive ships only the static per-worker config.
+- **Symbolic links / hardlinks instead of copies** as an optimization. Considered; rejected for SMB-on-Windows where mklink behavior across mount boundaries is unreliable. Plain copy is the safe default.
+- **Disk-space pre-check / quota management on the scratch dir.** Operator is responsible for sizing the disk. Future directive can add `df`-based pre-flight if disk-full failures become a real signal.
+- **Per-profile staging override** (a profile that always wants staging). Per-worker is sufficient for the operator's library shape.
+- **Restoring the dropped `Workers.StagingDirectory` column.** That column was for a different semantic (shared-mount staging path); we use new columns named for their new meaning.
+- **Mune-specific re-queue.** Separate operator action -- once this ships and I9-2024 is staging-enabled, Mune will succeed on the next attempt. The directive does not auto-enable staging or auto-requeue.
 
 ## Constraints
 
-- **db-is-authority** (`.claude/rules/db-is-authority.md`): `Workers.AllowedProfiles` reads fresh on every claim. No `self._cached_allowed_profiles` in `ProcessTranscodeQueueService`.
-- **R10** (`.claude/standards/index.md`): `ClaimNextPendingTranscodeJob` continues to call `BuildClaimPredicate`. New `BuildAllowedProfilesPredicate` is additive.
-- **R11**: migration uses `ADD COLUMN IF NOT EXISTS`; runnable repeatedly.
-- **R19**: claim query rewrite lands in `Features/TranscodeQueue/TranscodeQueueRepository.py`, not `Repositories/DatabaseManager.py`.
-- **R15**: every edited function/class in the `## Files` list gets `# directive: worker-routing` directly above the `def` / `class`.
-- **Data integrity** (`.claude/rules/data-integrity.md`): new column is nullable with NULL default (backward compatible). Profile rename/delete sweep runs in the same transaction as the profile mutation (no orphan window).
-- **Seam verification** (`.claude/rules/seam-verification.md`): the cross-stage seam `Workers.AllowedProfiles -> claim filter` is enumerated below in `### Seams Crossed` and round-tripped at VERIFYING.
-
-## Escalation Defaults
-
-- **Schema column add** -> Claude executes (`ADD COLUMN IF NOT EXISTS` is reversible; rollback is `ALTER TABLE Workers DROP COLUMN IF EXISTS AllowedProfiles`).
-- **Claim-query rewrite** -> Claude executes; runs `TestClaimAuthority.py` + new `TestWorkerAllowedProfiles.py` before declaring done. Live worker restart is operator-executed (memory: I9 services owned by Claude on dev workstation, container workers operator-executed; both via the worker-restart protocol).
-- **BUG-0043 smoke** -> Claude executes the synthetic-queue test; reports `TranscodeAttempts.workername` observation per criterion.
-- **Risk tolerance:** low for the live worker restart (one cycle, well-defined); medium for the claim-query change (covered by contract test + EXPLAIN-plan parity check).
+- **db-is-authority** (`.claude/rules/db-is-authority.md`): every `LocalStagingService.ShouldStage` call reads `Workers.LocalStagingEnabled / LocalScratchDir / LocalVmafFirst` and `SystemSettings.LocalStagingMinSizeMB` fresh from DB. No Python cache. Operator can flip the flag mid-flight and the next attempt honors it.
+- **R3**: no `self._cached_*` in `LocalStagingService`, `ProcessTranscodeQueueService`, or `CommandBuilder`. R3 + db-is-authority overlap here -- both forbid caching.
+- **R10**: no new `Claim*` paths. Claim logic untouched; staging happens AFTER the claim, inside the worker's processing loop.
+- **R11**: migration uses `ADD COLUMN IF NOT EXISTS`. Re-runnable.
+- **R12**: new code uses single-line SQL strings and single-line docstrings. Pre-existing triple-quoted SQL in edited files is preserved via edit-region scoping.
+- **R15**: every edited def/class in the `### Files` list gets `# directive: local-staging | # see local-staging.C<N>` directly above (the second `#` after the pipe is required -- per `Test-R15-DirectiveAnchor` regex `#\s*see\s+[a-z0-9-]+\.(S|W|C|ST)\d+`).
+- **R19**: any claim-query touch lands in `Features/TranscodeQueue/TranscodeQueueRepository.py`. None planned.
+- **Cross-feature contract:** the `transcoded-output-placement.feature.md` durable contract ("every worker writes side-by-side") becomes "every worker writes side-by-side unless `LocalStagingEnabled=TRUE`." That feature doc gets a one-line contract-update note at DELIVERING (R14: no annotation lines -- replace the section in place, don't append a "modified" annotation).
+- **One-knob-per-attempt invariant (C8)** is load-bearing for debuggability. Asserted at CommandBuilder + verified by contract test.
+- **Mode A / Mode B is per-worker, not per-job.** Simpler operator mental model; ships in one directive instead of two.
 
 ## Engineering Calls Already Made
 
-- **CSV column, not junction table.** `Workers.AllowedProfiles TEXT NULL`. Cleaner for 10×20 = 200 cells, single ALTER, matches the existing `Workers.Tags` precedent the earlier draft considered. Junction-table refactor is a one-paragraph migration if profile count ever grows past ~100.
-- **Single SQL fragment emitter.** `BuildAllowedProfilesPredicate` sibling of `BuildClaimPredicate`. R10 plus operator memory ("db-is-authority single emitter") plus seam discipline -- one place to edit, one place to test, one place to grep.
-- **NULL = accept all** (not `""` = accept all). NULL preserves the migration default and is distinguishable from "operator unchecked everything." `""` is a meaningful operator state (parked worker).
-- **Clean-default normalization.** When the operator checks every existing profile, the endpoint stores NULL, not the exhaustive CSV. This keeps backward-compat (NULL semantics) and survives adding a new profile later (a NULL worker auto-accepts new profiles; a CSV worker would need re-saving).
-- **Profile rename/delete sweep in same transaction.** Avoids orphan window. Implemented in `ProfileRepository.SaveProfile` (rename path) and `ProfileRepository.DeleteProfile`.
-- **Worker tile compact rendering on the tile, full checkbox UI in the modal.** Tile is a glance surface; modal is the editor. Putting checkboxes on the tile would scale poorly and clutter the dashboard.
-- **No worktree.** Landing on `main` directly. The change is well-scoped (10 files), high-priority (BUG-0043), and worktree session-handoff cost outweighs the isolation benefit at this scale.
+- **`LocalStagingService` is its own module, not bolted into `ProcessTranscodeQueueService`.** SRP: one place owns the staging decision + execution + cleanup. The transcode service is the caller, not the implementer. This is the SOLID compliance the operator asked for.
+- **Two opt-in flags (`LocalStagingEnabled` + `LocalVmafFirst`), not one enum.** Each flag has independent semantics; combining them into a `StagingMode TEXT` enum would force operator to read documentation to know which value means what. Two booleans are self-documenting.
+- **Local-VMAF-first is opt-in even when QualityTestEnabled=TRUE.** Mode B (copy-back-then-claim) is the safer default because it keeps the cross-worker VMAF hand-off working. Mode A is an optimization for the case where the operator knows the staging worker is also the VMAF worker and wants to skip the round-trip. Default OFF.
+- **Reuse `TemporaryFilePaths` for local-path tracking.** Adding two columns is cheaper than building a parallel `StagedAttempts` table; the row already exists per-attempt and is already cleaned up by FileReplacement.
+- **Size gate at `LocalStagingConfig.MinSizeMB DEFAULT 500`.** 500 MB threshold aligns with "encode duration exceeds the SMB handle stability window" -- not just movies. Most 1080p TV episodes (~250-800 MB typical) stay direct; anything sustained (>500 MB) routes through staging. Operator-tunable via the `/settings` GUI card (C16).
+- **Dedicated `LocalStagingConfig` table, not a `SystemSettings` KV row.** Matches the codebase convention for typed, single-row scalar config -- `Features/TranscodeQueue/QueueAdmissionConfigRepository.py` and `Features/QualityTesting/PostTranscodeGateConfigRepository.py` are the precedents. Future knobs (verify-hash, max-concurrent-stagings, cleanup-on-startup) get added as columns on the same table; KV is reserved for genuinely-loose configuration.
+- **No worktree** -- land on `main` per session preference. Six-ish commits split by criterion group (A schema + B service + C gate + D paths / E disposition / F cleanup / G UI / H docs+tests).
+- **Don't touch `transcoded-output-placement.feature.md` Status from COMPLETE.** Its criteria still describe the *default* contract; this feature adds an *opt-in* override. Both feature docs coexist; cross-link at DELIVERING.
 
 ## Status
 
-Active 2026-06-06 -- phase: NEEDS_PLAN. Directive doc just opened; criteria + files list written. Next phase: NEEDS_DOC_PREREAD (read every `*.feature.md` / `*.flow.md` ancestor of files in `### Files` below).
+Active 2026-06-07 -- phase: NEEDS_PLAN. Directive doc just opened; criteria + Files list written. Awaiting operator approval before phase advance.
 
 ### Files
 
-| # | File | Action | Criterion anchor (`# directive: worker-routing \| # see worker-routing.<ID>`) | R-rule notes |
+| # | File | Action | Anchor (`# directive: local-staging \| # see local-staging.<ID>`) | R-rule notes |
 |---|---|---|---|---|
-| 1 | `Scripts/SQLScripts/AddWorkerAllowedProfiles.py` | NEW | `C1` on `Run()` | R11: `ADD COLUMN IF NOT EXISTS`. R12: no module docstring, no triple-quoted SQL -- single-line ALTER string. |
-| 2 | `Core/Database/WorkerCapabilityPredicate.py` | EDIT (ADD function) | `C2` on `BuildAllowedProfilesPredicate()` | R12: edit region is the new function only; one-line docstring max. SQL fragment is single-line string. Whitelist not needed -- helper takes no column-name argument. |
-| 3 | `Features/TranscodeQueue/TranscodeQueueRepository.py` | EDIT | `C2`+`C11` on `ClaimNextPendingTranscodeJob()` | R10: keep `BuildClaimPredicate` call. R12: existing triple-quoted SQL is preexisting; edit must NOT extend the multi-line block -- splice the new fragment as f-string interpolation on the same line where `BuildClaimPredicate`'s fragment is interpolated, OR introduce a single-line concatenation. R6: not path-bearing. |
-| 4 | `Features/Workers/WorkersRepository.py` | EDIT (ADD methods) | `C6` on `UpdateWorkerAllowedProfiles()`; `C5`/`C6` on the read-path method that exposes `AllowedProfiles` in `GetWorkerConfig` (or sibling getter) | R12: one-line docstrings max. R3: no `self._cached_*` (db-is-authority -- repo is a stateless query wrapper). |
-| 5 | `Features/TranscodeJob/ProcessTranscodeQueueService.py` | EDIT | `C4` on the `GetNextJob` method that calls the claim | R3: no `self._cached_allowed_profiles` -- repo reads fresh. R12: existing docstrings are preexisting; edit-region scope. |
-| 6 | `Features/TeamStatus/TeamStatusController.py` | EDIT (ADD endpoint + payload field) | `C6` on `POST /AllowedProfiles` handler; `C5` on the `/Workers` GET handler edit | R9: any `LIKE` queries (none expected) would need `EscapeLikePattern`. R12: one-line docstrings. |
-| 7 | `Features/Profiles/ProfileRepository.py` | EDIT | `C10` on `SaveProfile()` (rename path) + `DeleteProfile()` | R12: existing triple-quoted SQL is preexisting; the sweep UPDATE is a single-line string. R9: rewrite UPDATE uses simple `string_to_array` + `array_to_string`, no LIKE. R7: not polymorphic. |
-| 8 | `Templates/Activity.html` | EDIT | N/A (HTML; R15 does not apply to non-Python) | R1: colocated `*.feature.md` preread satisfied via `Features/Activity/` ancestor docs (already in scope this session). |
-| 9 | `Tests/Contract/TestWorkerAllowedProfiles.py` | NEW | `C2`/`C3`/`C4`/`C8`/`C9`/`C10` distributed across `test_*` functions | R8: under `Tests/Contract/`. R12: one-line docstrings on each test. |
-| 10 | `transcode.flow.md` | EDIT | N/A (flow doc; R15 does not apply) | R16: `**Slug:** transcode` already present. R14: no annotation lines (replace S1 row in place; do not annotate "extended for routing"). |
-| 11 | `memory/KNOWN-ISSUES.md` | EDIT (mid-flight) + DELETE entry (at close) | N/A (memory; no anchors) | Entry removed at C14 verify; commit message captures the close. |
-| 12 | `Features/TranscodeQueue/worker-routing.feature.md` | EDIT (Progress checkmarks as criteria land; Status -> SHIPPED at DELIVERING) | N/A (feature doc; R15 does not apply) | R14: no annotation lines. R16: `**Slug:** worker-routing` already present. R18: any further edits use `limit<=50` Reads. |
+| 1 | `Scripts/SQLScripts/AddLocalStagingColumns.py` | NEW | `C1` on `Run()` | R11: idempotent `ADD COLUMN IF NOT EXISTS` for 3 cols on Workers + 2 on TemporaryFilePaths, plus `CREATE TABLE IF NOT EXISTS LocalStagingConfig` + `INSERT ... ON CONFLICT DO NOTHING` for the default row. R12: single-line SQL strings; no module docstring. |
+| 1b | `Features/TranscodeJob/LocalStagingConfigRepository.py` | NEW | `C17` on `class LocalStagingConfigRepository`; `C5` on `Get()`; `C16` on `Update()` | R3: no cached fields. R12: single-line SQL strings, one-line docstrings. Mirrors `Features/TranscodeQueue/QueueAdmissionConfigRepository.py` line-for-line. |
+| 2 | `Features/TranscodeJob/LocalStagingService.py` | NEW | `C3` on `class LocalStagingService`; `C5` on `ShouldStage()`; `C7` on `StageSource()`; `C11` on `Cleanup()` | R3: no cached fields. R12: one-line docstrings max. Composes `WorkersRepository` + `DatabaseService`; no inheritance. |
+| 3 | `Features/TranscodeJob/ProcessTranscodeQueueService.py` | EDIT (`SetupFilePreparation` delegates; cleanup hook) | `C4` on `SetupFilePreparation`; `C9`/`C10` on the encode-finalize block; `C12` on the crash-recovery call site | R3: no cache. R12: edit-region only; no new multi-line docstrings. |
+| 4 | `Models/CommandBuilder.py` | EDIT (local-path branch) | `C7`/`C8` on the function that emits `-i`/output args | R12: branch is single-line conditionals around the existing ProfileSettings reads. R6: paths flow through `Core.PathStorage` helpers, not `.replace().split()`. |
+| 5 | `Features/QualityTesting/QualityTestingBusinessService.py` | EDIT (Mode A local-VMAF dispatch) | `C9` on the VMAF-execution function | R3: no cache. R12: edit-region. |
+| 6 | `Features/QualityTesting/QualityTestQueueService.py` | EDIT (Mode B canonical-path-only queue row) | `C10` on the enqueue function | R12: edit-region; QualityTestingQueue rows use canonical paths only. |
+| 7 | `Features/FileReplacement/FileReplacementBusinessService.py` | EDIT (handle staged `.inprogress` ship-back) | `C9`/`C10` on the rename / replace function | R12: edit-region. R6: PathStorage helpers for path joins. |
+| 8 | `Features/Workers/WorkersRepository.py` | EDIT (add `UpdateWorkerLocalStaging`, `GetWorkerLocalStagingConfig`) | `C13` on each new method | R12: single-line SQL strings; one-line docstrings. R3: stateless query wrappers. |
+| 9 | `Features/TeamStatus/TeamStatusController.py` | EDIT (NEW endpoint + extend GET payload) | `C13` on the new POST handler; `C13` on the GET edit | R9: any LIKE uses EscapeLikePattern (none expected). R12: edit-region. |
+| 9b | `Features/SystemSettings/SystemSettingsController.py` | EDIT (NEW GET + PUT for LocalStagingConfig) | `C16` on each new handler | R12: edit-region; follows `UpdateQueueAdmissionConfig` pattern at lines 222-257. |
+| 10 | `Templates/Activity.html` | EDIT (Local Staging modal section + tile line) | N/A (HTML; R15 does not apply) | R1: colocated docs already read this session. |
+| 10b | `Templates/Settings.html` | EDIT (Local staging collapsible card) | N/A (HTML; R15 does not apply) | Follows Queue admission card pattern at lines 356-427 + Load/Save JS at 1871-1895 + collapse wire at 2024-2030. |
+| 11 | `Features/ServiceControl/CrashRecoveryService.py` | EDIT (orphan sweep in `LocalScratchDir`) | `C12` on the recovery function | R12: edit-region. |
+| 12 | `transcode.flow.md` | EDIT (Stage 5 staging subsection + S2 seam) | N/A (flow doc; R15 does not apply) | R14: replace S2 row in place; no annotation lines. |
+| 13 | `Tests/Contract/TestLocalStaging.py` | NEW | `C3`-`C12` distributed across `test_*` functions | R8: under `Tests/Contract/`. R9: any LIKE uses EscapeLikePattern. R12: one-line docstrings. |
+| 14 | `memory/KNOWN-ISSUES.md` | EDIT (cross-link `feedback_ms_nfs_client_unreliable.md` from the staging context) | N/A (memory) | One-line note. |
 
-### Hook Conformance Pre-Flight (so we don't bounce off the hook mid-implementation)
+### Hook Conformance Pre-Flight
 
-The accepted code-anchor syntax is **`# directive: worker-routing | # see worker-routing.C<N>`** -- the second `#` after the pipe is required (per `Test-R15-DirectiveAnchor` regex `#\s*see\s+[a-z0-9-]+\.(S|W|C|ST)\d+`). Working examples in tree: `Core/WorkerContext.py:4`, `Features/MediaFiles/MediaFilesRepository.py:8`. Place this comment on the line **immediately above** each `def` / `class` the directive edits.
+Accepted code-anchor syntax: **`# directive: local-staging | # see local-staging.C<N>`** -- second `#` after the pipe is required. Working examples in tree: `Core/WorkerContext.py:4`, `Features/MediaFiles/MediaFilesRepository.py:8`.
 
-Phase: edits land in `IMPLEMENTING`. `VERIFYING` allows directive-doc-only edits + read-only Bash. `DELIVERING` re-opens all tools (R13 relaxed) so any `.feature.md` / `.flow.md` create-needs can happen at close.
-
-R-rules that are easy to forget on this directive:
-- **R3** -- no `self._cached_allowed_profiles` anywhere. `Workers.AllowedProfiles` is read in the SQL fragment per-claim. No Python-side cache. This is the load-bearing invariant the operator chose this design for.
-- **R10** -- `ClaimNextPendingTranscodeJob` must still call `BuildClaimPredicate`. Adding `BuildAllowedProfilesPredicate` is additive, not a replacement.
-- **R11** -- migration `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. Re-runnable.
-- **R12 edit-region trap** -- when editing existing triple-quoted SQL in `TranscodeQueueRepository.py` / `ProfileRepository.py`, the surrounding lines may already contain triple-quoted strings. R12 fires when violations fall in the edit region. Splice strategy: introduce the new fragment as a Python `+`-concatenation or f-string interpolation on a single new line; do NOT add lines INSIDE the existing `"""..."""` block.
-- **R14** -- when updating `transcode.flow.md` S1 seam, REPLACE the row in place. Do not add an annotation like `(extended for routing 2026-06-06)`. The seam table is the durable contract.
-- **R15** -- every edited `def` / `class` in the table above gets the two-line anchor exactly as specified.
-- **R19** -- claim-query edit lands in `TranscodeQueueRepository.py`, not `DatabaseManager.py` (already correct per aggregate-map row 10).
-
-### Seams Crossed (per `.claude/rules/seam-verification.md`)
-
-The directive adds one new cross-stage seam and touches one existing seam. Persistent home is `transcode.flow.md`'s `## Seams` table (F13 puts the new row there).
-
-| Seam | Producer | Wire shape | Consumer expects | Verification |
-|---|---|---|---|---|
-| `Workers.AllowedProfiles -> ClaimNextPendingTranscodeJob filter` | `POST /api/TeamStatus/Workers/<name>/AllowedProfiles` (operator UI) writes `Workers.AllowedProfiles TEXT NULL` (NULL / CSV / `""`) | TEXT column; NULL OR CSV-of-profile-names | `BuildAllowedProfilesPredicate` emits `(w.AllowedProfiles IS NULL OR mf.AssignedProfile = ANY(string_to_array(w.AllowedProfiles, ',')))` | `Tests/Contract/TestWorkerAllowedProfiles.py` |
-| `Profiles.Name rename/delete -> Workers.AllowedProfiles sweep` | `ProfileRepository.SaveProfile` (rename) / `DeleteProfile` | Same-transaction UPDATE sweeps every CSV containing the affected name | `BuildAllowedProfilesPredicate` continues to match on the post-sweep CSV | `Tests/Contract/TestWorkerAllowedProfiles.py::test_profile_rename_sweep` + `::test_profile_delete_sweep` |
-| `Activity modal -> POST /Workers/<name>/AllowedProfiles` (existing UI surface, new field) | `Templates/Activity.html` (existing modal) | JSON `{"AllowedProfiles": ["P1","P2"] | []}` | `TeamStatusController` validates against `Profiles.Name`, normalizes, persists | Manual modal CRUD round-trip + `TestWorkerAllowedProfiles.py::test_post_endpoint_*` |
-
-### R18 overrides
-
-(None yet. R18 caps `*.feature.md` Reads at limit<=50; partial reads via the `## Files` index. Override entries land here when full reads are genuinely required.)
+Easy-to-forget rules:
+- **R3 + db-is-authority** -- the staging config (`LocalStagingEnabled`, `LocalScratchDir`, `LocalVmafFirst`, `LocalStagingMinSizeMB`) is read fresh on every staging-decision call. No `self._cached_*` anywhere. This is the operator-flips-mid-flight invariant.
+- **R12 edit-region trap** -- edits to existing triple-quoted SQL in `ProcessTranscodeQueueService.py` / `QualityTestingBusinessService.py` / `FileReplacementBusinessService.py` keep the triple-quoted block OUT of the edit region. Either edit single-line strings nearby OR refactor in a separate commit.
+- **R14** -- updating `transcode.flow.md` Stage 5 + S2 seam REPLACES content in place. No `(extended for staging 2026-06-07)` annotations. Same for the eventual `transcoded-output-placement.feature.md` contract-update note.
+- **R15** -- every new and every edited def/class gets the two-anchor line. Multiple consecutive `# directive:` lines fail R12 (consecutive comment block) -- if a function already carries a closed directive's anchor, REPLACE it with this directive's anchor (git history preserves the old breadcrumb).
+- **R19** -- no Claim* edits planned. If a downstream tweak requires one, it lands in `Features/TranscodeQueue/TranscodeQueueRepository.py`.
 
 ### Promotions
 
-All durable content was authored directly in the feature / flow docs (not duplicated into the directive), so this table records authored-in-place verification rather than literal moves out of the directive.
+(Populated at DELIVERING. The criteria block above promotes to a NEW `Features/TranscodeJob/local-staging.feature.md` per R13. The `transcoded-output-placement.feature.md` Default-contract paragraph gets a one-line cross-link to `local-staging.feature.md` at the same DELIVERING transition.)
 
 | Source artifact | Target file | Commit |
 |---|---|---|
-| Per-worker checkbox model + C1-C14 criteria | `Features/TranscodeQueue/worker-routing.feature.md` (Success Criteria + Files + Deviation) | `1ead529` (initial canonical-IDs rewrite) |
-| Three-filter additive claim documentation + S1 seam row | `transcode.flow.md` `## Seams` row S1 + `### Job Claiming Mechanism` prose | `ca505ae` |
-| BUG-0043 description (interim workaround + new fix path) | `memory/KNOWN-ISSUES.md` BUG-0043 entry -- updated mid-implementation, entry removed at directive close | `1ead529` (update) + this commit (removal) |
-| Helper-emitter pattern (`BuildAllowedProfilesPredicate`) | `Core/Database/WorkerCapabilityPredicate.py` -- sibling helper colocated with `BuildClaimPredicate` (single SQL fragment emitter per `.claude/rules/db-is-authority.md`) | `0d8ecc0` |
-| Per-worker × per-profile UI surface | `Templates/Activity.html` -- modal `ProfilesSection`, tile compact `Profiles:` line, namespace exports | `22ef941` |
+| `## Acceptance Criteria` C1-C15 | `Features/TranscodeJob/local-staging.feature.md` | TBD |
+| Stage 5 staging subsection + S2 seam update | `transcode.flow.md` | TBD |
+| One-line cross-link from default contract to opt-in override | `Features/FileReplacement/transcoded-output-placement.feature.md` | TBD |
+| `feedback_ms_nfs_client_unreliable.md` cross-link | `memory/KNOWN-ISSUES.md` | TBD |
 
 ### Verification
 
-| Criterion | Evidence | Status |
-|---|---|---|
-| C1 (schema) | `SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name='workers' AND column_name='allowedprofiles'` -> `allowedprofiles \| text \| YES`. Re-ran migration: idempotent (no error). All 13 existing workers had `AllowedProfiles=NULL` post-migration (C9 also satisfied). | PASS |
-| C2 (claim filter SQL) | `Core/Database/WorkerCapabilityPredicate.BuildAllowedProfilesPredicate` emits `EXISTS (SELECT 1 FROM Workers w3 WHERE w3.WorkerName = %s AND (w3.AllowedProfiles IS NULL OR mf.AssignedProfile = ANY(string_to_array(w3.AllowedProfiles, ','))))`. Spliced into both branches of `ClaimNextPendingTranscodeJob`. Grep for `AllowedProfiles` in `Claim*` returns only the helper call site. `Tests/Contract/TestWorkerAllowedProfiles::TestBuildAllowedProfilesPredicate` PASS. | PASS |
-| C3 (NULL-everywhere = today) | `py -m pytest Tests/Contract/TestClaimAuthority.py -q` -> 14/14 pass pre- and post-change. Claim distribution invariant: capability EXISTS + interlace + NVENC gates unchanged; new filter evaluates TRUE when `AllowedProfiles IS NULL`. | PASS |
-| C4 (mid-flight) | Helper reads `Workers.AllowedProfiles` via SQL on every claim attempt (correlated EXISTS subquery). No `self._cached_*` (R3-clean). Live smoke: POST endpoint flipped 3 workers' allowlists; next `SELECT WorkerName, AllowedProfiles FROM Workers` returned the new values without restart. | PASS |
-| C5 (modal Profiles section) | `Templates/Activity.html::ProfilesSection` renders one checkbox per entry in `ProfileCatalog`. `GET /api/TeamStatus/Workers` includes `ProfileCatalog` field (verified live: 25 entries). Checkbox state derived from `W.AllowedProfiles` (NULL=all-checked, ""=none-checked, CSV=listed-checked). | PASS |
-| C6 (POST endpoint) | `POST /api/TeamStatus/Workers/<name>/AllowedProfiles` live smoke: (a) `["NvencProf1","CpuProf1"]` -> persisted as sorted CSV; (b) `["X-NOT-A-PROFILE"]` -> HTTP 400 `{"Message":"Unknown profile: X-NOT-A-PROFILE","Success":false}`; (c) `[]` -> persisted `""`; (d) full 25-profile set -> persisted `NULL` (clean-default). | PASS |
-| C7 (check-all / uncheck-all) | `ActivityPage.CheckAllProfiles` / `UncheckAllProfiles` wired in namespace; Save Profiles button POSTs current checkbox set. Visible affordances above the checkbox list. | PASS (UI render verified at function level; operator browser-check at acceptance) |
-| C8 (orthogonality) | Truth table baked into WHERE clause -- capability EXISTS gate (`TranscodeEnabled=TRUE`) and AllowedProfiles filter are independent AND-clauses. `TestClaimAuthority::TestTranscodeClaimAuthority` exercises the capability axis; `TestWorkerAllowedProfiles` exercises the allowlist axis. Both axes block independently. | PASS |
-| C9 (migration default invariant) | Post-migration `SELECT COUNT(*) FILTER (WHERE allowedprofiles IS NULL) FROM workers` returned 13/13. No claim-behavior change until first operator POST. | PASS |
-| C10 (profile rename / delete sweep) | `TestProfileRenameSweepsWorkerAllowlist::test_rename_substitutes_old_name_in_csv` PASS. `TestProfileDeleteSweepsWorkerAllowlist::test_delete_removes_name_and_normalizes_single_member_to_empty` PASS. Both run in the same DB transaction as the profile UPDATE/DELETE (no orphan window). | PASS |
-| C11 (claim log) | `Features/TranscodeQueue/TranscodeQueueRepository.ClaimNextPendingTranscodeJob` post-claim `LoggingService.LogInfo` line emits `WorkerName=, JobId=, ProfileName=, WorkerAllowedProfiles=`. Display: `<all>` / `<none>` / CSV. | PASS (live log entry verifiable via next worker claim cycle) |
-| C12 (tile compact rendering) | `Templates/Activity.html::RenderWorkerTile` emits `<i class="fas fa-filter"></i>Profiles: <strong>...</strong>` line below scan-posture. 80-char truncate via `FormatAllowedProfilesShort`; full-CSV tooltip via `FormatAllowedProfilesTooltip`. | PASS |
-| C13 (flow doc update) | `transcode.flow.md` S1 row updated to enumerate the three additive claim filters (capability + NVENC + AllowedProfiles). `### Job Claiming Mechanism` prose rewritten to describe the atomic UPDATE shape and the three predicates. No annotation lines (R14-clean). | PASS |
-| C14 (BUG-0043 closure) | Live setup: I9-2024 `AllowedProfiles`=12 NVENC profiles; wakko-worker-1 / dot-worker-1 `AllowedProfiles`=13 CPU profiles. SQL smoke per worker:<br/>- SVT-AV1 CPU profile: `I9-2024 blocked`, `wakko-worker-1 WOULD-CLAIM`, `dot-worker-1 WOULD-CLAIM`<br/>- NVENC profile: `I9-2024 WOULD-CLAIM`, `wakko-worker-1 blocked`, `dot-worker-1 blocked`<br/>BUG-0043 entry removal from `memory/KNOWN-ISSUES.md` lands at DELIVERING. | PASS |
-
-Test suite: `py -m pytest Tests/Contract/TestClaimAuthority.py Tests/Contract/TestWorkerAllowedProfiles.py` -> 20/20 pass.
+(Populated at VERIFYING; one entry per acceptance criterion.)
 
 ### Decisions Made
 
-Material engineering calls made during execution (in addition to those pre-populated in `## Engineering Calls Already Made` above):
-
-- **Replaced existing `# directive: path-schema-migration` anchor on `ClaimNextPendingTranscodeJob` rather than stacking two anchors.** R12 forbids consecutive `#` comment blocks; the path-schema-migration directive is closed; git history preserves the prior breadcrumb. Adjacent functions in the same file keep their path-schema-migration anchors untouched.
-- **Two adjacent helper read methods on `WorkersRepository`** (`UpdateWorkerAllowedProfiles` + `GetWorkerAllowedProfiles`) rather than threading `AllowedProfiles` into the existing `GetWorkerConfig` triple-quoted query. R12 edit-region scope would have flagged my touch inside the existing multi-line SQL block; the separate single-line read is cleaner and matches the existing `Repositories/DatabaseManager.UpdateWorker*` shape.
-- **`ProfileCatalog` as sibling field on the `/Workers` GET payload** rather than a separate `GET /api/Profiles` endpoint. Single round-trip per page load; the Activity surface already fetches `/Workers`. Backward-compatible (existing JS reads `Response.Data` unchanged).
-- **Clean-default normalization (`all-profiles -> NULL`)** in the POST endpoint, not just in the SaveProfile rename / DeleteProfile sweep. Operator who checks every box gets the same DB state as a brand-new worker -- adding a new profile later auto-extends every NULL worker rather than requiring a re-save.
-- **No worktree.** Landed on `main` directly per CEO-mode session preference. Six commits (planning + four implementation slices + DELIVERING close).
-- **R1 sweep on `TeamStatus.feature.md`** to add canonical `C1..C10` IDs. The preexisting `# see teamstatus.C1` anchor referenced a section ID that didn't canonically exist (criteria were numbered `1.`, not `C1.`). Renumbering was in-scope under the verification-blocking test (`feedback_preexisting_bug_scope_test.md`). This same drift existed in the prior `worker-routing.feature.md` draft and was fixed in the initial directive setup.
-
-### Delivery Report
-
-```
-DIRECTIVE: worker-routing -- per-worker checkbox allowlist on /Activity; claim
-           filter routes jobs by profile name; BUG-0043 closure.
-STATUS:    Done.
-
-WHAT SHIPPED:
-  - Workers.AllowedProfiles TEXT NULL column (idempotent migration).
-  - Core/Database/WorkerCapabilityPredicate.BuildAllowedProfilesPredicate
-    (single SQL fragment emitter, sibling of BuildClaimPredicate).
-  - ClaimNextPendingTranscodeJob WHERE clause + post-claim observability log
-    (WorkerName / JobId / ProfileName / WorkerAllowedProfiles).
-  - POST /api/TeamStatus/Workers/<name>/AllowedProfiles (validate, normalize,
-    persist) + GET /api/TeamStatus/Workers payload extended with
-    AllowedProfiles + ProfileCatalog.
-  - Activity worker modal: Profiles checkbox section, Check-all / Uncheck-all,
-    Save Profiles button; worker tile compact "Profiles: <all|csv|<none>>" line.
-  - ProfileRepository same-transaction sweep on rename (array_replace) and
-    delete (array_remove + renormalize-to-NULL-when-set-matches).
-  - transcode.flow.md S1 seam + Job Claiming Mechanism prose: three-filter
-    additive claim documented.
-  - Tests/Contract/TestWorkerAllowedProfiles.py (6 tests, 6 pass).
-  - TestClaimAuthority.py: 14/14 still pass post-change.
-  - memory/KNOWN-ISSUES.md BUG-0043 entry removed.
-
-HOW TO USE IT:
-  - On the /Activity page, click any worker tile to open its modal.
-  - The new "Profiles Allowed" section lists every Profiles.ProfileName with
-    a checkbox. Pre-state: every box checked (NULL allowlist = accept all).
-  - Toggle checkboxes (or use "Check all" / "Uncheck all"), then "Save Profiles".
-  - Successful save shows a toast; the claim path uses the new allowlist on
-    the very next poll tick (no worker restart).
-  - The tile shows "Profiles: <all>" / "Profiles: P1, P2, ..." / "Profiles:
-    <none>" below the existing scan line.
-
-WHAT YOU NEED TO EXECUTE:
-  - Nothing. The migration ran (column added live, idempotent). WebService
-    is already restarted with the new endpoint and UI. The smoke setup left
-    I9-2024 / wakko-worker-1 / dot-worker-1 with the BUG-0043 routing
-    configured (NVENC profiles on I9, CPU profiles on wakko/dot). Restore
-    any worker to "accept all" by clicking Check all + Save.
-
-CRITERIA VERIFICATION:
-  See `### Verification` table above. C1-C14 all PASS.
-
-DECISIONS I MADE:
-  See `### Decisions Made` above + `## Engineering Calls Already Made`.
-
-KNOWN GAPS / DEFERRED:
-  - C7 modal UI rendering is verified at the function/API level; full
-    browser-click verification of "Check all" / "Uncheck all" affordances
-    is operator-side acceptance.
-  - C11 claim log entry will land in `Logs` table on the next real worker
-    claim cycle (synthetic test in the contract suite would require
-    setting up MediaFiles + TranscodeQueue rows; deferred to live signal).
-  - No regression run of full TestClaimAuthority + TestWorkerAllowedProfiles
-    against the post-deploy LXC fleet -- those workers point at the same
-    production PostgreSQL CT 203 the I9 tests hit, so the contract suite is
-    representative.
-```
+(Populated during execution as ambiguities surface. Pre-populated decisions live in `## Engineering Calls Already Made` above.)
