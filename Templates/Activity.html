@@ -847,6 +847,15 @@ var ActivityPage = (function() {
         var ProfilesLineHtml = '<div class="small text-muted mb-1" title="' + ProfilesTooltip + '">' +
             '<i class="fas fa-filter me-1"></i>Profiles: <strong>' + ProfilesLabel + '</strong>' +
             '</div>';
+        var StagingLineHtml = '';
+        if (W.LocalStagingEnabled) {
+            var StagingPath = W.LocalScratchDir || '';
+            var StagingShort = StagingPath.length > 80 ? StagingPath.substring(0, 77) + '...' : StagingPath;
+            var ModeLabel = W.LocalVmafFirst ? ' (VMAF local)' : '';
+            StagingLineHtml = '<div class="small text-muted mb-1" title="' + EscapeHtml(StagingPath) + (W.LocalVmafFirst ? ' | Local VMAF first' : ' | Mode B copy-back') + '">' +
+                '<i class="fas fa-hdd me-1"></i>Staging: <strong>' + EscapeHtml(StagingShort) + '</strong>' + ModeLabel +
+                '</div>';
+        }
 
         var Col = document.createElement('div');
         Col.className = 'col-6 col-lg-4 col-xl-3';
@@ -859,6 +868,7 @@ var ActivityPage = (function() {
                 MountErrorHtml +
                 ScanLineHtml +
                 ProfilesLineHtml +
+                StagingLineHtml +
                 '<button class="btn btn-sm w-100 ' + ToggleClass + '" onclick="event.stopPropagation(); ActivityPage.SetWorkerStatus(\'' + WorkerNameJs + '\', \'' + ToggleTarget + '\')">' +
                     '<i class="fas ' + ToggleIcon + ' me-1"></i>' + ToggleLabel +
                 '</button>' +
@@ -944,7 +954,8 @@ var ActivityPage = (function() {
                 CapabilityRow('ScanEnabled', 'Scan', W.ScanEnabled, null, null, WorkerNameJs) +
             '</div>' +
             ProfilesSection(W, WorkerNameJs) +
-            '<div class="form-text small">Capability changes apply within one polling interval (no restart). AllowedProfiles takes effect on the next claim tick.</div>';
+            LocalStagingSection(W, WorkerNameJs) +
+            '<div class="form-text small">Capability changes apply within one polling interval (no restart). AllowedProfiles + LocalStaging take effect on the next claim tick.</div>';
 
         var Modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('WorkerSettingsModal'));
         Modal.show();
@@ -989,6 +1000,54 @@ var ActivityPage = (function() {
 
     function UncheckAllProfiles() {
         document.querySelectorAll('.WorkerAllowedProfileCheckbox').forEach(function(cb) { cb.checked = false; });
+    }
+
+    function LocalStagingSection(W, WorkerNameJs) {
+        var ScratchDir = W.LocalScratchDir || '';
+        var EnabledChecked = W.LocalStagingEnabled ? 'checked' : '';
+        var VmafFirstChecked = W.LocalVmafFirst ? 'checked' : '';
+        var ScratchEsc = EscapeHtml(ScratchDir).replace(/"/g, '&quot;');
+        return '<div class="mb-3">' +
+                 '<label class="form-label small fw-bold">Local staging (per-worker scratch for SMB stability + IO speed)</label>' +
+                 '<div class="input-group input-group-sm mb-2">' +
+                     '<span class="input-group-text" style="min-width: 110px">Scratch dir</span>' +
+                     '<input type="text" class="form-control" id="LocalScratchDirInput" placeholder="e.g. D:\\MediaVortexScratch" value="' + ScratchEsc + '">' +
+                 '</div>' +
+                 '<div class="form-check form-check-inline">' +
+                     '<input class="form-check-input" type="checkbox" id="LocalStagingEnabledInput" ' + EnabledChecked + '>' +
+                     '<label class="form-check-label small" for="LocalStagingEnabledInput">Enable staging</label>' +
+                 '</div>' +
+                 '<div class="form-check form-check-inline">' +
+                     '<input class="form-check-input" type="checkbox" id="LocalVmafFirstInput" ' + VmafFirstChecked + '>' +
+                     '<label class="form-check-label small" for="LocalVmafFirstInput">Local VMAF first (Mode A; requires VMAF capability)</label>' +
+                 '</div>' +
+                 '<div class="d-flex gap-2 mt-2">' +
+                     '<button class="btn btn-sm btn-primary ms-auto" onclick="ActivityPage.SaveWorkerLocalStaging(\'' + WorkerNameJs + '\')">Save Staging</button>' +
+                 '</div>' +
+               '</div>';
+    }
+
+    function SaveWorkerLocalStaging(WorkerName) {
+        var Body = {
+            LocalScratchDir: document.getElementById('LocalScratchDirInput').value.trim() || null,
+            LocalStagingEnabled: document.getElementById('LocalStagingEnabledInput').checked,
+            LocalVmafFirst: document.getElementById('LocalVmafFirstInput').checked
+        };
+        fetch('/api/TeamStatus/Workers/' + encodeURIComponent(WorkerName) + '/LocalStaging', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(Body)
+        })
+        .then(function(R) { return R.json(); })
+        .then(function(Result) {
+            if (Result.Success) {
+                showToastAlert('Local staging config updated.', 'success');
+                LoadWorkers();
+            } else {
+                showToastAlert(Result.Message || Result.ErrorMessage || 'Failed to save local staging.', 'danger');
+            }
+        })
+        .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
     }
 
     function SaveWorkerAllowedProfiles(WorkerName) {
@@ -1294,6 +1353,7 @@ var ActivityPage = (function() {
         SetMachineStatus: SetMachineStatus,
         ToggleWorkerCapability: ToggleWorkerCapability,
         SaveWorkerAllowedProfiles: SaveWorkerAllowedProfiles,
+        SaveWorkerLocalStaging: SaveWorkerLocalStaging,
         CheckAllProfiles: CheckAllProfiles,
         UncheckAllProfiles: UncheckAllProfiles,
         SetWorkerConcurrency: SetWorkerConcurrency,

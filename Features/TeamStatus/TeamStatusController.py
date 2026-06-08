@@ -473,6 +473,9 @@ def GetWorkers():
         IntervalMin = _GetContinuousScanIntervalMinutes()
         AllowedProfilesRows = DbManager.DatabaseService.ExecuteQuery("SELECT WorkerName, AllowedProfiles FROM Workers") or []
         AllowedProfilesByWorker = {(R.get('WorkerName') or ''): R.get('allowedprofiles') for R in AllowedProfilesRows}
+        # directive: local-staging | # see local-staging.C13
+        StagingRows = DbManager.DatabaseService.ExecuteQuery("SELECT WorkerName, LocalScratchDir, LocalStagingEnabled, LocalVmafFirst FROM Workers") or []
+        StagingByWorker = {(R.get('WorkerName') or ''): {'LocalScratchDir': R.get('localscratchdir'), 'LocalStagingEnabled': bool(R.get('localstagingenabled')), 'LocalVmafFirst': bool(R.get('localvmaffirst'))} for R in StagingRows}
         ProfileCatalogRows = DbManager.DatabaseService.ExecuteQuery("SELECT ProfileName FROM Profiles ORDER BY ProfileName") or []
         ProfileCatalog = [(R.get('profilename') or '').strip() for R in ProfileCatalogRows if R.get('profilename')]
 
@@ -516,6 +519,9 @@ def GetWorkers():
                 "NextScanEstimate": str(NextScanEstimate) if NextScanEstimate else None,
                 "CurrentScanRootFolder": ScanPosture.get('CurrentScanRootFolder'),
                 "AllowedProfiles": AllowedProfilesByWorker.get(WorkerName),
+                "LocalScratchDir": StagingByWorker.get(WorkerName, {}).get('LocalScratchDir'),
+                "LocalStagingEnabled": StagingByWorker.get(WorkerName, {}).get('LocalStagingEnabled', False),
+                "LocalVmafFirst": StagingByWorker.get(WorkerName, {}).get('LocalVmafFirst', False),
             })
 
         return jsonify({"Success": True, "Data": Workers, "ProfileCatalog": ProfileCatalog})
@@ -817,6 +823,38 @@ def SetWorkerAllowedProfiles(WorkerName):
     except Exception as e:
         ErrorMsg = f"Exception in SetWorkerAllowedProfiles: {str(e)}"
         LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "SetWorkerAllowedProfiles")
+        return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
+
+@TeamStatusBlueprint.route('/Workers/<WorkerName>/LocalStaging', methods=['POST'])
+# directive: local-staging | # see local-staging.C13
+def SetWorkerLocalStaging(WorkerName):
+    """Set per-worker local-staging config (LocalScratchDir + LocalStagingEnabled + LocalVmafFirst)."""
+    try:
+        LoggingService.LogFunctionEntry("SetWorkerLocalStaging", "TeamStatusController")
+        Data = request.get_json() or {}
+        ScratchDir = Data.get('LocalScratchDir')
+        Enabled = bool(Data.get('LocalStagingEnabled', False))
+        VmafFirst = bool(Data.get('LocalVmafFirst', False))
+        if ScratchDir is not None and not isinstance(ScratchDir, str):
+            return jsonify({"Success": False, "Message": "LocalScratchDir must be a string or null"}), 400
+        if ScratchDir is not None:
+            ScratchDir = ScratchDir.strip() or None
+        if Enabled and not ScratchDir:
+            return jsonify({"Success": False, "Message": "LocalScratchDir is required when LocalStagingEnabled=true"}), 400
+        DbManager = DatabaseManager()
+        CheckRows = DbManager.DatabaseService.ExecuteQuery("SELECT 1 FROM Workers WHERE WorkerName = %s", (WorkerName,))
+        if not CheckRows:
+            return jsonify({"Success": False, "Message": f"Worker '{WorkerName}' not found"}), 404
+        from Features.Workers.WorkersRepository import WorkersRepository
+        Ok = WorkersRepository().UpdateWorkerLocalStaging(WorkerName, ScratchDir, Enabled, VmafFirst)
+        if not Ok:
+            return jsonify({"Success": False, "Message": "Database update failed"}), 500
+        LoggingService.LogInfo(f"Worker '{WorkerName}' LocalStaging set to ScratchDir={ScratchDir!r} Enabled={Enabled} VmafFirst={VmafFirst}", "TeamStatusController", "SetWorkerLocalStaging")
+        return jsonify({"Success": True, "Message": f"Worker '{WorkerName}' local-staging config updated", "Data": {"LocalScratchDir": ScratchDir, "LocalStagingEnabled": Enabled, "LocalVmafFirst": VmafFirst}})
+    except Exception as e:
+        ErrorMsg = f"Exception in SetWorkerLocalStaging: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "SetWorkerLocalStaging")
         return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
 
 

@@ -200,3 +200,27 @@ class WorkersRepository:
         except Exception as e:
             LoggingService.LogException("Exception in GetWorkerAllowedProfiles", e, "WorkersRepository", "GetWorkerAllowedProfiles")
             return None
+
+    # directive: local-staging | # see local-staging.C13
+    def UpdateWorkerLocalStaging(self, WorkerName: str, LocalScratchDir, LocalStagingEnabled: bool, LocalVmafFirst: bool) -> bool:
+        """Persist the three Workers staging columns; LocalScratchDir may be None to clear."""
+        try:
+            query = "UPDATE Workers SET LocalScratchDir = %s, LocalStagingEnabled = %s, LocalVmafFirst = %s WHERE WorkerName = %s"
+            self.DatabaseService.ExecuteNonQuery(query, (LocalScratchDir, bool(LocalStagingEnabled), bool(LocalVmafFirst), WorkerName))
+            return True
+        except Exception as e:
+            LoggingService.LogException("Exception in UpdateWorkerLocalStaging", e, "WorkersRepository", "UpdateWorkerLocalStaging")
+            return False
+
+    # directive: local-staging | # see local-staging.C13
+    def GetWorkerLocalStagingConfig(self, WorkerName: str):
+        """Fresh read of the three Workers staging columns for the given worker; returns dict or None."""
+        try:
+            rows = self.DatabaseService.ExecuteQuery("SELECT LocalScratchDir, LocalStagingEnabled, LocalVmafFirst FROM Workers WHERE WorkerName = %s", (WorkerName,))
+            if not rows:
+                return None
+            R = rows[0]
+            return {"LocalScratchDir": R.get('localscratchdir'), "LocalStagingEnabled": bool(R.get('localstagingenabled')), "LocalVmafFirst": bool(R.get('localvmaffirst'))}
+        except Exception as e:
+            LoggingService.LogException("Exception in GetWorkerLocalStagingConfig", e, "WorkersRepository", "GetWorkerLocalStagingConfig")
+            return None
