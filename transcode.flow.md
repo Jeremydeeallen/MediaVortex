@@ -141,8 +141,8 @@ The cascade is ordered: Transcode wins over Remux (if a file needs both a codec 
 - A `LogWarning` row is emitted naming the MediaFileId and reason whenever the fallback path runs (NULL AssignedProfile, no ProfileThresholds row). Per the loud-failure rule, silent fallbacks are forbidden.
 
 **Output:** Every MediaFiles row carries up-to-date routing fields. Consumers:
-- `SmartPopulateQueue(Mode='Remux')` reads `RecommendedMode` to show remux candidates.
-- `SmartPopulateQueue(Mode='Transcode')` reads `RecommendedMode` to show transcode candidates.
+- `NextTranscodeBatch(Drive)` reads `NeedsTranscode` for the TV / Movies "Next Batch" cards on the Transcode pane.
+- `SmartPopulateQueue(Mode='Quick'|'Remux'|'AudioFix')` reads `NeedsQuick` / `RecommendedMode` for the Quick Fix / Remux / AudioFix cards.
 - Activity page compliance widget reads `IsCompliant` for library-wide stats.
 - No consumer recomputes -- all read the materialized columns.
 
@@ -158,7 +158,7 @@ See `Features/TranscodeQueue/priority-materialization.feature.md` and `Features/
 |------|----------|----------------------|
 | Full populate | `POST /api/TranscodeQueue/PopulateQueue` | All guards (audio, resolution, VMAF, CRF floor) |
 | Media page: queue by folder | `POST /api/ShowSettings/QueueByFolder` | Audio language, probed (Resolution NOT NULL), dedup, already-transcoded |
-| Media page: batch (SmartPopulate) | `POST /api/ShowSettings/AddToQueue` | Dedup only (user explicitly chose files) |
+| Media page: batch (NextTranscodeBatch -- TV/Movies cards; SmartPopulate -- Quick Fix/Remux/AudioFix cards) | `POST /api/ShowSettings/AddToQueue` | Dedup only (user explicitly chose files) |
 | Single file add | `POST /api/TranscodeQueue/AddJob` | All guards (audio, resolution, VMAF, CRF floor) |
 
 **Full populate code path** (most guards):

@@ -4,22 +4,29 @@
 
 ## Entry Point
 
-`Templates/ShowSettings.html` -- Card 1 "Next Batch" + Card 1.5 "Next
-Remux Batch" (parallel sibling). The user lands on `/ShowSettings` to
-find files worth queuing. Both cards surface ranked candidates, scoped
-by `MediaFiles.RecommendedMode`, and accept the user's commit to the
-queue.
+`Templates/ShowSettings.html` -- the Quick Fix card (`Mode='Quick'` + `Focus`),
+the legacy Remux card (`Mode='Remux'`), and the legacy AudioFix card
+(`Mode='AudioFix'`) all surface ranked candidates scoped by their respective
+`MediaFiles` flags and accept the user's commit to the queue.
 
 API entry: `POST /api/ShowSettings/SmartPopulate` ->
 `Features/ShowSettings/ShowSettingsController.SmartPopulateQueue` ->
 `Features/TranscodeQueue/QueueManagementBusinessService.SmartPopulateQueue`.
 
-The endpoint accepts a `Mode` parameter (`Transcode` | `Remux`) that
-filters to the matching `RecommendedMode` and routes the resulting
-queue items to the corresponding `ProcessingMode`. Both cards hit the
-same endpoint with their own `Mode` value plus independent state
-(search, batch size, offset) so an operator can search Survivor on
-the Transcode side without affecting the Remux side, and vice versa.
+The endpoint accepts a `Mode` parameter (`Quick` | `Remux` | `AudioFix` |
+`Transcode`) that filters to the matching `MediaFiles` flag and routes the
+resulting queue items to the corresponding `ProcessingMode`. Each card hits
+the same endpoint with its own `Mode` value plus independent state
+(search, batch size, offset).
+
+**Scope note.** The Transcode pane's TV / Movies "Next Batch" cards do NOT
+go through this flow. They consume the purpose-built
+`POST /api/ShowSettings/NextTranscodeBatch` endpoint (WHERE `NeedsTranscode = TRUE`,
+ORDER BY `SizeMB DESC NULLS LAST`, partial index
+`idx_mediafiles_next_transcode_batch`). See
+`Features/TranscodeQueue/next-batch-per-drive.feature.md` for that surface.
+The stages, seams, and failure modes below describe the SmartPopulate path
+only -- they apply to the Quick Fix / Remux / AudioFix cards.
 
 The ranking value (`MediaFiles.PriorityScore`) is **maintained
 continuously** by the priority materialization pipeline -- see

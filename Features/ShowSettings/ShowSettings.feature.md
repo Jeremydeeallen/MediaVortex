@@ -47,7 +47,8 @@ The Media page (`/ShowSettings`) lets users browse all discovered media (shows, 
 | `/Delete` | POST | Delete a title setting (revert to default) |
 | `/BulkUpdate` | POST | Update target resolution for multiple titles |
 | `/Default` | GET/POST | Get or set the global default target resolution |
-| `/SmartPopulate` | POST | Generate batch suggestions (largest untranscoded files, sorted by size then bitrate) |
+| `/SmartPopulate` | POST | Generate batch suggestions for Quick Fix / Remux / AudioFix tabs. Multi-mode multiplexer keyed by `Mode` (`Quick` + `Focus`, `Remux`, `AudioFix`). |
+| `/NextTranscodeBatch` | POST | Generate batch suggestions for the TV / Movies "Next Batch" cards on the Transcode pane. WHERE `NeedsTranscode = TRUE`, ORDER BY `SizeMB DESC NULLS LAST`. Owned by `Features/TranscodeQueue/next-batch-per-drive.feature.md`. |
 | `/AddToQueue` | POST | Add batch suggestions to transcode queue |
 | `/QueueByFolder` | POST | Queue all untranscoded files for specified folders (takes ShowFolders[], ProfileId) |
 
