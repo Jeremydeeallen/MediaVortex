@@ -435,10 +435,12 @@ class ProcessTranscodeQueueService:
             TranscodeCommand = CommandResult['Command']
             OutputPath = CommandResult['OutputPath']
 
-            # directive: path-schema-migration | # see path.S8
+            # directive: path-schema-migration, local-staging | # see path.S8, local-staging.C7
             SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath)
+            LocalSrcPath, LocalOutPath = self._GetLocalStagingPathsIfActive(EffectiveInputPath, OutputPath)
             TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(
-                TranscodeAttemptId, SrcId, SrcRel, OutId, OutRel)
+                TranscodeAttemptId, SrcId, SrcRel, OutId, OutRel,
+                LocalSourcePath=LocalSrcPath, LocalOutputPath=LocalOutPath)
             if not TemporaryFilePathId:
                 LoggingService.LogWarning(f"Failed to create TemporaryFilePath record for TranscodeAttempt {TranscodeAttemptId}, but file preparation succeeded",
                                         "ProcessTranscodeQueueService", "ProcessJob")
@@ -477,6 +479,15 @@ class ProcessTranscodeQueueService:
                 self._DeleteInProgressFile(OutputPath)
                 self.HandleJobFailure(Job, f"Transcode output failed FFprobe verification: {OutputPath}", TranscodeAttemptId, ActiveJobId)
                 return
+
+            # directive: local-staging | # see local-staging.C10
+            if LocalOutPath:
+                CanonicalOutputPath = self._ResolveCanonicalOutputPath(OutId, OutRel)
+                if not self._CopyBackStagedOutput(OutputPath, CanonicalOutputPath, Job.MediaFileId):
+                    self.HandleJobFailure(Job, f"Staged output copy-back failed: {OutputPath} -> {CanonicalOutputPath}", TranscodeAttemptId, ActiveJobId)
+                    return
+                self._CleanupLocalScratchForAttempt(Job.MediaFileId)
+                OutputPath = CanonicalOutputPath
 
             # Phase 7: Finalizing
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Processing results and cleanup...")
@@ -1159,15 +1170,22 @@ class ProcessTranscodeQueueService:
                 "ProcessTranscodeQueueService", "_MarkMediaFileSourceMissing"
             )
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: nvenc-rate-anchored-remediation, local-staging | # see local-staging.C4
     def SetupFilePreparation(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, TranscodeAttemptId: int) -> Optional[str]:
-        """Resolve the worker-local path for the job's source file. Workers read
-        the source directly from the NFS/SMB mount; no copy step.
-        Returns the effective input path, or None on failure."""
+        """Resolve worker-local source path; conditionally stage to local scratch via LocalStagingService when the worker opts in and size >= floor."""
         try:
-            SourcePath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker.Current(Db=self.DatabaseManager.DatabaseService))
-            LoggingService.LogInfo(f"Resolved source path: {SourcePath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
-            return SourcePath
+            CanonicalLocalSource = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker.Current(Db=self.DatabaseManager.DatabaseService))
+            LoggingService.LogInfo(f"Resolved source path: {CanonicalLocalSource}", "ProcessTranscodeQueueService", "SetupFilePreparation")
+            from Features.TranscodeJob.LocalStagingService import LocalStagingService
+            Staging = LocalStagingService(self.DatabaseManager.DatabaseService)
+            SourceSizeMB = float(getattr(MediaFile, 'SizeMB', None) or getattr(Job, 'SizeMB', None) or 0)
+            if Staging.ShouldStage(self.WorkerName, SourceSizeMB):
+                LoggingService.LogInfo(f"LocalStaging active for MediaFileId={Job.MediaFileId} (SizeMB={SourceSizeMB}); copying to scratch before encode", "ProcessTranscodeQueueService", "SetupFilePreparation")
+                StagedSource = Staging.StageSource(self.WorkerName, Job.MediaFileId, CanonicalLocalSource)
+                if StagedSource:
+                    return StagedSource
+                LoggingService.LogWarning(f"LocalStaging.StageSource returned None for MediaFileId={Job.MediaFileId}; falling back to direct mount read", "ProcessTranscodeQueueService", "SetupFilePreparation")
+            return CanonicalLocalSource
 
         except Exception as e:
             LoggingService.LogException("Exception in file preparation", e, "ProcessTranscodeQueueService", "SetupFilePreparation")
@@ -1657,6 +1675,13 @@ class ProcessTranscodeQueueService:
                         LoggingService.LogInfo(f"Partial output file does not exist (already cleaned up): {ActualPath}",
                                              "ProcessTranscodeQueueService", "_CleanupFailedAttemptFiles")
 
+                # directive: local-staging | # see local-staging.C11
+                if TemporaryFilePathRecord.get('IsStaged'):
+                    from Features.TranscodeJob.LocalStagingService import LocalStagingService
+                    Staging = LocalStagingService(self.DatabaseManager.DatabaseService)
+                    Staging.Cleanup(TemporaryFilePathRecord.get('LocalSourcePath'))
+                    Staging.Cleanup(TemporaryFilePathRecord.get('LocalOutputPath'))
+
                 # Delete the TemporaryFilePaths row
                 self.DatabaseManager.DeleteTemporaryFilePath(TranscodeAttemptId)
             else:
@@ -1995,22 +2020,93 @@ class ProcessTranscodeQueueService:
         OutRel = OutRel or None
         return SrcId, SrcRel, OutId, OutRel
 
-    # directive: path-schema-migration | # see path.S8
+    # directive: local-staging | # see local-staging.C7
+    def _GetLocalStagingPathsIfActive(self, EffectiveInputPath: str, OutputPath: str):
+        """Return (LocalSourcePath, LocalOutputPath) iff EffectiveInputPath lies under this worker's LocalScratchDir; else (None, None)."""
+        try:
+            Rows = self.DatabaseManager.DatabaseService.ExecuteQuery("SELECT LocalScratchDir FROM Workers WHERE WorkerName = %s", (self.WorkerName,))
+            if not Rows:
+                return (None, None)
+            ScratchDir = (Rows[0].get('localscratchdir') or '').strip()
+            if not ScratchDir:
+                return (None, None)
+            EffStr = str(EffectiveInputPath or '')
+            if EffStr.startswith(ScratchDir):
+                return (EffStr, str(OutputPath) if OutputPath else None)
+            return (None, None)
+        except Exception as Ex:
+            LoggingService.LogException("_GetLocalStagingPathsIfActive failed", Ex, "ProcessTranscodeQueueService", "_GetLocalStagingPathsIfActive")
+            return (None, None)
+
+    # directive: local-staging | # see local-staging.C10
+    def _ResolveCanonicalOutputPath(self, OutputStorageRootId, OutputRelativePath) -> Optional[str]:
+        """Resolve the canonical typed-pair output path to the worker-native mount path (e.g. M:\\Show\\foo-mv.mp4.inprogress)."""
+        try:
+            if OutputStorageRootId is None or OutputRelativePath is None:
+                return None
+            return Path(OutputStorageRootId, OutputRelativePath).Resolve(Worker.Current(Db=self.DatabaseManager.DatabaseService))
+        except Exception as Ex:
+            LoggingService.LogException("_ResolveCanonicalOutputPath failed", Ex, "ProcessTranscodeQueueService", "_ResolveCanonicalOutputPath")
+            return None
+
+    # directive: local-staging | # see local-staging.C10
+    def _CopyBackStagedOutput(self, LocalOutputPath: str, CanonicalOutputPath: str, MediaFileId: int) -> bool:
+        """Copy local .inprogress back to the canonical side-by-side path; size-verify; return False on any failure."""
+        try:
+            if not LocalOutputPath or not CanonicalOutputPath:
+                LoggingService.LogError(f"Copy-back missing path: local={LocalOutputPath} canonical={CanonicalOutputPath} mid={MediaFileId}", "ProcessTranscodeQueueService", "_CopyBackStagedOutput")
+                return False
+            import shutil as _shutil
+            from Core.Path.LocalPath import LocalDirname, LocalExists, LocalGetSize
+            DestDir = LocalDirname(CanonicalOutputPath)
+            if DestDir and not LocalExists(DestDir):
+                os.makedirs(DestDir, exist_ok=True)
+            LoggingService.LogInfo(f"Copy-back staged output for MediaFileId={MediaFileId}: {LocalOutputPath} -> {CanonicalOutputPath}", "ProcessTranscodeQueueService", "_CopyBackStagedOutput")
+            _shutil.copy2(LocalOutputPath, CanonicalOutputPath)
+            SrcSize = LocalGetSize(LocalOutputPath)
+            DstSize = LocalGetSize(CanonicalOutputPath)
+            if SrcSize != DstSize:
+                LoggingService.LogError(f"Copy-back size mismatch for MediaFileId={MediaFileId}: src={SrcSize} dst={DstSize}; deleting partial canonical write", "ProcessTranscodeQueueService", "_CopyBackStagedOutput")
+                try:
+                    os.remove(CanonicalOutputPath)
+                except Exception:
+                    pass
+                return False
+            LoggingService.LogInfo(f"Copy-back complete for MediaFileId={MediaFileId}: {DstSize} bytes at {CanonicalOutputPath}", "ProcessTranscodeQueueService", "_CopyBackStagedOutput")
+            return True
+        except Exception as Ex:
+            LoggingService.LogException(f"_CopyBackStagedOutput failed for MediaFileId={MediaFileId}", Ex, "ProcessTranscodeQueueService", "_CopyBackStagedOutput")
+            return False
+
+    # directive: local-staging | # see local-staging.C11
+    def _CleanupLocalScratchForAttempt(self, MediaFileId: int) -> bool:
+        """Idempotent removal of the per-job scratch subdir (source + any leftover output)."""
+        try:
+            from Features.TranscodeJob.LocalStagingService import LocalStagingService
+            return LocalStagingService(self.DatabaseManager.DatabaseService).CleanupJobScratchDir(self.WorkerName, MediaFileId)
+        except Exception as Ex:
+            LoggingService.LogException(f"_CleanupLocalScratchForAttempt failed for MediaFileId={MediaFileId}", Ex, "ProcessTranscodeQueueService", "_CleanupLocalScratchForAttempt")
+            return False
+
+    # directive: path-schema-migration, local-staging | # see path.S8, local-staging.C7
     def PrivateCreateTemporaryFilePathRecord(self, TranscodeAttemptId: int,
                                               SourceStorageRootId: int, SourceRelativePath: str,
                                               OutputStorageRootId: Optional[int] = None,
-                                              OutputRelativePath: Optional[str] = None) -> Optional[int]:
-        """Route TemporaryFilePaths insert through QualityTestRepository using typed pairs only."""
+                                              OutputRelativePath: Optional[str] = None,
+                                              LocalSourcePath: Optional[str] = None,
+                                              LocalOutputPath: Optional[str] = None) -> Optional[int]:
+        """Route TemporaryFilePaths insert through QualityTestRepository; populate worker-local staging paths when staging is active."""
         try:
             LoggingService.LogFunctionEntry("PrivateCreateTemporaryFilePathRecord", "ProcessTranscodeQueueService",
                                           TranscodeAttemptId, SourceStorageRootId, SourceRelativePath,
-                                          OutputStorageRootId, OutputRelativePath)
+                                          OutputStorageRootId, OutputRelativePath, LocalSourcePath, LocalOutputPath)
 
             from Features.QualityTesting.QualityTestRepository import QualityTestRepository
             _Repo = QualityTestRepository(self.DatabaseManager.DatabaseService)
             TemporaryFilePathId = _Repo.CreateTemporaryFilePath(
                 TranscodeAttemptId, SourceStorageRootId, SourceRelativePath,
                 OutputStorageRootId, OutputRelativePath,
+                LocalSourcePath, LocalOutputPath,
             )
 
             if TemporaryFilePathId:

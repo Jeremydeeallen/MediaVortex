@@ -687,46 +687,31 @@ class QualityTestRepository(BaseRepository):
 
     # ─── TemporaryFilePaths Methods (DatabaseManager port + Phase 8 typed-pair) ────
 
-    # directive: path-schema-migration | # see path.S8
+    # directive: path-schema-migration, local-staging | # see path.S8, local-staging.C7
     def CreateTemporaryFilePath(self,
                                 TranscodeAttemptId: int,
                                 SourceStorageRootId: int,
                                 SourceRelativePath: str,
                                 OutputStorageRootId: Optional[int] = None,
-                                OutputRelativePath: Optional[str] = None) -> Optional[int]:
-        """Create a TemporaryFilePaths row using typed-pair source + optional typed-pair output (Phase 8 schema)."""
+                                OutputRelativePath: Optional[str] = None,
+                                LocalSourcePath: Optional[str] = None,
+                                LocalOutputPath: Optional[str] = None) -> Optional[int]:
+        """Create a TemporaryFilePaths row using typed-pair source + optional typed-pair output + optional worker-local staging paths."""
         try:
             LoggingService.LogFunctionEntry("CreateTemporaryFilePath", "QualityTestRepository",
                                           TranscodeAttemptId, SourceStorageRootId, SourceRelativePath,
-                                          OutputStorageRootId, OutputRelativePath)
+                                          OutputStorageRootId, OutputRelativePath, LocalSourcePath, LocalOutputPath)
 
             if not self.PrivateValidateTranscodeAttemptId(TranscodeAttemptId):
                 LoggingService.LogError(f"Invalid TranscodeAttemptId: {TranscodeAttemptId}", "QualityTestRepository", "CreateTemporaryFilePath")
                 return None
 
             if OutputStorageRootId is not None and OutputRelativePath:
-                Query = (
-                    "INSERT INTO TemporaryFilePaths ("
-                    "TranscodeAttemptId, "
-                    "SourceStorageRootId, SourceRelativePath, "
-                    "OutputStorageRootId, OutputRelativePath, "
-                    "CreatedDate"
-                    ") VALUES (%s, %s, %s, %s, %s, NOW()) "
-                    "RETURNING Id"
-                )
-                Params = (TranscodeAttemptId,
-                          SourceStorageRootId, SourceRelativePath,
-                          OutputStorageRootId, OutputRelativePath)
+                Query = "INSERT INTO TemporaryFilePaths (TranscodeAttemptId, SourceStorageRootId, SourceRelativePath, OutputStorageRootId, OutputRelativePath, LocalSourcePath, LocalOutputPath, CreatedDate) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW()) RETURNING Id"
+                Params = (TranscodeAttemptId, SourceStorageRootId, SourceRelativePath, OutputStorageRootId, OutputRelativePath, LocalSourcePath, LocalOutputPath)
             else:
-                Query = (
-                    "INSERT INTO TemporaryFilePaths ("
-                    "TranscodeAttemptId, "
-                    "SourceStorageRootId, SourceRelativePath, "
-                    "CreatedDate"
-                    ") VALUES (%s, %s, %s, NOW()) "
-                    "RETURNING Id"
-                )
-                Params = (TranscodeAttemptId, SourceStorageRootId, SourceRelativePath)
+                Query = "INSERT INTO TemporaryFilePaths (TranscodeAttemptId, SourceStorageRootId, SourceRelativePath, LocalSourcePath, LocalOutputPath, CreatedDate) VALUES (%s, %s, %s, %s, %s, NOW()) RETURNING Id"
+                Params = (TranscodeAttemptId, SourceStorageRootId, SourceRelativePath, LocalSourcePath, LocalOutputPath)
 
             RowsAffected = self.ExecuteNonQuery(Query, Params)
 
@@ -785,20 +770,13 @@ class QualityTestRepository(BaseRepository):
             self.PrivateLogTemporaryFilePathOperation("UPDATE", TranscodeAttemptId, None, "EXCEPTION", str(e))
             return False
 
-    # directive: path-schema-migration | # see path.S8
+    # directive: path-schema-migration, local-staging | # see path.S8, local-staging.C7
     def GetTemporaryFilePath(self, TranscodeAttemptId: int) -> Optional[Dict[str, Any]]:
-        """Get TemporaryFilePaths row by TranscodeAttemptId. Returns typed-pair columns plus synthesized canonical legacy keys (OriginalPath, LocalSourcePath, LocalOutputPath) for back-compat readers."""
+        """Get TemporaryFilePaths row by TranscodeAttemptId. Returns typed-pair columns + LocalSourcePath/LocalOutputPath (real local staging paths when set, synthesized canonical otherwise)."""
         try:
             LoggingService.LogFunctionEntry("GetTemporaryFilePath", "QualityTestRepository", TranscodeAttemptId)
 
-            Query = (
-                "SELECT Id, TranscodeAttemptId, "
-                "SourceStorageRootId, SourceRelativePath, "
-                "OutputStorageRootId, OutputRelativePath, "
-                "CreatedDate "
-                "FROM TemporaryFilePaths "
-                "WHERE TranscodeAttemptId = %s"
-            )
+            Query = "SELECT Id, TranscodeAttemptId, SourceStorageRootId, SourceRelativePath, OutputStorageRootId, OutputRelativePath, LocalSourcePath, LocalOutputPath, CreatedDate FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s"
             Results = self.ExecuteQuery(Query, (TranscodeAttemptId,))
 
             if Results:
@@ -807,6 +785,8 @@ class QualityTestRepository(BaseRepository):
                 SrcRel = Row.get("SourceRelativePath") if "SourceRelativePath" in Row else Row.get("sourcerelativepath")
                 OutId = Row.get("OutputStorageRootId") if "OutputStorageRootId" in Row else Row.get("outputstoragerootid")
                 OutRel = Row.get("OutputRelativePath") if "OutputRelativePath" in Row else Row.get("outputrelativepath")
+                StoredLocalSrc = Row.get("LocalSourcePath") if "LocalSourcePath" in Row else Row.get("localsourcepath")
+                StoredLocalOut = Row.get("LocalOutputPath") if "LocalOutputPath" in Row else Row.get("localoutputpath")
 
                 SynthesizedSource = _SafeCanonical(SrcId, SrcRel)
                 SynthesizedOutput = _SafeCanonical(OutId, OutRel)
@@ -820,8 +800,9 @@ class QualityTestRepository(BaseRepository):
                     "OutputRelativePath": OutRel,
                     "CreatedDate": Row.get("CreatedDate") if "CreatedDate" in Row else Row.get("createddate"),
                     "OriginalPath": SynthesizedSource,
-                    "LocalSourcePath": SynthesizedSource,
-                    "LocalOutputPath": SynthesizedOutput,
+                    "LocalSourcePath": StoredLocalSrc if StoredLocalSrc else SynthesizedSource,
+                    "LocalOutputPath": StoredLocalOut if StoredLocalOut else SynthesizedOutput,
+                    "IsStaged": bool(StoredLocalSrc) or bool(StoredLocalOut),
                 }
                 LoggingService.LogInfo(f"Retrieved temporary file path record for TranscodeAttempt {TranscodeAttemptId}",
                                      "QualityTestRepository", "GetTemporaryFilePath")

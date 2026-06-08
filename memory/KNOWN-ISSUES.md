@@ -6,6 +6,38 @@
 
 *Per-entry area subsection assignment deferred to follow-up directive `migrate-bugs-compliance-deep`. Consult `memory/BUG-INDEX.md` for per-bug area metadata and the operationally-correct active/resolved classification (several entries below still bear `RESOLVED`/`FIXED` annotations in their headers despite living under `## Active`; the INDEX classifies them correctly).*
 
+### [BUG-0045] Directive anchor convention + hook validators are too loose for shared / hot functions
+**Date:** 2026-06-08 | **Area:** standards-hook
+
+**What breaks:** Three related gaps in how `pre-edit-standards.ps1` validates the `# directive: <slug> | # see <slug>.<ID>` anchor on a `def`/`class`. All three surface as the same operator-visible pain: shared functions touched by multiple directives end up with either lost provenance (operator "replaces" the anchor to avoid R12) or silently-wrong anchors (active directive's slug not present, see-ID typo'd against the active directive).
+
+**Three sub-items, ship in one follow-up directive (`/n anchor-convention-comma-separated`):**
+
+1. **R12 refusal message should TEACH the comma-separated format** when the stacked-`#`-lines pattern is two consecutive `# directive:` anchors. Today the message says "one-line max; rationale belongs in the directive doc" -- which is misleading because the right fix is NOT to delete one anchor or move rationale to the directive doc; it is to MERGE the two anchors into one line as `# directive: slug-a, slug-b | # see slug-a.C1, slug-b.C5`. The Path-Forward text should detect "both lines are directive anchors" and suggest the merge format with a worked example. Surfaced twice this session: worker-routing (replaced path-schema anchor on ClaimNextPendingTranscodeJob, losing breadcrumb) and local-staging (attempted to stack on CreateTemporaryFilePath, R12 fired with misleading guidance).
+
+2. **R15 should validate the ACTIVE directive's slug is present in the list**, not just "any slug present." Today the hook's regex `#\s*directive:\s*[a-z0-9-]+` matches the first slug it finds. An operator could leave only a closed-directive anchor on an edited function and the hook would pass -- the active directive's provenance would be missing from the code. Fix: parse `.claude/directive.md` for the active slug, then ensure that slug is one of the comma-separated tokens on the anchor line.
+
+3. **R15 `# see` should validate the criterion ID against the ACTIVE directive doc**. Today the regex `#\s*see\s+[a-z0-9-]+\.(S|W|C|ST)\d+` checks shape only -- a typo like `local-staging.C77` (instead of `C7`) passes regex but doesn't resolve to any real criterion. Fix: when the see anchor names the active directive's slug, parse the directive's `## Acceptance Criteria` section and confirm the cited ID exists. Closed-directive see anchors (e.g. `path.S8` for a closed `path-schema-migration` directive) are unverifiable post-close, so skip validation for those -- only enforce the live one.
+
+**Convention to codify (in `.claude/rules/ceo-mode.md` and/or `.claude/standards/index.md` R15 row):**
+
+```
+# directive: slug-a, slug-b, slug-c | # see slug-a.C1, slug-b.C5, slug-c.C7
+def SharedHotFunction(...):
+```
+
+- One line per function (R12 OK).
+- Slugs accumulate in chronological order (oldest -> newest left to right).
+- When a directive closes, its slug stays as a historical breadcrumb (preserves "this function was touched by directive X" for future archaeology).
+- Active directive (rightmost typically) gates the current edit (R15 enforced via #2 above).
+- `# see` carries one ID per slug, comma-separated in matching order.
+
+**Look first:** `.claude/hooks/pre-edit-standards.ps1` -- `Test-R12-CommentVolume` (for sub-item 1: add a "is this a stacked-directive-anchors block?" detector + a path-forward message variant), `Test-R15-DirectiveAnchor` (for sub-items 2 + 3: parse active directive doc for slug + criterion IDs and validate against the anchor line). `.claude/rules/ceo-mode.md` -- add the comma-separated convention example. `.claude/standards/index.md` R15 row -- update description.
+
+**Fix with:** `/n anchor-convention-comma-separated` -- single directive, ~3 hook functions touched, one rule doc updated, one standards row updated. Out of scope: retroactively converting every existing single-anchor function in the codebase (do that opportunistically when each is touched next).
+
+---
+
 ### [BUG-0044] CpuAffinityService loses its SystemSettingsRepository wiring on every worker startup -- config knobs silently ignored
 **Date:** 2026-06-06 | **Area:** worker-lifecycle
 
