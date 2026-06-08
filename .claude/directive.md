@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-08
-**Status:** Active -- phase: NEEDS_DOC_PREREAD
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** legacy-audio-damage-accounting
 **Interrupts:** local-staging (paused at `.claude/directives/paused/2026-06-08-local-staging.md`; resume by un-pausing after this closes)
 
