@@ -387,6 +387,8 @@ pipeline.
 
 DRAFT -- criteria pending operator approval. No code until approved.
 
+**Forward-guarantee tests:** `Tests/Contract/TestLinearLoudnormEnforcement.py` enforces the "Linear or refused -- never quietly different" contract mechanically. See `memory/KNOWN-ISSUES.md` BUG-0046 for the legacy-chain damage accounting.
+
 ### Progress
 
 - [x] Stack pivot from `scan-drives`; pause snapshot committed (2560fe9)

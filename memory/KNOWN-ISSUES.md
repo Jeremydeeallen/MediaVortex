@@ -6,6 +6,25 @@
 
 *Per-entry area subsection assignment deferred to follow-up directive `migrate-bugs-compliance-deep`. Consult `memory/BUG-INDEX.md` for per-bug area metadata and the operationally-correct active/resolved classification (several entries below still bear `RESOLVED`/`FIXED` annotations in their headers despite living under `## Active`; the INDEX classifies them correctly).*
 
+### [BUG-0046] Legacy acompressor+dynamic-loudnorm chain damaged 8,249 library files; population is closed but damage is permanent
+**Date:** 2026-06-08 | **Area:** audio-pipeline
+
+**What happened:** Between 2025-10-03 and 2026-05-30 the production audio-filter chain was `acompressor=threshold=-15dB:ratio=3:attack=0.01:release=0.1:makeup=3dB,loudnorm=I=-23:LRA=7:TP=-2`. The `linear-loudnorm.feature.md` design replaced this with linear-mode loudnorm starting 2026-05-25; the transition completed 2026-05-30.
+
+**Scope:** 8,249 audio-bearing files were processed under the legacy chain. Split: 22 movies + 8,227 TV episodes. Population is closed -- no new files entering since 2026-05-25.
+
+**Damage profile:** Irreversible. The acompressor reduced peaks above -15 dB at a 3:1 ratio with 3 dB makeup gain; the dynamic-mode `loudnorm LRA=7` then forced everything into a 7-LU loudness range envelope. Dynamic range was compressed and peaks were limited in ways that cannot be recovered from the encoded output. Films/cinematic content with native LRA 12-20+ LU took audible damage; TV-series content with native LRA 5-8 LU took subtle damage that is typically inaudible.
+
+**Affected file list:** `Reports/LegacyAudioDamagedMovies.csv` lists the 22 movies (operator-actionable subset). The 8,227 TV episodes are queryable via `Scripts/IdentifyLegacyDamagedMovies.py` with the `seasonid IS NULL` and filename regex filters removed.
+
+**Why not remediated:** Zero of the 8,249 files have `MediaFiles.KeepSource=TRUE` -- the original sources were deleted by FileReplacement post-flight in every case. Full re-transcode from MediaVortex-managed source is impossible. Audio-only re-pass (considered + closed as `audio-renorm-legacy` directive) does not recover dynamic range or peak fidelity -- it would only re-normalize the loudness of already-damaged audio. External re-acquisition (Sonarr/Radarr/manual) for the 22 movies is the operator-driven recovery path; the 8,227 TV episodes are accepted as historical loss.
+
+**Forward-guarantee:** `Tests/Contract/TestLinearLoudnormEnforcement.py` greps the python tree for the legacy chain literal + `acompressor=` and asserts production code is clean. `Models/CommandBuilder.BuildAudioFilters` now raises `RuntimeError(ungainable_peak)` on the case that previously triggered the dynamic-mode fallback -- "linear or refused" is now mechanically enforced, not just documented.
+
+**Look first:** `Reports/LegacyAudioDamagedMovies.csv` (the operator-actionable subset), `Features/LoudnessAnalysis/linear-loudnorm.feature.md` (forward policy), `Tests/Contract/TestLinearLoudnormEnforcement.py` (regression guard), `.claude/directives/closed/2026-06-08-legacy-audio-damage-accounting.md` (full directive context).
+
+---
+
 ### [BUG-0045] Directive anchor convention + hook validators are too loose for shared / hot functions
 **Date:** 2026-06-08 | **Area:** standards-hook
 

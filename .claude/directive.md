@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-08
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** legacy-audio-damage-accounting
 **Interrupts:** local-staging (paused at `.claude/directives/paused/2026-06-08-local-staging.md`; resume by un-pausing after this closes)
 
@@ -110,8 +110,35 @@ Easy-to-forget rules:
 
 ### Promotions
 
-(populated at DELIVERING)
+| Source artifact | Target file | Commit |
+|---|---|---|
+| `## Acceptance Criteria` C1 + identification script + 22-movie CSV | `memory/KNOWN-ISSUES.md` BUG-0046 (cross-linked) + `Reports/LegacyAudioDamagedMovies.csv` (artifact) | `72b227f` |
+| `## Concern` legacy damage profile + scope numbers | `memory/KNOWN-ISSUES.md` BUG-0046 | this closing commit |
+| C3/C4/C5 forward-guarantee tests | `Features/LoudnessAnalysis/linear-loudnorm.feature.md` Status section pointer | this closing commit |
+| C5 BuildAudioFilters fix | `Models/CommandBuilder.py` (R15 anchor; code is durable) | `e5e6a08` |
+| C7 ClipBuilder loudnorm removal | `Features/ClipBuilder/ClipBuilderBusinessService.py` (code is durable) | `e5e6a08` |
+| C6 ungainable-peak admission gate | DEFERRED to `/n ungainable-peak-admission-gate` -- C5's RuntimeError holds the safety floor; admission-gate addition is defense-in-depth without blocking damage | n/a |
+| C8 three deferred smoke scripts | DEFERRED to `/n smoke-scripts-cleanup` -- pre-existing R1/R6 violations require unrelated path-handling work; loudnorm removal lands there | n/a |
 
 ### Verification
 
-(populated at VERIFYING)
+| Criterion | Evidence | Status |
+|---|---|---|
+| C1 (identification + CSV) | `Scripts/IdentifyLegacyDamagedMovies.py` ran successfully; `Reports/LegacyAudioDamagedMovies.csv` produced with 22 rows; spot-checked rows pass the targeting predicate (dynamic-mode loudnorm in most-recent attempt, no linear pass since, no SxxEyy in filename, NULL seasonid). | PASS |
+| C2 (KNOWN-ISSUES entry) | `memory/KNOWN-ISSUES.md` BUG-0046 added with all five structured fields: What happened, Scope, Damage profile, Affected file list, Why not remediated. CSV header references BUG-0046. | PASS |
+| C3 (linear-mode happy path test) | `Tests/Contract/TestLinearLoudnormEnforcement.py::test_linear_mode_when_gainable` passes; asserts `linear=true` present, `acompressor` absent, `alimiter` absent. | PASS |
+| C4 (audit tests) | `test_audit_no_legacy_chain_literal` + `test_audit_no_acompressor_in_audio_chains` pass; zero violations in production code; three deferred smoke scripts whitelisted with BUG reference. | PASS |
+| C5 (BuildAudioFilters refuses ungainable-peak) | `test_ungainable_peak_refuses` passes; mock with SourceIntegratedLufs=-30, TruePeak=-3 triggers RuntimeError containing 'ungainable_peak' and the MediaFileId. Code review: dynamic-fallback branch deleted; only linear-mode path remains. | PASS |
+| C6 (admission gate refuses ungainable-peak upstream) | DEFERRED to follow-up. Rationale: C5's RuntimeError holds the safety floor (no silent dynamic-mode emission possible). Upstream gate is defense-in-depth, not damage-prevention. | DEFERRED |
+| C7 (ClipBuilder loudnorm removed) | `Features/ClipBuilder/ClipBuilderBusinessService.py` line 54 hardcoded `-af loudnorm=...` removed; `grep -n loudnorm Features/ClipBuilder/` returns zero matches. | PASS |
+| C8 (smoke scripts loudnorm removed) | 1 of 4 removed (`NewGirlEncodingABC.py`). 3 deferred due to pre-existing R1/R6 hook violations (EncoderShootout.feature.md preread + os.path.exists path-shape on path-named variables). | PARTIAL (1/4 done, 3/4 deferred) |
+
+Full regression: `py -m pytest Tests/Contract/TestLinearLoudnormEnforcement.py Tests/Contract/TestClaimAuthority.py -q` -> 18/18 pass.
+
+### Decisions Made
+
+- **C6 deferred to follow-up directive `/n ungainable-peak-admission-gate`.** C5's RuntimeError replaces the silent dynamic-mode fallback with a loud, named failure -- the safety floor is held. Adding the ungainable-peak refusal at the admission gate (`Features/TranscodeQueue/QueueManagementBusinessService.py` around line 1606, right after the existing a4. measurement-gate block) is defense-in-depth: it prevents queueing files that would later fail at encode time. Worth doing, but a separate directive: the admission-cascade file is 3000+ lines, requires reading two more colocated feature docs (`TranscodeQueue.feature.md` + `media-tabs-and-loudness.feature.md`), and needs a new entry in `QueueAdmissionConfig` (TargetIntegratedLufs + TargetTruePeakDbtp thresholds). Focused enough to be its own small directive.
+- **C8 three smoke scripts deferred to follow-up directive `/n smoke-scripts-cleanup`.** The hooks caught pre-existing R1 (colocated `EncoderShootout.feature.md` unread) and R6 (`os.path.exists` on path-named variables) violations in `EncodeAndVmaf.py`, `FourKEncodingABC.py`, `NewGirlEncodingABC_VarianceBoost.py`. These are unrelated to loudnorm and per `feedback_preexisting_bug_scope_test.md` shouldn't expand mid-directive scope. The follow-up bundles the R6 path-fix + R1 preread + loudnorm removal in one focused pass.
+- **Adult-content videos vs Hollywood films.** The C1 query identified 22 videos matching the "movies" heuristic (no SxxEyy, NULL seasonid). On inspection, they're short-form adult content (`Videos/Test`, `Videos/Couple`), not Hollywood films. Operator re-acquisition path is different from Sonarr/Radarr; the report still flags them honestly as the audibly-damaged subset, but the practical recovery path is operator-specific.
+- **R15 anchor comma-separated convention applied to `BuildAudioFilters`.** Pre-existing `# directive: mv-suffix-greedy-collapse` anchor extended to `# directive: mv-suffix-greedy-collapse, legacy-audio-damage-accounting | # see legacy-audio-damage-accounting.C5` per BUG-0045's documented convention.
+- **No new feature doc for this directive.** The work promotes content into existing durable artifacts: KNOWN-ISSUES BUG-0046, linear-loudnorm.feature.md Status pointer, and the contract test file itself. R13 doesn't require a new `*.feature.md` when no new feature is being added -- this is a remediation + regression-guard directive.
