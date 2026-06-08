@@ -55,3 +55,11 @@ class TeamStatusRepository(BaseRepository):
             "FROM Workers WHERE WorkerName = %s", (WorkerName,)
         )
         return Rows[0] if Rows else {}
+
+    # directive: worker-routing | # see worker-routing.C15
+    def GetNvencProfileNames(self) -> List[str]:
+        """Return profile names with usenvidiahardware=1 (NVENC-required profiles); used to detect misconfigured workers."""
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT ProfileName FROM Profiles WHERE usenvidiahardware = 1 ORDER BY ProfileName"
+        ) or []
+        return [(R.get('ProfileName') or R.get('profilename') or '').strip() for R in Rows if R.get('ProfileName') or R.get('profilename')]

@@ -210,6 +210,7 @@
 var ActivityPage = (function() {
     var Workers = [];
     var ProfileCatalog = [];
+    var NvencProfiles = [];
     var AutoRefreshEnabled = true;
     var OverviewInterval = null;
     // QT-specific polling moved to /Queue page; only OverviewInterval remains here.
@@ -714,6 +715,7 @@ var ActivityPage = (function() {
                 if (Data.Success && Data.Data) {
                     Workers = Data.Data;
                     if (Array.isArray(Data.ProfileCatalog)) ProfileCatalog = Data.ProfileCatalog;
+                    if (Array.isArray(Data.NvencProfiles)) NvencProfiles = Data.NvencProfiles;
                     RenderWorkers(Workers);
                 }
             })
@@ -796,6 +798,20 @@ var ActivityPage = (function() {
         }
         var VersionHtml = ' <small class="' + VersionCls + ' ms-2" title="' + VersionTooltip + '" style="white-space:pre-line">v: ' + VersionShort + '</small>';
 
+        var NvencMisconfigHtml = '';
+        if (W.NvencCapable === false && typeof W.AllowedProfiles === 'string' && W.AllowedProfiles.length > 0 && NvencProfiles.length > 0) {
+            var AllowedList = W.AllowedProfiles.split(',').map(function(s) { return s.trim(); });
+            var NvencSelected = AllowedList.filter(function(P) { return NvencProfiles.indexOf(P) !== -1; });
+            if (NvencSelected.length > 0) {
+                NvencMisconfigHtml =
+                    '<div class="alert alert-warning py-2 px-2 mb-2 small" role="alert">' +
+                        '<i class="fas fa-exclamation-triangle me-1"></i>' +
+                        '<strong>NVENC misconfig.</strong> ' + NvencSelected.length + ' NVENC profile(s) selected but NvencCapable=false &mdash; claims silently no-op. ' +
+                        'Enable NvencCapable in the modal if this worker has NVIDIA hardware, or unselect the NVENC profiles.' +
+                    '</div>';
+            }
+        }
+
         var MountErrorHtml = '';
         if (W.MountValidationError) {
             MountErrorHtml =
@@ -866,6 +882,7 @@ var ActivityPage = (function() {
                     '<span class="badge ' + BadgeCls + '">' + DisplayStatus + '</span>' +
                 '</h6>' +
                 MountErrorHtml +
+                NvencMisconfigHtml +
                 ScanLineHtml +
                 ProfilesLineHtml +
                 StagingLineHtml +

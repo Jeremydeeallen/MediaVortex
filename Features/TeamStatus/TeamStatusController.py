@@ -467,6 +467,7 @@ def GetWorkers():
         StagingByWorker = {(R.get('WorkerName') or ''): {'LocalScratchDir': R.get('localscratchdir'), 'LocalStagingEnabled': bool(R.get('localstagingenabled')), 'LocalVmafFirst': bool(R.get('localvmaffirst'))} for R in StagingRows}
         ProfileCatalogRows = DbManager.DatabaseService.ExecuteQuery("SELECT ProfileName FROM Profiles ORDER BY ProfileName") or []
         ProfileCatalog = [(R.get('profilename') or '').strip() for R in ProfileCatalogRows if R.get('profilename')]
+        NvencProfiles = TeamStatusRepo.GetNvencProfileNames()
 
         Workers = []
         for Row in (Rows or []):
@@ -514,7 +515,7 @@ def GetWorkers():
                 "LocalVmafFirst": StagingByWorker.get(WorkerName, {}).get('LocalVmafFirst', False),
             })
 
-        return jsonify({"Success": True, "Data": Workers, "ProfileCatalog": ProfileCatalog})
+        return jsonify({"Success": True, "Data": Workers, "ProfileCatalog": ProfileCatalog, "NvencProfiles": NvencProfiles})
 
     except Exception as e:
         ErrorMsg = f"Exception in GetWorkers: {str(e)}"

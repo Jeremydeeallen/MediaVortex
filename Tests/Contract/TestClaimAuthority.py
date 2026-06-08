@@ -1,25 +1,4 @@
-"""Conformance tests for DB-authoritative claim queries.
-
-Asserts the invariant from `.claude/rules/db-is-authority.md`:
-
-  Every capability-gated claim query MUST refuse the claim when the calling
-  Worker is `Status='Paused'` OR has the capability flag set to FALSE. The DB
-  is the gate; no Python control flow short-circuits the predicate; mid-flight
-  flag changes are honored on the next claim.
-
-Covers three claim paths (one test class each):
-  - TranscodeJob:   ClaimNextPendingTranscodeJob   gates on TranscodeEnabled
-  - Remux:          ClaimNextPendingRemuxJob       gates on RemuxEnabled
-  - QualityTesting: ClaimQualityTestJob            gates on QualityTestEnabled
-
-Test methodology: real DB; create a sentinel Workers row + a sentinel queue row
-in setUp; in each test, flip the relevant Worker flag, attempt the claim, assert
-refused-or-allowed correctly; teardown deletes both sentinels. The tests are
-self-isolating -- they do not depend on or affect production rows.
-
-Run:
-    py -m pytest Tests/Contract/TestClaimAuthority.py -v
-"""
+# see .claude/rules/db-is-authority.md -- conformance tests for capability-gated claim queries
 
 import os
 import sys
@@ -37,9 +16,7 @@ SENTINEL_WORKER = "_test-claim-authority-worker"
 SENTINEL_STORAGE_ROOT_ID = 1
 
 
-# ---------------------------------------------------------------------------
 # Helper smoke (the foundation everything else depends on)
-# ---------------------------------------------------------------------------
 
 class TestWorkerCapabilityPredicate(unittest.TestCase):
     def test_emits_workers_exists_clause(self):
@@ -59,9 +36,7 @@ class TestWorkerCapabilityPredicate(unittest.TestCase):
             self.assertIn(Cap, _ALLOWED_CAPABILITIES)
 
 
-# ---------------------------------------------------------------------------
 # Quality testing claim authority
-# ---------------------------------------------------------------------------
 
 class TestQualityTestClaimAuthority(unittest.TestCase):
     """ClaimQualityTestJob must honor Workers.Status + Workers.QualityTestEnabled."""
@@ -73,10 +48,10 @@ class TestQualityTestClaimAuthority(unittest.TestCase):
         # Sentinel worker -- isolated from production rows.
         cls.Db.ExecuteNonQuery("DELETE FROM Workers WHERE WorkerName = %s", (SENTINEL_WORKER,))
         cls.Db.ExecuteNonQuery(
-            """INSERT INTO Workers (WorkerName, Platform, Status,
-                   TranscodeEnabled, QualityTestEnabled, RemuxEnabled, ScanEnabled,
-                   Enabled, LastHeartbeat)
-               VALUES (%s, 'linux', 'Online', TRUE, TRUE, TRUE, TRUE, TRUE, NOW())""",
+            "INSERT INTO Workers (WorkerName, Platform, Status, "
+            "TranscodeEnabled, QualityTestEnabled, RemuxEnabled, ScanEnabled, "
+            "Enabled, LastHeartbeat) "
+            "VALUES (%s, 'linux', 'Online', TRUE, TRUE, TRUE, TRUE, TRUE, NOW())",
             (SENTINEL_WORKER,),
         )
 
@@ -94,14 +69,11 @@ class TestQualityTestClaimAuthority(unittest.TestCase):
         self.Db.ExecuteNonQuery(
             "DELETE FROM QualityTestingQueue WHERE LocalSourcePath = %s", ("_test-local",),
         )
-        # Create a sentinel queue row. TranscodeAttemptId can be NULL for the
-        # claim predicate test (the gate doesn't depend on it). ExecuteNonQuery
-        # auto-commits; ExecuteQuery does not -- so we INSERT via ExecuteNonQuery
-        # and look up the Id via a separate SELECT keyed on LocalSourcePath.
+        # sentinel queue row: TranscodeAttemptId NULL (gate-independent); ExecuteNonQuery auto-commits
         self.Db.ExecuteNonQuery(
-            """INSERT INTO QualityTestingQueue
-                  (TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, LocalSourcePath, Status, DateAdded)
-               VALUES (NULL, '_test-source', '_test-transcoded', '_test-local', 'Pending', NOW())""",
+            "INSERT INTO QualityTestingQueue "
+            "(TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, LocalSourcePath, Status, DateAdded) "
+            "VALUES (NULL, '_test-source', '_test-transcoded', '_test-local', 'Pending', NOW())",
         )
         Rows = self.Db.ExecuteQuery(
             "SELECT Id FROM QualityTestingQueue WHERE LocalSourcePath = %s",
@@ -153,8 +125,7 @@ class TestQualityTestClaimAuthority(unittest.TestCase):
         self.assertIsNone(Job2, "mid-flight QualityTestEnabled=FALSE MUST refuse")
 
     def test_force_disposition_row_invisible(self):
-        # Operator override path: rows with ForceDisposition set MUST NOT be
-        # claimable by workers (qt-queue-visibility-and-override.feature.md C4).
+        # see qt-queue-visibility-and-override.feature.md C4 -- ForceDisposition rows MUST NOT be claimable
         self.Db.ExecuteNonQuery(
             "UPDATE QualityTestingQueue SET ForceDisposition='Replace' WHERE Id=%s",
             (self.QueueId,),
@@ -163,21 +134,13 @@ class TestQualityTestClaimAuthority(unittest.TestCase):
         self.assertIsNone(Job, "row with ForceDisposition set MUST be invisible to worker claims")
 
 
-# ---------------------------------------------------------------------------
 # Transcode claim authority
-# ---------------------------------------------------------------------------
 
 SENTINEL_FILE_TRANSCODE = "_test-claim-authority-transcode.mkv"
 
 
 class TestTranscodeClaimAuthority(unittest.TestCase):
-    """ClaimNextPendingTranscodeJob must honor Workers.Status + Workers.TranscodeEnabled.
-
-    Fixture safety: sentinel queue row has Priority=-1000 (production rows
-    always rank higher), FilePath prefixed with `_test-claim-authority-`
-    (greppable for cleanup), MediaFileId NULL (no downstream side effects on
-    real MediaFiles).
-    """
+    """ClaimNextPendingTranscodeJob must honor Workers.Status + Workers.TranscodeEnabled; sentinel queue row at Priority=-1000 with MediaFileId=NULL for safety."""
 
     @classmethod
     def setUpClass(cls):
@@ -185,10 +148,10 @@ class TestTranscodeClaimAuthority(unittest.TestCase):
         cls.Dm = DatabaseManager()
         cls.Db.ExecuteNonQuery("DELETE FROM Workers WHERE WorkerName = %s", (SENTINEL_WORKER,))
         cls.Db.ExecuteNonQuery(
-            """INSERT INTO Workers (WorkerName, Platform, Status,
-                   TranscodeEnabled, QualityTestEnabled, RemuxEnabled, ScanEnabled,
-                   Enabled, AcceptsInterlaced, LastHeartbeat)
-               VALUES (%s, 'linux', 'Online', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, NOW())""",
+            "INSERT INTO Workers (WorkerName, Platform, Status, "
+            "TranscodeEnabled, QualityTestEnabled, RemuxEnabled, ScanEnabled, "
+            "Enabled, AcceptsInterlaced, LastHeartbeat) "
+            "VALUES (%s, 'linux', 'Online', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, NOW())",
             (SENTINEL_WORKER,),
         )
 
@@ -228,9 +191,7 @@ class TestTranscodeClaimAuthority(unittest.TestCase):
 
     def test_eligible_worker_claims(self):
         Job = self.Dm.ClaimNextPendingTranscodeJob(SENTINEL_WORKER, AcceptsInterlaced=True)
-        # Production rows may rank higher; only assert if our sentinel was the
-        # chosen row OR no claim happened due to higher-priority production work.
-        # If Job is None, verify the queue row is still claimable in isolation.
+        # production rows outrank our Priority=-1000 sentinel; only verify claim shape when sentinel wins
         if Job is None:
             ProdPending = self.Db.ExecuteQuery(
                 "SELECT COUNT(*) AS n FROM TranscodeQueue WHERE Status='Pending' AND Priority > -1000",
@@ -263,9 +224,7 @@ class TestTranscodeClaimAuthority(unittest.TestCase):
         self.assertIsNone(Job, "TranscodeEnabled=FALSE worker MUST NOT claim")
 
 
-# ---------------------------------------------------------------------------
 # Remux claim authority
-# ---------------------------------------------------------------------------
 
 SENTINEL_FILE_REMUX = "_test-claim-authority-remux.mkv"
 
@@ -279,10 +238,10 @@ class TestRemuxClaimAuthority(unittest.TestCase):
         cls.Dm = DatabaseManager()
         cls.Db.ExecuteNonQuery("DELETE FROM Workers WHERE WorkerName = %s", (SENTINEL_WORKER,))
         cls.Db.ExecuteNonQuery(
-            """INSERT INTO Workers (WorkerName, Platform, Status,
-                   TranscodeEnabled, QualityTestEnabled, RemuxEnabled, ScanEnabled,
-                   Enabled, AcceptsInterlaced, LastHeartbeat)
-               VALUES (%s, 'linux', 'Online', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, NOW())""",
+            "INSERT INTO Workers (WorkerName, Platform, Status, "
+            "TranscodeEnabled, QualityTestEnabled, RemuxEnabled, ScanEnabled, "
+            "Enabled, AcceptsInterlaced, LastHeartbeat) "
+            "VALUES (%s, 'linux', 'Online', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, NOW())",
             (SENTINEL_WORKER,),
         )
 
@@ -352,6 +311,146 @@ class TestRemuxClaimAuthority(unittest.TestCase):
         )
         Job = self.Dm.ClaimNextPendingRemuxJob(SENTINEL_WORKER)
         self.assertIsNone(Job, "RemuxEnabled=FALSE worker MUST NOT claim remux")
+
+
+# directive: worker-routing | # see worker-routing.C15 -- NVENC routing truth-table; closes BUG-0047 follow-up
+
+NVENC_TEST_WORKER_CAPABLE = "_test-nvenc-routing-capable"
+NVENC_TEST_WORKER_NOT_CAPABLE = "_test-nvenc-routing-not-capable"
+NVENC_TEST_PROFILE_NVENC = "_test-nvenc-routing-NVENC-profile"
+NVENC_TEST_PROFILE_CPU = "_test-nvenc-routing-CPU-profile"
+NVENC_TEST_FILE_NVENC = "_test-nvenc-routing-nvenc-file.mkv"
+NVENC_TEST_FILE_CPU = "_test-nvenc-routing-cpu-file.mkv"
+
+
+# directive: worker-routing | # see worker-routing.C15
+class TestNvencRouting(unittest.TestCase):
+    """ClaimNextPendingTranscodeJob NVENC truth table: 2 sentinel workers x 2 sentinel profiles x 2 sentinel media files; Priority=+10000 so sentinels outrank production."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Db = DatabaseService()
+        cls.Dm = DatabaseManager()
+        cls._WipeFixtures()
+        cls.Db.ExecuteNonQuery(
+            "INSERT INTO Profiles (ProfileName, usenvidiahardware) VALUES (%s, 1)",
+            (NVENC_TEST_PROFILE_NVENC,),
+        )
+        cls.Db.ExecuteNonQuery(
+            "INSERT INTO Profiles (ProfileName, usenvidiahardware) VALUES (%s, 0)",
+            (NVENC_TEST_PROFILE_CPU,),
+        )
+        cls.Db.ExecuteNonQuery(
+            "INSERT INTO MediaFiles (FileName, AssignedProfile) VALUES (%s, %s)",
+            (NVENC_TEST_FILE_NVENC, NVENC_TEST_PROFILE_NVENC),
+        )
+        cls.Db.ExecuteNonQuery(
+            "INSERT INTO MediaFiles (FileName, AssignedProfile) VALUES (%s, %s)",
+            (NVENC_TEST_FILE_CPU, NVENC_TEST_PROFILE_CPU),
+        )
+        Rows = cls.Db.ExecuteQuery(
+            "SELECT Id, FileName FROM MediaFiles WHERE FileName IN (%s, %s)",
+            (NVENC_TEST_FILE_NVENC, NVENC_TEST_FILE_CPU),
+        )
+        cls.MfIdByName = {(R.get('FileName') or R.get('filename')): (R.get('Id') or R.get('id')) for R in Rows}
+        cls.Db.ExecuteNonQuery(
+            "INSERT INTO Workers (WorkerName, Platform, Status, TranscodeEnabled, "
+            "QualityTestEnabled, RemuxEnabled, ScanEnabled, Enabled, AcceptsInterlaced, "
+            "nvenccapable, LastHeartbeat) "
+            "VALUES (%s, 'linux', 'Online', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, NOW())",
+            (NVENC_TEST_WORKER_CAPABLE,),
+        )
+        cls.Db.ExecuteNonQuery(
+            "INSERT INTO Workers (WorkerName, Platform, Status, TranscodeEnabled, "
+            "QualityTestEnabled, RemuxEnabled, ScanEnabled, Enabled, AcceptsInterlaced, "
+            "nvenccapable, LastHeartbeat) "
+            "VALUES (%s, 'linux', 'Online', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, FALSE, NOW())",
+            (NVENC_TEST_WORKER_NOT_CAPABLE,),
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._WipeFixtures()
+
+    @classmethod
+    def _WipeFixtures(cls):
+        """Delete all sentinel rows across TranscodeQueue/MediaFiles/Profiles/Workers (idempotent)."""
+        cls.Db.ExecuteNonQuery(
+            "DELETE FROM TranscodeQueue WHERE FileName IN (%s, %s)",
+            (NVENC_TEST_FILE_NVENC, NVENC_TEST_FILE_CPU),
+        )
+        cls.Db.ExecuteNonQuery(
+            "DELETE FROM MediaFiles WHERE FileName IN (%s, %s)",
+            (NVENC_TEST_FILE_NVENC, NVENC_TEST_FILE_CPU),
+        )
+        cls.Db.ExecuteNonQuery(
+            "DELETE FROM Profiles WHERE ProfileName IN (%s, %s)",
+            (NVENC_TEST_PROFILE_NVENC, NVENC_TEST_PROFILE_CPU),
+        )
+        cls.Db.ExecuteNonQuery(
+            "DELETE FROM Workers WHERE WorkerName IN (%s, %s)",
+            (NVENC_TEST_WORKER_CAPABLE, NVENC_TEST_WORKER_NOT_CAPABLE),
+        )
+
+    def _EnqueueRow(self, FileName):
+        """Insert a high-priority sentinel TranscodeQueue row pointing at one sentinel MediaFile; returns new queue row Id."""
+        MfId = self.MfIdByName[FileName]
+        self.Db.ExecuteNonQuery(
+            "INSERT INTO TranscodeQueue "
+            "(StorageRootId, RelativePath, FileName, Directory, SizeBytes, SizeMB, "
+            "Priority, Status, ProcessingMode, MediaFileId, DateAdded) "
+            "VALUES (%s, %s, %s, '_test', 1, 1.0, 10000, 'Pending', 'Transcode', %s, NOW())",
+            (SENTINEL_STORAGE_ROOT_ID, FileName, FileName, MfId),
+        )
+        Rows = self.Db.ExecuteQuery(
+            "SELECT Id FROM TranscodeQueue WHERE FileName = %s AND Status = 'Pending'",
+            (FileName,),
+        )
+        return Rows[0]["Id"] if Rows else None
+
+    def _DeleteQueueRow(self, QueueId):
+        """Delete one sentinel queue row by Id (idempotent on None)."""
+        if QueueId is not None:
+            self.Db.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE Id = %s", (QueueId,))
+
+    def test_nvenc_profile_capable_worker_claims(self):
+        """NVENC profile + nvenccapable=TRUE -> claim succeeds."""
+        QId = self._EnqueueRow(NVENC_TEST_FILE_NVENC)
+        try:
+            Job = self.Dm.ClaimNextPendingTranscodeJob(NVENC_TEST_WORKER_CAPABLE, AcceptsInterlaced=True)
+            self.assertIsNotNone(Job, "nvenccapable=TRUE worker MUST claim NVENC profile row")
+            self.assertEqual(Job.Id, QId, "Claimed row Id mismatch -- expected sentinel queue row")
+        finally:
+            self._DeleteQueueRow(QId)
+
+    def test_nvenc_profile_not_capable_worker_refused(self):
+        """NVENC profile + nvenccapable=FALSE -> claim refused (NvencGate blocks)."""
+        QId = self._EnqueueRow(NVENC_TEST_FILE_NVENC)
+        try:
+            Job = self.Dm.ClaimNextPendingTranscodeJob(NVENC_TEST_WORKER_NOT_CAPABLE, AcceptsInterlaced=True)
+            self.assertIsNone(Job, "nvenccapable=FALSE worker MUST NOT claim NVENC profile row")
+        finally:
+            self._DeleteQueueRow(QId)
+
+    def test_cpu_profile_capable_worker_claims(self):
+        """Non-NVENC profile + nvenccapable=TRUE -> claim succeeds."""
+        QId = self._EnqueueRow(NVENC_TEST_FILE_CPU)
+        try:
+            Job = self.Dm.ClaimNextPendingTranscodeJob(NVENC_TEST_WORKER_CAPABLE, AcceptsInterlaced=True)
+            self.assertIsNotNone(Job, "nvenccapable=TRUE worker MUST claim CPU profile row")
+            self.assertEqual(Job.Id, QId, "Claimed row Id mismatch -- expected sentinel queue row")
+        finally:
+            self._DeleteQueueRow(QId)
+
+    def test_cpu_profile_not_capable_worker_claims(self):
+        """Non-NVENC profile + nvenccapable=FALSE -> claim succeeds (NvencGate inactive when usenvidiahardware=0)."""
+        QId = self._EnqueueRow(NVENC_TEST_FILE_CPU)
+        try:
+            Job = self.Dm.ClaimNextPendingTranscodeJob(NVENC_TEST_WORKER_NOT_CAPABLE, AcceptsInterlaced=True)
+            self.assertIsNotNone(Job, "nvenccapable=FALSE worker MUST claim CPU profile row (NVENC gate not applicable)")
+            self.assertEqual(Job.Id, QId, "Claimed row Id mismatch -- expected sentinel queue row")
+        finally:
+            self._DeleteQueueRow(QId)
 
 
 if __name__ == "__main__":
