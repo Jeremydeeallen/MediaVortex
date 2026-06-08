@@ -1,7 +1,7 @@
 # Current Directive
 
-**Set:** 2026-06-06
-**Status:** Active -- phase: DELIVERING
+**Set:** 2026-06-06 (reopened 2026-06-08 to address BUG-0047 -- the C14 claim flow is not actually working as shipped)
+**Status:** Active -- phase: IMPLEMENTING (reopened)
 **Slug:** worker-routing
 **Replaces:** `.claude/directives/paused/2026-06-06-db-maintenance-no-partition.md` (paused mid-IMPLEMENTING; one artifact remaining = `Tests/Contract/TestMaintenanceBaseline.py`; resume by un-pausing after worker-routing closes)
 

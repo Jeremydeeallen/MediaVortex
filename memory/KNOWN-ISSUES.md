@@ -6,6 +6,42 @@
 
 *Per-entry area subsection assignment deferred to follow-up directive `migrate-bugs-compliance-deep`. Consult `memory/BUG-INDEX.md` for per-bug area metadata and the operationally-correct active/resolved classification (several entries below still bear `RESOLVED`/`FIXED` annotations in their headers despite living under `## Active`; the INDEX classifies them correctly).*
 
+### [BUG-0047] dot-worker-1 not claiming NVENC transcode jobs despite operator-configured AllowedProfiles + TranscodeEnabled; i9 claims the same queue items
+**Date:** 2026-06-08 | **Area:** transcode-queue
+
+**What breaks:** Operator configured `dot-worker-1` with `TranscodeEnabled=TRUE` and `AllowedProfiles` listing NVENC codec profile names. `TranscodeQueue` contains NVENC-profile rows. `dot-worker-1` never claims them. The `i9-2024` worker claims the same rows and processes them successfully. Per `Features/TranscodeQueue/worker-routing.feature.md` C8 truth table, `TranscodeEnabled=TRUE` + `AllowedProfiles` including the queued profile name MUST claim the row -- this is the criterion BUG-0047 violates.
+
+**Repro:**
+1. Confirm `dot-worker-1` operator-visible state in /Activity modal: TranscodeEnabled=TRUE, AllowedProfiles=`<list including NVENC profile name(s) currently queued>`.
+2. Confirm TranscodeQueue has at least one Pending row matching one of those NVENC profile names.
+3. Wait one poll tick (or more).
+4. Observe: `dot-worker-1` did not claim the row; `i9-2024` did (visible in Activity Jobs list or in `TranscodeAttempts.WorkerName` after).
+
+**Evidence:** Behavioral. Operator-reported. No claim attempts by dot-worker-1 surface in logs / activity for NVENC rows queued during the observation window.
+
+**Possible failure modes (not yet investigated -- /b discipline):**
+- `Workers.nvenccapable=FALSE` on dot-worker-1 (LXC containers on larry may lack GPU passthrough -- per `reference_worker_containers_on_larry.md`). The claim predicate (`Core/Database/WorkerCapabilityPredicate.BuildClaimPredicate`) gates NVENC claims on `nvenccapable=TRUE` regardless of AllowedProfiles.
+- `Workers.Status != 'Online'` on dot-worker-1.
+- WorkerService process not actually running on larry LXC 218 (despite operator believing it is). Per `reference_worker_containers_on_larry.md`: `ssh root@larry "pct exec 218 -- docker ps | grep dot-worker-1"`.
+- `AllowedProfiles` CSV value in DB differs from the operator-visible UI state (modal refresh race per BUG-0007).
+- Predicate routing emits different SQL for NVENC capability gating than the truth-table promises.
+
+**First place to look:**
+1. `SELECT WorkerName, Status, TranscodeEnabled, nvenccapable, AllowedProfiles FROM Workers WHERE WorkerName = 'dot-worker-1'` -- compare to operator's stated config.
+2. `SELECT mediafileid, ProfileName FROM TranscodeQueue WHERE Status = 'Pending' ORDER BY id DESC LIMIT 10` -- confirm queue has profiles dot-worker-1 should match.
+3. `Core/Database/WorkerCapabilityPredicate.py::BuildClaimPredicate` -- inspect the NVENC capability clause that the claim WHERE clause uses.
+4. `Features/TranscodeQueue/TranscodeQueueRepository.py::ClaimNextPendingTranscodeJob` -- confirm claim SQL routes through BuildClaimPredicate.
+5. `ssh root@larry "pct exec 218 -- docker ps | grep dot-worker"` -- confirm dot-worker-1 process is actually running.
+6. Run `py -m pytest Tests/Contract/TestClaimAuthority.py -v` -- if all green, the bug is in operator-visible state OR runtime config not exercised by the test fixture.
+
+**Violates:** `Features/TranscodeQueue/worker-routing.feature.md` C8 (capability truth table: TranscodeEnabled=TRUE + AllowedProfiles containing the queued profile -> CLAIMS YES). C14 (BUG-0043 closure condition: "i9 configured AllowedProfiles = <every NVENC profile name>" was the precedent; this bug is the symmetric case where a non-NVENC-hardware worker has AllowedProfiles including NVENC profiles, and silently no-ops).
+
+**Look first:** `Core/Database/WorkerCapabilityPredicate.py`, `Features/TranscodeQueue/TranscodeQueueRepository.py`, `Features/TranscodeQueue/worker-routing.feature.md` C8 truth table.
+
+**Fix with:** `/t BUG-0047` -- worker-routing directive is reopened 2026-06-08 to own this work.
+
+---
+
 ### [BUG-0046] Legacy acompressor+dynamic-loudnorm chain damaged 8,249 library files; population is closed but damage is permanent
 **Date:** 2026-06-08 | **Area:** audio-pipeline
 

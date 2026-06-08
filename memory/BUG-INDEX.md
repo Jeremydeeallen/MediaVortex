@@ -22,6 +22,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0040 | active | transcode-job | Second concurrent job shows first job's progress | 2026-05-05
 - BUG-0043 | active | transcode-queue | TranscodeQueue claim has no codec affinity; NVENC workers grab CPU-profile jobs and burn GPU compute; fix path = worker-routing.feature.md (DRAFTED) | 2026-06-03
 - BUG-0044 | active | worker-lifecycle | CpuAffinityService loses SystemSettingsRepository wiring on every worker startup; AttributeError caught, falls back to defaults, configured thermal knobs silently ignored | 2026-06-06
+- BUG-0047 | active | transcode-queue | dot-worker-1 not claiming NVENC transcode jobs despite operator-configured AllowedProfiles + TranscodeEnabled; i9 claims the same queue items | 2026-06-08
 
 - BUG-0002 | active | file-replacement | Silent-output Remux MediaFiles purge | 2026-05-16
 - BUG-0007 | active | activity-page | Worker capability toggle no UI refresh | 2026-05-22

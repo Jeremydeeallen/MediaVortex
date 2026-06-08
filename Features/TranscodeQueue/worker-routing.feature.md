@@ -81,6 +81,8 @@ C13. `transcode.flow.md` updates land in two places: (a) the `## Seams` table S1
 
 C14. **[BUG-0043] resolution.** With i9 configured `AllowedProfiles = <every NVENC profile name>` and wakko / dot configured `AllowedProfiles = <every CPU profile name>`, a queued SVT-AV1 row is claimed by wakko or dot within one poll tick; i9 sits idle if no NVENC work is pending. The Priority-based interim workaround is removed from `memory/KNOWN-ISSUES.md`; the BUG-0043 entry itself is removed at directive close. Verifiable: synthetic test queue with one SVT-AV1 row; observe `TranscodeAttempts.workername` after one tick.
 
+C15. **[BUG-0047] dot-worker-1 not claiming NVENC despite operator config.** When operator configures `dot-worker-1` with `TranscodeEnabled=TRUE` + `AllowedProfiles` containing NVENC profile name(s), ONE of two outcomes MUST hold per the C8 truth table: (a) `dot-worker-1` claims and processes the next matching NVENC `TranscodeQueue.Pending` row within one poll tick, OR (b) the `/Activity` worker modal surfaces a structured gating-reason badge (e.g. `nvenccapable=FALSE -- this worker cannot claim NVENC profiles`, `worker offline`, `WorkerService process not running`) so the operator understands why claims aren't happening. Silent non-claim violates the C8 truth-table promise. Verifiable: configure dot-worker-1 per operator's stated config; queue one NVENC profile row; within one tick either `TranscodeAttempts.WorkerName='dot-worker-1'` exists, OR the `/Activity` modal for dot-worker-1 shows a non-default gating-reason badge naming the actual blocker.
+
 ## Status
 
 SHIPPED 2026-06-06 -- BUG-0043 closed.
