@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-07
-**Status:** Active -- phase: NEEDS_PLAN
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** local-staging
 **Interrupts:** quality-floor-lift (paused at `.claude/directives/paused/2026-06-07-quality-floor-lift.md`; resume by un-pausing after this closes)
 
