@@ -256,6 +256,34 @@ class SystemSettingsController:
                 LoggingService.LogException("Error updating QueueAdmissionConfig", e, 'UpdateQueueAdmissionConfig', 'SystemSettingsController')
                 return jsonify({'Success': False, 'Error': str(e)}), 500
 
+        @self.Blueprint.route('/LocalStagingConfig', methods=['GET'])
+        # directive: local-staging | # see local-staging.C16
+        def GetLocalStagingConfig():
+            """Return the single-row LocalStagingConfig (Id=1, MinSizeMB scalar)."""
+            try:
+                from Features.TranscodeJob.LocalStagingConfigRepository import LocalStagingConfigRepository
+                Cfg = LocalStagingConfigRepository().Get()
+                LastUpdated = Cfg.get('LastUpdated')
+                return jsonify({'Success': True, 'Config': {'Id': Cfg.get('Id', 1), 'MinSizeMB': Cfg.get('MinSizeMB', 500), 'LastUpdated': LastUpdated.isoformat() if LastUpdated else None}})
+            except Exception as e:
+                LoggingService.LogException("Error getting LocalStagingConfig", e, 'GetLocalStagingConfig', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
+        @self.Blueprint.route('/LocalStagingConfig', methods=['PUT'])
+        # directive: local-staging | # see local-staging.C16
+        def UpdateLocalStagingConfig():
+            """Update LocalStagingConfig scalar fields (MinSizeMB)."""
+            try:
+                Data = request.get_json() or {}
+                from Features.TranscodeJob.LocalStagingConfigRepository import LocalStagingConfigRepository
+                Ok = LocalStagingConfigRepository().Update(MinSizeMB=Data.get('MinSizeMB'))
+                if not Ok:
+                    return jsonify({'Success': False, 'Error': 'Update rejected (see logs)'}), 400
+                return jsonify({'Success': True, 'Message': 'LocalStagingConfig updated'})
+            except Exception as e:
+                LoggingService.LogException("Error updating LocalStagingConfig", e, 'UpdateLocalStagingConfig', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
         @self.Blueprint.route('/CrfBitrateEstimates', methods=['GET'])
         def GetAllCrfBitrateEstimates():
             """Return all CrfBitrateEstimates rows for the editor table."""

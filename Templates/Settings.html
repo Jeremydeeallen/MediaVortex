@@ -426,6 +426,30 @@
             </div>
         </div>
 
+        <!-- =============== SECTION: Local staging =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#LocalStagingSection">
+                <span><i class="fas fa-hdd me-2"></i> Local staging &mdash; per-worker scratch threshold</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="LocalStagingSection" class="collapse">
+                <table class="table settings-table">
+                    <tbody>
+                        <tr>
+                            <th>Minimum source size for local staging (MB)
+                                <br><small class="text-muted">Files at or above this size route through a worker's local scratch dir instead of reading directly from the shared mount. Per-worker scratch dir + enable flag are set on the <a href="/Activity">/Activity</a> worker modal. Default 500 MB.</small>
+                            </th>
+                            <td><input type="number" id="LocalStagingMinSizeMB" class="form-control form-control-sm" min="1" style="max-width: 140px;"></td>
+                        </tr>
+                        <tr>
+                            <th></th>
+                            <td><button class="btn btn-sm btn-primary" onclick="SaveLocalStagingConfig()">Save threshold</button></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- =============== SECTION: After transcode =============== -->
         <div class="settings-section">
             <div class="card-header" data-bs-toggle="collapse" data-bs-target="#PostTranscodeSection">
@@ -2020,6 +2044,34 @@ function SavePostTranscodeGateConfig() {
     }).fail(function(X) { alert('Save failed: ' + X.responseText); });
 }
 
+function LoadLocalStagingConfig() {
+    $.get('/api/SystemSettings/LocalStagingConfig').done(function(R) {
+        if (!R.Success) { return; }
+        $('#LocalStagingMinSizeMB').val(R.Config.MinSizeMB);
+    }).fail(function(X) { alert('Failed to load LocalStagingConfig: ' + X.responseText); });
+}
+
+function SaveLocalStagingConfig() {
+    var MinSizeMB = parseInt($('#LocalStagingMinSizeMB').val(), 10);
+    if (isNaN(MinSizeMB) || MinSizeMB <= 0) {
+        alert('Invalid threshold: MinSizeMB must be a positive integer.');
+        return;
+    }
+    $.ajax({
+        url: '/api/SystemSettings/LocalStagingConfig',
+        method: 'PUT',
+        contentType: 'application/json',
+        data: JSON.stringify({ MinSizeMB: MinSizeMB })
+    }).done(function(R) {
+        if (R.Success) {
+            alert('Local staging threshold saved.');
+            LoadLocalStagingConfig();
+        } else {
+            alert('Save failed: ' + (R.Error || 'unknown'));
+        }
+    }).fail(function(X) { alert('Save failed: ' + X.responseText); });
+}
+
 // Auto-load Queue Tuning data when the section is opened (lazy).
 $(function() {
     LoadDisplayTimezone();
@@ -2030,6 +2082,9 @@ $(function() {
     });
     $('#PostTranscodeSection').on('shown.bs.collapse', function() {
         LoadPostTranscodeGateConfig();
+    });
+    $('#LocalStagingSection').on('shown.bs.collapse', function() {
+        LoadLocalStagingConfig();
     });
 });
 
