@@ -15,7 +15,12 @@
 
 **Damage profile:** Irreversible. The acompressor reduced peaks above -15 dB at a 3:1 ratio with 3 dB makeup gain; the dynamic-mode `loudnorm LRA=7` then forced everything into a 7-LU loudness range envelope. Dynamic range was compressed and peaks were limited in ways that cannot be recovered from the encoded output. Films/cinematic content with native LRA 12-20+ LU took audible damage; TV-series content with native LRA 5-8 LU took subtle damage that is typically inaudible.
 
-**Affected file list:** `Reports/LegacyAudioDamagedMovies.csv` lists the 22 movies (operator-actionable subset). The 8,227 TV episodes are queryable via `Scripts/IdentifyLegacyDamagedMovies.py` with the `seasonid IS NULL` and filename regex filters removed.
+**Affected file list:** `Reports/LegacyAudioDamagedMovies.csv` lists 18 rows post-operator-triage (down from 22; see `### Operator triage 2026-06-08` below). The 8,227 TV episodes are queryable via `Scripts/IdentifyLegacyDamagedMovies.py` with the `seasonid IS NULL` and filename regex filters removed.
+
+**Operator triage 2026-06-08:**
+- 17 rows on storage root `xxx` flagged `AudioDamageNotMaterial=TRUE` -- adult content; loudness fidelity not operationally meaningful for this share. No remediation planned.
+- 4 rows on storage root `media_tv` (LOONEYTOONS_SHOW_SEASON_1_VOL2.Title3-6, MediaFileIds 39551-39554) DELETED from disk + MediaFiles + dependent rows (32 TranscodeAttempts + 4 TranscodeFiles + 4 MediaFiles, all committed). These were unrenamed DVD-title rips in `Minnie's Bow-Toons` folder.
+- 1 row on storage root `media_tv` (Firefly Serenity Pilot 2002, MediaFileId 1980) KEPT with `AudioDamageNotMaterial=FALSE`. Operator declined deletion -- pilot is a legitimate TV-movie worth keeping despite audio damage.
 
 **Why not remediated:** Zero of the 8,249 files have `MediaFiles.KeepSource=TRUE` -- the original sources were deleted by FileReplacement post-flight in every case. Full re-transcode from MediaVortex-managed source is impossible. Audio-only re-pass (considered + closed as `audio-renorm-legacy` directive) does not recover dynamic range or peak fidelity -- it would only re-normalize the loudness of already-damaged audio. External re-acquisition (Sonarr/Radarr/manual) for the 22 movies is the operator-driven recovery path; the 8,227 TV episodes are accepted as historical loss.
 

@@ -26,10 +26,12 @@ def Main():
 
     Sql = (
         "SELECT mf.id AS mediafileid, mf.filename, mf.relativepath AS canonicalpath, "
+        "sr.name AS storageroot, "
         "ta.attemptdate AS legacyattemptdate, ta.profilename AS legacyprofile, "
         "mf.sourceintegratedlufs, mf.audiocodec, mf.audiobitratekbps, mf.audiochannels, "
         "mf.durationminutes "
         "FROM mediafiles mf "
+        "LEFT JOIN storageroots sr ON sr.id = mf.storagerootid "
         "JOIN LATERAL (SELECT attemptdate, profilename FROM transcodeattempts "
         "  WHERE mediafileid = mf.id AND success = TRUE AND ffpmpegcommand ILIKE %s "
         "    AND ffpmpegcommand NOT ILIKE %s "
@@ -42,7 +44,7 @@ def Main():
         "  AND NOT EXISTS (SELECT 1 FROM transcodeattempts ta2 "
         "    WHERE ta2.mediafileid = mf.id AND ta2.success = TRUE "
         "      AND ta2.ffpmpegcommand ILIKE %s) "
-        "ORDER BY mf.audiobitratekbps DESC NULLS LAST, mf.filename ASC"
+        "ORDER BY sr.name, mf.audiobitratekbps DESC NULLS LAST, mf.filename ASC"
     )
     Rows = Db.ExecuteQuery(Sql, ("%loudnorm%", "%linear=true%", "S[0-9]+E[0-9]+", "%linear=true%"))
 
@@ -50,8 +52,9 @@ def Main():
         os.makedirs(REPORT_DIR)
 
     Columns = [
-        "MediaFileId", "Filename", "CanonicalPath", "LegacyAttemptDate", "LegacyProfile",
-        "SourceIntegratedLufs", "AudioCodec", "AudioBitrateKbps", "AudioChannels", "DurationMinutes",
+        "MediaFileId", "Filename", "StorageRoot", "CanonicalPath", "AudioDamageNotMaterial",
+        "LegacyAttemptDate", "LegacyProfile", "SourceIntegratedLufs",
+        "AudioCodec", "AudioBitrateKbps", "AudioChannels", "DurationMinutes",
     ]
 
     with open(REPORT_PATH, "w", newline="", encoding="utf-8") as Fh:
@@ -59,10 +62,14 @@ def Main():
         Writer = csv.writer(Fh)
         Writer.writerow(Columns)
         for Row in Rows:
+            StorageRootName = Row.get("StorageRoot")
+            NotMaterial = (StorageRootName or "").lower() == "xxx"
             Writer.writerow([
                 Row.get("MediaFileId"),
                 Row.get("FileName"),
+                StorageRootName,
                 Row.get("CanonicalPath"),
+                "TRUE" if NotMaterial else "FALSE",
                 Row.get("LegacyAttemptDate"),
                 Row.get("LegacyProfile"),
                 Row.get("SourceIntegratedLufs"),
