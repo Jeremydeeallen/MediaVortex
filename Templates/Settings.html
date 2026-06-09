@@ -450,6 +450,99 @@
             </div>
         </div>
 
+        <!-- =============== SECTION: Compliance rules =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#ComplianceRulesSection">
+                <span><i class="fas fa-shield-alt me-2"></i> Compliance rules &mdash; what makes a file need work</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="ComplianceRulesSection" class="collapse">
+                <div class="p-3">
+
+                    <div id="ComplianceBucketsWidget" class="alert alert-light small mb-3">Loading bucket counts&hellip;</div>
+
+                    <h6 class="mt-2">Transcode rules</h6>
+                    <table class="table settings-table">
+                        <tbody>
+                            <tr><th>Block when source resolution exceeds profile target<br><small class="text-muted">Triggers transcode for downscale candidates.</small></th>
+                                <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Tr_ResolutionExceedsProfileTarget"></div></td></tr>
+                            <tr><th>Acceptable video codecs (CSV)<br><small class="text-muted">Non-listed codecs trigger transcode.</small></th>
+                                <td><input type="text" id="Tr_AcceptableVideoCodecsCsv" class="form-control form-control-sm" style="max-width: 340px;"></td></tr>
+                            <tr><th>Estimated savings threshold (MB)<br><small class="text-muted">Predicted bytes-saved &ge; threshold triggers transcode.</small></th>
+                                <td><input type="number" id="Tr_EstimatedSavingsMBThreshold" class="form-control form-control-sm" min="0" style="max-width: 140px;"></td></tr>
+                            <tr><th>Prevent upscale<br><small class="text-muted">When source resolution &lt; profile target, never propose transcode.</small></th>
+                                <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Tr_PreventUpscale"></div></td></tr>
+                            <tr><th></th><td><button class="btn btn-sm btn-primary" onclick="SaveTranscodeRules()">Save Transcode rules</button></td></tr>
+                        </tbody>
+                    </table>
+
+                    <h6 class="mt-3">Remux rules</h6>
+                    <table class="table settings-table">
+                        <tbody>
+                            <tr><th>Acceptable containers (CSV)<br><small class="text-muted">Non-listed containers trigger remux to MP4.</small></th>
+                                <td><input type="text" id="Rx_AcceptableContainersCsv" class="form-control form-control-sm" style="max-width: 340px;"></td></tr>
+                            <tr><th>Acceptable audio codecs in MP4 (CSV)<br><small class="text-muted">Non-listed audio codecs trigger remux to re-encode audio.</small></th>
+                                <td><input type="text" id="Rx_AcceptableAudioCodecsMp4Csv" class="form-control form-control-sm" style="max-width: 340px;"></td></tr>
+                            <tr><th>Require audio normalized<br><small class="text-muted">Files with AudioComplete=FALSE route to Remux for loudnorm pass.</small></th>
+                                <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Rx_RequireAudioNormalized"></div></td></tr>
+                            <tr><th></th><td><button class="btn btn-sm btn-primary" onclick="SaveRemuxRules()">Save Remux rules</button></td></tr>
+                        </tbody>
+                    </table>
+
+                    <h6 class="mt-3">AudioFix rules</h6>
+                    <table class="table settings-table">
+                        <tbody>
+                            <tr><th>Target loudness (LUFS)</th>
+                                <td><input type="number" id="Af_TargetLoudnessLufs" class="form-control form-control-sm" style="max-width: 140px;"></td></tr>
+                            <tr><th>Tolerance (LU)<br><small class="text-muted">Source LUFS within target&plusmn;tolerance is considered on-target.</small></th>
+                                <td><input type="number" step="0.1" id="Af_ToleranceLufs" class="form-control form-control-sm" min="0" style="max-width: 140px;"></td></tr>
+                            <tr><th>Require LUFS measured<br><small class="text-muted">Skip evaluation when SourceIntegratedLufs is NULL (unmeasured).</small></th>
+                                <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Af_RequireLufsMeasured"></div></td></tr>
+                            <tr><th></th><td><button class="btn btn-sm btn-primary" onclick="SaveAudioFixRules()">Save AudioFix rules</button></td></tr>
+                        </tbody>
+                    </table>
+
+                    <h6 class="mt-3">SubtitleFix rules</h6>
+                    <table class="table settings-table">
+                        <tbody>
+                            <tr><th>Enabled<br><small class="text-muted">When OFF, SubtitleFix never proposes itself regardless of other knobs.</small></th>
+                                <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Sf_Enabled"></div></td></tr>
+                            <tr><th>mov_text required in MP4 family<br><small class="text-muted">Only fires when container is mp4/mov/m4v.</small></th>
+                                <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Sf_MovTextRequiredForMp4"></div></td></tr>
+                            <tr><th>Non-native subtitle formats (CSV)<br><small class="text-muted">e.g. ass,ssa,vobsub.</small></th>
+                                <td><input type="text" id="Sf_NonNativeSubtitleFormatsCsv" class="form-control form-control-sm" style="max-width: 340px;"></td></tr>
+                            <tr><th>Require forced subtitles present<br><small class="text-muted">Only fire when MediaFiles.HasForcedSubtitles=TRUE (forced-subs use case).</small></th>
+                                <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Sf_RequireForcedSubtitlesPresent"></div></td></tr>
+                            <tr><th></th><td><button class="btn btn-sm btn-primary" onclick="SaveSubtitleFixRules()">Save SubtitleFix rules</button></td></tr>
+                        </tbody>
+                    </table>
+
+                    <h6 class="mt-3">Hard-block gates</h6>
+                    <small class="text-muted d-block mb-2">Disable a gate to let files through that would otherwise be undecidable. Each gate maps 1:1 to a previous undecidable-return path.</small>
+                    <table class="table settings-table">
+                        <tbody>
+                            <tr><th>Require explicit English audio</th><td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Gt_RequireExplicitEnglishAudio"></div></td></tr>
+                            <tr><th>Block on AudioCorruptSuspect</th><td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Gt_BlockOnAudioCorruptSuspect"></div></td></tr>
+                            <tr><th>Require audio stream present</th><td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Gt_RequireAudioStream"></div></td></tr>
+                            <tr><th>Require loudness measurements</th><td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Gt_RequireLoudnessMeasurements"></div></td></tr>
+                            <tr><th>Require probe metadata</th><td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Gt_RequireProbeMetadata"></div></td></tr>
+                            <tr><th>Require effective profile resolved</th><td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Gt_RequireEffectiveProfile"></div></td></tr>
+                            <tr><th>Require resolution category</th><td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Gt_RequireResolutionCategory"></div></td></tr>
+                            <tr><th>Require profile thresholds</th><td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Gt_RequireProfileThresholds"></div></td></tr>
+                            <tr><th></th><td><button class="btn btn-sm btn-primary" onclick="SaveGates()">Save Gates</button></td></tr>
+                        </tbody>
+                    </table>
+
+                    <h6 class="mt-3">Live preview</h6>
+                    <div class="mb-2">
+                        <button class="btn btn-sm btn-outline-primary" onclick="PreviewCompliance()">Preview impact (1,000-row sample)</button>
+                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="RefreshBucketCounts()">Refresh bucket counts</button>
+                    </div>
+                    <pre id="CompliancePreviewResult" class="small bg-light p-2" style="max-height: 280px; overflow-y: auto;"></pre>
+                </div>
+            </div>
+        </div>
+
         <!-- =============== SECTION: After transcode =============== -->
         <div class="settings-section">
             <div class="card-header" data-bs-toggle="collapse" data-bs-target="#PostTranscodeSection">
@@ -2072,6 +2165,127 @@ function SaveLocalStagingConfig() {
     }).fail(function(X) { alert('Save failed: ' + X.responseText); });
 }
 
+// Compliance Rules section -- load/save per rule table, bucket widget, preview.
+
+function _RefreshTranscodeRules() {
+    $.get('/api/Compliance/TranscodeRules').done(function(R) {
+        if (!R.Success) { return; }
+        $('#Tr_ResolutionExceedsProfileTarget').prop('checked', R.Data.ResolutionExceedsProfileTarget);
+        $('#Tr_AcceptableVideoCodecsCsv').val(R.Data.AcceptableVideoCodecsCsv);
+        $('#Tr_EstimatedSavingsMBThreshold').val(R.Data.EstimatedSavingsMBThreshold);
+        $('#Tr_PreventUpscale').prop('checked', R.Data.PreventUpscale);
+    });
+}
+function _RefreshRemuxRules() {
+    $.get('/api/Compliance/RemuxRules').done(function(R) {
+        if (!R.Success) { return; }
+        $('#Rx_AcceptableContainersCsv').val(R.Data.AcceptableContainersCsv);
+        $('#Rx_AcceptableAudioCodecsMp4Csv').val(R.Data.AcceptableAudioCodecsMp4Csv);
+        $('#Rx_RequireAudioNormalized').prop('checked', R.Data.RequireAudioNormalized);
+    });
+}
+function _RefreshAudioFixRules() {
+    $.get('/api/Compliance/AudioFixRules').done(function(R) {
+        if (!R.Success) { return; }
+        $('#Af_TargetLoudnessLufs').val(R.Data.TargetLoudnessLufs);
+        $('#Af_ToleranceLufs').val(R.Data.ToleranceLufs);
+        $('#Af_RequireLufsMeasured').prop('checked', R.Data.RequireLufsMeasured);
+    });
+}
+function _RefreshSubtitleFixRules() {
+    $.get('/api/Compliance/SubtitleFixRules').done(function(R) {
+        if (!R.Success) { return; }
+        $('#Sf_Enabled').prop('checked', R.Data.Enabled);
+        $('#Sf_MovTextRequiredForMp4').prop('checked', R.Data.MovTextRequiredForMp4);
+        $('#Sf_NonNativeSubtitleFormatsCsv').val(R.Data.NonNativeSubtitleFormatsCsv);
+        $('#Sf_RequireForcedSubtitlesPresent').prop('checked', R.Data.RequireForcedSubtitlesPresent);
+    });
+}
+function _RefreshGates() {
+    $.get('/api/Compliance/Gates').done(function(R) {
+        if (!R.Success) { return; }
+        $('#Gt_RequireExplicitEnglishAudio').prop('checked', R.Data.RequireExplicitEnglishAudio);
+        $('#Gt_BlockOnAudioCorruptSuspect').prop('checked', R.Data.BlockOnAudioCorruptSuspect);
+        $('#Gt_RequireAudioStream').prop('checked', R.Data.RequireAudioStream);
+        $('#Gt_RequireLoudnessMeasurements').prop('checked', R.Data.RequireLoudnessMeasurements);
+        $('#Gt_RequireProbeMetadata').prop('checked', R.Data.RequireProbeMetadata);
+        $('#Gt_RequireEffectiveProfile').prop('checked', R.Data.RequireEffectiveProfile);
+        $('#Gt_RequireResolutionCategory').prop('checked', R.Data.RequireResolutionCategory);
+        $('#Gt_RequireProfileThresholds').prop('checked', R.Data.RequireProfileThresholds);
+    });
+}
+function _RulePut(Url, Body, OnDone) {
+    $.ajax({ url: Url, method: 'PUT', contentType: 'application/json', data: JSON.stringify(Body) })
+        .done(function(R) {
+            if (R.Success) { alert('Saved.'); if (OnDone) { OnDone(); } }
+            else { alert('Save failed: ' + (R.Message || 'unknown')); }
+        }).fail(function(X) { alert('Save failed: ' + X.responseText); });
+}
+function SaveTranscodeRules() {
+    _RulePut('/api/Compliance/TranscodeRules', {
+        ResolutionExceedsProfileTarget: $('#Tr_ResolutionExceedsProfileTarget').is(':checked'),
+        AcceptableVideoCodecsCsv: $('#Tr_AcceptableVideoCodecsCsv').val(),
+        EstimatedSavingsMBThreshold: parseInt($('#Tr_EstimatedSavingsMBThreshold').val(), 10),
+        PreventUpscale: $('#Tr_PreventUpscale').is(':checked')
+    }, _RefreshTranscodeRules);
+}
+function SaveRemuxRules() {
+    _RulePut('/api/Compliance/RemuxRules', {
+        AcceptableContainersCsv: $('#Rx_AcceptableContainersCsv').val(),
+        AcceptableAudioCodecsMp4Csv: $('#Rx_AcceptableAudioCodecsMp4Csv').val(),
+        RequireAudioNormalized: $('#Rx_RequireAudioNormalized').is(':checked')
+    }, _RefreshRemuxRules);
+}
+function SaveAudioFixRules() {
+    _RulePut('/api/Compliance/AudioFixRules', {
+        TargetLoudnessLufs: parseInt($('#Af_TargetLoudnessLufs').val(), 10),
+        ToleranceLufs: parseFloat($('#Af_ToleranceLufs').val()),
+        RequireLufsMeasured: $('#Af_RequireLufsMeasured').is(':checked')
+    }, _RefreshAudioFixRules);
+}
+function SaveSubtitleFixRules() {
+    _RulePut('/api/Compliance/SubtitleFixRules', {
+        Enabled: $('#Sf_Enabled').is(':checked'),
+        MovTextRequiredForMp4: $('#Sf_MovTextRequiredForMp4').is(':checked'),
+        NonNativeSubtitleFormatsCsv: $('#Sf_NonNativeSubtitleFormatsCsv').val(),
+        RequireForcedSubtitlesPresent: $('#Sf_RequireForcedSubtitlesPresent').is(':checked')
+    }, _RefreshSubtitleFixRules);
+}
+function SaveGates() {
+    _RulePut('/api/Compliance/Gates', {
+        RequireExplicitEnglishAudio: $('#Gt_RequireExplicitEnglishAudio').is(':checked'),
+        BlockOnAudioCorruptSuspect: $('#Gt_BlockOnAudioCorruptSuspect').is(':checked'),
+        RequireAudioStream: $('#Gt_RequireAudioStream').is(':checked'),
+        RequireLoudnessMeasurements: $('#Gt_RequireLoudnessMeasurements').is(':checked'),
+        RequireProbeMetadata: $('#Gt_RequireProbeMetadata').is(':checked'),
+        RequireEffectiveProfile: $('#Gt_RequireEffectiveProfile').is(':checked'),
+        RequireResolutionCategory: $('#Gt_RequireResolutionCategory').is(':checked'),
+        RequireProfileThresholds: $('#Gt_RequireProfileThresholds').is(':checked')
+    }, _RefreshGates);
+}
+function RefreshBucketCounts() {
+    $.get('/api/Compliance/Buckets').done(function(R) {
+        if (!R.Success) { return; }
+        var Total = 0;
+        var Lines = ['<strong>WorkBucket counts:</strong>'];
+        Object.keys(R.Data.Buckets).sort().forEach(function(K) { Lines.push(K + ': ' + R.Data.Buckets[K]); Total += R.Data.Buckets[K]; });
+        if (Object.keys(R.Data.GateBlocked).length > 0) {
+            Lines.push('<br><strong>Gate-blocked (rows with non-null ComplianceGateBlocked):</strong>');
+            Object.keys(R.Data.GateBlocked).sort().forEach(function(K) { Lines.push(K + ': ' + R.Data.GateBlocked[K]); });
+        }
+        Lines.push('<br><em>Total MediaFiles: ' + Total + '</em>');
+        $('#ComplianceBucketsWidget').html(Lines.join('<br>'));
+    });
+}
+function PreviewCompliance() {
+    $('#CompliancePreviewResult').text('Running 1,000-row sample...');
+    $.ajax({ url: '/api/Compliance/Preview', method: 'POST', contentType: 'application/json', data: JSON.stringify({ SampleSize: 1000 }) })
+        .done(function(R) {
+            if (R.Success) { $('#CompliancePreviewResult').text(JSON.stringify(R.Data, null, 2)); }
+            else { $('#CompliancePreviewResult').text('Preview failed: ' + (R.Message || 'unknown')); }
+        }).fail(function(X) { $('#CompliancePreviewResult').text('Preview failed: ' + X.responseText); });
+}
+
 // Auto-load Queue Tuning data when the section is opened (lazy).
 $(function() {
     LoadDisplayTimezone();
@@ -2085,6 +2299,14 @@ $(function() {
     });
     $('#LocalStagingSection').on('shown.bs.collapse', function() {
         LoadLocalStagingConfig();
+    });
+    $('#ComplianceRulesSection').on('shown.bs.collapse', function() {
+        _RefreshTranscodeRules();
+        _RefreshRemuxRules();
+        _RefreshAudioFixRules();
+        _RefreshSubtitleFixRules();
+        _RefreshGates();
+        RefreshBucketCounts();
     });
 });
 
