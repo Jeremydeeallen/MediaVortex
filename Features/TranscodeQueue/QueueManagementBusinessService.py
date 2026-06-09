@@ -1585,7 +1585,7 @@ class QueueManagementBusinessService:
             ShowOverrides = self._LoadShowProfileOverrides()
             EffectiveProfile = self._GetEffectiveProfileFromCache(CandidateRow.get('FilePath'), ShowOverrides, DefaultProfile)
         Mf = self._RowToMediaFileForCompliance(CandidateRow)
-        Profile = self._BuildEffectiveProfileObj(EffectiveProfile, Mf.ResolutionCategory, Lookup)
+        Profile = self._BuildEffectiveProfileObj(EffectiveProfile, Mf.ResolutionCategory, Lookup, VideoBitrateKbps=Mf.VideoBitrateKbps)
         Decision = BuildEvaluator().Evaluate(Mf, Profile, BuildRuleCache())
         LegacyMode = self._LegacyModeFromWorkBucket(Decision.WorkBucket)
         RefusalReason = self._LegacyRefusalReasonFromDecision(Decision)
@@ -1622,17 +1622,15 @@ class QueueManagementBusinessService:
             LoudnessMeasurementFailureReason=Row.get('LoudnessMeasurementFailureReason'),
         )
 
-    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
-    def _BuildEffectiveProfileObj(self, ProfileName: Optional[str], ResolutionCategory: Optional[str], Lookup: Dict[tuple, tuple]):
-        """Build the EffectiveProfile model the new engine expects from the legacy (profile-name, res-cat, lookup) trio."""
-        from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C12
+    def _BuildEffectiveProfileObj(self, ProfileName: Optional[str], ResolutionCategory: Optional[str], Lookup: Dict[tuple, tuple], VideoBitrateKbps: Optional[int] = None):
+        """Delegate to EffectiveProfileResolver -- profile name + source resolution + optional source video kbps fold into a synthesized MediaFileModel-shaped input; resolver handles fixed/VBR/CRF strategy dispatch."""
+        from Features.Compliance.Services.EffectiveProfileResolver import EffectiveProfileResolver
+        from Models.MediaFileModel import MediaFileModel
         if not ProfileName:
             return None
-        Hit = Lookup.get((ProfileName, ResolutionCategory)) if ResolutionCategory else None
-        if not Hit:
-            return EffectiveProfile(ProfileName=ProfileName, TargetVideoKbps=None, TargetAudioKbps=None, TargetResolutionCategory=None)
-        Vk, Ak, Tgt = Hit
-        return EffectiveProfile(ProfileName=ProfileName, TargetVideoKbps=Vk, TargetAudioKbps=Ak, TargetResolutionCategory=Tgt or ResolutionCategory)
+        SyntheticMf = MediaFileModel(AssignedProfile=ProfileName, ResolutionCategory=ResolutionCategory, VideoBitrateKbps=VideoBitrateKbps)
+        return EffectiveProfileResolver().Resolve(SyntheticMf)
 
     @staticmethod
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C14
@@ -1983,7 +1981,7 @@ class QueueManagementBusinessService:
 
                     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
                     MfModel = self._RowToMediaFileForCompliance(r)
-                    ProfileObj = self._BuildEffectiveProfileObj(EffectiveProfile, MfModel.ResolutionCategory, Lookup)
+                    ProfileObj = self._BuildEffectiveProfileObj(EffectiveProfile, MfModel.ResolutionCategory, Lookup, VideoBitrateKbps=MfModel.VideoBitrateKbps)
                     Decision = ComplianceEval.Evaluate(MfModel, ProfileObj, ComplianceCache)
                     IsCompliant = Decision.IsCompliant
                     RecommendedMode = self._LegacyModeFromWorkBucket(Decision.WorkBucket)

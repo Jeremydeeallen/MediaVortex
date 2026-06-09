@@ -2,18 +2,19 @@ from typing import List, Optional, Dict, Any
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Models.MediaFileModel import MediaFileModel
-from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
 from Features.Compliance.ComplianceComposition import BuildEvaluator, BuildRuleCache
+from Features.Compliance.Services.EffectiveProfileResolver import EffectiveProfileResolver
 
 
 # directive: compliance-solid-refactor | # see compliance-solid-refactor.C23
 class ComplianceRecomputeService:
-    """Runs ComplianceEvaluator across MediaFileIds and writes back to MediaFiles.WorkBucket / OperationsNeededCsv / ComplianceGateBlocked / ComplianceEvaluatedAt -- Batch 1 standalone path; Batch 2 will merge with RecomputeForFiles."""
+    """Runs ComplianceEvaluator across MediaFileIds and writes back to MediaFiles.WorkBucket / OperationsNeededCsv / ComplianceGateBlocked / ComplianceEvaluatedAt. Profile resolution delegated to EffectiveProfileResolver (DIP)."""
 
-    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C23
-    def __init__(self, DatabaseServiceInstance: Optional[DatabaseService] = None):
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C11
+    def __init__(self, DatabaseServiceInstance: Optional[DatabaseService] = None, ProfileResolver: Optional[EffectiveProfileResolver] = None):
         self.DB = DatabaseServiceInstance or DatabaseService()
         self.Evaluator = BuildEvaluator()
+        self.ProfileResolver = ProfileResolver or EffectiveProfileResolver(self.DB)
 
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C23
     def Recompute(self, MediaFileIds: List[int], DryRun: bool = False) -> Dict[str, Any]:
@@ -21,7 +22,6 @@ class ComplianceRecomputeService:
         if not MediaFileIds:
             return {'Evaluated': 0, 'Bucketed': {}, 'GateBlocked': {}, 'DryRun': DryRun}
         Cache = BuildRuleCache()
-        Thresholds = self._LoadThresholdLookup()
 
         Bucketed: Dict[str, int] = {}
         GateBlocked: Dict[str, int] = {}
@@ -30,7 +30,7 @@ class ComplianceRecomputeService:
         Rows = self.DB.ExecuteQuery(self._SelectSql(len(MediaFileIds)), tuple(MediaFileIds))
         for Row in Rows:
             Mf = self._RowToMediaFile(Row)
-            Profile = self._ResolveProfile(Mf, Thresholds)
+            Profile = self.ProfileResolver.Resolve(Mf)
             Decision = self.Evaluator.Evaluate(Mf, Profile, Cache)
             if Decision.GateBlocked is not None:
                 GateBlocked[Decision.GateBlocked] = GateBlocked.get(Decision.GateBlocked, 0) + 1
@@ -72,21 +72,3 @@ class ComplianceRecomputeService:
             SourceTruePeakDbtp=R.get('SourceTruePeakDbtp'), SourceIntegratedThresholdLufs=R.get('SourceIntegratedThresholdLufs'),
         )
 
-    def _LoadThresholdLookup(self) -> Dict[tuple, tuple]:
-        """Return {(ProfileName, SourceResolutionCategory): (TargetVideoKbps, TargetAudioKbps, TargetResolutionCategory)} for all profiles."""
-        Rows = self.DB.ExecuteQuery("SELECT p.ProfileName, pt.Resolution, pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.TranscodeDownTo FROM Profiles p JOIN ProfileThresholds pt ON pt.ProfileId = p.Id")
-        Lookup = {}
-        for R in Rows:
-            Target = R['TranscodeDownTo'] or R['Resolution']
-            Lookup[(R['ProfileName'], R['Resolution'])] = (R['VideoBitrateKbps'], R['AudioBitrateKbps'], Target)
-        return Lookup
-
-    def _ResolveProfile(self, Mf: MediaFileModel, Thresholds: Dict[tuple, tuple]) -> Optional[EffectiveProfile]:
-        """Minimal cascade for Batch 1: use MediaFile.AssignedProfile + ResolutionCategory key; ShowSettings overlay deferred to Batch 2."""
-        if not Mf.AssignedProfile or not Mf.ResolutionCategory:
-            return None
-        Hit = Thresholds.get((Mf.AssignedProfile, Mf.ResolutionCategory))
-        if not Hit:
-            return EffectiveProfile(ProfileName=Mf.AssignedProfile, TargetVideoKbps=None, TargetAudioKbps=None, TargetResolutionCategory=None)
-        Vk, Ak, Tgt = Hit
-        return EffectiveProfile(ProfileName=Mf.AssignedProfile, TargetVideoKbps=Vk, TargetAudioKbps=Ak, TargetResolutionCategory=Tgt)
