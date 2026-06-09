@@ -6,6 +6,77 @@
 
 *Per-entry area subsection assignment deferred to follow-up directive `migrate-bugs-compliance-deep`. Consult `memory/BUG-INDEX.md` for per-bug area metadata and the operationally-correct active/resolved classification (several entries below still bear `RESOLVED`/`FIXED` annotations in their headers despite living under `## Active`; the INDEX classifies them correctly).*
 
+### [BUG-0053] `Tests/Contract/TestMediaProbeUsesPath.py` SELECTs non-column `m.FilePath` -- psycopg2 UndefinedColumn during contract suite
+**Date:** 2026-06-09 | **Area:** tests | **Severity:** test-suite collection error
+
+**What happened:** Discovered 2026-06-09 during post-Phase-7 contract suite run. `Tests/Contract/TestMediaProbeUsesPath.py` line 27 issues `SELECT Id, FilePath, StorageRootId, RelativePath FROM MediaFiles ...` -- `FilePath` is a **computed model property** (synthesized from typed pair via `PathStorageRoots` singleton), not a DB column. psycopg2 returns `UndefinedColumn: column "filepath" does not exist`. The test errors out during collection; the assertion never runs.
+
+**Look first:** `Tests/Contract/TestMediaProbeUsesPath.py:27` for the SELECT; `Core/Models/MediaFileModel.py` for the FilePath property derivation (compare to `Tests/Pipeline/Harness/Fixtures.py` for the post-Phase-7 correct shape).
+
+**Fix shape:** Replace the SELECT with `SELECT Id, StorageRootId, RelativePath FROM MediaFiles ...`; reconstruct FilePath in Python via `Path(StorageRootId, RelativePath).CanonicalDisplay(GetPrefixMap())` if needed.
+
+---
+
+### [BUG-0052] `Core.PathStorage` module deleted but 6 importers still import from it -- ModuleNotFoundError on invocation
+**Date:** 2026-06-09 | **Area:** path-storage | **Severity:** production-importer broken (StartWorker.py)
+
+**What happened:** Discovered 2026-06-09 during Phase 7 cleanup of the compliance directive. `Core/PathStorage.py` source file has been deleted but `Core/__pycache__/PathStorage.cpython-313.pyc` remains. Six callers still import from the dead module:
+- `StartWorker.py:34` (production entry point for I9 worker)
+- `_check_path.py`
+- `Tests/Unit/TestPathStorageShapeOps.py`
+- `Tests/Pipeline/Harness/Backup.py` (FIXED in Phase 7)
+- `Tests/Pipeline/test_quickfix_then_transcode.py` (FIXED in Phase 7)
+- `Tests/Pipeline/test_transcode_dual_pipeline.py` (FIXED in Phase 7)
+
+The Phase 7 cleanup fixed the Tests/Pipeline tree but left the others alone (out of scope). `StartWorker.py` is the worrying one -- it's a production entry point that fails immediately if invoked. The fact that I9 worker still runs suggests `WorkerService/Main.py` is being launched directly (bypassing StartWorker.py), but the dead import path is a latent footgun.
+
+`CLAUDE.md` (line 87-89) still documents `from Core.PathStorage import ParentDir, LastSegment, Join, Normalize, PathsEqual, Exists, LocalExists, Resolve` -- stale documentation. Real replacements live in `Core.Path.LocalPath` (LocalExists/LocalBasename/LocalDirname/LocalSplitExt/LocalJoin/LocalIsFile/LocalIsDir/LocalGetSize/LocalGetMTime) and `Core.Path.PathFs` (Exists/IsFile/IsDir on Path instances).
+
+**Look first:** `StartWorker.py:34`; `_check_path.py`; `Tests/Unit/TestPathStorageShapeOps.py`; `CLAUDE.md` (paths section); compare to `Tests/Pipeline/Harness/HarnessPathResolver.py` for the correct post-Phase-7 import pattern.
+
+**Fix shape:** (1) update each importer to `from Core.Path.LocalPath import ...` (or `Path` + `Worker` pattern when path resolution is needed); (2) sweep `CLAUDE.md` to remove the stale `Core.PathStorage` documentation; (3) delete the `.pyc` cache; (4) add an `__init__.py` guard or `Core/PathStorage.py` re-export shim if backward compat is required.
+
+---
+
+### [BUG-0051] `ProcessRemuxQueueService._ClaimNextRemuxJob` raises `AttributeError: 'ProcessRemuxQueueService' object has no attribute 'DatabaseManager'`
+**Date:** 2026-06-09 | **Area:** transcode-queue | **Severity:** workers losing the claim path
+
+**What happened:** Discovered 2026-06-09 in ERROR logs surrounding the post-restart larry-worker-1 + I9 transcode burst. `ProcessRemuxQueueService._ClaimNextRemuxJob` (line 124-130) calls `self.DatabaseManager.ClaimNextPendingRemuxJob(...)`. Source inspection shows `__init__` at line 21 assigns `self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()`. So the attribute IS set on a normally-constructed instance -- but the runtime error reports it missing.
+
+Possible root causes (need investigation):
+- Worker process running stale code from before `self.DatabaseManager` attribute was added (need redeploy check)
+- `__init__` raising before line 21 and the half-constructed object getting reused via except-and-continue
+- Different attribute name used elsewhere (case mismatch, `_DatabaseManager` private vs `DatabaseManager` public)
+- Threading race: claim loop hits the attribute before `__init__` completes on a worker startup
+
+**Concrete evidence (Log Id 11338920):**
+```
+ProcessRemuxQueueService._ClaimNextRemuxJob:
+Exception claiming next remux job: 'ProcessRemuxQueueService' object has no attribute 'DatabaseManag...
+```
+(Truncated at 'DatabaseManag' -- full name almost certainly `DatabaseManager`.)
+
+**Look first:** `Features/TranscodeJob/ProcessRemuxQueueService.py:21` (__init__ assignment) + line 127 (consumer); compare to `Features/TranscodeJob/ProcessTranscodeQueueService.py` for the parallel transcode-queue pattern that does NOT raise; check whether worker startup logs show a swallowed exception in `__init__` before line 21.
+
+**Fix shape:** Reproduce locally with a fresh worker instantiation; if the attribute is genuinely missing post-`__init__`, audit for raise paths before line 21 and add a constructor-completion sentinel; if it's a redeploy lag, schedule a worker bounce and confirm via repeated heartbeat that the error stops recurring.
+
+---
+
+### [BUG-0050] `AdaptiveQualityService.ShouldRetranscode` references undefined `FilePath` in `LogDebug` at line 160 -- `NameError` on every first-attempt path
+**Date:** 2026-06-09 | **Area:** quality-testing | **Severity:** masked failure -- first-attempt logging broken, decision short-circuits
+
+**What happened:** Discovered 2026-06-09 during ERROR-log scan post-Phase-7. `Features/TranscodeJob/AdaptiveQualityService.py:160` reads:
+```python
+LoggingService.LogDebug(f"No previous attempt for {FilePath}, should transcode", ...)
+```
+`FilePath` is undefined in this scope -- the method takes `MediaFileId` (int), not a file path. Python raises `NameError: name 'FilePath' is not defined` on the f-string interpolation, which the surrounding `try:` swallows... but the `LogDebug` is INSIDE an `if not previousAttempt:` branch that returns `(True, None)`. If the NameError fires before the return, the method probably returns `(False, None)` (default exception path) and the caller may proceed differently than expected.
+
+**Look first:** `Features/TranscodeJob/AdaptiveQualityService.py:160` (the undefined reference); the surrounding `try:` for the exception swallow; the caller path that consumes `ShouldRetranscode` result -- check whether the `(should_retranscode=True, previous=None)` first-attempt branch is observably reached.
+
+**Fix shape:** Look up FilePath via `self.GetFilePathById(MediaFileId)` or just log `MediaFileId` (the parameter that IS in scope). Add a contract test for the first-attempt path so this can't silently regress.
+
+---
+
 ### [BUG-0049] `BuildAudioFilters` raises `RuntimeError` on ungainable_peak instead of emitting dynamic-mode loudnorm; violates `linear-loudnorm.feature.md` C10 + C2
 **Date:** 2026-06-09 | **Area:** audio-pipeline | **Severity:** silent contract drift; ~20% of post-compliance-backfill Remux jobs refused
 
