@@ -59,7 +59,7 @@ class TranscodeOperation(IComplianceOperation):
 
     @staticmethod
     def _EstimatedSavingsMB(Mf: MediaFileModel, Profile: EffectiveProfile) -> Optional[float]:
-        if Profile.TargetVideoKbps is None or Profile.TargetAudioKbps is None:
+        if not Profile.TargetVideoKbps or not Profile.TargetAudioKbps:
             return None
         if Mf.DurationMinutes is None or Mf.DurationMinutes <= 0:
             return None

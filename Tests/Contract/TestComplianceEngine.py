@@ -206,6 +206,34 @@ class TestMidFlightConfigChange(unittest.TestCase):
         self.assertEqual(After.EstimatedSavingsMBThreshold, Before.EstimatedSavingsMBThreshold)
 
 
+class TestCrfProfileRegression(unittest.TestCase):
+    """Regression: VideoBitrateKbps=0 (CRF profile, no fixed bitrate) must NOT trigger ProfileThresholds gate or savings estimate -- 2026-06-09 dot-worker-1 NoReplace incident."""
+
+    def setUp(self):
+        self.Ev = BuildEvaluator()
+
+    def test_crf_profile_zero_bitrate_passes_thresholds_gate(self):
+        """A CRF profile (TargetVideoKbps=0, TargetAudioKbps=0) is valid; the ProfileThresholds gate fires only on None, not 0."""
+        Mf = CompliantMediaFile(ResolutionCategory='720p', Codec='hevc', AudioCodec='aac', ContainerFormat='mp4', AudioComplete=True)
+        CrfProfile = EffectiveProfile(ProfileName='NVENC AV1 P7 CANARY VBR -720p', TargetVideoKbps=0, TargetAudioKbps=0, TargetResolutionCategory='720p')
+        D = self.Ev.Evaluate(Mf, CrfProfile, MakeCache())
+        self.assertNotEqual(D.GateBlocked, 'ProfileThresholds')
+
+    def test_crf_profile_zero_bitrate_does_not_trigger_savings(self):
+        """When CRF profile (kbps=0) is in play, EstimatedSavingsMBThreshold rule MUST NOT propose Transcode just because savings calc looks unbounded."""
+        Mf = CompliantMediaFile(SizeMB=5000, DurationMinutes=60, ResolutionCategory='720p', Codec='av1', AudioCodec='aac', ContainerFormat='mp4', AudioComplete=True)
+        CrfProfile = EffectiveProfile(ProfileName='X', TargetVideoKbps=0, TargetAudioKbps=0, TargetResolutionCategory='720p')
+        D = self.Ev.Evaluate(Mf, CrfProfile, MakeCache())
+        self.assertNotIn('Transcode', D.OperationsNeeded)
+
+    def test_missing_thresholds_still_blocks(self):
+        """ProfileThresholds gate must still fire when TargetVideoKbps IS None (distinct from 0)."""
+        Mf = CompliantMediaFile()
+        NoThresholdsProfile = EffectiveProfile(ProfileName='X', TargetVideoKbps=None, TargetAudioKbps=None, TargetResolutionCategory='720p')
+        D = self.Ev.Evaluate(Mf, NoThresholdsProfile, MakeCache())
+        self.assertEqual(D.GateBlocked, 'ProfileThresholds')
+
+
 class TestBucketResolverPrecedence(unittest.TestCase):
     """C14 bucket precedence rules -- Transcode > Remux > AudioFixOnly > SubtitleFixOnly."""
 

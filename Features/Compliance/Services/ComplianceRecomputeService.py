@@ -78,7 +78,7 @@ class ComplianceRecomputeService:
         Lookup = {}
         for R in Rows:
             Target = R['TranscodeDownTo'] or R['Resolution']
-            Lookup[(R['ProfileName'], R['Resolution'])] = (R['VideoBitrateKbps'] or None, R['AudioBitrateKbps'] or None, Target)
+            Lookup[(R['ProfileName'], R['Resolution'])] = (R['VideoBitrateKbps'], R['AudioBitrateKbps'], Target)
         return Lookup
 
     def _ResolveProfile(self, Mf: MediaFileModel, Thresholds: Dict[tuple, tuple]) -> Optional[EffectiveProfile]:

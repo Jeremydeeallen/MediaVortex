@@ -1632,7 +1632,7 @@ class QueueManagementBusinessService:
         if not Hit:
             return EffectiveProfile(ProfileName=ProfileName, TargetVideoKbps=None, TargetAudioKbps=None, TargetResolutionCategory=None)
         Vk, Ak, Tgt = Hit
-        return EffectiveProfile(ProfileName=ProfileName, TargetVideoKbps=Vk or None, TargetAudioKbps=Ak or None, TargetResolutionCategory=Tgt or ResolutionCategory)
+        return EffectiveProfile(ProfileName=ProfileName, TargetVideoKbps=Vk, TargetAudioKbps=Ak, TargetResolutionCategory=Tgt or ResolutionCategory)
 
     @staticmethod
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C14
