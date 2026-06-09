@@ -221,8 +221,8 @@ Active 2026-06-09 -- phase: IMPLEMENTING. Operator authorized Batch 1 (WebServic
 | 12 | `Features/TranscodeQueue/QueueManagementBusinessService.py` | EDIT (delete `_EvaluateCompliance`, migrate callers to `ComplianceEvaluator`) | `C9` on each touched method | R3/R12. R19-adjacent: keep QMBS shrinkage to compliance extraction only. |
 | 13 | `Features/MediaProbe/MediaProbeBusinessService.py` | EDIT (read `Disposition.forced` per subtitle stream, populate `MediaFiles.HasForcedSubtitles` per `C5b`; call `RecomputeForFiles` with new bucket fields populated per `C23`) | `C5b`/`C23` on `_ExecuteProbe` | **Batch 2** (worker redeploy required). R12 edit-region. |
 | 14 | `Features/FileReplacement/FileReplacementBusinessService.py` | EDIT (recompute post-flight reads `WorkBucket`) | `C23` on the post-flight hook | **Batch 2** (worker redeploy required). R12 edit-region. |
-| 15 | `Features/TranscodeQueue/QueueManagementBusinessService.py` -- `NextTranscodeBatch` + `SmartPopulateQueue` | EDIT (WHERE clause uses `WorkBucket = '<bucket>'`) | `C20` on each query | R12 edit-region. |
-| 16 | `Features/Activity/ActivityRepository.py` | EDIT (compliance widget GROUP BY `WorkBucket`) | `C20` on the query | R12 edit-region. |
+| 15 | `Features/TranscodeQueue/QueueManagementBusinessService.py` -- `NextTranscodeBatch` + `SmartPopulateQueue` | **DEFERRED to Batch 2.5 / DELIVERING** -- migrating WHERE clauses to `WorkBucket` requires that WorkBucket be populated for the bulk of the library, which requires CRF-bitrate-estimate integration (`marginal-savings-gate.feature.md` CRF lookups). Backfill ran during Batch 2 step 2 and surfaced 92% of the library gate-blocked on `ProfileThresholds` because CRF profiles store `VideoBitrateKbps=0`. Switching readers now would empty operator UI. Dual-write from RecomputeForFiles keeps both column families in sync so the swap can land later atomically. | `C20` on each query | R12 edit-region (when it lands). |
+| 16 | `Features/Activity/ActivityController.py` (not Repository -- SQL currently inlined in Controller; will move during this edit) | **DEFERRED to Batch 2.5 / DELIVERING** -- same blocker as file 15 (needs WorkBucket populated) AND will also satisfy R12 mandate #2 by moving the 4 inlined `LibraryCompliance` SQL blocks to `ActivityRepository.py`. | `C20` on the query | R12 edit-region (when it lands); R12 mandate #2 (SQL-in-Repository). |
 | 17 | `Templates/Settings.html` | EDIT (new "Compliance Rules" collapsible card) | N/A (HTML; R15 N/A) | Follows the Queue admission card pattern. |
 | 18 | `Tests/Contract/TestComplianceEngine.py` | NEW | `C26` distributed across `test_*` | R8 placement. R12 one-line docstrings. |
 | 19 | `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md` | EDIT (C11 prose replaced with pointer to `compliance.feature.md`) | N/A (R15 N/A); R14: delete in place, no annotation | DELIVERING-phase edit. |
@@ -312,13 +312,18 @@ No numeric literals in the INSERT -> R2 doesn't fire. The defended values live i
 - I report "drain complete, ready for Batch 2 + redeploy" and wait for operator confirmation before the worker code commit lands.
 
 **Batch 2 -- worker-affecting.** Lands after drain:
-- File 12 (`QueueManagementBusinessService._EvaluateCompliance` deletion + WebService caller migrations)
-- File 13 (`MediaProbeBusinessService._ExecuteProbe` forced-subs read + recompute hook)
-- File 14 (`FileReplacementBusinessService` post-flight recompute reads WorkBucket)
-- File 15 (NextTranscodeBatch + SmartPopulate WHERE clause migration to WorkBucket)
-- File 16 (ActivityRepository GROUP BY WorkBucket)
+- File 12 (`QueueManagementBusinessService._EvaluateCompliance` deletion + WebService caller migrations) -- DONE (commit c8fa349)
+- File 13 (`MediaProbeBusinessService._ExecuteProbe` forced-subs read + recompute hook) -- DONE (commit 61192af)
+- File 14 (`FileReplacementBusinessService` post-flight recompute reads WorkBucket) -- IMPLICITLY DONE via file 12 (post-flight calls RecomputeForFiles which dual-writes)
+- File 15 + file 16 -- DEFERRED to Batch 2.5 / DELIVERING, gated on CRF-bitrate-estimate integration. See Files table notes.
 - Operator redeploys workers via `mediavortex-deploy-worker` skill (or I run it on explicit per-step authorization).
 - Workers come back up; `Workers.Status='Online'`; verify one probe + one transcode end-to-end before VERIFYING.
+
+**Batch 2.5 (follow-up directive, not this one):**
+- CRF-bitrate-estimate integration into `ComplianceRecomputeService._ResolveProfile` (use `CrfBitrateEstimates` table when `ProfileThresholds.VideoBitrateKbps=0`).
+- After integration, full library re-backfill -> WorkBucket populates for the ~92% currently gate-blocked on ProfileThresholds.
+- File 15: NextTranscodeBatch + SmartPopulate WHERE clauses migrate from `NeedsTranscode/NeedsQuick/RecommendedMode` to `WorkBucket`.
+- File 16: ActivityController's 4 inlined `LibraryCompliance` SQL blocks move to `ActivityRepository.py` (R12 mandate #2 satisfied) + GROUP BY `WorkBucket` (file 16's original intent).
 
 **DELIVERING** runs after both batches: file 5/5b drop scripts execute, files 19-20 prose retirement, files 21-22 (`compliance.feature.md` + `compliance.flow.md`) creation per R13.
 
