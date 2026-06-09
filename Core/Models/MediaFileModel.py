@@ -62,6 +62,11 @@ class MediaFileModel:
     FFprobeFailureCount: Optional[int] = 0
     LastFFprobeError: Optional[str] = None
     LastFFprobeAttemptDate: Optional[datetime] = None
+    WorkBucket: Optional[str] = None
+    OperationsNeededCsv: Optional[str] = None
+    ComplianceGateBlocked: Optional[str] = None
+    ComplianceEvaluatedAt: Optional[datetime] = None
+    HasForcedSubtitles: Optional[bool] = None
 
     # directive: path-schema-migration | # see path.S8
     def __post_init__(self):
