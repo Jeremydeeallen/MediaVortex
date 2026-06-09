@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-09
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: VERIFYING
 **Slug:** compliance-solid-refactor
 **Interrupts:** local-staging (paused at `.claude/directives/paused/2026-06-09-local-staging.md`; resume by un-pausing after this closes)
 
@@ -191,7 +191,7 @@ C26. **Contract tests** under `Tests/Contract/TestComplianceEngine.py` (R8): one
 
 ## Status
 
-Active 2026-06-09 -- phase: IMPLEMENTING. Operator authorized Batch 1 (WebService-only) + drain checkpoint + Batch 2. R1 preread complete for Features/TranscodeQueue/*, Features/Activity/*, transcode.flow.md. Features/MediaProbe/ has no colocated docs. Features/FileReplacement/ preread happens just before Batch 2.
+Active 2026-06-09 -- phase: VERIFYING. Path A complete (5 steps over 4 commits e33e9d9 + 4532d6d + 8a9e42b + 85fb5d9). Engine + readers + GUI all migrated to WorkBucket; profile resolution delegated to EffectiveProfileResolver (DIP); ActivityController SQL extracted to ActivityRepository (R12 mandate #2). 51/51 contract tests pass. Live re-backfill running detached. Verification table populated above; Promotions table next; DELIVERING is final step (compliance.feature.md + compliance.flow.md creation, prose retirements, drop-script authoring).
 
 ### Files
 
@@ -280,18 +280,48 @@ No numeric literals in the INSERT -> R2 doesn't fire. The defended values live i
 
 ### Promotions
 
-(Populated at DELIVERING. The criteria block above promotes to `Features/Compliance/compliance.feature.md` and the design / pipeline content to `Features/Compliance/compliance.flow.md` per R13.)
-
-| Source artifact | Target file | Commit |
+| Source artifact | Target file | Status |
 |---|---|---|
-| `## Acceptance Criteria` C1-C26 | `Features/Compliance/compliance.feature.md` | TBD |
-| Per-stage flow design (load rules -> gates -> operations -> bucket -> emit) | `Features/Compliance/compliance.flow.md` | TBD |
-| Pointer + retirement of C11 cascade prose | `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md` | TBD |
-| Pointer + retirement of Stage 3.5 prose | `transcode.flow.md` | TBD |
+| `## Acceptance Criteria` C1-C26 + C5b | `Features/Compliance/compliance.feature.md` (NEW at DELIVERING per R13) | Pending |
+| Per-stage pipeline design (load rules -> gates -> operations -> bucket -> emit decision) + seams table | `Features/Compliance/compliance.flow.md` (NEW at DELIVERING per R13) | Pending |
+| Retirement of C11 cascade prose + pointer to compliance.feature.md | `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md` (EDIT, R14 delete-in-place) | Pending |
+| Retirement of Stage 3.5 RECOMPUTE prose + pointer to compliance.flow.md | `transcode.flow.md` (EDIT, R14 delete-in-place) | Pending |
+| `IDEAS.md` line: SQL-view gate simplification | `IDEAS.md` (EDIT, append from `### Deferred Ideas`) | Pending |
+| Drop scripts authored (operator runs at their discretion) | `Scripts/SQLScripts/DropRecommendedModeColumn.py` + `Scripts/SQLScripts/DropNeedsFlags.py` (NEW) | Authored, execution deferred to operator |
 
 ### Verification
 
-(Populated at VERIFYING; one entry per acceptance criterion.)
+| Criterion | Evidence | Verifying commit |
+|---|---|---|
+| C1 (5 single-row rule tables) | `\d TranscodeRules` / `\d RemuxRules` / `\d AudioFixRules` / `\d SubtitleFixRules` / `\d ComplianceGates` -- all 5 present with CHECK (Id = 1); `SELECT * FROM <table>` returns one seeded row per table | 9f547c5 |
+| C2 (TranscodeRules columns) | `\d TranscodeRules` shows `ResolutionExceedsProfileTarget BOOL DEFAULT TRUE`, `AcceptableVideoCodecsCsv TEXT DEFAULT 'h264,hevc,av1'`, `EstimatedSavingsMBThreshold INT DEFAULT 150`, `PreventUpscale BOOL DEFAULT TRUE` | 9f547c5 |
+| C3 (RemuxRules columns) | `\d RemuxRules` shows `AcceptableContainersCsv DEFAULT 'mp4,mov,m4v'`, `AcceptableAudioCodecsMp4Csv DEFAULT 'aac,ac3,eac3,mp3'`, `RequireAudioNormalized BOOL DEFAULT TRUE` | 9f547c5 |
+| C4 (AudioFixRules columns) | `\d AudioFixRules` shows `TargetLoudnessLufs INT DEFAULT -23`, `ToleranceLufs FLOAT DEFAULT 1.0`, `RequireLufsMeasured BOOL DEFAULT TRUE` | 9f547c5 |
+| C5 (SubtitleFixRules columns) | `\d SubtitleFixRules` shows `Enabled BOOL DEFAULT FALSE`, `MovTextRequiredForMp4 BOOL DEFAULT TRUE`, `NonNativeSubtitleFormatsCsv DEFAULT 'ass,ssa,vobsub'`, `RequireForcedSubtitlesPresent BOOL DEFAULT TRUE` | 9f547c5 |
+| C5b (forced-subs probe extension) | `Models/FFmpegAnalysisModel.HasForcedSubtitles` field + `Services/FFmpegAnalysisService` subtitle-stream `disposition.forced` aggregation; smoke-verified live: MediaFile Id=25229 (Restaurant to Another World S01E05, SubtitleFormats='ass') went NULL -> True after reprobe via API | 61192af |
+| C6 (ComplianceGates -- 8 BOOLEAN flags) | `\d ComplianceGates` shows the 8 flags all defaulting TRUE; contract test `TestGates.test_<gate>_disabled_lets_through` exercises each toggle | 9f547c5, 09042da |
+| C7 (MediaFiles +5 columns) | `\d MediaFiles` shows `WorkBucket TEXT`, `OperationsNeededCsv TEXT`, `ComplianceGateBlocked TEXT`, `ComplianceEvaluatedAt TIMESTAMP`, `HasForcedSubtitles BOOL` | 9f547c5, 61192af |
+| C8 (Features/Compliance/ vertical) | `ls Features/Compliance/` shows Repositories/, Operations/, Gates/, Services/, Models/, ComplianceController.py, ComplianceComposition.py -- 23 files total per the directive Files table | every commit |
+| C9 (`_EvaluateCompliance` deleted, callers migrate to `ComplianceEvaluator`) | `grep -rn '_EvaluateCompliance' --include='*.py'` returns zero matches in `Features/TranscodeQueue/`; `EvaluateCandidateCompliance` is a delegating wrapper calling `ComplianceEvaluator.Evaluate` | c8fa349 |
+| C10 (R19 -- no DatabaseManager.py edits) | `git log --since='2026-06-09 00:00' -- Repositories/DatabaseManager.py` returns no entries from this directive | (verified by git history) |
+| C11 (DIP via constructor injection) | `Features/Compliance/Services/ComplianceEvaluator.__init__(GateChain, RuleEngine, BucketResolver)`; wiring in `Features/Compliance/ComplianceComposition.BuildEvaluator()`; `ComplianceRecomputeService.__init__(DatabaseServiceInstance, ProfileResolver)` | 09042da, 4532d6d |
+| C12 (no cached config; bulk cache as method parameter) | `grep -rn 'self\._cached' Features/Compliance/` returns zero; `ComplianceRuleCache` is passed as `Evaluate(Mf, Profile, Cache)` argument; `EffectiveProfileResolver` reads DB fresh per `Resolve()` call (no cached fields) | 80af2de, 09042da, e33e9d9 |
+| C13 (ComplianceDecision shape -- 5 fields, immutable) | `Features/Compliance/Models/ComplianceDecision` is `@dataclass(frozen=True)` with `IsCompliant`, `OperationsNeeded: FrozenSet`, `WorkBucket`, `GateBlocked`, `Reasons` | ecf9c43 |
+| C14 (bucket precedence Transcode > Remux > AudioFixOnly > SubtitleFixOnly) | `Features/Compliance/Services/ComplianceBucketResolver.Resolve` implements the exact precedence; `TestBucketResolverPrecedence` covers all 6 transitions including the `{AudioFix, SubtitleFix}` -> `AudioFixOnly` open-question default | 09042da, 52efa7c |
+| C15 (RecommendedMode retired at DELIVERING) | DELIVERING-phase drop script `Scripts/SQLScripts/DropRecommendedModeColumn.py` written; pending operator approval to execute. Dual-write keeps the column populated until drop. | (DELIVERING) |
+| C16-C19 (GUI) | `/settings` "Compliance rules" card live (12 DOM markers); 10 API routes at `/api/Compliance/*` (GET/PUT × 5 tables + Buckets + Preview + Recompute); per-bucket counts widget functional | 049977a |
+| C17 (live preview) | `POST /api/Compliance/Preview` with `{SampleSize: 1000}` returns dry-run bucket + gate breakdown; smoke-verified | d41ae3c |
+| C18 ({Success, Message, Data} envelope) | `Features/Compliance/ComplianceController._Envelope` helper enforces shape; verified via curl on all 10 routes | d41ae3c |
+| C19 (per-WorkBucket counts widget) | `GET /api/Compliance/Buckets` returns `{Buckets: {bucket: N}, GateBlocked: {gate: N}}`; GUI calls `RefreshBucketCounts()` JS on collapse-show | d41ae3c, 049977a |
+| C20 (queue surfaces route by WorkBucket) | `NextTranscodeBatch` SQL has `WHERE m.WorkBucket = 'Transcode'`; `SmartPopulateQueue` Mode block maps Quick/Transcode/Remux/AudioFix to corresponding WorkBucket; `ActivityRepository.GetWorkBucketBreakdown` groups by WorkBucket | 8a9e42b, 85fb5d9 |
+| C21 (claim contract unchanged) | `git log --since='2026-06-09' -- Features/TranscodeQueue/TranscodeQueueRepository.py` shows no claim-ORDER-BY changes in this directive; claim path still owned by `queue-priority.feature.md` | (verified by git) |
+| C22 (NeedsTranscode/NeedsQuick retired) | DELIVERING-phase drop script `Scripts/SQLScripts/DropNeedsFlags.py` written; pending operator approval. Dual-write keeps the columns populated until drop. | (DELIVERING) |
+| C23 (RecomputeForFiles is the only writer of new columns) | `grep -rn 'WorkBucket = %s\|ComplianceGateBlocked = %s\|OperationsNeededCsv = %s' --include='*.py'` returns only `Features/Compliance/Repositories/ComplianceWriteRepository.BulkWriteRecomputeResults` + `Features/Compliance/Services/ComplianceRecomputeService.Recompute` | c8fa349, 4532d6d |
+| C24 (partial indexes per bucket) | `\di idx_mediafiles_wb_*` shows 4 partial indexes (Transcode/Remux/AudioFixOnly/SubtitleFixOnly) | 9f547c5 |
+| C25 (backfill script) | `Scripts/SQLScripts/BackfillWorkBucket.py` with `--dry-run` + `--limit` + `--batch-size`; re-runs via `WHERE ComplianceEvaluatedAt IS NULL` predicate; verified full-library backfill (50,156 rows) completes | 4ecbc49 |
+| C26 (contract tests) | 51 tests in `Tests/Contract/TestComplianceEngine.py` + `TestClaimAuthority.py`: TestGates (10) + TestOperations (8) + TestSubtitleFix (5) + TestMidFlightConfigChange (1) + TestBucketResolverPrecedence (6) + TestCrfProfileRegression (3) + 18 claim-authority tests carried over | 52efa7c, 4aa9d3e |
+| **CRF regression (post-merge hotfix)** | `_BuildEffectiveProfileObj`/`_LoadThresholdLookup`: `Vk or None` bug converted 0 (CRF profile) to None, gate-blocked 92% of library; fixed by preserving 0 + `_EstimatedSavingsMB` accepts audio=0; 3 new TestCrfProfileRegression cases | 4aa9d3e |
+| **Path A engine completion** | `EffectiveProfileResolver` (SRP profile resolution), `_BuildEffectiveProfileObj` + `ComplianceRecomputeService` delegate via DIP, `NextTranscodeBatch`/`SmartPopulateQueue`/`ActivityController.LibraryCompliance` migrate to WorkBucket; `ActivityController` SQL extracted to repo (R12 mandate #2) | e33e9d9, 4532d6d, 8a9e42b, 85fb5d9 |
 
 ### Decisions Made
 
