@@ -24,8 +24,7 @@ _FULL_SELECT_COLS = (
     "AudioComplete, AudioCorruptSuspect, AudioCorruptReason, "
     "SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, "
     "SourceIntegratedThresholdLufs, AdmissionDeferReason, "
-    "LoudnessMeasurementFailureReason, AudioNormalizationMode, "
-    "NeedsQuick, NeedsTranscode"
+    "LoudnessMeasurementFailureReason, AudioNormalizationMode"
 )
 
 
@@ -97,8 +96,6 @@ class MediaFilesRepository(BaseRepository):
             AdmissionDeferReason=(row.get('AdmissionDeferReason') or row.get('admissiondeferreason')),
             LoudnessMeasurementFailureReason=(row.get('LoudnessMeasurementFailureReason') or row.get('loudnessmeasurementfailurereason')),
             AudioNormalizationMode=(row.get('AudioNormalizationMode') or row.get('audionormalizationmode')),
-            NeedsQuick=row.get('NeedsQuick') if 'NeedsQuick' in row else row.get('needsquick'),
-            NeedsTranscode=row.get('NeedsTranscode') if 'NeedsTranscode' in row else row.get('needstranscode'),
         )
 
     # directive: path-schema-migration | # see path.S8

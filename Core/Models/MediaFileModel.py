@@ -57,8 +57,6 @@ class MediaFileModel:
     AdmissionDeferReason: Optional[str] = None
     LoudnessMeasurementFailureReason: Optional[str] = None
     AudioNormalizationMode: Optional[str] = None
-    NeedsQuick: Optional[bool] = None
-    NeedsTranscode: Optional[bool] = None
     FFprobeFailureCount: Optional[int] = 0
     LastFFprobeError: Optional[str] = None
     LastFFprobeAttemptDate: Optional[datetime] = None

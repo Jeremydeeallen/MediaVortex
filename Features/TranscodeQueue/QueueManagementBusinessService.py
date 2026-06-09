@@ -670,12 +670,19 @@ class QueueManagementBusinessService:
 
             from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
-            Params: list = [Mode, Mode]  # ProcessingMode in SELECT, RecommendedMode in WHERE
+            # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
+            ModeToBucket = {'Transcode': 'Transcode', 'Remux': 'Remux', 'AudioFix': 'AudioFixOnly'}
+            Params: list = [Mode]
+            if Mode == 'Quick':
+                BucketSql = "AND m.WorkBucket IN ('Remux', 'AudioFixOnly') "
+            else:
+                BucketSql = "AND m.WorkBucket = %s "
+                Params.append(ModeToBucket[Mode])
             WhereSql = (
                 " WHERE m.TranscodedByMediaVortex IS NOT TRUE "
                 "AND m.SizeMB > 0 "
                 "AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true) "
-                "AND m.RecommendedMode = %s "
+                + BucketSql +
                 "AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.StorageRootId = m.StorageRootId AND tq.RelativePath = m.RelativePath)"
             )
 
@@ -1582,10 +1589,9 @@ class QueueManagementBusinessService:
         Mf = self._RowToMediaFileForCompliance(CandidateRow)
         Profile = self._BuildEffectiveProfileObj(EffectiveProfile, Mf.ResolutionCategory, Lookup, VideoBitrateKbps=Mf.VideoBitrateKbps)
         Decision = BuildEvaluator().Evaluate(Mf, Profile, BuildRuleCache())
-        LegacyMode = self._LegacyModeFromWorkBucket(Decision.WorkBucket)
         RefusalReason = self._LegacyRefusalReasonFromDecision(Decision)
         CandidateRow['_RefusalReason'] = RefusalReason
-        return {'IsCompliant': Decision.IsCompliant, 'RecommendedMode': LegacyMode, 'RefusalReason': RefusalReason}
+        return {'IsCompliant': Decision.IsCompliant, 'RecommendedMode': Decision.WorkBucket, 'RefusalReason': RefusalReason}
 
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
     def _RowToMediaFileForCompliance(self, Row: Dict[str, Any]):
@@ -1626,18 +1632,6 @@ class QueueManagementBusinessService:
             return None
         SyntheticMf = MediaFileModel(AssignedProfile=ProfileName, ResolutionCategory=ResolutionCategory, VideoBitrateKbps=VideoBitrateKbps)
         return EffectiveProfileResolver().Resolve(SyntheticMf)
-
-    @staticmethod
-    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C14
-    def _LegacyModeFromWorkBucket(Bucket: Optional[str]) -> Optional[str]:
-        """Map new WorkBucket enum to legacy RecommendedMode -- 'Transcode'/'Remux'->same; 'AudioFixOnly'->'Quick' (legacy conflates Remux+AudioFix); 'SubtitleFixOnly'->None (no legacy routing)."""
-        if Bucket == 'Transcode':
-            return 'Transcode'
-        if Bucket == 'Remux':
-            return 'Quick'
-        if Bucket == 'AudioFixOnly':
-            return 'Quick'
-        return None
 
     @staticmethod
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C13
@@ -1916,8 +1910,8 @@ class QueueManagementBusinessService:
             # directive: path-schema-migration | # see path.S8
             rows = db.ExecuteQuery(
                 "SELECT Id, StorageRootId, RelativePath, FileName, SizeMB, DurationMinutes, AssignedProfile, "
-                "ResolutionCategory, Resolution, Codec, ContainerFormat, "
-                "AudioCodec, HasExplicitEnglishAudio, "
+                "ResolutionCategory, Resolution, Codec, VideoBitrateKbps, ContainerFormat, "
+                "AudioCodec, HasExplicitEnglishAudio, HasForcedSubtitles, SubtitleFormats, "
                 "AudioComplete, AudioCorruptSuspect, AudioBitrateKbps, AudioChannels, "
                 "SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, "
                 "SourceIntegratedThresholdLufs, LoudnessMeasuredAt, "
@@ -1979,12 +1973,9 @@ class QueueManagementBusinessService:
                     ProfileObj = self._BuildEffectiveProfileObj(EffectiveProfile, MfModel.ResolutionCategory, Lookup, VideoBitrateKbps=MfModel.VideoBitrateKbps)
                     Decision = ComplianceEval.Evaluate(MfModel, ProfileObj, ComplianceCache)
                     IsCompliant = Decision.IsCompliant
-                    RecommendedMode = self._LegacyModeFromWorkBucket(Decision.WorkBucket)
                     WorkBucket = Decision.WorkBucket
                     OperationsNeededCsv = ','.join(sorted(Decision.OperationsNeeded)) if Decision.OperationsNeeded else None
                     GateBlocked = Decision.GateBlocked
-                    r['_NeedsTranscode'] = (Decision.WorkBucket == 'Transcode')
-                    r['_NeedsQuick'] = (Decision.WorkBucket in ('Remux', 'AudioFixOnly'))
                     r['_RefusalReason'] = self._LegacyRefusalReasonFromDecision(Decision)
                     r['_DeferReason'] = GateBlocked if GateBlocked in ('LoudnessMeasurements',) else None
 
@@ -1994,7 +1985,7 @@ class QueueManagementBusinessService:
                     # (computed score, BoostedPriority). All downstream queue
                     # inserts read m.PriorityScore so the boost propagates.
                     FinalScore = int(Score)
-                    if RecommendedMode == 'AudioFix' and AudioFixPins:
+                    if WorkBucket == 'AudioFixOnly' and AudioFixPins:
                         FilePathLower = (r.get('FilePath') or '').lower()
                         for Pattern, Boost in AudioFixPins:
                             if Pattern and Pattern in FilePathLower:
@@ -2007,9 +1998,6 @@ class QueueManagementBusinessService:
                         EffectiveProfile,
                         FinalScore,
                         IsCompliant,
-                        RecommendedMode,
-                        bool(r.get('_NeedsQuick', False)),
-                        bool(r.get('_NeedsTranscode', False)),
                         r.get('_DeferReason'),
                         WorkBucket,
                         OperationsNeededCsv,

@@ -19,8 +19,7 @@ class MediaProbeRepository(BaseRepository):
         "HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate, "
         "AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats, "
         "ContainerFormat, OverallBitrate, TranscodedByMediaVortex, "
-        "FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate, "
-        "NeedsQuick, NeedsTranscode"
+        "FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate"
     )
 
     # directive: path-schema-migration | # see path.S8
@@ -49,8 +48,6 @@ class MediaProbeRepository(BaseRepository):
             FFprobeFailureCount=Row.get('FFprobeFailureCount', 0),
             LastFFprobeError=Row.get('LastFFprobeError'),
             LastFFprobeAttemptDate=Row.get('LastFFprobeAttemptDate'),
-            NeedsQuick=Row.get('NeedsQuick'),
-            NeedsTranscode=Row.get('NeedsTranscode'),
         )
 
     # ─── Query Methods ─────────────────────────────────────────────────
