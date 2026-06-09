@@ -444,6 +444,7 @@ class WebServiceApp:
         from Features.AudioCompletion.AudioCompletionController import AudioCompletionBlueprint
         from Features.Activity.ActivityController import ActivityBlueprint
         from Features.TranscodeQueue.AudioFixPriorityHintsController import AudioFixPriorityHintsBlueprint
+        from Features.Compliance.ComplianceController import ComplianceBlueprint
 
         # Register all blueprints
         self.App.register_blueprint(ShowSettingsBlueprint)
@@ -465,6 +466,7 @@ class WebServiceApp:
         self.App.register_blueprint(TeamStatusBlueprint)
         self.App.register_blueprint(MediaProbeBlueprint)
         self.App.register_blueprint(FailureTrackingBlueprint, url_prefix='/api/FailureTracking')
+        self.App.register_blueprint(ComplianceBlueprint)
     
     def PrivateStartServiceStatusTracking(self):
         """Start service status tracking thread."""
