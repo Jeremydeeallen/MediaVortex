@@ -99,46 +99,7 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 
 ## Stage 3.5: RECOMPUTE -- Priority, Compliance, and Routing Materialization (`ST4`)
 
-**What it computes:** A single function (`RecomputeForFiles`) updates four cached columns on `MediaFiles` in one pass per row:
-
-| Column | Values | Purpose |
-|--------|--------|---------|
-| `AssignedProfile` | profile name string or NULL | Resolved via cascade: ShowSettings per-show override -> SystemSettings.DefaultProfileName |
-| `PriorityScore` | integer 1-194 | Impact-based score (bytes-saved estimate). Workers claim highest first. |
-| `IsCompliant` | true / false / NULL | Whether the file already meets all codec/container/audio requirements. NULL = undecidable (no profile, no English audio, not probed). |
-| `RecommendedMode` | 'Transcode' / 'Remux' / NULL | Which pipeline should handle this file. NULL = already compliant. |
-
-**RecommendedMode decision** (from `_EvaluateCompliance`, see `transcode-vs-remux-routing.feature.md` criterion 11):
-
-1. Hard blocks (return NULL/NULL): no English audio, no effective profile, no resolution category, no profile thresholds.
-2. `Transcode` -- video codec not in `CodecCompatibility.VideoCodec` acceptable set, OR resolution downscale needed, OR estimated savings >= `QueueAdmissionConfig.MinTranscodeSavingsMB`.
-3. `Remux` -- container not in acceptable set (e.g. matroska), OR audio codec not acceptable for MP4, OR audio not yet normalized.
-4. Compliant (true, NULL) -- passes all checks.
-
-The cascade is ordered: Transcode wins over Remux (if a file needs both a codec change and a container change, Transcode handles it since re-encoding produces an MP4 output anyway).
-
-**Trigger:** Four event sources keep these columns current:
-
-1. **Probe completion** -- `MediaProbeBusinessService._ExecuteProbe` calls `RecomputeForFiles([MediaFileId])` after writing probe metadata. Since probe runs automatically at the end of every scan (Stage 2), this is the initial population path for newly discovered files.
-2. **File replacement completion** -- `FileReplacementBusinessService._ProcessCompleteFileReplacement` calls `RecomputeForFiles([MediaFileId])` after updating the MediaFiles row with new metadata. This is what clears `RecommendedMode` after a successful remux or transcode.
-3. **AssignedProfile change** -- profile assignment endpoints invoke `ComputePriorityScoresForFiles` (alias for `RecomputeForFiles`) for affected MediaFileIds.
-4. **Admin recompute** -- `POST /api/PriorityMaterialization/Recompute` (explicit operator action, optional `ProfileName` / `Drive` / `ShowFolder` filters).
-
-**Code path:**
-- `Features/TranscodeQueue/QueueManagementBusinessService.py`:
-  - `RecomputeForFiles(MediaFileIds)` -- loads all caches once (profiles, thresholds, show overrides, audio normalization set, codec compatibility sets, queue admission config), then evaluates each row. Single bulk UPDATE writes all four columns.
-  - `ComputePriorityScoresForFiles(MediaFileIds)` -- backwards-compat alias, calls `RecomputeForFiles`.
-- `Features/PriorityMaterialization/PriorityMaterializationController.py` -- admin endpoint.
-
-**Tables read:** MediaFiles, Profiles, ProfileThresholds, ShowSettings, SystemSettings, CodecCompatibility, QueueAdmissionConfig, AudioNormalizationLog.
-
-**Tables written:** MediaFiles (AssignedProfile, PriorityScore, IsCompliant, RecommendedMode).
-
-**Failure semantics:**
-- The recompute hook never blocks the triggering operation. If recompute fails (DB error, missing inputs), the trigger (probe / replace / assign) still returns Success=True.
-- A failed recompute leaves prior values untouched -- never silently zeroed or nulled.
-- Per-row failures in the bulk loop are logged and skipped; remaining rows still update.
-- A `LogWarning` row is emitted naming the MediaFileId and reason whenever the fallback path runs (NULL AssignedProfile, no ProfileThresholds row). Per the loud-failure rule, silent fallbacks are forbidden.
+`RecomputeForFiles(MediaFileIds)` writes four legacy cached columns (`AssignedProfile`, `PriorityScore`, `IsCompliant`, `RecommendedMode`) and five new bucket columns (`WorkBucket`, `OperationsNeededCsv`, `ComplianceGateBlocked`, `ComplianceEvaluatedAt`, `HasForcedSubtitles`) on each MediaFile in one bulk UPDATE per batch. The compliance evaluation pipeline is owned by `Features/Compliance/compliance.flow.md` and `Features/Compliance/compliance.feature.md`. Triggers: probe completion, file replacement completion, AssignedProfile change, admin `POST /api/Compliance/Recompute`.
 
 **Output:** Every MediaFiles row carries up-to-date routing fields. Consumers:
 - `NextTranscodeBatch(Drive)` reads `NeedsTranscode` for the TV / Movies "Next Batch" cards on the Transcode pane.

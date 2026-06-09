@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-09
-**Status:** Active -- phase: VERIFYING
+**Status:** Active -- phase: DELIVERING
 **Slug:** compliance-solid-refactor
 **Interrupts:** local-staging (paused at `.claude/directives/paused/2026-06-09-local-staging.md`; resume by un-pausing after this closes)
 
@@ -191,7 +191,7 @@ C26. **Contract tests** under `Tests/Contract/TestComplianceEngine.py` (R8): one
 
 ## Status
 
-Active 2026-06-09 -- phase: VERIFYING. Path A complete (5 steps over 4 commits e33e9d9 + 4532d6d + 8a9e42b + 85fb5d9). Engine + readers + GUI all migrated to WorkBucket; profile resolution delegated to EffectiveProfileResolver (DIP); ActivityController SQL extracted to ActivityRepository (R12 mandate #2). 51/51 contract tests pass. Live re-backfill running detached. Verification table populated above; Promotions table next; DELIVERING is final step (compliance.feature.md + compliance.flow.md creation, prose retirements, drop-script authoring).
+**CLOSED** 2026-06-09 -- DELIVERING complete. All Promotions delivered: `Features/Compliance/compliance.feature.md` + `compliance.flow.md` created; `transcode-vs-remux-routing.feature.md` C11 + `transcode.flow.md` Stage 3.5 retired in-place (R14); `IDEAS.md` appended with SQL-view follow-up. Drop scripts `Scripts/SQLScripts/DropRecommendedModeColumn.py` + `DropNeedsFlags.py` authored; **execution deferred to operator-authorized run** (production-shape MediaFiles schema change). Workers (I9 + dot + larry) on hotfix code; 51/51 contract tests pass; dual-write keeps operator UI rendering unchanged. Directive doc to move to `.claude/directives/closed/2026-06-09-compliance-solid-refactor.md` after final commit; `.claude/current-feature` stack pops `compliance-solid-refactor`.
 
 ### Files
 

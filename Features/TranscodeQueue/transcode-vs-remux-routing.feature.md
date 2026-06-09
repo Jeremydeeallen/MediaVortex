@@ -84,31 +84,7 @@ User-facing -- two GUI surfaces, two columns visible in any operator query, one 
 
 10. `MediaFiles.IsCompliant BOOLEAN` column exists, nullable. Migration `Scripts/SQLScripts/AddIsCompliantColumn.py` is idempotent. NULL means "compliance not yet evaluated" (e.g. probe missing, effective profile cannot be resolved).
 
-11. `_EvaluateCompliance(MediaFile, EffectiveProfile)` helper returns `(IsCompliant: bool, RecommendedMode: Optional[str])`. The cascade:
-
-    ```
-    a. HasExplicitEnglishAudio = false
-       -> IsCompliant = NULL, RecommendedMode = NULL
-       -> file is hard-blocked from queueing (existing audio-language safety guard)
-
-    b. EffectiveProfile cannot be resolved (SystemSetting missing)
-       -> IsCompliant = NULL, RecommendedMode = NULL
-
-    c. Resolution > effective_profile.TranscodeDownTo
-       OR video codec NOT IN (h264, hevc, av1)
-       OR estimated_savings_mb >= MIN_SAVINGS
-       -> IsCompliant = false, RecommendedMode = 'Transcode'
-       -- transcode inherently fixes container + audio + video, so the
-       -- lighter checks below are not consulted
-
-    d. Container NOT IN CompatibleContainers
-       OR audio codec NOT IN (aac, ac3, eac3, mp3)
-       OR audio not normalized (see criterion 13)
-       -> IsCompliant = false, RecommendedMode = 'Remux'
-
-    e. None of the above
-       -> IsCompliant = true, RecommendedMode = NULL
-    ```
+11. Compliance evaluation is owned by `Features/Compliance/compliance.feature.md` -- a SOLID-decomposed engine: 8 hard-block gates (one per former undecidable-return path), 4 operations (Transcode/Remux/AudioFix/SubtitleFix), a pure-function bucket resolver. The single public entry is `ComplianceEvaluator.Evaluate(MediaFile, EffectiveProfile, ComplianceRuleCache) -> ComplianceDecision`. `MediaFiles.WorkBucket` (TEXT enum) supersedes `RecommendedMode` as the routing column; readers consume it directly.
 
 12. Verifiable per-clause:
     - File with HasExplicitEnglishAudio=false: IsCompliant=NULL.
