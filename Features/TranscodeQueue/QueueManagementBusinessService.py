@@ -320,21 +320,15 @@ class QueueManagementBusinessService:
                 "AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true)"
             )
 
-            # Mode filter. Post-2026-05-17 the cascade tracks two independent
-            # flags (NeedsQuick, NeedsTranscode) so a file can appear in BOTH
-            # tabs when both apply. We filter on the flags directly, not the
-            # singular RecommendedMode -- that lets a file needing Transcode +
-            # Audio surface in the Quick Fix tab too, so the operator can do
-            # the cheap audio pass first regardless of whether heavy video
-            # work is also pending.
+            # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
             if Mode == 'Quick':
-                WhereSql += " AND m.NeedsQuick = TRUE"
+                WhereSql += " AND m.WorkBucket IN ('Remux', 'AudioFixOnly')"
             elif Mode == 'Transcode':
-                WhereSql += " AND m.NeedsTranscode = TRUE"
-            elif Mode in ('Remux', 'AudioFix'):
-                # Legacy modes -- preserve old semantics for backward compat
-                WhereSql += " AND m.RecommendedMode = %s"
-                Params.append(Mode)
+                WhereSql += " AND m.WorkBucket = 'Transcode'"
+            elif Mode == 'Remux':
+                WhereSql += " AND m.WorkBucket = 'Remux'"
+            elif Mode == 'AudioFix':
+                WhereSql += " AND m.WorkBucket = 'AudioFixOnly'"
 
             if Drive:
                 DrivePrefix = Drive.rstrip(':\\/') + ':'
@@ -472,8 +466,9 @@ class QueueManagementBusinessService:
                 Offset = 0
 
             Params: List[Any] = []
+            # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
             WhereSql = (
-                " WHERE m.NeedsTranscode = TRUE "
+                " WHERE m.WorkBucket = 'Transcode' "
                 "AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL) "
                 "AND m.SizeMB > 0 "
                 "AND m.HasExplicitEnglishAudio IS NOT FALSE"
