@@ -201,8 +201,10 @@ C26. **Contract tests** under `Tests/Contract/TestComplianceEngine.py` (R8): one
 | 2 | `Scripts/SQLScripts/AddWorkBucketColumn.py` | NEW | `C7` on `Run()` | R11: `ADD COLUMN IF NOT EXISTS` x5 on MediaFiles (the 4 bucket / gate columns + `HasForcedSubtitles BOOLEAN NULL` per `C5b`). |
 | 3 | `Scripts/SQLScripts/AddWorkBucketIndexes.py` | NEW | `C24` on `Run()` | R11: 4x `CREATE INDEX IF NOT EXISTS`. Prints EXPLAIN ANALYZE for each. |
 | 4 | `Scripts/SQLScripts/BackfillWorkBucket.py` | NEW | `C25` on `Run()` | R12: single-line docstrings. Batched, `--dry-run`, `--limit`. |
-| 5 | `Scripts/SQLScripts/DropRecommendedModeColumn.py` | NEW (DELIVERING) | `C15` on `Run()` | R11: idempotent `DROP COLUMN IF EXISTS`. Ships in the same commit as the last reader migration. |
-| 5b | `Scripts/SQLScripts/DropNeedsFlags.py` | NEW (DELIVERING) | `C22` on `Run()` | R11: idempotent `DROP COLUMN IF EXISTS` for NeedsTranscode + NeedsQuick + their indexes. |
+| 5 | `Scripts/SQLScripts/DropRecommendedModeColumn.py` | NEW (DELIVERING). Will be revised to target `RecommendedMode_legacy` after the rename canary (file 5c). | `C15` on `Run()` | R11: idempotent `DROP COLUMN IF EXISTS`. |
+| 5b | `Scripts/SQLScripts/DropNeedsFlags.py` | NEW (DELIVERING). Will be revised to target `NeedsTranscode_legacy` + `NeedsQuick_legacy`. | `C22` on `Run()` | R11: idempotent `DROP COLUMN IF EXISTS` + `DROP INDEX IF EXISTS`. |
+| 5c | `Scripts/SQLScripts/RenameLegacyComplianceColumns.py` | NEW (DELIVERING). Forcing-function canary: renames `RecommendedMode/NeedsTranscode/NeedsQuick` -> `*_legacy` so any remaining caller fails fast with `column does not exist`. R11: idempotent via information_schema check. | `C15`/`C22` on `Run()` | Single-line SQL, single-line docstring. Companion: file 5d. |
+| 5d | `Scripts/SQLScripts/RollbackRenameLegacyComplianceColumns.py` | NEW (DELIVERING). One-ALTER-per-column rollback of 5c. | `C15`/`C22` on `Run()` | Mirror inverse of 5c; idempotent. |
 | 6 | `Features/Compliance/Repositories/TranscodeRulesRepository.py` | NEW | `C2`/`C12` on `class`; `C2` on `Get()`/`Update()` | R3: stateless. R12: single-line SQL + one-line docstrings. Mirrors `QueueAdmissionConfigRepository`. |
 | 6b-6e | `Features/Compliance/Repositories/{Remux,AudioFix,SubtitleFix,ComplianceGates}RulesRepository.py` | NEW | analogous per `C3`/`C4`/`C5`/`C6` | same R-notes |
 | 6f | `Features/Compliance/Repositories/ComplianceWriteRepository.py` | NEW (Batch 2) | `C23` on `BulkWriteRecomputeResults` | Surfaced by R12 mandate #2 (SQL-in-Repository) when migrating `RecomputeForFiles`. Owns the bulk UPDATE that writes AssignedProfile / PriorityScore / IsCompliant / RecommendedMode / NeedsQuick / NeedsTranscode / AdmissionDeferReason + new WorkBucket / OperationsNeededCsv / ComplianceGateBlocked / ComplianceEvaluatedAt. R5: ExecuteNonQuery for the UPDATE. R12: single-line SQL strings, one-line docstring. R19: lives in `Features/Compliance/Repositories/`, not `Repositories/DatabaseManager.py`. |
@@ -287,7 +289,8 @@ No numeric literals in the INSERT -> R2 doesn't fire. The defended values live i
 | Retirement of C11 cascade prose + pointer to compliance.feature.md | `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md` (EDIT, R14 delete-in-place) | Pending |
 | Retirement of Stage 3.5 RECOMPUTE prose + pointer to compliance.flow.md | `transcode.flow.md` (EDIT, R14 delete-in-place) | Pending |
 | `IDEAS.md` line: SQL-view gate simplification | `IDEAS.md` (EDIT, append from `### Deferred Ideas`) | Pending |
-| Drop scripts authored (operator runs at their discretion) | `Scripts/SQLScripts/DropRecommendedModeColumn.py` + `Scripts/SQLScripts/DropNeedsFlags.py` (NEW) | Authored, execution deferred to operator |
+| Drop scripts authored (will be revised to target *_legacy after rename canary) | `Scripts/SQLScripts/DropRecommendedModeColumn.py` + `Scripts/SQLScripts/DropNeedsFlags.py` (NEW) | Authored, execution deferred |
+| Rename canary + rollback authored (forcing function for caller discovery) | `Scripts/SQLScripts/RenameLegacyComplianceColumns.py` + `Scripts/SQLScripts/RollbackRenameLegacyComplianceColumns.py` (NEW) | Authored, awaiting operator authorization to run |
 
 ### Verification
 
