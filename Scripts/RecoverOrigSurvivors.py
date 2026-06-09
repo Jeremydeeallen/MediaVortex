@@ -1,10 +1,9 @@
-# directive: bug-0032-orig-recovery
 import argparse
 import os
 import sys
 
 ScriptDir = os.path.dirname(os.path.abspath(__file__))
-RepoRoot = os.path.dirname(os.path.dirname(ScriptDir))
+RepoRoot = os.path.dirname(ScriptDir)
 if RepoRoot not in sys.path:
     sys.path.insert(0, RepoRoot)
 
@@ -29,7 +28,8 @@ CANDIDATE_QUERY = (
 )
 
 CLEAR_COMPLIANCE_SQL = (
-    "UPDATE MediaFiles SET RecommendedMode = NULL, IsCompliant = NULL "
+    "UPDATE MediaFiles SET WorkBucket = NULL, OperationsNeededCsv = NULL, "
+    "ComplianceGateBlocked = NULL, IsCompliant = NULL, ComplianceEvaluatedAt = NULL "
     "WHERE Id = %s"
 )
 
@@ -39,16 +39,18 @@ FLAG_ORPHAN_SQL = (
 )
 
 
-# directive: bug-0032-orig-recovery
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def BuildPathMap(Db, WorkerName):
+    """Worker-local prefix map for canonical -> local translation; raises if no active resolutions."""
     Rows = Db.ExecuteQuery(PATH_MAP_QUERY, (WorkerName,))
     if not Rows:
         raise RuntimeError(f"No StorageRootResolutions rows for worker '{WorkerName}'")
     return {Row["CanonicalPrefix"]: Row["AbsolutePath"] for Row in Rows}
 
 
-# directive: bug-0032-orig-recovery
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def TranslateToLocal(CanonicalPath, PathMap):
+    """Substitute canonical prefix for the worker-local prefix; case-insensitive prefix match."""
     if not CanonicalPath:
         return CanonicalPath
     for Prefix, LocalPrefix in PathMap.items():
@@ -60,8 +62,9 @@ def TranslateToLocal(CanonicalPath, PathMap):
     return CanonicalPath
 
 
-# directive: bug-0032-orig-recovery
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def RecoverAtRiskFile(Db, MediaFileId, LocalMp4, Execute):
+    """Restore the original .orig file over the failed .mp4 and clear compliance flags so next compliance recompute reassesses."""
     LocalOrig = LocalMp4 + ".orig"
     if not os.path.exists(LocalMp4) or not os.path.exists(LocalOrig):
         return "skip_disk_state_changed"
@@ -73,16 +76,18 @@ def RecoverAtRiskFile(Db, MediaFileId, LocalMp4, Execute):
     return "recovered"
 
 
-# directive: bug-0032-orig-recovery
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def FlagOrphan(Db, MediaFileId, Execute):
+    """Flag a MediaFile whose disk artifacts are missing for manual operator review."""
     if not Execute:
         return "dry_run"
     Db.ExecuteNonQuery(FLAG_ORPHAN_SQL, (MediaFileId,))
     return "flagged"
 
 
-# directive: bug-0032-orig-recovery
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def Main():
+    """Recovery script for bug-0032-era .orig survivors; defaults to dry-run -- pass --execute to commit."""
     Parser = argparse.ArgumentParser()
     Parser.add_argument("--worker", required=True)
     Parser.add_argument("--execute", action="store_true", help="Apply changes (default is dry-run)")

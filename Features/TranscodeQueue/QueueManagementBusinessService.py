@@ -283,18 +283,7 @@ class QueueManagementBusinessService:
     def SmartPopulateQueue(self, Limit: int = 100, Offset: int = 0, Drive: str = '',
                             Search: Optional[str] = None, Mode: Optional[str] = None,
                             Focus: Optional[str] = None) -> Dict[str, Any]:
-        """Get untranscoded MediaFiles ranked by materialized PriorityScore.
-
-        Reads MediaFiles.PriorityScore (maintained by the priority-materialization
-        pipeline -- see transcode.flow.md Stage 3.5). NULL scores sort last, with
-        SizeMB DESC as tiebreaker so unscored files still land in a sensible order.
-
-        Excludes files already in queue and already-MediaVortex-transcoded files.
-        Optional Drive filter (e.g. 'T:'), Search substring filter, and Mode
-        filter ('Transcode' | 'Remux') that scopes by `MediaFiles.RecommendedMode`
-        per `Features/ShowSettings/remux-populate-card.feature.md` criterion 4.
-        Invalid Mode is silently ignored (returns the unscoped set).
-        """
+        """Untranscoded MediaFiles ranked by PriorityScore; optional Drive/Search/Mode filters scope by MediaFiles.WorkBucket; see transcode.flow.md ST3.5 + remux-populate-card.feature.md C4."""
         try:
             LoggingService.LogFunctionEntry("SmartPopulateQueue", "QueueManagementBusinessService", Limit, Offset, Drive, Search, Mode)
 
@@ -451,7 +440,7 @@ class QueueManagementBusinessService:
 
     def NextTranscodeBatch(self, Limit: int = 100, Offset: int = 0, Drive: str = '',
                             Search: Optional[str] = None) -> Dict[str, Any]:
-        """Largest non-compliant transcode candidates -- WHERE NeedsTranscode ORDER BY SizeMB DESC."""
+        """Largest non-compliant transcode candidates -- WHERE WorkBucket='Transcode' ORDER BY SizeMB DESC."""
         try:
             LoggingService.LogFunctionEntry("NextTranscodeBatch", "QueueManagementBusinessService", Limit, Offset, Drive, Search)
             from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
@@ -656,14 +645,7 @@ class QueueManagementBusinessService:
             return {"Success": False, "ErrorMessage": ErrorMsg, "ItemsAdded": 0}
 
     def QueueAllMatching(self, Mode: str, Search: str = '', Drive: str = '') -> Dict[str, Any]:
-        """Queue every cascade-classified candidate matching the optional filters,
-        in one INSERT...SELECT. No client-side ID enumeration. Mirrors the
-        SmartPopulateQueue WHERE clause but inserts instead of selecting.
-
-        Mode must be 'Transcode' or 'Remux' -- filters MediaFiles by
-        RecommendedMode. Files already in queue are excluded via NOT EXISTS.
-        Returns ItemsAdded.
-        """
+        """Queue every WorkBucket-classified candidate matching the optional filters via one INSERT...SELECT; Mode in {Transcode, Remux, AudioFix, Quick}; returns ItemsAdded."""
         try:
             if Mode not in ('Transcode', 'Remux', 'AudioFix', 'Quick'):
                 return {"Success": False, "ErrorMessage": "Mode must be 'Transcode', 'Quick', 'Remux' (legacy), or 'AudioFix' (legacy)", "ItemsAdded": 0}
@@ -1579,7 +1561,7 @@ class QueueManagementBusinessService:
 
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
     def EvaluateCandidateCompliance(self, CandidateRow: Dict[str, Any], EffectiveProfile: Optional[str] = None) -> Dict[str, Any]:
-        """Public wrapper over ComplianceEvaluator -- preserves the legacy {IsCompliant, RecommendedMode, RefusalReason} dict shape for ComplianceGate.Evaluate (compliance-gated-rename.C1) and other dict-shaped callers."""
+        """Public wrapper over ComplianceEvaluator -- returns {IsCompliant, WorkBucket, RefusalReason} dict shape for ComplianceGate.Evaluate (compliance-gated-rename.C1) and other dict-shaped callers."""
         from Features.Compliance.ComplianceComposition import BuildEvaluator, BuildRuleCache
         Lookup = self._LoadPriorityLookupTable()
         if EffectiveProfile is None:
@@ -1591,7 +1573,7 @@ class QueueManagementBusinessService:
         Decision = BuildEvaluator().Evaluate(Mf, Profile, BuildRuleCache())
         RefusalReason = self._LegacyRefusalReasonFromDecision(Decision)
         CandidateRow['_RefusalReason'] = RefusalReason
-        return {'IsCompliant': Decision.IsCompliant, 'RecommendedMode': Decision.WorkBucket, 'RefusalReason': RefusalReason}
+        return {'IsCompliant': Decision.IsCompliant, 'WorkBucket': Decision.WorkBucket, 'RefusalReason': RefusalReason}
 
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
     def _RowToMediaFileForCompliance(self, Row: Dict[str, Any]):
@@ -1865,18 +1847,7 @@ class QueueManagementBusinessService:
             return None
 
     def RecomputeForFiles(self, MediaFileIds: List[int]) -> int:
-        """Bulk-recompute the four cached fields on MediaFiles for the given IDs.
-
-        Computes in a single pass per row:
-          - AssignedProfile  (cascade: ShowSettings -> SystemSettings.DefaultProfileName)
-          - PriorityScore    (existing impact-based score against the cascade-resolved profile)
-          - IsCompliant      (NULL/true/false per the compliance cascade)
-          - RecommendedMode  ('Transcode' / 'Remux' / NULL)
-
-        Single round-trip for the rows; one bulk UPDATE FROM VALUES for the writes.
-        Replaces the prior ComputePriorityScoresForFiles. Returns rows updated.
-        Failures on individual rows do not abort the batch.
-        """
+        """Bulk-recompute AssignedProfile + PriorityScore + IsCompliant + WorkBucket + OperationsNeededCsv + ComplianceGateBlocked for the given IDs; one round-trip + one bulk UPDATE; returns rows updated; per-row failures do not abort the batch."""
         if not MediaFileIds:
             return 0
         try:
@@ -1892,9 +1863,7 @@ class QueueManagementBusinessService:
             ComplianceEval = BuildEvaluator()
             ComplianceCache = BuildRuleCache()
 
-            # AudioFix folder pins (media-tabs-and-loudness.feature.md C22).
-            # Load once per call; apply per-row to PriorityScore when the file
-            # would route to RecommendedMode='AudioFix' and its FilePath matches.
+            # AudioFix folder pins (media-tabs-and-loudness.feature.md C22): boost PriorityScore when WorkBucket='AudioFixOnly' and FilePath matches a hint pattern.
             AudioFixPins = []
             try:
                 AudioFixPins = [

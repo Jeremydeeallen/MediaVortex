@@ -1,20 +1,3 @@
-"""Smoke test: verify file scanning is non-destructive and non-duplicative.
-
-FileScanning.feature.md criterion 22:
-  Pick one known file in MediaFiles, trigger a scan of its parent RootFolder,
-  then verify:
-    (a) No duplicate MediaFiles row created
-    (b) Row Id unchanged (not delete+reinsert)
-    (c) Metadata preserved (AssignedProfile, TranscodedByMediaVortex, IsCompliant, RecommendedMode)
-    (d) ScanJobs shows Completed with NewFiles=0, DeletedFiles=0
-    (e) No orphaned TranscodeAttempts/MediaFilesArchive rows for the same path
-
-Usage:
-    py Scripts/SmokeTestScan.py                  # auto-picks a file from T:\ root
-    py Scripts/SmokeTestScan.py --filepath "T:\Show\Season 1\file.mkv"
-    py Scripts/SmokeTestScan.py --dry-run        # shows what would be tested without scanning
-"""
-
 import sys
 import os
 import time
@@ -26,7 +9,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from Core.Database.DatabaseService import DatabaseService
 
 
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def Main():
+    """Smoke-test that a scan is non-destructive: same Id, no duplicate row, metadata preserved (AssignedProfile/TranscodedByMediaVortex/IsCompliant/WorkBucket); see FileScanning.feature.md C22."""
     Parser = argparse.ArgumentParser(description="Smoke test: scan is non-destructive")
     Parser.add_argument('--filepath', type=str, default=None, help="Specific file path to test")
     Parser.add_argument('--dry-run', action='store_true', help="Show test plan without executing scan")
@@ -36,10 +21,9 @@ def Main():
 
     Db = DatabaseService()
 
-    # Step 1: Pick a test file
     if Args.filepath:
         Rows = Db.ExecuteQuery(
-            "SELECT Id, FilePath, SizeMB, AssignedProfile, TranscodedByMediaVortex, IsCompliant, RecommendedMode "
+            "SELECT Id, FilePath, SizeMB, AssignedProfile, TranscodedByMediaVortex, IsCompliant, WorkBucket "
             "FROM MediaFiles WHERE FilePath = %s",
             (Args.filepath,)
         )
@@ -47,16 +31,15 @@ def Main():
             print(f"[FAIL] File not found in MediaFiles: {Args.filepath}")
             sys.exit(1)
     else:
-        # Pick a file from the T:\ root that has metadata worth preserving
         Rows = Db.ExecuteQuery(
-            "SELECT Id, FilePath, SizeMB, AssignedProfile, TranscodedByMediaVortex, IsCompliant, RecommendedMode "
+            "SELECT Id, FilePath, SizeMB, AssignedProfile, TranscodedByMediaVortex, IsCompliant, WorkBucket "
             "FROM MediaFiles "
             "WHERE AssignedProfile IS NOT NULL AND TranscodedByMediaVortex IS NOT NULL "
             "ORDER BY Id DESC LIMIT 1"
         )
         if not Rows:
             Rows = Db.ExecuteQuery(
-                "SELECT Id, FilePath, SizeMB, AssignedProfile, TranscodedByMediaVortex, IsCompliant, RecommendedMode "
+                "SELECT Id, FilePath, SizeMB, AssignedProfile, TranscodedByMediaVortex, IsCompliant, WorkBucket "
                 "FROM MediaFiles ORDER BY Id DESC LIMIT 1"
             )
         if not Rows:
@@ -70,12 +53,9 @@ def Main():
     OrigProfile = TestFile.get('assignedprofile')
     OrigTranscoded = TestFile.get('transcodedbyMediaVortex') or TestFile.get('transcodedby_mediavortex') or TestFile.get('transcodedbyMediavortex')
     OrigCompliant = TestFile.get('iscompliant')
-    OrigMode = TestFile.get('recommendedmode')
+    OrigBucket = TestFile.get('workbucket')
 
-    # Resolve the RootFolder for this file (find closest match)
-    RfRows = Db.ExecuteQuery(
-        "SELECT Id, RootFolder FROM RootFolders ORDER BY LENGTH(RootFolder) DESC"
-    )
+    RfRows = Db.ExecuteQuery("SELECT Id, RootFolder FROM RootFolders ORDER BY LENGTH(RootFolder) DESC")
     MatchedRoot = None
     for Rf in RfRows:
         RootPath = Rf.get('rootfolder') or Rf.get('RootFolder')
@@ -83,7 +63,6 @@ def Main():
             MatchedRoot = RootPath
             break
     if not MatchedRoot:
-        # Fallback: use drive root
         MatchedRoot = FilePath[:3]
 
     print("=" * 70)
@@ -95,7 +74,7 @@ def Main():
     print(f"  AssignedProfile:        {OrigProfile}")
     print(f"  TranscodedByMediaVortex:{OrigTranscoded}")
     print(f"  IsCompliant:            {OrigCompliant}")
-    print(f"  RecommendedMode:        {OrigMode}")
+    print(f"  WorkBucket:             {OrigBucket}")
     print(f"  Root Folder:            {MatchedRoot}")
     print("=" * 70)
 
@@ -103,29 +82,17 @@ def Main():
         print("\n[DRY RUN] Would scan root folder and verify assertions. Exiting.")
         sys.exit(0)
 
-    # Step 2: Count existing rows for this path BEFORE scan
-    PreDupCount = Db.ExecuteQuery(
-        "SELECT COUNT(*) AS Cnt FROM MediaFiles WHERE FilePath = %s", (FilePath,)
-    )[0]['cnt']
+    PreDupCount = Db.ExecuteQuery("SELECT COUNT(*) AS Cnt FROM MediaFiles WHERE FilePath = %s", (FilePath,))[0]['cnt']
     print(f"\n[PRE] Duplicate count for path: {PreDupCount}")
 
-    PreAttemptIds = Db.ExecuteQuery(
-        "SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s", (FileId,)
-    )
-    PreArchiveIds = Db.ExecuteQuery(
-        "SELECT Id FROM MediaFilesArchive WHERE OriginalMediaFileId = %s", (FileId,)
-    )
+    PreAttemptIds = Db.ExecuteQuery("SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s", (FileId,))
+    PreArchiveIds = Db.ExecuteQuery("SELECT Id FROM MediaFilesArchive WHERE OriginalMediaFileId = %s", (FileId,))
     print(f"[PRE] TranscodeAttempts for this file: {len(PreAttemptIds)}")
     print(f"[PRE] MediaFilesArchive for this file: {len(PreArchiveIds)}")
 
-    # Step 3: Trigger scan via API
     print(f"\n[SCAN] Triggering scan for: {MatchedRoot}")
     try:
-        Resp = requests.post(
-            f"{Args.api_base}/api/Scan/Start",
-            json={"RootFolderPath": MatchedRoot, "Recursive": True},
-            timeout=30
-        )
+        Resp = requests.post(f"{Args.api_base}/api/Scan/Start", json={"RootFolderPath": MatchedRoot, "Recursive": True}, timeout=30)
         RespData = Resp.json()
         if not RespData.get('Success'):
             print(f"[WARN] Scan start response: {RespData.get('Message')}")
@@ -138,18 +105,12 @@ def Main():
         print(f"[FAIL] Error calling scan API: {e}")
         sys.exit(1)
 
-    # Step 4: Wait for scan to complete
     print("[WAIT] Waiting for scan to complete...")
     StartWait = time.time()
     ScanCompleted = False
     while time.time() - StartWait < Args.timeout:
         time.sleep(5)
-        # Check ScanJobs for the most recent scan of this root
-        Jobs = Db.ExecuteQuery(
-            "SELECT Id, Status, NewFiles, DeletedFiles, ErrorMessage "
-            "FROM ScanJobs WHERE RootFolderPath = %s ORDER BY Id DESC LIMIT 1",
-            (MatchedRoot,)
-        )
+        Jobs = Db.ExecuteQuery("SELECT Id, Status, NewFiles, DeletedFiles, ErrorMessage FROM ScanJobs WHERE RootFolderPath = %s ORDER BY Id DESC LIMIT 1", (MatchedRoot,))
         if Jobs:
             Job = Jobs[0]
             Status = Job.get('status')
@@ -167,24 +128,19 @@ def Main():
         print(f"[FAIL] Scan did not complete within {Args.timeout}s")
         sys.exit(1)
 
-    # Step 5: VERIFY assertions
     print("\n" + "=" * 70)
     print("VERIFICATION")
     print("=" * 70)
     Failures = []
 
-    # (a) No duplicate
-    PostDupCount = Db.ExecuteQuery(
-        "SELECT COUNT(*) AS Cnt FROM MediaFiles WHERE FilePath = %s", (FilePath,)
-    )[0]['cnt']
+    PostDupCount = Db.ExecuteQuery("SELECT COUNT(*) AS Cnt FROM MediaFiles WHERE FilePath = %s", (FilePath,))[0]['cnt']
     if PostDupCount != 1:
         Failures.append(f"(a) FAIL: Expected 1 row for path, got {PostDupCount}")
     else:
         print(f"  (a) PASS: Exactly 1 MediaFiles row for path (no duplicate)")
 
-    # (b) Id unchanged
     PostRows = Db.ExecuteQuery(
-        "SELECT Id, AssignedProfile, TranscodedByMediaVortex, IsCompliant, RecommendedMode "
+        "SELECT Id, AssignedProfile, TranscodedByMediaVortex, IsCompliant, WorkBucket "
         "FROM MediaFiles WHERE FilePath = %s",
         (FilePath,)
     )
@@ -198,11 +154,10 @@ def Main():
         else:
             print(f"  (b) PASS: Id unchanged ({FileId})")
 
-        # (c) Metadata preserved
         PostProfile = PostFile.get('assignedprofile')
         PostTranscoded = PostFile.get('transcodedbyMediaVortex') or PostFile.get('transcodedby_mediavortex') or PostFile.get('transcodedbyMediavortex')
         PostCompliant = PostFile.get('iscompliant')
-        PostMode = PostFile.get('recommendedmode')
+        PostBucket = PostFile.get('workbucket')
 
         MetaOk = True
         if PostProfile != OrigProfile:
@@ -214,33 +169,23 @@ def Main():
         if PostCompliant != OrigCompliant:
             Failures.append(f"(c) FAIL: IsCompliant changed from '{OrigCompliant}' to '{PostCompliant}'")
             MetaOk = False
-        if PostMode != OrigMode:
-            Failures.append(f"(c) FAIL: RecommendedMode changed from '{OrigMode}' to '{PostMode}'")
+        if PostBucket != OrigBucket:
+            Failures.append(f"(c) FAIL: WorkBucket changed from '{OrigBucket}' to '{PostBucket}'")
             MetaOk = False
         if MetaOk:
-            print(f"  (c) PASS: Metadata preserved (AssignedProfile, TranscodedByMediaVortex, IsCompliant, RecommendedMode)")
+            print(f"  (c) PASS: Metadata preserved (AssignedProfile, TranscodedByMediaVortex, IsCompliant, WorkBucket)")
 
-    # (d) ScanJobs shows Completed with NewFiles=0, DeletedFiles=0 for a re-scan
-    LatestJob = Db.ExecuteQuery(
-        "SELECT Status, NewFiles, DeletedFiles FROM ScanJobs WHERE RootFolderPath = %s ORDER BY Id DESC LIMIT 1",
-        (MatchedRoot,)
-    )
+    LatestJob = Db.ExecuteQuery("SELECT Status, NewFiles, DeletedFiles FROM ScanJobs WHERE RootFolderPath = %s ORDER BY Id DESC LIMIT 1", (MatchedRoot,))
     if LatestJob:
         J = LatestJob[0]
         if J.get('status') != 'Completed':
             Failures.append(f"(d) FAIL: ScanJobs.Status='{J.get('status')}', expected 'Completed'")
         else:
             print(f"  (d) PASS: ScanJobs Status='Completed'")
-        # Note: NewFiles/DeletedFiles may be non-zero if OTHER files changed. We just report.
         print(f"       NewFiles={J.get('newfiles', 0)}, DeletedFiles={J.get('deletedfiles', 0)}")
 
-    # (e) No orphaned TranscodeAttempts/MediaFilesArchive
-    PostAttemptIds = Db.ExecuteQuery(
-        "SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s", (FileId,)
-    )
-    PostArchiveIds = Db.ExecuteQuery(
-        "SELECT Id FROM MediaFilesArchive WHERE OriginalMediaFileId = %s", (FileId,)
-    )
+    PostAttemptIds = Db.ExecuteQuery("SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s", (FileId,))
+    PostArchiveIds = Db.ExecuteQuery("SELECT Id FROM MediaFilesArchive WHERE OriginalMediaFileId = %s", (FileId,))
     if len(PostAttemptIds) != len(PreAttemptIds):
         Failures.append(f"(e) FAIL: TranscodeAttempts count changed from {len(PreAttemptIds)} to {len(PostAttemptIds)}")
     elif len(PostArchiveIds) != len(PreArchiveIds):
@@ -248,7 +193,6 @@ def Main():
     else:
         print(f"  (e) PASS: No orphaned TranscodeAttempts or MediaFilesArchive rows")
 
-    # Summary
     print("\n" + "=" * 70)
     if Failures:
         print(f"RESULT: FAILED ({len(Failures)} assertion(s))")

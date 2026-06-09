@@ -115,13 +115,13 @@ class ComplianceGate:
 
             Eval = QueueManagementBusinessService().EvaluateCandidateCompliance(CandidateRow)
 
-            if Eval.get('IsCompliant') is True and Eval.get('RecommendedMode') is None:
+            if Eval.get('IsCompliant') is True and Eval.get('WorkBucket') is None:
                 return {'Compliant': True, 'RefusalReason': None}
 
             RefusalReason = Eval.get('RefusalReason') or (
-                f"undecidable_{Eval.get('RecommendedMode') or 'unknown'}"
+                f"undecidable_{Eval.get('WorkBucket') or 'unknown'}"
                 if Eval.get('IsCompliant') is None
-                else f"non_compliant_{Eval.get('RecommendedMode') or 'unknown'}"
+                else f"non_compliant_{Eval.get('WorkBucket') or 'unknown'}"
             )
             return {'Compliant': False, 'RefusalReason': RefusalReason}
 

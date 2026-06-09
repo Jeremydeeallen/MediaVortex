@@ -1,4 +1,3 @@
-# Time AddSuggestionsToQueue end-to-end with real data, NO INSERTS (rolled back).
 import sys
 sys.path.insert(0, '.')
 import time
@@ -10,20 +9,31 @@ DB = DatabaseService()
 _StorageRoots = GetStorageRoots()
 _PrefixMap = GetPrefixMap()
 
-# Step 1: Get 250 candidate items the way SmartPopulate does
+ModeToBucket = {'Transcode': 'Transcode', 'Remux': 'Remux', 'AudioFix': 'AudioFixOnly'}
+Mode = 'Remux'
+Bucket = ModeToBucket[Mode]
+
 t0 = time.time()
-# directive: path-schema-migration | # see path.S8
-WhereSql = " WHERE m.TranscodedByMediaVortex IS NOT TRUE AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL) AND m.SizeMB > 0 AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true) AND m.RecommendedMode = %s AND m.RelativePath LIKE %s ESCAPE %s "
-# T:\ rows have StorageRootId for the T:\ root; the LIKE filter narrows by RelativePath prefix
-Sql = "SELECT m.Id, m.StorageRootId, m.RelativePath, m.FileName, m.SizeMB FROM MediaFiles m " + WhereSql + " ORDER BY m.PriorityScore DESC NULLS LAST, m.SizeMB DESC LIMIT 250"
-Candidates = DB.ExecuteQuery(Sql, ('Remux', '%', '!'))
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
+WhereSql = (
+    " WHERE m.TranscodedByMediaVortex IS NOT TRUE "
+    " AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL) "
+    " AND m.SizeMB > 0 "
+    " AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true) "
+    " AND m.WorkBucket = %s "
+    " AND m.RelativePath LIKE %s ESCAPE %s "
+)
+Sql = (
+    "SELECT m.Id, m.StorageRootId, m.RelativePath, m.FileName, m.SizeMB FROM MediaFiles m "
+    + WhereSql
+    + " ORDER BY m.PriorityScore DESC NULLS LAST, m.SizeMB DESC LIMIT 250"
+)
+Candidates = DB.ExecuteQuery(Sql, (Bucket, '%', '!'))
 t1 = time.time()
 print(f"[1] Get 250 candidates: {t1-t0:.3f}s")
 
-# Items mirror JS payload; FilePath synthesized from typed pair via Path.CanonicalDisplay
-Items = [{'FilePath': Path(c['StorageRootId'], c['RelativePath'] or '').CanonicalDisplay(_PrefixMap) if c.get('StorageRootId') is not None else '', 'MediaFileId': c['Id'], 'SizeMB': c['SizeMB'], 'StorageRootId': c.get('StorageRootId'), 'RelativePath': c.get('RelativePath') or '', 'Mode': 'Remux'} for c in Candidates]
+Items = [{'FilePath': Path(c['StorageRootId'], c['RelativePath'] or '').CanonicalDisplay(_PrefixMap) if c.get('StorageRootId') is not None else '', 'MediaFileId': c['Id'], 'SizeMB': c['SizeMB'], 'StorageRootId': c.get('StorageRootId'), 'RelativePath': c.get('RelativePath') or '', 'Mode': Mode} for c in Candidates]
 
-# Step 2: GetExistingQueueFilePaths
 from Features.TranscodeQueue.TranscodeQueueRepository import TranscodeQueueRepository
 Repo = TranscodeQueueRepository()
 t0 = time.time()
@@ -31,10 +41,9 @@ ExistingPaths = Repo.GetExistingQueueFilePaths()
 t1 = time.time()
 print(f"[2] GetExistingQueueFilePaths ({len(ExistingPaths)} paths): {t1-t0:.3f}s")
 
-# Step 3: Bulk MediaFile lookup
 AllMediaFileIds = [Item.get('MediaFileId') for Item in Items if Item.get('MediaFileId')]
 t0 = time.time()
-# directive: path-schema-migration | # see path.S8
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 Rows = DB.ExecuteQuery(
     "SELECT Id, StorageRootId, RelativePath, FileName, SizeMB, DurationMinutes, AssignedProfile, Resolution "
     "FROM MediaFiles WHERE Id IN %s",
@@ -43,7 +52,6 @@ Rows = DB.ExecuteQuery(
 t1 = time.time()
 print(f"[3] Bulk MediaFile lookup ({len(AllMediaFileIds)} ids): {t1-t0:.3f}s")
 
-# Step 4: Build TranscodeQueueModels (in-memory only)
 from datetime import datetime, timezone
 from Features.TranscodeQueue.Models.TranscodeQueueModel import TranscodeQueueModel
 from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
@@ -52,7 +60,7 @@ MediaFileMap = {r['Id']: r for r in Rows}
 
 t0 = time.time()
 PendingInserts = []
-# directive: path-schema-migration | # see path.S8
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 for Item in Items:
     FilePath = Item['FilePath']
     if FilePath in ExistingPaths:
@@ -78,13 +86,12 @@ for Item in Items:
         FileName=FileName, Directory=Directory,
         SizeBytes=int(SizeMB * 1024 * 1024), SizeMB=SizeMB,
         Priority=Priority, Status="Pending",
-        ProcessingMode='Remux', DateAdded=datetime.now(timezone.utc)
+        ProcessingMode=Mode, DateAdded=datetime.now(timezone.utc)
     )
     PendingInserts.append(QI)
 t1 = time.time()
 print(f"[4] Build {len(PendingInserts)} TranscodeQueueModels + priority: {t1-t0:.3f}s")
 
-# Step 5: Time BulkInsertQueueItems WITHOUT actually committing -- use a savepoint
 from psycopg2.extras import execute_values
 
 t0 = time.time()
@@ -104,7 +111,7 @@ for Item in PendingInserts:
 t1 = time.time()
 print(f"[5b] Pre-resolve StorageRootId/RelativePath in Python ({len(PendingInserts)}): {t1-t0:.3f}s")
 
-# directive: path-schema-migration | # see path.S8
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 Conn = DB.GetConnection()
 try:
     Cur = Conn.cursor()

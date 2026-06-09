@@ -155,22 +155,7 @@ def DeleteShowSetting():
 
 @ShowSettingsBlueprint.route('/SmartPopulate', methods=['POST'])
 def SmartPopulateQueue():
-    """Generate suggested queue items ranked by MediaFiles.PriorityScore.
-
-    Body params (all optional):
-      Drive   -- drive-letter prefix filter (e.g. 'T:')
-      Limit   -- page size, 1-500 (default 100); the business service coerces.
-      Offset  -- pagination offset (default 0)
-      Search  -- substring match on FileName or show-folder segment, case-insensitive,
-                 max 100 chars. Empty/whitespace = no filter.
-      Mode    -- 'Transcode' | 'Remux'. Filters by MediaFiles.RecommendedMode so
-                 Card 1 ('Transcode') and Card 1.5 ('Remux') get scoped result sets.
-                 See remux-populate-card.feature.md criterion 4. Invalid value is
-                 silently ignored (returns the unscoped set, backward-compat).
-
-    Service is the source of truth for sort order (PriorityScore DESC NULLS LAST,
-    SizeMB DESC). See smart-populate.flow.md for the user journey.
-    """
+    """Generate suggested queue items ranked by MediaFiles.PriorityScore; optional Drive/Limit/Offset/Search/Mode/Focus body params; Mode scopes by MediaFiles.WorkBucket per smart-populate.flow.md + remux-populate-card.feature.md C4."""
     try:
         Data = request.get_json() or {}
         Limit = Data.get('Limit', 100)
@@ -194,7 +179,7 @@ def SmartPopulateQueue():
 
 @ShowSettingsBlueprint.route('/NextTranscodeBatch', methods=['POST'])
 def NextTranscodeBatch():
-    """Largest non-compliant transcode candidates -- WHERE NeedsTranscode ORDER BY SizeMB DESC."""
+    """Largest non-compliant transcode candidates -- WHERE WorkBucket='Transcode' ORDER BY SizeMB DESC."""
     try:
         Data = request.get_json() or {}
         Limit = Data.get('Limit', 100)

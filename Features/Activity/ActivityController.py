@@ -1,13 +1,3 @@
-"""ActivityController -- panel data endpoints for the /Activity page.
-
-Currently exposes:
-  - GET /api/Activity/LibraryCompliance -- counts driving the Library
-    Compliance panel: compliance state, RecommendedMode breakdown,
-    AudioComplete distribution, loudness band distribution.
-
-See media-tabs-and-loudness.feature.md criteria 23-24.
-"""
-
 from flask import Blueprint, jsonify
 
 from Core.Database.DatabaseService import DatabaseService

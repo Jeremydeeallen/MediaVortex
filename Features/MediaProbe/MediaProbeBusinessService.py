@@ -190,13 +190,7 @@ class MediaProbeBusinessService:
                         SignalsEx, "MediaProbeBusinessService", "_ExecuteProbe"
                     )
 
-                # Materialize PriorityScore + AssignedProfile + IsCompliant + RecommendedMode
-                # via the unified updater. RecomputeForFiles applies the ShowSettings ->
-                # SystemSettings.DefaultProfileName cascade so newly-discovered files get
-                # a sensible profile (and a deterministic priority) instead of falling back
-                # to the size*0.5 proxy. See transcode-vs-remux-routing.feature.md.
-                # Failure here must NOT roll back the probe (priority-materialization
-                # criterion 14).
+                # see compliance.flow.md (post-probe recompute; failure must not roll back the probe)
                 try:
                     from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
                     QueueManagementBusinessService().RecomputeForFiles([MediaFile.Id])

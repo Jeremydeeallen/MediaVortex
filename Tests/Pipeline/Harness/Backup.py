@@ -1,13 +1,3 @@
-"""File + DB row backup and restore for the pipeline test harness.
-
-Captures a MediaFile and every related DB row before a test mutates them;
-restores all of it on success or failure. The on-disk backup file is the
-recovery anchor -- if a hard crash leaves the test halfway through, the
-backup file is still on disk and `RestoreMediaFile` can be replayed.
-
-See Tests/Pipeline/pipeline-test-harness.feature.md criteria 1-3.
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -17,41 +7,28 @@ import re
 import shutil
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from pathlib import Path as _SpoolPath
+from typing import Any, Dict, List
 
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
+from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalExists, LocalIsDir, LocalJoin, LocalSplitExt
+from Tests.Pipeline.Harness.HarnessPathResolver import ResolveLocalPathForMediaFile
 
 
-BACKUP_ROOT = Path(__file__).resolve().parent.parent / '_backup'
+BACKUP_ROOT = _SpoolPath(__file__).resolve().parent.parent / '_backup'
 
 
-# Tables touched by a Quick Fix / Transcode pipeline run. For each table the
-# backup captures every row keyed to the MediaFileId; restore wipes any rows
-# the test added and re-inserts the captured rows.
 _RELATED_TABLES = (
-    # (table_name, predicate_column, optional extra row-key for ordering)
     ('TranscodeAttempts', 'MediaFileId'),
     ('TranscodeQueue', 'MediaFileId'),
-    # MediaFilesArchive joins via TranscodeAttemptId -- handled specially after TA is captured.
-    # TemporaryFilePaths also joins via TranscodeAttemptId -- handled specially.
-    # ActiveJobs joins via TranscodeQueue.Id -- handled specially.
 )
 
 
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 @dataclass
 class BackupHandle:
-    """The unit of recovery for one MediaFile under test.
-
-    On-disk artifacts:
-      - LocalBackupFilePath: byte-for-byte copy of the original file
-      - MetadataJsonPath:    captured DB rows as JSON
-
-    DB snapshots (in-memory mirror of the JSON):
-      - MediaFileRow: the single MediaFiles row
-      - RelatedRows: {table_name: [row dicts]} for each related table
-    """
+    """One MediaFile's recovery anchor -- file copy + DB row snapshot; see pipeline-test-harness.feature.md S4."""
     MediaFileId: int
     CapturedAt: str
     OriginalCanonicalPath: str
@@ -64,7 +41,9 @@ class BackupHandle:
     RelatedRows: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
 
 
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def _Sha256OfFile(LocalPath: str) -> str:
+    """SHA-256 hex digest of file content."""
     H = hashlib.sha256()
     with open(LocalPath, 'rb') as F:
         for Chunk in iter(lambda: F.read(1024 * 1024), b''):
@@ -72,8 +51,9 @@ def _Sha256OfFile(LocalPath: str) -> str:
     return H.hexdigest()
 
 
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def _Stringify(Row: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert non-JSON-native types (datetime, Decimal) to strings."""
+    """Convert non-JSON-native row values (datetime, Decimal) to strings."""
     Result: Dict[str, Any] = {}
     for Key, Val in Row.items():
         if isinstance(Val, datetime):
@@ -85,106 +65,58 @@ def _Stringify(Row: Dict[str, Any]) -> Dict[str, Any]:
     return Result
 
 
-def _ResolveLocalPath(CanonicalPath: str) -> str:
-    """Translate a canonical DB path to the I9's local view via WorkerContext."""
-    try:
-        from Core.PathStorage import LoadStorageRoots, Parse as PathParse, Resolve as PathResolve
-        from Core.WorkerContext import WorkerContext
-        Db = DatabaseService()
-        SrId, Rel = PathParse(CanonicalPath, LoadStorageRoots(Db))
-        Ctx = WorkerContext.Current()
-        WorkerName = Ctx.WorkerName if Ctx else os.environ.get('MEDIAVORTEX_WORKER_NAME', 'I9-2024')
-        if SrId is not None and Rel is not None:
-            return PathResolve(SrId, Rel, WorkerName, Db)
-    except Exception:
-        pass
-    return CanonicalPath
-
-
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def BackupMediaFile(MediaFileId: int) -> BackupHandle:
-    """Capture file content + all related DB rows for `MediaFileId`.
-
-    The on-disk backup lives under `Tests/Pipeline/_backup/<id>-<timestamp>.bin`
-    with a sibling `.json` holding the DB snapshot.
-    """
+    """Capture file content + all related DB rows for MediaFileId; spools under Tests/Pipeline/_backup/."""
     Db = DatabaseService()
     Rows = Db.ExecuteQuery("SELECT * FROM MediaFiles WHERE Id = %s", (MediaFileId,))
     if not Rows:
         raise ValueError(f"MediaFile {MediaFileId} not found")
     MediaFileRow = _Stringify(dict(Rows[0]))
-    CanonicalPath = MediaFileRow.get('FilePath') or MediaFileRow.get('filepath')
-    if not CanonicalPath:
-        raise ValueError(f"MediaFile {MediaFileId} has no FilePath")
-    LocalPath = _ResolveLocalPath(CanonicalPath)
-    if not os.path.exists(LocalPath):
-        raise FileNotFoundError(
-            f"MediaFile {MediaFileId} local path {LocalPath!r} does not exist; "
-            f"cannot back up. (Canonical: {CanonicalPath!r})"
-        )
+    CanonicalPath = MediaFileRow.get('FilePath') or MediaFileRow.get('filepath') or ''
+    LocalPath = ResolveLocalPathForMediaFile(MediaFileId, Db)
+    if not LocalPath or not LocalExists(LocalPath):
+        raise FileNotFoundError(f"MediaFile {MediaFileId} local path {LocalPath!r} does not exist; cannot back up. (Canonical: {CanonicalPath!r})")
 
     BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
     Stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     BackupFile = BACKUP_ROOT / f"{MediaFileId}-{Stamp}.bin"
     MetadataJson = BACKUP_ROOT / f"{MediaFileId}-{Stamp}.json"
 
-    LoggingService.LogInfo(
-        f"Backing up MediaFile {MediaFileId}: {LocalPath} -> {BackupFile}",
-        "Backup", "BackupMediaFile",
-    )
-    # Sweep orphans BEFORE the test runs too -- old -mv.mp4 / .inprogress
-    # files from prior runs (test or production) block the pipeline's
-    # "refuse to overwrite existing target" check.
+    LoggingService.LogInfo(f"Backing up MediaFile {MediaFileId}: {LocalPath} -> {BackupFile}", "Backup", "BackupMediaFile")
     Swept = _SweepPostTestArtifacts(LocalPath)
     if Swept > 0:
-        LoggingService.LogInfo(
-            f"Pre-backup sweep removed {Swept} stale artifact(s) for {LocalPath}",
-            "Backup", "BackupMediaFile",
-        )
+        LoggingService.LogInfo(f"Pre-backup sweep removed {Swept} stale artifact(s) for {LocalPath}", "Backup", "BackupMediaFile")
     shutil.copy2(LocalPath, BackupFile)
     Sha = _Sha256OfFile(str(BackupFile))
     Size = os.path.getsize(BackupFile)
 
     Related: Dict[str, List[Dict[str, Any]]] = {}
-    # Tables that key directly on MediaFileId
     for TableName, KeyCol in _RELATED_TABLES:
-        QRows = Db.ExecuteQuery(
-            f"SELECT * FROM {TableName} WHERE {KeyCol} = %s",
-            (MediaFileId,),
-        )
+        QRows = Db.ExecuteQuery(f"SELECT * FROM {TableName} WHERE {KeyCol} = %s", (MediaFileId,))
         Related[TableName] = [_Stringify(dict(R)) for R in QRows]
 
-    # TemporaryFilePaths + MediaFilesArchive -- both join via TranscodeAttempts.Id
     AttemptIds = [int(R['id']) for R in Related.get('TranscodeAttempts', [])]
     if AttemptIds:
         PH = ','.join(['%s'] * len(AttemptIds))
         Related['TemporaryFilePaths'] = [
             _Stringify(dict(R))
-            for R in Db.ExecuteQuery(
-                f"SELECT * FROM TemporaryFilePaths WHERE TranscodeAttemptId IN ({PH})",
-                tuple(AttemptIds),
-            )
+            for R in Db.ExecuteQuery(f"SELECT * FROM TemporaryFilePaths WHERE TranscodeAttemptId IN ({PH})", tuple(AttemptIds))
         ]
         Related['MediaFilesArchive'] = [
             _Stringify(dict(R))
-            for R in Db.ExecuteQuery(
-                f"SELECT * FROM MediaFilesArchive WHERE TranscodeAttemptId IN ({PH})",
-                tuple(AttemptIds),
-            )
+            for R in Db.ExecuteQuery(f"SELECT * FROM MediaFilesArchive WHERE TranscodeAttemptId IN ({PH})", tuple(AttemptIds))
         ]
     else:
         Related['TemporaryFilePaths'] = []
         Related['MediaFilesArchive'] = []
 
-    # ActiveJobs -- key on any TranscodeQueue.Id we captured
     QueueIds = [int(R['id']) for R in Related.get('TranscodeQueue', [])]
     if QueueIds:
         PH = ','.join(['%s'] * len(QueueIds))
         Related['ActiveJobs'] = [
             _Stringify(dict(R))
-            for R in Db.ExecuteQuery(
-                f"SELECT * FROM ActiveJobs WHERE QueueId IN ({PH})",
-                tuple(QueueIds),
-            )
+            for R in Db.ExecuteQuery(f"SELECT * FROM ActiveJobs WHERE QueueId IN ({PH})", tuple(QueueIds))
         ]
     else:
         Related['ActiveJobs'] = []
@@ -205,14 +137,11 @@ def BackupMediaFile(MediaFileId: int) -> BackupHandle:
     with open(MetadataJson, 'w', encoding='utf-8') as F:
         json.dump(asdict(Handle), F, indent=2)
 
-    LoggingService.LogInfo(
-        f"Backup complete: file_sha={Sha[:12]} size={Size:,} "
-        f"related_rows={sum(len(v) for v in Related.values())}",
-        "Backup", "BackupMediaFile",
-    )
+    LoggingService.LogInfo(f"Backup complete: file_sha={Sha[:12]} size={Size:,} related_rows={sum(len(v) for v in Related.values())}", "Backup", "BackupMediaFile")
     return Handle
 
 
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def LoadBackupHandle(MetadataJsonPath: str) -> BackupHandle:
     """Recover a BackupHandle from its on-disk JSON (for crash recovery)."""
     with open(MetadataJsonPath, 'r', encoding='utf-8') as F:
@@ -220,56 +149,31 @@ def LoadBackupHandle(MetadataJsonPath: str) -> BackupHandle:
     return BackupHandle(**Data)
 
 
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def _ReinsertRow(Db: DatabaseService, TableName: str, Row: Dict[str, Any]) -> None:
-    """Insert a single captured row back into its table.
-
-    Columns and values come from the captured dict; column names are
-    quoted by PostgreSQL convention (case-folding to lowercase, which is
-    how psycopg2 returns them from `SELECT *`).
-    """
+    """Insert a single captured row back into its table; column names case-fold via psycopg2."""
     if not Row:
         return
     Cols = list(Row.keys())
     Placeholders = ','.join(['%s'] * len(Cols))
     ColList = ','.join(Cols)
     Values = tuple(Row[C] for C in Cols)
-    Db.ExecuteNonQuery(
-        f"INSERT INTO {TableName} ({ColList}) VALUES ({Placeholders})",
-        Values,
-    )
+    Db.ExecuteNonQuery(f"INSERT INTO {TableName} ({ColList}) VALUES ({Placeholders})", Values)
 
 
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def _DeleteCurrentRowsFor(Db: DatabaseService, MediaFileId: int) -> None:
-    """Wipe rows the test added/mutated before reinserting the backup."""
-    # Order matters: child tables before parents to avoid FK issues.
-    # ActiveJobs -> TranscodeQueue (FK on QueueId)
-    Db.ExecuteNonQuery(
-        "DELETE FROM ActiveJobs WHERE QueueId IN "
-        "(SELECT Id FROM TranscodeQueue WHERE MediaFileId = %s)",
-        (MediaFileId,),
-    )
-    # MediaFilesArchive + TemporaryFilePaths both key on TranscodeAttempts.Id
-    Db.ExecuteNonQuery(
-        "DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId IN "
-        "(SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s)",
-        (MediaFileId,),
-    )
-    Db.ExecuteNonQuery(
-        "DELETE FROM MediaFilesArchive WHERE TranscodeAttemptId IN "
-        "(SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s)",
-        (MediaFileId,),
-    )
+    """Wipe rows the test added/mutated before reinserting the backup (FK-safe child-then-parent order)."""
+    Db.ExecuteNonQuery("DELETE FROM ActiveJobs WHERE QueueId IN (SELECT Id FROM TranscodeQueue WHERE MediaFileId = %s)", (MediaFileId,))
+    Db.ExecuteNonQuery("DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s)", (MediaFileId,))
+    Db.ExecuteNonQuery("DELETE FROM MediaFilesArchive WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s)", (MediaFileId,))
     Db.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE MediaFileId = %s", (MediaFileId,))
     Db.ExecuteNonQuery("DELETE FROM TranscodeAttempts WHERE MediaFileId = %s", (MediaFileId,))
 
 
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def _ParseTimestamps(Row: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert ISO-string timestamps back to datetime for insert.
-
-    JSON serialization replaced datetimes with strings; psycopg2 will
-    accept ISO strings for TIMESTAMP columns, but parsing them to
-    datetime is more robust against PG version quirks.
-    """
+    """Convert ISO-string timestamps back to datetime for insert; pg accepts ISO strings but parsed is more robust."""
     Out: Dict[str, Any] = {}
     for Key, Val in Row.items():
         if isinstance(Val, str) and len(Val) >= 10 and Val[4] == '-' and Val[7] == '-':
@@ -285,118 +189,59 @@ def _ParseTimestamps(Row: Dict[str, Any]) -> Dict[str, Any]:
 _RES_TAG_RE = re.compile(r'-\d+p$', re.IGNORECASE)
 
 
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def _SweepPostTestArtifacts(OriginalLocalPath: str) -> int:
-    """Delete files in the same dir that match post-pipeline naming.
-
-    After a Quick Fix `foo-720p.mkv` becomes `foo-720p-mv.mp4`. After a
-    Transcode that downscales to 480p, the output is `foo-480p-mv.mp4`
-    -- the resolution tag in the basename changes. So we cannot just
-    match against the full source stem; we strip any trailing `-<N>p`
-    resolution token first and match on the resolution-free prefix.
-
-    Files swept:
-      - <prefix>-<any-res>-mv*.mp4  (Quick Fix / Transcode outputs)
-      - <prefix>-<any-res>-mv*.mp4.inprogress (crashed encodes)
-      - <prefix>-<any-res>-mv-thumb.jpg, etc. (Jellyfin sidecars from
-        the orphan)
-
-    Preserves:
-      - The original source file (never deleted)
-      - Sidecars of the original (<stem>.nfo, <stem>-thumb.jpg without
-        any `-mv` segment)
-    """
-    Dir = os.path.dirname(OriginalLocalPath)
-    OriginalBase = os.path.basename(OriginalLocalPath)
-    Stem, _OriginalExt = os.path.splitext(OriginalBase)
-    # Strip the resolution tag from the stem so 'foo-720p' becomes 'foo'
-    # and matches both the source AND any '-480p-mv' transcode output.
+    """Delete same-dir files matching post-pipeline naming (-mv*.mp4, .inprogress, -mv-thumb.jpg); preserves original + non-mv sidecars."""
+    Dir = LocalDirname(OriginalLocalPath)
+    OriginalBase = LocalBasename(OriginalLocalPath)
+    Stem, _OriginalExt = LocalSplitExt(OriginalBase)
     ResolutionFreeStem = _RES_TAG_RE.sub('', Stem)
-    if not os.path.isdir(Dir):
+    if not LocalIsDir(Dir):
         return 0
     Removed = 0
     for Entry in os.listdir(Dir):
         if Entry == OriginalBase:
-            continue  # never touch the original itself
-        EntryStem, _EntryExt = os.path.splitext(Entry)
-        # Match prefix is resolution-free; both the source and any
-        # alternate-resolution -mv output share this prefix.
+            continue
+        EntryStem, _EntryExt = LocalSplitExt(Entry)
         if not EntryStem.startswith(ResolutionFreeStem):
             continue
-        # Only delete if the entry has `-mv` in its suffix (post-pipeline)
-        # OR is an `.inprogress` artifact. This protects unrelated
-        # sidecars like the original's `.nfo` and `-thumb.jpg`.
         Tail = Entry[len(ResolutionFreeStem):]
         if '-mv' in Tail or Tail.endswith('.inprogress'):
-            Full = os.path.join(Dir, Entry)
+            Full = LocalJoin(Dir, Entry)
             try:
                 os.remove(Full)
                 Removed += 1
-                LoggingService.LogInfo(
-                    f"Swept post-test artifact: {Full}",
-                    "Backup", "_SweepPostTestArtifacts",
-                )
+                LoggingService.LogInfo(f"Swept post-test artifact: {Full}", "Backup", "_SweepPostTestArtifacts")
             except OSError as Ex:
-                LoggingService.LogWarning(
-                    f"Could not sweep {Full}: {Ex}",
-                    "Backup", "_SweepPostTestArtifacts",
-                )
+                LoggingService.LogWarning(f"Could not sweep {Full}: {Ex}", "Backup", "_SweepPostTestArtifacts")
     return Removed
 
 
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def RestoreMediaFile(Handle: BackupHandle) -> None:
-    """Replay the backup: file content + DB rows back to captured state.
+    """Replay the backup: sweep -mv* siblings, restore the file, wipe test-added rows, UPDATE MediaFiles to captured state, re-INSERT related rows."""
+    if not LocalExists(Handle.LocalBackupFilePath):
+        raise FileNotFoundError(f"Backup file missing: {Handle.LocalBackupFilePath}. Cannot restore MediaFile {Handle.MediaFileId} without it.")
 
-    Steps:
-      1. Sweep post-test artifacts (the test may have produced -mv.mp4
-         outputs that no longer correspond to any row).
-      2. Restore the file on disk (overwrite if it was renamed/replaced).
-      3. Wipe any rows the test created for this MediaFile.
-      4. UPDATE the MediaFiles row column-by-column to its captured values.
-      5. Re-INSERT every captured related row.
+    LoggingService.LogInfo(f"Restoring MediaFile {Handle.MediaFileId} from {Handle.LocalBackupFilePath}", "Backup", "RestoreMediaFile")
 
-    Safe to call after a partial test run -- everything is idempotent.
-    Raises only if the backup files are missing or DB writes fail.
-    """
-    if not os.path.exists(Handle.LocalBackupFilePath):
-        raise FileNotFoundError(
-            f"Backup file missing: {Handle.LocalBackupFilePath}. "
-            f"Cannot restore MediaFile {Handle.MediaFileId} without it."
-        )
-
-    LoggingService.LogInfo(
-        f"Restoring MediaFile {Handle.MediaFileId} from {Handle.LocalBackupFilePath}",
-        "Backup", "RestoreMediaFile",
-    )
-
-    # 1. Sweep any -mv* / .inprogress siblings the test produced.
     _SweepPostTestArtifacts(Handle.OriginalLocalPath)
 
-    # 2. Restore the file at the canonical original path.
-    os.makedirs(os.path.dirname(Handle.OriginalLocalPath), exist_ok=True)
+    os.makedirs(LocalDirname(Handle.OriginalLocalPath), exist_ok=True)
     shutil.copy2(Handle.LocalBackupFilePath, Handle.OriginalLocalPath)
     PostSha = _Sha256OfFile(Handle.OriginalLocalPath)
     if PostSha != Handle.OriginalSha256:
-        raise RuntimeError(
-            f"Restore checksum mismatch: expected {Handle.OriginalSha256[:12]}, "
-            f"got {PostSha[:12]}. File at {Handle.OriginalLocalPath} is corrupt."
-        )
+        raise RuntimeError(f"Restore checksum mismatch: expected {Handle.OriginalSha256[:12]}, got {PostSha[:12]}. File at {Handle.OriginalLocalPath} is corrupt.")
 
     Db = DatabaseService()
-
-    # 2. Wipe rows the test added/mutated
     _DeleteCurrentRowsFor(Db, Handle.MediaFileId)
 
-    # 3. UPDATE MediaFiles row to captured values (DELETE+INSERT would break FKs)
     MfRow = _ParseTimestamps(Handle.MediaFileRow)
     SetCols = [C for C in MfRow.keys() if C.lower() != 'id']
     SetClause = ', '.join(f"{C} = %s" for C in SetCols)
     Values = tuple(MfRow[C] for C in SetCols) + (Handle.MediaFileId,)
-    Db.ExecuteNonQuery(
-        f"UPDATE MediaFiles SET {SetClause} WHERE Id = %s",
-        Values,
-    )
+    Db.ExecuteNonQuery(f"UPDATE MediaFiles SET {SetClause} WHERE Id = %s", Values)
 
-    # 4. Re-insert related rows. Order matters: parents before children.
     for TableName in ('TranscodeAttempts', 'TranscodeQueue', 'MediaFilesArchive'):
         for Row in Handle.RelatedRows.get(TableName, []):
             _ReinsertRow(Db, TableName, _ParseTimestamps(Row))
@@ -405,24 +250,15 @@ def RestoreMediaFile(Handle: BackupHandle) -> None:
     for Row in Handle.RelatedRows.get('ActiveJobs', []):
         _ReinsertRow(Db, 'ActiveJobs', _ParseTimestamps(Row))
 
-    LoggingService.LogInfo(
-        f"Restore complete for MediaFile {Handle.MediaFileId}",
-        "Backup", "RestoreMediaFile",
-    )
+    LoggingService.LogInfo(f"Restore complete for MediaFile {Handle.MediaFileId}", "Backup", "RestoreMediaFile")
 
 
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def DiscardBackup(Handle: BackupHandle) -> None:
-    """Remove the on-disk backup spool for a successfully-restored handle.
-
-    Optional cleanup. Leaves the JSON + .bin in place by default so
-    failed tests retain a recovery anchor.
-    """
+    """Optional cleanup: remove the on-disk backup spool for a successfully-restored handle."""
     for P in (Handle.LocalBackupFilePath, Handle.MetadataJsonPath):
         try:
-            if os.path.exists(P):
+            if LocalExists(P):
                 os.remove(P)
         except OSError as Ex:
-            LoggingService.LogWarning(
-                f"Could not remove backup artifact {P}: {Ex}",
-                "Backup", "DiscardBackup",
-            )
+            LoggingService.LogWarning(f"Could not remove backup artifact {P}: {Ex}", "Backup", "DiscardBackup")

@@ -1,10 +1,9 @@
-# directive: bug-0032-orig-recovery
 import argparse
 import os
 import sys
 
 ScriptDir = os.path.dirname(os.path.abspath(__file__))
-RepoRoot = os.path.dirname(os.path.dirname(ScriptDir))
+RepoRoot = os.path.dirname(ScriptDir)
 if RepoRoot not in sys.path:
     sys.path.insert(0, RepoRoot)
 
@@ -19,7 +18,7 @@ PATH_MAP_QUERY = (
 )
 
 CANDIDATE_QUERY = (
-    "SELECT m.Id, m.FilePath, m.RecommendedMode, m.IsCompliant, "
+    "SELECT m.Id, m.FilePath, m.WorkBucket, m.IsCompliant, "
     "EXISTS(SELECT 1 FROM TranscodeAttempts ta "
     "WHERE ta.MediaFileId = m.Id AND ta.Success = TRUE AND ta.FileReplaced = TRUE) "
     "AS HadSuccessfulRemux "
@@ -29,16 +28,18 @@ CANDIDATE_QUERY = (
 )
 
 
-# directive: bug-0032-orig-recovery
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def BuildPathMap(WorkerName):
+    """Worker-local prefix map for canonical -> local translation; raises if no active resolutions."""
     Rows = DatabaseService().ExecuteQuery(PATH_MAP_QUERY, (WorkerName,))
     if not Rows:
         raise RuntimeError(f"No StorageRootResolutions rows for worker '{WorkerName}'")
     return {Row["CanonicalPrefix"]: Row["AbsolutePath"] for Row in Rows}
 
 
-# directive: bug-0032-orig-recovery
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def TranslateToLocal(CanonicalPath, PathMap):
+    """Substitute canonical prefix for the worker-local prefix; case-insensitive prefix match."""
     if not CanonicalPath:
         return CanonicalPath
     for Prefix, LocalPrefix in PathMap.items():
@@ -50,8 +51,9 @@ def TranslateToLocal(CanonicalPath, PathMap):
     return CanonicalPath
 
 
-# directive: bug-0032-orig-recovery
+# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def Main():
+    """Audit script for bug-0032-era .orig survivors; classifies MediaFiles into four buckets and surfaces stale WorkBucket='Remux' + IsCompliant=true rows."""
     Parser = argparse.ArgumentParser()
     Parser.add_argument("--worker", required=True)
     Parser.add_argument("--sample", type=int, default=10)
@@ -79,7 +81,7 @@ def Main():
             CategoryC.append(Tup)
         elif not OrigExists:
             CategoryD.append(Tup)
-        if Row["RecommendedMode"] == "Remux" and Row["IsCompliant"] is True:
+        if Row["WorkBucket"] == "Remux" and Row["IsCompliant"] is True:
             StaleRemuxRows.append(Tup)
 
     print(f"  (a) .mp4 + .orig both exist, prior successful remux: {len(CategoryA):,}")
@@ -87,7 +89,7 @@ def Main():
     print(f"  (c) .mp4 only, no .orig:                             {len(CategoryC):,}")
     print(f"  (d) neither exists (orphan DB row):                  {len(CategoryD):,}")
     print()
-    print(f"Stale RecommendedMode='Remux' AND IsCompliant=true:    {len(StaleRemuxRows):,}")
+    print(f"Stale WorkBucket='Remux' AND IsCompliant=true:         {len(StaleRemuxRows):,}")
     print()
 
     for Label, Rs in [("category (a)", CategoryA), ("category (b) DATA-LOSS RISK", CategoryB), ("category (c)", CategoryC), ("category (d)", CategoryD)]:
