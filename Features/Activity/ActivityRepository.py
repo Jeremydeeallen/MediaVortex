@@ -154,6 +154,67 @@ class ActivityRepository(BaseRepository):
         rows = self.DatabaseService.ExecuteQuery(query)
         return rows[0]['Count'] if rows else 0
 
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
+    def GetComplianceBreakdown(self) -> Dict[str, int]:
+        """Return {Total, CompliantTrue, CompliantFalse, CompliantNull} from MediaFiles."""
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT COUNT(*) AS Total, "
+            "SUM(CASE WHEN IsCompliant IS TRUE THEN 1 ELSE 0 END) AS CompliantTrue, "
+            "SUM(CASE WHEN IsCompliant IS FALSE THEN 1 ELSE 0 END) AS CompliantFalse, "
+            "SUM(CASE WHEN IsCompliant IS NULL THEN 1 ELSE 0 END) AS CompliantNull "
+            "FROM MediaFiles"
+        )
+        return dict(Rows[0]) if Rows else {}
+
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
+    def GetWorkBucketBreakdown(self) -> Dict[str, int]:
+        """Return per-WorkBucket counts mapped to legacy Mode-breakdown keys (Transcode/Remux/AudioFix/SubtitleFix/NoMode) so the existing UI renders unchanged."""
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT "
+            "SUM(CASE WHEN WorkBucket = 'Transcode' THEN 1 ELSE 0 END) AS Transcode, "
+            "SUM(CASE WHEN WorkBucket = 'Remux' THEN 1 ELSE 0 END) AS Remux, "
+            "SUM(CASE WHEN WorkBucket = 'AudioFixOnly' THEN 1 ELSE 0 END) AS AudioFix, "
+            "SUM(CASE WHEN WorkBucket = 'SubtitleFixOnly' THEN 1 ELSE 0 END) AS SubtitleFix, "
+            "SUM(CASE WHEN WorkBucket IS NULL AND IsCompliant IS FALSE THEN 1 ELSE 0 END) AS NoMode "
+            "FROM MediaFiles"
+        )
+        return dict(Rows[0]) if Rows else {}
+
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
+    def GetAudioCompleteBreakdown(self) -> Dict[str, int]:
+        """Return {AudioTrue, AudioFalse, AudioNull} from MediaFiles.AudioComplete."""
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT "
+            "SUM(CASE WHEN AudioComplete IS TRUE THEN 1 ELSE 0 END) AS AudioTrue, "
+            "SUM(CASE WHEN AudioComplete IS FALSE THEN 1 ELSE 0 END) AS AudioFalse, "
+            "SUM(CASE WHEN AudioComplete IS NULL THEN 1 ELSE 0 END) AS AudioNull "
+            "FROM MediaFiles"
+        )
+        return dict(Rows[0]) if Rows else {}
+
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
+    def GetSuspectByReason(self) -> Dict[str, int]:
+        """Return {reason: count} for MediaFiles flagged AudioCorruptSuspect."""
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT COALESCE(AudioCorruptReason, 'unspecified') AS Reason, COUNT(*) AS N "
+            "FROM MediaFiles WHERE AudioCorruptSuspect = TRUE GROUP BY 1 ORDER BY 2 DESC"
+        )
+        return {R['Reason']: R['N'] for R in Rows}
+
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
+    def GetLoudnessBreakdown(self) -> Dict[str, int]:
+        """Return {Measured, Unmeasured, OnTarget, OffTarget, WideLRA} loudness distribution."""
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT "
+            "SUM(CASE WHEN LoudnessMeasuredAt IS NOT NULL AND SourceIntegratedLufs IS NOT NULL THEN 1 ELSE 0 END) AS Measured, "
+            "SUM(CASE WHEN LoudnessMeasuredAt IS NULL THEN 1 ELSE 0 END) AS Unmeasured, "
+            "SUM(CASE WHEN SourceIntegratedLufs BETWEEN -24 AND -22 THEN 1 ELSE 0 END) AS OnTarget, "
+            "SUM(CASE WHEN SourceIntegratedLufs IS NOT NULL AND (SourceIntegratedLufs > -20 OR SourceIntegratedLufs < -26) THEN 1 ELSE 0 END) AS OffTarget, "
+            "SUM(CASE WHEN SourceLoudnessRangeLU > 18 THEN 1 ELSE 0 END) AS WideLRA "
+            "FROM MediaFiles"
+        )
+        return dict(Rows[0]) if Rows else {}
+
     # directive: path-schema-migration | # see path.S8
     def GetVideoCodecCounts(self) -> List[Dict[str, Any]]:
         """Get file counts grouped by video codec."""
