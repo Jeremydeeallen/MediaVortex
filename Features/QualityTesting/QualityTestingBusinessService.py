@@ -376,6 +376,62 @@ class QualityTestingBusinessService:
         except Exception as e:
             return {"Success": False, "Error": str(e)}
 
+    # directive: local-staging | # see local-staging.C9
+    def RunLocalVmafForAttempt(self, TranscodeAttemptId: int, LocalSourcePath: str, LocalOutputPath: str) -> dict:
+        """Mode A pre-flight VMAF: run libvmaf locally against staged source/output, write VMAF to TranscodeAttempts, return {Success, VMAFScore}."""
+        try:
+            if not LocalSourcePath or not LocalOutputPath:
+                return {"Success": False, "Error": f"Mode A VMAF requires both LocalSourcePath and LocalOutputPath; got src={LocalSourcePath!r} out={LocalOutputPath!r}"}
+            if not LocalExists(LocalSourcePath):
+                return {"Success": False, "Error": f"Mode A VMAF: local source missing: {LocalSourcePath}"}
+            if not LocalExists(LocalOutputPath):
+                return {"Success": False, "Error": f"Mode A VMAF: local output missing: {LocalOutputPath}"}
+            from Core.WorkerContext import WorkerContext
+            Ctx = WorkerContext.Current()
+            FFmpegBinary = Ctx.FFmpegPath if Ctx and Ctx.FFmpegPath else None
+            if not FFmpegBinary or not LocalExists(FFmpegBinary):
+                return {"Success": False, "Error": f"FFmpeg executable not found: {FFmpegBinary or '<no WorkerContext.FFmpegPath registered>'}"}
+            OriginalResolution = self.GetVideoResolution(LocalSourcePath, FFmpegBinary)
+            TranscodedResolution = self.GetVideoResolution(LocalOutputPath, FFmpegBinary)
+            TargetWidth, TargetHeight = self.DetermineVMAFTargetResolution(OriginalResolution, TranscodedResolution)
+            try:
+                FFprobeBinary = FFmpegBinary.replace('ffmpeg.exe', 'ffprobe.exe').replace('ffmpeg', 'ffprobe')
+                FpsProbe = subprocess.run([FFprobeBinary, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=avg_frame_rate', '-of', 'csv=p=0', LocalSourcePath], capture_output=True, text=True, timeout=10)
+                FpsRaw = (FpsProbe.stdout or '').strip()
+                if '/' in FpsRaw:
+                    Num, Den = FpsRaw.split('/', 1)
+                    SourceFps = round(float(Num) / float(Den), 3) if float(Den) != 0 else 24
+                else:
+                    SourceFps = float(FpsRaw) if FpsRaw else 24
+            except Exception:
+                SourceFps = 24
+            ReferenceScale = f"scale=w={TargetWidth}:h={TargetHeight},"
+            XmlPath = f"vmaf_modea_{TranscodeAttemptId}.xml"
+            VmafFilter = (
+                f"[0:v]format=yuv420p10le,fps=fps={SourceFps},setpts=PTS-STARTPTS[dist];"
+                f"[1:v]{ReferenceScale}format=yuv420p10le,fps=fps={SourceFps},setpts=PTS-STARTPTS[ref];"
+                f"[dist][ref]libvmaf=log_fmt=xml:log_path={XmlPath}:n_threads=4"
+            )
+            Command = f'"{FFmpegBinary}" -i "{LocalOutputPath}" -i "{LocalSourcePath}" -lavfi "{VmafFilter}" -f null -'
+            LoggingService.LogInfo(f"Mode A VMAF for attempt {TranscodeAttemptId}: {Command}", "QualityTestingBusinessService", "RunLocalVmafForAttempt")
+            Result = subprocess.run(Command, shell=True, capture_output=True, text=True)
+            if Result.returncode != 0:
+                Stderr = (Result.stderr or '')[-2000:]
+                return {"Success": False, "Error": f"Mode A VMAF ffmpeg failed rc={Result.returncode}: {Stderr}"}
+            Metrics = self.ParseVMAFMetrics(XmlPath)
+            VmafScore = float(Metrics.get('Mean', 0.0) or 0.0)
+            try:
+                if LocalExists(XmlPath):
+                    os.remove(XmlPath)
+            except Exception:
+                pass
+            self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {"VMAF": VmafScore, "QualityTestCompleted": True})
+            LoggingService.LogInfo(f"Mode A VMAF for attempt {TranscodeAttemptId}: score={VmafScore}", "QualityTestingBusinessService", "RunLocalVmafForAttempt")
+            return {"Success": True, "VMAFScore": VmafScore}
+        except Exception as Ex:
+            LoggingService.LogException(f"RunLocalVmafForAttempt failed for attempt {TranscodeAttemptId}", Ex, "QualityTestingBusinessService", "RunLocalVmafForAttempt")
+            return {"Success": False, "Error": str(Ex)}
+
     # directive: nvenc-rate-anchored-remediation
     def GetVideoResolution(self, VideoFilePath: str, FFmpegPath: str) -> tuple:
         """Get video resolution (width, height) from video file."""

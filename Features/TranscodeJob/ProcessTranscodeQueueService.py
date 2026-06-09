@@ -480,8 +480,29 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, f"Transcode output failed FFprobe verification: {OutputPath}", TranscodeAttemptId, ActiveJobId)
                 return
 
+            # directive: local-staging | # see local-staging.C9
+            SkipModeBCopyBack = False
+            if LocalSrcPath and LocalOutPath:
+                from Features.TranscodeJob.LocalStagingService import LocalStagingService
+                Staging = LocalStagingService(self.DatabaseManager.DatabaseService)
+                if Staging.IsLocalVmafFirst(self.WorkerName):
+                    from Features.QualityTesting.QualityTestingBusinessService import QualityTestingBusinessService
+                    from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
+                    ModeAResult = QualityTestingBusinessService(self.DatabaseManager).RunLocalVmafForAttempt(TranscodeAttemptId, LocalSrcPath, OutputPath)
+                    if ModeAResult.get('Success'):
+                        ModeAScore = float(ModeAResult.get('VMAFScore') or 0.0)
+                        GateConfig = PostTranscodeGateConfigRepository(self.DatabaseManager.DatabaseService).Get()
+                        if ModeAScore < float(GateConfig.VmafAutoReplaceMinThreshold):
+                            LoggingService.LogInfo(f"Mode A VMAF {ModeAScore} < {GateConfig.VmafAutoReplaceMinThreshold} for attempt {TranscodeAttemptId}; skipping copy-back, disposition will Requeue", "ProcessTranscodeQueueService", "ProcessJob")
+                            self._CleanupLocalScratchForAttempt(Job.MediaFileId)
+                            SkipModeBCopyBack = True
+                        else:
+                            LoggingService.LogInfo(f"Mode A VMAF {ModeAScore} >= {GateConfig.VmafAutoReplaceMinThreshold} for attempt {TranscodeAttemptId}; proceeding to copy-back + replacement", "ProcessTranscodeQueueService", "ProcessJob")
+                    else:
+                        LoggingService.LogWarning(f"Mode A VMAF execution failed for attempt {TranscodeAttemptId}: {ModeAResult.get('Error')}; falling through to Mode B canonical copy-back", "ProcessTranscodeQueueService", "ProcessJob")
+
             # directive: local-staging | # see local-staging.C10
-            if LocalOutPath:
+            if LocalOutPath and not SkipModeBCopyBack:
                 CanonicalOutputPath = self._ResolveCanonicalOutputPath(OutId, OutRel)
                 if not self._CopyBackStagedOutput(OutputPath, CanonicalOutputPath, Job.MediaFileId):
                     self.HandleJobFailure(Job, f"Staged output copy-back failed: {OutputPath} -> {CanonicalOutputPath}", TranscodeAttemptId, ActiveJobId)

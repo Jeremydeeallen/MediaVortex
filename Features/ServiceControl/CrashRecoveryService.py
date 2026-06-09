@@ -114,12 +114,12 @@ class CrashRecoveryService:
             # associated TranscodeProgress rows.
             InProgressFilesCleaned = 0
             PartialReplacementsCompleted = 0
+            LocalStagingOrphansCleaned = 0
             if ServiceName == "TranscodeService":
                 OrphanedCleaned = self.CleanupOrphanedProgressRecords()
-                # Worker-lifecycle criteria 11, 12: clean .inprogress artifacts
-                # left on disk and complete partial replacements where the
-                # `-mv.<ext>` file is in place but the original was not deleted.
+                # see worker-lifecycle.feature.md C11/C12
                 InProgressFilesCleaned, PartialReplacementsCompleted = self._RecoverInProgressArtifacts()
+                LocalStagingOrphansCleaned = self._SweepLocalStagingOrphans()
             else:
                 OrphanedCleaned = 0
 
@@ -153,7 +153,8 @@ class CrashRecoveryService:
                     f"Recovered {JobsRecovered} jobs, killed {OrphanedProcessesKilled} orphaned processes, "
                     f"cleaned {OrphanedCleaned} orphaned progress records, "
                     f"deleted {InProgressFilesCleaned} .inprogress artifacts, "
-                    f"completed {PartialReplacementsCompleted} partial replacements"
+                    f"completed {PartialReplacementsCompleted} partial replacements, "
+                    f"swept {LocalStagingOrphansCleaned} local-staging scratch orphans"
                 ),
                 "JobsRecovered": JobsRecovered,
                 "OrphanedProcessesKilled": OrphanedProcessesKilled,
@@ -161,6 +162,7 @@ class CrashRecoveryService:
                 "OrphanedProgressCleaned": OrphanedCleaned,
                 "InProgressFilesCleaned": InProgressFilesCleaned,
                 "PartialReplacementsCompleted": PartialReplacementsCompleted,
+                "LocalStagingOrphansCleaned": LocalStagingOrphansCleaned,
                 "RecoveryDetails": RecoveryDetails
             }
 
@@ -484,6 +486,51 @@ class CrashRecoveryService:
                 e, "CrashRecoveryService", "_RecoverInProgressArtifacts"
             )
             return 0, 0
+
+    # directive: local-staging | # see local-staging.C12
+    def _SweepLocalStagingOrphans(self) -> int:
+        """Delete orphaned per-job scratch subdirs under this worker's LocalScratchDir; orphan = no in-flight TFP row for that MediaFileId."""
+        if not self.WorkerName:
+            return 0
+        try:
+            from Core.Path.LocalPath import LocalIsDir, LocalJoin
+            Rows = self.DatabaseManager.DatabaseService.ExecuteQuery("SELECT LocalScratchDir FROM Workers WHERE WorkerName = %s", (self.WorkerName,))
+            if not Rows:
+                return 0
+            ScratchDir = (Rows[0].get('localscratchdir') or '').strip()
+            if not ScratchDir or not LocalExists(ScratchDir):
+                return 0
+            import shutil as _shutil
+            Swept = 0
+            try:
+                Entries = os.listdir(ScratchDir)
+            except Exception as ListEx:
+                LoggingService.LogException(f"Crash recovery: cannot list LocalScratchDir {ScratchDir}", ListEx, "CrashRecoveryService", "_SweepLocalStagingOrphans")
+                return 0
+            for Name in Entries:
+                if not Name.isdigit():
+                    continue
+                SubPath = LocalJoin(ScratchDir, Name)
+                if not LocalIsDir(SubPath):
+                    continue
+                MediaFileId = int(Name)
+                InFlight = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                    "SELECT 1 FROM TemporaryFilePaths tfp JOIN TranscodeAttempts ta ON ta.Id = tfp.TranscodeAttemptId "
+                    "WHERE ta.MediaFileId = %s AND ta.WorkerName = %s AND ta.Success IS NULL LIMIT 1",
+                    (MediaFileId, self.WorkerName),
+                )
+                if InFlight:
+                    continue
+                try:
+                    _shutil.rmtree(SubPath, ignore_errors=True)
+                    Swept += 1
+                    LoggingService.LogWarning(f"Crash recovery: swept local-staging orphan {SubPath} for MediaFileId={MediaFileId}", "CrashRecoveryService", "_SweepLocalStagingOrphans")
+                except Exception as RmEx:
+                    LoggingService.LogException(f"Crash recovery: could not remove orphan scratch dir {SubPath}", RmEx, "CrashRecoveryService", "_SweepLocalStagingOrphans")
+            return Swept
+        except Exception as Ex:
+            LoggingService.LogException("Error during _SweepLocalStagingOrphans", Ex, "CrashRecoveryService", "_SweepLocalStagingOrphans")
+            return 0
 
     def LogRecoverySummary(self, ServiceName: str, JobsRecovered: int, OrphanedProcessesKilled: int, RecoveryDetails: List[Dict]):
         """Log a summary of the recovery operation to the Logs table."""
