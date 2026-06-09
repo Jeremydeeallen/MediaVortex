@@ -67,7 +67,7 @@ class TranscodeQueueRepository(BaseRepository):
         query = (
             f"SELECT {self._QUEUE_SELECT_COLS} "
             "FROM TranscodeQueue "
-            "ORDER BY Priority DESC, DateAdded ASC"
+            "ORDER BY (CASE WHEN Priority >= 195 THEN Priority ELSE 0 END) DESC, SizeMB DESC NULLS LAST, DateAdded ASC"
         )
         rows = self.ExecuteQuery(query)
         return [self._MapRowToQueueItem(row) for row in rows]
@@ -248,7 +248,7 @@ class TranscodeQueueRepository(BaseRepository):
         query = (
             f"SELECT {self._QUEUE_SELECT_COLS} "
             "FROM TranscodeQueue WHERE Status = %s "
-            "ORDER BY Priority DESC, DateAdded ASC"
+            "ORDER BY (CASE WHEN Priority >= 195 THEN Priority ELSE 0 END) DESC, SizeMB DESC NULLS LAST, DateAdded ASC"
         )
         rows = self.ExecuteQuery(query, (Status,))
         return [self._MapRowToQueueItem(row) for row in rows]
@@ -259,7 +259,7 @@ class TranscodeQueueRepository(BaseRepository):
         query = (
             f"SELECT {self._QUEUE_SELECT_COLS} "
             "FROM TranscodeQueue WHERE Status = 'Pending' "
-            "ORDER BY Priority DESC, DateAdded ASC LIMIT 1"
+            "ORDER BY (CASE WHEN Priority >= 195 THEN Priority ELSE 0 END) DESC, SizeMB DESC NULLS LAST, DateAdded ASC LIMIT 1"
         )
         rows = self.ExecuteQuery(query)
         if not rows:
@@ -301,7 +301,7 @@ class TranscodeQueueRepository(BaseRepository):
                         f"    AND {CapabilityFragment} "
                         f"    AND {NvencGate} "
                         f"    AND {AllowedProfilesFragment} "
-                        "  ORDER BY tq.Priority DESC, tq.DateAdded ASC "
+                        "  ORDER BY (CASE WHEN tq.Priority >= 195 THEN tq.Priority ELSE 0 END) DESC, tq.SizeMB DESC NULLS LAST, tq.DateAdded ASC "
                         "  LIMIT 1 "
                         "  FOR UPDATE OF tq SKIP LOCKED "
                         ") "
@@ -321,7 +321,7 @@ class TranscodeQueueRepository(BaseRepository):
                         f"    AND {CapabilityFragment} "
                         f"    AND {NvencGate} "
                         f"    AND {AllowedProfilesFragment} "
-                        "  ORDER BY tq.Priority DESC, tq.DateAdded ASC "
+                        "  ORDER BY (CASE WHEN tq.Priority >= 195 THEN tq.Priority ELSE 0 END) DESC, tq.SizeMB DESC NULLS LAST, tq.DateAdded ASC "
                         "  LIMIT 1 "
                         "  FOR UPDATE OF tq SKIP LOCKED "
                         ") "
@@ -386,7 +386,7 @@ class TranscodeQueueRepository(BaseRepository):
                     "  WHERE Status = 'Pending' "
                     "    AND ProcessingMode IN ('Remux', 'Quick', 'AudioFix') "
                     f"   AND {CapabilityFragment} "
-                    "  ORDER BY Priority DESC, DateAdded ASC "
+                    "  ORDER BY (CASE WHEN Priority >= 195 THEN Priority ELSE 0 END) DESC, SizeMB DESC NULLS LAST, DateAdded ASC "
                     "  LIMIT 1 "
                     "  FOR UPDATE SKIP LOCKED "
                     ") "
@@ -427,11 +427,11 @@ class TranscodeQueueRepository(BaseRepository):
         """Get paginated transcoding queue items with SQL-level sorting + optional ProcessingMode filter."""
         sort_columns = {
             'SizeMB': 'SizeMB',
-            'Priority': 'Priority',
+            'Priority': '(CASE WHEN Priority >= 195 THEN Priority ELSE 0 END), SizeMB',
             'DateAdded': 'DateAdded',
             'FileName': 'FileName'
         }
-        sort_col = sort_columns.get(SortBy, 'Priority')
+        sort_col = sort_columns.get(SortBy, '(CASE WHEN Priority >= 195 THEN Priority ELSE 0 END), SizeMB')
         order = 'DESC' if SortOrder == 'DESC' else 'ASC'
 
         ModeFilter = Mode if Mode in ('Transcode', 'Quick', 'Remux', 'AudioFix') else None
@@ -447,7 +447,7 @@ class TranscodeQueueRepository(BaseRepository):
             f"SELECT {self._QUEUE_SELECT_COLS} "
             "FROM TranscodeQueue "
             f"{WhereClause} "
-            f"ORDER BY {sort_col} {order}, DateAdded ASC "
+            f"ORDER BY {sort_col} {order} NULLS LAST, DateAdded ASC "
             "LIMIT %s OFFSET %s"
         )
         rows = self.ExecuteQuery(query, FilterParams + (PageSize, offset))
@@ -499,10 +499,10 @@ class TranscodeQueueRepository(BaseRepository):
                     failedJobs = count
                 elif status == "Cancelled":
                     cancelledJobs = count
-            activeJobsQuery = "SELECT Id FROM TranscodeQueue WHERE Status = 'Running' ORDER BY Priority DESC, DateAdded ASC"
+            activeJobsQuery = "SELECT Id FROM TranscodeQueue WHERE Status = 'Running' ORDER BY (CASE WHEN Priority >= 195 THEN Priority ELSE 0 END) DESC, SizeMB DESC NULLS LAST, DateAdded ASC"
             activeJobRows = self.ExecuteQuery(activeJobsQuery)
             activeJobs = [row['Id'] for row in activeJobRows]
-            nextJobQuery = "SELECT Id FROM TranscodeQueue WHERE Status = 'Pending' ORDER BY Priority DESC, DateAdded ASC LIMIT 1"
+            nextJobQuery = "SELECT Id FROM TranscodeQueue WHERE Status = 'Pending' ORDER BY (CASE WHEN Priority >= 195 THEN Priority ELSE 0 END) DESC, SizeMB DESC NULLS LAST, DateAdded ASC LIMIT 1"
             nextJobRows = self.ExecuteQuery(nextJobQuery)
             nextJobId = nextJobRows[0]['Id'] if nextJobRows else None
             statistics = {

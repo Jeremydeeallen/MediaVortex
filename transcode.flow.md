@@ -209,22 +209,11 @@ Configuration knobs (data-driven, all in **dedicated normalized tables -- not th
 
 Both tables are read fresh per call (no caching, per the standing rule against cached DB-backed settings -- see `memory/feedback_no_cached_db_settings.md`).
 
-**Priority calculation (impact-based, range 1-194):**
+**Priority / claim order:**
 
-Every queue insertion runs `QueueManagementBusinessService.CalculatePriority(MediaFile, ProfileSettings)` which returns an integer between 1 and 194. Workers claim with `ORDER BY Priority DESC, DateAdded ASC`, so higher priority is more urgent.
+Queue insertion writes `Priority = 0`. Workers claim largest non-compliant first, with a 195-200 window reserved for manual overrides (operator Priority modal, AudioFix folder-pin hints). The full contract is owned by `Features/TranscodeQueue/queue-priority.feature.md` -- not restated here.
 
-Score is the bytes-saved estimate, computed deterministically from the configured profile target:
-
-1. `target_size_mb = ((profile.VideoBitrateKbps + profile.AudioBitrateKbps) * MediaFile.DurationMinutes * 60) / (8 * 1024)`
-2. `estimated_savings_mb = max(0, MediaFile.SizeMB - target_size_mb)`
-3. `score = log10(estimated_savings_mb + 1)` -- log dampens outliers so a single 30 GB rip doesn't swamp the queue
-4. `priority = clamp(1 + (score / 5.0) * 193, 1, 194)`
-
-The 6-slot window 195-200 is reserved for manual user overrides (the `POST /api/TranscodeQueue/PrioritizeJob` endpoint). Auto-assignment never produces a value in that range, so a manually-set 200 always beats any auto-prioritized item.
-
-When `MediaFile.DurationMinutes` or `MediaFile.AssignedProfile` is NULL, or when no `ProfileThresholds` row exists for the resolution category, the function falls back to `estimated_savings_mb = SizeMB * 0.5` and emits a `LogWarning` naming the MediaFileId and the missing input. Silent fallbacks are forbidden per the Phase 2a loud-failure rule.
-
-Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 files at the top of the queue and ignored compression headroom. Reading the actual configured profile target (rather than guessing via a codec multiplier) means already-efficient sources correctly land at savings = 0 -> priority 1, and a profile change automatically reflects in the next CalculatePriority call. See `Features/TranscodeQueue/queue-priority.feature.md` for the full criteria.
+Queue admission (whether a file enters the queue at all) is owned by `Features/TranscodeQueue/marginal-savings-gate.feature.md`. The estimated-bytes-saved math lives there now, not in the claim path.
 
 ---
 
@@ -434,7 +423,7 @@ MediaFiles.FilePath          -- created at SCAN, used everywhere
 MediaFiles.Resolution        -- set at PROBE, checked at QUEUE
 MediaFiles.HasExplicitEnglishAudio -- set at PROBE, checked at QUEUE
 MediaFiles.AssignedProfile   -- set at RECOMPUTE (cascade from ShowSettings/SystemSettings), read at TRANSCODE
-MediaFiles.PriorityScore     -- set at RECOMPUTE, used by worker claim ORDER BY
+MediaFiles.PriorityScore     -- set at RECOMPUTE, read by non-claim consumers (SmartPopulate helpers, backfill scripts); NOT consulted on the worker claim path (see queue-priority.feature.md)
 MediaFiles.IsCompliant       -- set at RECOMPUTE, checked at QUEUE (compliant files blocked)
 MediaFiles.RecommendedMode   -- set at RECOMPUTE, read by SmartPopulate to route Transcode vs Remux
 MediaFiles.TranscodedByMediaVortex -- set at REPLACE, checked at QUEUE
@@ -509,7 +498,7 @@ Distributed claim flow (current):
    - Applies `BuildClaimPredicate(WorkerName, 'TranscodeEnabled')` -- worker is Online and TranscodeEnabled
    - Applies the NVENC EXISTS gate -- `p.usenvidiahardware=0` OR worker has `nvenccapable=TRUE`
    - Applies `BuildAllowedProfilesPredicate(WorkerName)` -- `w.AllowedProfiles IS NULL` (accept all) OR `mf.AssignedProfile = ANY(string_to_array(w.AllowedProfiles, ','))` (explicit allowlist match). Operator sets per-worker via `POST /api/TeamStatus/Workers/<name>/AllowedProfiles`; takes effect on the next claim tick (db-is-authority single-emitter pattern)
-   - Orders by `tq.Priority DESC, tq.DateAdded ASC`
+   - Orders per the claim contract in `queue-priority.feature.md`: `(CASE WHEN tq.Priority >= 195 THEN tq.Priority ELSE 0 END) DESC, tq.SizeMB DESC NULLS LAST, tq.DateAdded ASC`
    - Locks via `FOR UPDATE OF tq SKIP LOCKED` -- two workers racing the same row is impossible
 4. On successful claim, logs `WorkerName`, `JobId`, `ProfileName`, `WorkerAllowedProfiles` (`<all>` / `<none>` / CSV) for routing observability
 
@@ -601,7 +590,7 @@ End-to-end trace from worker installation through finished product. Every functi
 | Step | Action | Function | DB Call | Status Change |
 |------|--------|----------|---------|---------------|
 | 2.1 | Check for work | `ProcessQueueLoop()` polls every 2s | -- | -- |
-| 2.2 | Claim job atomically | `GetNextJob()` -> `DatabaseManager.ClaimNextPendingTranscodeJob(WorkerName)` | `UPDATE TranscodeQueue SET Status='Running', ClaimedBy=%s, ClaimedAt=NOW(), DateStarted=NOW() WHERE Id = (SELECT Id FROM TranscodeQueue WHERE Status='Pending' ORDER BY Priority DESC, DateAdded ASC LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *` | TranscodeQueue.Status = `Running`, ClaimedBy = hostname |
+| 2.2 | Claim job atomically | `GetNextJob()` -> `DatabaseManager.ClaimNextPendingTranscodeJob(WorkerName)` | `UPDATE TranscodeQueue SET Status='Running', ClaimedBy=%s, ClaimedAt=NOW(), DateStarted=NOW() WHERE Id = (SELECT Id FROM TranscodeQueue WHERE Status='Pending' ORDER BY (CASE WHEN Priority >= 195 THEN Priority ELSE 0 END) DESC, SizeMB DESC NULLS LAST, DateAdded ASC LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *` -- see `queue-priority.feature.md` | TranscodeQueue.Status = `Running`, ClaimedBy = hostname |
 | 2.3 | Create ActiveJob | `DatabaseManager.CreateActiveJob(ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName)` | `INSERT INTO ActiveJobs (ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName, Status, StartedAt) VALUES (...)` | ActiveJobs row created, Status = `Running` |
 
 ### Phase 3: Job Processing

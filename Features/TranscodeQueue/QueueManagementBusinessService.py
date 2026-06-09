@@ -1018,7 +1018,7 @@ class QueueManagementBusinessService:
                 Directory=_DirCanonical,
                 SizeBytes=int((MediaFile.SizeMB or 0) * 1024 * 1024),
                 SizeMB=MediaFile.SizeMB or 0,
-                Priority=self.CalculatePriority(MediaFile),
+                Priority=0,
                 Status='Pending',
                 DateAdded=datetime.now(timezone.utc)
             )
@@ -1036,31 +1036,6 @@ class QueueManagementBusinessService:
         try:
             LoggingService.LogFunctionEntry("CreateQueueItemFromMediaFileWithProfile", "QueueManagementBusinessService", MediaFile.FileName, MediaFile.AssignedProfile)
 
-            # Profile-target priority: look up the matching ProfileThresholds row for
-            # this file's resolution and pass bitrates to CalculatePriority. Falls back
-            # gracefully if the lookup returns nothing (function logs a warning).
-            targetVideoKbps = None
-            targetAudioKbps = None
-            try:
-                profileSettings = self.ProfileRepository.GetProfileSettingsForTargetResolution(
-                    MediaFile.AssignedProfile, MediaFile.Resolution
-                )
-                if profileSettings:
-                    targetVideoKbps = profileSettings.get('VideoBitrateKbps')
-                    targetAudioKbps = profileSettings.get('AudioBitrateKbps')
-            except Exception as Ex:
-                LoggingService.LogException(
-                    f"Could not look up ProfileThresholds for priority calc on {MediaFile.FileName}",
-                    Ex, "QueueManagementBusinessService", "CreateQueueItemFromMediaFileWithProfile"
-                )
-
-            priority = self.CalculatePriority(
-                MediaFile,
-                TargetVideoKbps=targetVideoKbps,
-                TargetAudioKbps=targetAudioKbps,
-            )
-
-            # Extract directory from file path
             filePath = MediaFile.FilePath or ""
             directory = ""
             fileName = MediaFile.FileName or ""
@@ -1076,12 +1051,12 @@ class QueueManagementBusinessService:
                 Directory=directory,
                 SizeBytes=int((MediaFile.SizeMB or 0) * 1024 * 1024),
                 SizeMB=MediaFile.SizeMB or 0.0,
-                Priority=priority,
+                Priority=0,
                 Status="Pending",
                 DateAdded=datetime.now(timezone.utc)
             )
 
-            LoggingService.LogInfo(f"Created queue item for {fileName} with profile {MediaFile.AssignedProfile} and priority {priority}", "QueueManagementBusinessService", "CreateQueueItemFromMediaFileWithProfile")
+            LoggingService.LogInfo(f"Created queue item for {fileName} with profile {MediaFile.AssignedProfile}", "QueueManagementBusinessService", "CreateQueueItemFromMediaFileWithProfile")
             return queueItem
 
         except Exception as e:
@@ -1237,7 +1212,7 @@ class QueueManagementBusinessService:
                 Directory=directory,
                 SizeBytes=int((MediaFile.SizeMB or 0) * 1024 * 1024),
                 SizeMB=MediaFile.SizeMB or 0.0,
-                Priority=self.CalculatePriority(MediaFile),
+                Priority=0,
                 Status="Pending",
                 ProcessingMode="Remux",
                 DateAdded=datetime.now(timezone.utc)
@@ -1351,15 +1326,6 @@ class QueueManagementBusinessService:
         try:
             LoggingService.LogFunctionEntry("CreateQueueItemFromMediaFile", "QueueManagementBusinessService", MediaFile.FileName, Threshold.ProfileId)
 
-            # Profile-target priority: pass the threshold's bitrates so CalculatePriority
-            # uses the deterministic post-transcode size estimate (see queue-priority.feature.md A2).
-            priority = self.CalculatePriority(
-                MediaFile,
-                TargetVideoKbps=Threshold.VideoBitrateKbps,
-                TargetAudioKbps=Threshold.AudioBitrateKbps,
-            )
-
-            # Extract directory from file path
             filePath = MediaFile.FilePath or ""
             directory = ""
             fileName = MediaFile.FileName or ""
@@ -1375,12 +1341,12 @@ class QueueManagementBusinessService:
                 Directory=directory,
                 SizeBytes=int((MediaFile.SizeMB or 0) * 1024 * 1024),
                 SizeMB=MediaFile.SizeMB or 0.0,
-                Priority=priority,
+                Priority=0,
                 Status="Pending",
                 DateAdded=datetime.now(timezone.utc)
             )
 
-            LoggingService.LogInfo(f"Created queue item for {fileName} with priority {priority}", "QueueManagementBusinessService", "CreateQueueItemFromMediaFile")
+            LoggingService.LogInfo(f"Created queue item for {fileName}", "QueueManagementBusinessService", "CreateQueueItemFromMediaFile")
             return queueItem
 
         except Exception as e:
@@ -1391,23 +1357,7 @@ class QueueManagementBusinessService:
                           TargetVideoKbps: Optional[int] = None,
                           TargetAudioKbps: Optional[int] = None,
                           SuppressFallbackWarning: bool = False) -> int:
-        """Calculate impact-based priority for a queue item, range 1-194.
-
-        See Features/TranscodeQueue/queue-priority.feature.md for the contract.
-        Workers claim with ORDER BY Priority DESC, so higher priority is more urgent.
-        The 6-slot window 195-200 is reserved for manual user overrides; this
-        function never produces a value in that range.
-
-        Inputs:
-            MediaFile: source row (uses SizeMB and DurationMinutes)
-            TargetVideoKbps / TargetAudioKbps: from the matching ProfileThresholds row
-                for the file's resolution category. When BOTH are provided AND
-                MediaFile.DurationMinutes is set, the formula uses the deterministic
-                profile-target estimate. Otherwise it falls back to SizeMB * 0.5
-                with a loud warning (per Phase 2a loud-failure rule).
-
-        Returns int in [1, 194].
-        """
+        """Impact-based score in [1, 194] for MediaFiles.PriorityScore consumers (SmartPopulate helpers, backfill); NOT consulted on the claim path -- see queue-priority.feature.md."""
         try:
             import math
 
@@ -2722,7 +2672,7 @@ class QueueManagementBusinessService:
                     Directory=_DirCanonical,
                     SizeBytes=int((mediaFile.SizeMB or 0) * 1024 * 1024),
                     SizeMB=mediaFile.SizeMB or 0.0,
-                    Priority=self.CalculatePriority(mediaFile),
+                    Priority=0,
                     Status="Pending",
                     ProcessingMode="SubtitleFix",
                     DateAdded=datetime.now(timezone.utc)

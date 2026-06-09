@@ -53,6 +53,10 @@ Operator dogfood (2026-05-30). With TV and Movies on different drives, a single 
 
 The Quick Fix pane (`/media#quickfix`) and Library pane (`/media#library`) are untouched. Other consumers of `SmartPopulate` (the Remux card, the AudioFix card) are also untouched -- they remain TV-pinned per their existing implementations and are out of scope here.
 
+## See also
+
+The worker claim order mirrors this card's SQL contract -- largest non-compliant first, with a 195-200 manual override window layered on top. The claim contract is owned by `Features/TranscodeQueue/queue-priority.feature.md`.
+
 ## Status
 
 COMPLETE 2026-05-30. WebService restarted; both cards render and populate independently (verified via /ShowSettings page HTML inspection + endpoint smoke tests: TV returned 11,645 candidates, Movies returned 1,063).

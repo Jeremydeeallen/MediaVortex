@@ -1,213 +1,93 @@
-﻿# Queue Priority -- impact-based scoring with manual override window
+# Queue Priority -- largest non-compliant first, with manual override window
 
 **Slug:** queue-priority
 
 ## What It Does
 
-Replaces the legacy "Priority = `int(SizeMB)`" assignment with an impact-based
-score in 1-194, leaving 195-200 reserved for manual user overrides. The new
-priority puts the highest-bytes-saved transcodes at the front of the queue
-without requiring the operator to think about it; explicit user prioritization
-via the existing UI Priority modal still wins.
+Defines the order in which workers claim transcode queue rows. One contract serves every claim path (`ClaimNextPendingTranscodeJob`, `ClaimNextPendingRemuxJob`) and every operator-facing list view (`/TranscodeQueue` page, SQLQueries diagnostics, `GetTranscodeQueueItemsPaginated`).
 
-Drives the `ORDER BY Priority DESC, DateAdded ASC` claim order used by every
-worker. No worker code changes required -- only the value written into the
-column at queue-population time, plus the Update Priority modal's accepted
-range.
+The order is:
+
+```sql
+ORDER BY (CASE WHEN tq.Priority >= 195 THEN tq.Priority ELSE 0 END) DESC,
+         tq.SizeMB DESC NULLS LAST,
+         tq.DateAdded ASC
+```
+
+Read top-down:
+1. **Manual override window (195-200):** queue rows with `Priority >= 195` jump the queue. Used by the operator Priority modal and by `AudioFixPriorityHints` (`Features/TranscodeQueue/AudioFixPriorityHintsController.py`), which validates the boost is in `[195, 200]` server-side.
+2. **Largest non-compliant first:** outside the override window, the largest `SizeMB` claims first. Mirrors the **TV - Next Batch** / **Movies - Next Batch** UI cards (`next-batch-per-drive.feature.md`) — what the operator sees in the cards is what the worker claims.
+3. **DateAdded ASC tiebreaker:** within identical size, the older queue row wins.
+
+Auto-computed Priority is no longer written at queue-insert time. All `CreateQueueItem*` paths in `QueueManagementBusinessService` write `Priority = 0`. The `Priority` column on `TranscodeQueue` is reserved exclusively for the 195-200 override window — operator UI overrides and folder-pin hint boosts.
 
 ## Concern
 
-Dogfood -- the operator surfaced today that every queued file gets
-`Priority = file_size_in_MB`, which means already-efficient AV1 files end up
-ahead of compressible h264 and the documented 1-100 manual range can never
-beat the auto-set values.
+Operator dogfood. The prior contract computed a log-scaled "impact score" (`log10(estimated_savings_mb + 1)` mapped into 1-194) at insert time, then ordered by that. Two failure modes:
+
+1. **Log compression flattened the size signal.** A 10× difference in source size moved priority by only ~40 points (700 MB → ~89, 7000 MB → ~127). Combined with the `DateAdded ASC` tiebreaker, claim order did not track size in practice.
+
+2. **Already-efficient large files sank to Priority 1.** Files where `SizeMB - target_size_mb ≈ 0` (e.g. a 6 GB AV1 source against an AV1 profile) computed savings ≈ 0 → Priority 1. The same file sat at the top of Next Batch (still `NeedsTranscode = TRUE`, still huge), creating a disagreement between what the UI surfaced and what the worker actually picked.
+
+The fix is to make claim order match the operator-facing card: largest non-compliant first. The estimated-savings math moves out of the claim path entirely — admission decisions (whether a file should be queued at all) live in `marginal-savings-gate.feature.md`.
 
 ## Success Criteria
 
-### A. Score formula
+### A. Claim order
 
-1. `QueueManagementBusinessService.CalculatePriority(MediaFile, ProfileSettings)`
-   returns an integer in `[1, 194]`. Inputs are `MediaFile.SizeMB`,
-   `MediaFile.DurationMinutes`, `MediaFile.AssignedProfile`,
-   `MediaFile.ResolutionCategory`, plus the matching `ProfileThresholds`
-   row (`VideoBitrateKbps`, `AudioBitrateKbps`) for that profile and
-   resolution. Pure function -- same inputs always produce the same output.
+1. `ClaimNextPendingTranscodeJob` ORDER BY (both AcceptsInterlaced branches) is `(CASE WHEN tq.Priority >= 195 THEN tq.Priority ELSE 0 END) DESC, tq.SizeMB DESC NULLS LAST, tq.DateAdded ASC`. Verifiable: `grep -n 'ORDER BY' Features/TranscodeQueue/TranscodeQueueRepository.py` shows this exact composite in both branches of `ClaimNextPendingTranscodeJob`.
 
-2. The estimated post-transcode size is computed deterministically from the
-   profile target bitrate:
-   ```python
-   target_size_mb = ((video_kbps + audio_kbps) * duration_minutes * 60) / (8 * 1024)
-   estimated_savings_mb = max(0, size_mb - target_size_mb)
-   ```
-   Reading the actual configured profile target (instead of guessing via a
-   codec multiplier) means already-efficient sources (av1 at profile bitrate,
-   files barely above target) correctly land at savings = 0 -> priority 1,
-   and a profile change automatically reflects in the next CalculatePriority
-   call without any code change. No `EXPECTED_REDUCTION` or `STANDARD_KBPS`
-   constants are needed.
+2. `ClaimNextPendingRemuxJob` ORDER BY uses the same composite (unqualified `Priority` + `SizeMB` because the Remux SELECT does not alias). Verifiable: same grep above, in `ClaimNextPendingRemuxJob`.
 
-3. Final priority is computed via:
-   ```python
-   import math
-   score = math.log10(estimated_savings_mb + 1)        # 0..5+
-   priority = int(round(1 + min(193, (score / 5.0) * 193)))
-   priority = max(1, min(194, priority))
-   ```
-   Log scaling is required: a 30 GB save is ~4x more urgent than a 300 MB
-   save, not 100x. Linear scaling on raw size produces a top-heavy queue
-   where one BluRay rip suppresses everything else.
+3. With every queue row at `Priority = 0` and no manual overrides set, the next-claimed row is the one with the largest `SizeMB`. Verifiable: insert two `Pending` rows with `Priority = 0` and `SizeMB = (100, 5000)`; the next claim returns the 5000 MB row.
 
-4. Fallback when any required input is NULL or missing
-   (`DurationMinutes`, `AssignedProfile`, or no `ProfileThresholds` row
-   for the resolution category): use `estimated_savings_mb = size_mb * 0.5`
-   so the file gets a rough non-zero priority instead of erroring or
-   landing at the bottom. The fallback path logs a warning via
-   `LoggingService.LogWarning` naming the MediaFileId and which input was
-   missing -- per the Phase 2a loud-failure rule, silent fallbacks are
-   forbidden.
+4. A queue row with `Priority = 200` claims before any row with `Priority < 195`, regardless of `SizeMB`. Verifiable: insert one row at `Priority = 200, SizeMB = 50` and one at `Priority = 0, SizeMB = 9999`; the next claim returns the 200-priority row.
 
-5. Files with `MediaFile.SizeMB` NULL or 0 receive `Priority = 1` (lowest
-   non-zero) so the queue does not error on partial-scan rows.
-
-15. **[BUG -- CRITICAL] Profile-less files use a profile-agnostic estimate
-   based on probed source bitrate, not the `SizeMB * 0.5` proxy.** When
-   `MediaFile.AssignedProfile` is NULL or the profile cascade does not
-   resolve, the estimate MUST use a deterministic formula keyed on the
-   probed `Codec` + `OverallBitrate` (or `VideoBitrateKbps + AudioBitrateKbps`)
-   + `ResolutionCategory` and a configurable expected-output-bitrate table
-   (e.g. "AV1 at 720p ~ 1500 kbps"). The `SizeMB * 0.5` fallback in
-   criterion 4 is replaced for any file that has been probed (Codec +
-   OverallBitrate present); the file-size proxy remains only as the
-   absolute-last-resort case where no probe data exists.
-
-   Why critical: profile-less files are the population the operator looks
-   at to decide which titles to assign profiles to next. The current
-   `size * 0.5` proxy ranks bloated-but-already-efficient files (e.g. a
-   large AV1 source) the same as a bloated h264 source -- the operator
-   ends up sorting by file size instead of compression headroom, which
-   misses the highest-impact transcode candidates.
-
-   Verifiable:
-   (a) Two files with identical `SizeMB` and `DurationMinutes` but
-       different `Codec` (h264 vs av1) and different `OverallBitrate`
-       (8 Mbps vs 2 Mbps) get DIFFERENT `PriorityScore` values when
-       neither has an `AssignedProfile`. The h264/8 Mbps file ranks
-       higher than the av1/2 Mbps file.
-   (b) An h264 file with `OverallBitrate` already below the expected
-       AV1-at-its-resolution target ranks at `Priority = 1` (no
-       headroom) without a profile, instead of the `SizeMB * 0.5`
-       proxy giving it a misleading mid-range priority.
-   (c) The expected-output-bitrate table is operator-tunable from the
-       `/settings` "Queue Tuning" card (reuses `CrfBitrateEstimates` if
-       extended with a "no-profile default codec" row, OR a new sibling
-       table). Source of truth is the DB, not a Python constant.
-   (d) Files with NO probe data (Codec NULL or OverallBitrate NULL)
-       still receive the `SizeMB * 0.5` last-resort estimate so the
-       queue keeps populating during partial-probe windows.
-
-   Owns the `memory/KNOWN-ISSUES.md` "Profile-less savings estimate uses
-   misleading SizeMB * 0.5 proxy" entry recorded 2026-05-10.
+5. Two rows both at `Priority = 200` claim in `SizeMB DESC` order. Verifiable: insert two override-window rows; the larger claims first.
 
 ### B. Manual override window
 
-6. The Priority modal in `Templates/Queue.html` (line 106 input min/max)
-   accepts `[1, 200]`, not `[1, 100]` as before. Hint text updated to
-   "1-194 = auto / 195-200 = reserved for manual override".
+6. The operator Priority modal (`Templates/Queue.html`) accepts `[1, 200]`. Values `[195, 200]` jump the queue per criterion 4; values `[1, 194]` are accepted but do not affect claim order (CASE collapses them to 0).
 
-7. The Add Job dialog's Priority input (`Templates/Queue.html` line 134) uses
-   the same `[1, 200]` range with the same hint text.
+7. `AudioFixPriorityHints` server-side validation (`Features/TranscodeQueue/AudioFixPriorityHintsController.py:AddPin`) rejects `BoostedPriority` outside `[195, 200]` with HTTP 400. Hint-boosted rows surface ahead of size-ordered rows. Verifiable: pin a folder with `BoostedPriority=195`; matching `AudioFix` queue rows claim before any larger non-pinned row.
 
-8. `POST /api/TranscodeQueue/PrioritizeJob` server-side validation accepts
-   `1 <= NewPriority <= 200`. The `Features/TranscodeQueue/TranscodeQueueController.py`
-   bounds check (currently `1 <= NewPriority <= 100`) is updated.
+### C. Insert sites
 
-9. `POST /api/TranscodeQueue/AddJob` server-side validation accepts
-   `1 <= Priority <= 200` (same site, line 173 today).
+8. No `CreateQueueItem*` function in `Features/TranscodeQueue/QueueManagementBusinessService.py` calls `CalculatePriority` when constructing a `TranscodeQueueModel`. All queue inserts write `Priority = 0`. Verifiable: `grep -n 'Priority=self.CalculatePriority' Features/TranscodeQueue/QueueManagementBusinessService.py` returns no matches.
 
-10. Auto-assignment never produces a value in `[195, 200]`. Independently
-    verifiable: a SQL query `SELECT MIN(Priority), MAX(Priority) FROM TranscodeQueue WHERE ClaimedBy IS NULL`
-    after a fresh `PopulateQueue` returns `MIN >= 1, MAX <= 194`.
+9. `CalculatePriority` is still defined for the `ComputePriorityScore` / `ComputePriorityScoresForFiles` path that maintains `MediaFiles.PriorityScore` — a separate denormalized column used by non-claim readers (SmartPopulate-style queue helpers, backfill scripts). Removing it would break those. See `priority-materialization.feature.md`.
 
-### C. Queue ordering observable correctness
+### D. Operator-facing list views match claim order
 
-11. The first item a worker would claim from a fresh queue (per
-    `ORDER BY Priority DESC, DateAdded ASC LIMIT 1`) is a high-impact file
-    (large h264 or larger). Tested by inspecting `GetNextJob()` output on a
-    representative queue.
+10. `GetAllTranscodeQueueItems`, `GetTranscodeQueueItemsByStatus`, `GetNextPendingTranscodeJob`, and the `Status='Running'` / `Status='Pending'` diagnostic queries in `GetQueueStatistics` all use the same composite ORDER BY. So what the operator sees at the top of `/TranscodeQueue` and in SQLQueries diagnostics is what the next worker will actually claim. Verifiable: `grep -n 'ORDER BY' Features/TranscodeQueue/TranscodeQueueRepository.py Features/SQLQueries/SQLQueriesController.py` shows the composite in every diagnostic / list query against `TranscodeQueue`.
 
-12. Existing queue items keep their stored Priority. Recalculation only
-    applies to NEW queue items going forward, so changing the formula does
-    not silently reorder current pending work. A separate one-shot
-    `Scripts/SQLScripts/RecalculateQueuePriorities.py` is offered for
-    operators who want to rebalance an existing queue manually.
+11. `GetTranscodeQueueItemsPaginated` with `SortBy='Priority'` returns rows in the composite order (override-window first, then `SizeMB DESC`). Other `SortBy` values (`SizeMB`, `DateAdded`, `FileName`) sort by their named column alone. Verifiable: paginated request with `SortBy=Priority` and a mix of override-window + auto-zero rows returns override rows first, then largest size first.
 
-### D. Display alignment
+## Seams
 
-13. The Priority column on `/TranscodeQueue` renders the value as-is (no UI
-    change needed; the existing badge logic at `Templates/Queue.html:326`
-    works for any positive integer). Verified by visual inspection that
-    priorities like 109, 169, 194 render without truncation.
-
-14. `getPriorityBadgeClass(priority)` (the JS color helper, `Templates/Queue.html`
-    around line 326) rebrackets to the new range:
-    - `>= 195`: red badge ("manual override")
-    - `>= 150`: yellow ("high impact")
-    - `>= 75`: blue ("medium impact")
-    - `< 75`: gray ("low impact")
-    Bracket boundaries are calibrated to the score distribution shown in
-    `transcode.flow.md` Stage 4 priority section.
+| ID | Seam | Producer | Wire shape | Consumer expects | Verification |
+|---|---|---|---|---|---|
+| S1 | Queue insert -> claim ORDER BY | `QueueManagementBusinessService.CreateQueueItem*` | `TranscodeQueue.(Priority INT, SizeMB DOUBLE, DateAdded TIMESTAMP)` — Priority=0 unless operator/hint override | `TranscodeQueueRepository.ClaimNextPendingTranscodeJob` reads composite ORDER BY | Insert rows at varying sizes with `Priority=0`; verify next claim is largest |
+| S2 | Manual override -> claim | `TranscodeQueueController.PrioritizeJob` writes `Priority` in `[1, 200]` | Same column, values `>= 195` interpreted as "override" | Claim CASE surfaces override-window rows ahead of size-ordered rows | Set one row to `Priority=200`; confirm it claims before larger rows |
+| S3 | AudioFix hint boost -> claim | `AudioFixPriorityHintsController.AddPin` / `ApplyAll` UPDATEs `Priority = BoostedPriority` for matching `ProcessingMode='AudioFix'` rows | Same column, controller enforces `[195, 200]` | Same CASE; hint-boosted rows surface first within their mode | Pin folder; observe matching rows reach top of AudioFix claim |
 
 ## Status
 
-COMPLETE -- all DB and UI verifies passed 2026-05-09
-
-### Progress
-
-- [x] Flow doc extended (`transcode.flow.md` Stage 4, "Priority calculation" subsection)
-- [x] Feature doc drafted (this file)
-- [x] Refined formula to profile-target (criteria A1-A4 rewritten 2026-05-09)
-- [x] Implement `CalculatePriority(MediaFile, TargetVideoKbps, TargetAudioKbps)` rewrite -- pure function with kbps params; callers pass them in. Fallback path with loud `LogWarning` when inputs missing.
-- [x] Update profile-aware callers: `CreateQueueItemFromMediaFile` (passes Threshold bitrates directly), `CreateQueueItemFromMediaFileWithProfile` (looks up via `GetProfileSettingsForTargetResolution`). Remux + SubtitleFix + Simple paths intentionally use the fallback.
-- [x] Update server-side validation in `TranscodeQueueController` (PrioritizeJob and AddJob: 100 -> 200)
-- [x] Update template input bounds + hint text (`Queue.html` PriorityModal + AddJob)
-- [x] Update `getPriorityBadgeClass` JS color brackets in `Queue.html` (>=195 red, >=150 yellow, >=75 blue, <75 gray)
-- [x] Write `Scripts/SQLScripts/RecalculateQueuePriorities.py` (optional rebalance, dry-run by default; manual-override range 195-200 excluded by query)
-- [x] Smoke test PASSED: profile-target path produces 107/136/150/173 across 1.5/4/8/30 GB. Already-efficient files clamp to priority 1. 200 GB worst case caps at 194.
-- [x] Close priority-bypass paths (2026-05-09, after operator reported Priority=1076 on a Media-page-added Survivor episode): `SmartPopulateQueue` no longer pre-fills `Priority` in suggestion dicts; `AddSuggestionsToQueue` recomputes via `CalculatePriority` with profile bitrates; `AddJobToQueue` uses the profile-aware queue-item path and caps the manual-bonus at 194 (not 100). `Templates/ShowSettings.html` no longer sends `S.Priority` from the SmartPopulate UI.
-- [x] Fix worker claim path (2026-05-09, found while verifying first criterion-11 dogfood): the live atomic claim in `DatabaseManager.ClaimNextPendingTranscodeJob` and the two peek/list paths in `DatabaseManager.GetNextPendingTranscodeJob` + `Features/TranscodeQueue/TranscodeQueueRepository.py` were ordering by `SizeMB DESC, DateAdded ASC` -- Priority was selected but never used. Changed all four queries to `ORDER BY Priority DESC, DateAdded ASC`. `transcode.flow.md:403` Stage 2.2 updated to match. Without this fix the entire feature was a no-op at the worker.
-- [x] Queue UI default sort flipped from `SizeMB` to `Priority DESC` (`Templates/Queue.html:202`) so the visible row order matches worker claim order.
-- [x] Live verify (DB-confirmed 2026-05-09): live queue inspection on 40 rows showed `MIN=1, MAX=90, AVG=33`, all values in [1,194]; `manual_195_200=0`; recent UI-added rows (Outlander, The Deuce, Project Runway) landed at sensible priorities for their size/profile combos. Two natural Priority=1 examples (Project Runway 720p HDTV-MKV at ~930 MB, already at/below profile target bitrate) confirm savings-clamp-to-zero behavior on the live data.
-- [x] Live verify (DB-confirmed 2026-05-09): worker claim path is taking highest-priority items first. Running rows at priorities 90/89/59/54 ahead of 54-priority pending rows -- pre-fix behavior would have ordered by SizeMB and the larger 924+ MB files would have been claimed before the 90-priority Expedition Unknown. Criterion 11 PASSING in production.
-- [x] Live verify (UI, 2026-05-09): manual priority 200 accepted by PriorityModal; worker claim order honored.
-- [x] Live verify (UI, 2026-05-09): badge color brackets render correctly on /TranscodeQueue.
-- [x] Fix paginated Queue page sort whitelist (2026-05-09): `Repositories/DatabaseManager.GetTranscodeQueueItemsPaginated` mapped `'Priority' -> 'SizeMB'`, so the JS-driven Priority sort silently degraded to size sort. Fixed; controller + viewmodel defaults also flipped from `SizeMB` to `Priority`.
-
-NEXT: two UI-only verifies remain (priority 200 modal accept + badge colors). Both are non-blocking for downstream features and can be confirmed during the next operator session on the Queue page.
-
-## Scope
-
-```
-Features/TranscodeQueue/QueueManagementBusinessService.py    -- CalculatePriority and module constants
-Features/TranscodeQueue/TranscodeQueueController.py          -- bounds validation; paginated sort default
-Repositories/DatabaseManager.py                              -- GetTranscodeQueueItemsPaginated whitelist
-Templates/Queue.html                                          -- modal bounds, color brackets, default sort
-Scripts/SQLScripts/RecalculateQueuePriorities.py              -- optional rebalance script (NEW)
-transcode.flow.md                                              -- Stage 4 priority subsection
-```
+COMPLETE -- claim order unified with Next Batch contract, manual override window preserved.
 
 ## Files
 
 | File | Role |
 |------|------|
-| `Features/TranscodeQueue/QueueManagementBusinessService.py` | `CalculatePriority(MediaFile, ProfileSettings)` rewrite from `int(SizeMB)` to log-scaled impact score using the profile's target bitrate. Each queue-population caller looks up the `ProfileThresholds` row once and passes it in -- no module constants needed. |
-| `Features/TranscodeQueue/TranscodeQueueController.py` | `PrioritizeJob` endpoint bounds check 1-100 -> 1-200; `AddJob` Priority bounds check |
-| `Templates/Queue.html` | PriorityModal `min`/`max` attributes (line 106), AddJob Priority input (line 134), `getPriorityBadgeClass` JS color thresholds (around line 326) |
-| `Scripts/SQLScripts/RecalculateQueuePriorities.py` | NEW. Walks current TranscodeQueue, recomputes Priority per the new formula, dry-run by default. Operator opts in to rebalance an existing queue without re-populating |
-| `transcode.flow.md` | Stage 4 "Priority calculation" subsection (already added in this `/n` step 4) |
+| `Features/TranscodeQueue/TranscodeQueueRepository.py` | `ClaimNextPendingTranscodeJob`, `ClaimNextPendingRemuxJob`, `GetAllTranscodeQueueItems`, `GetTranscodeQueueItemsByStatus`, `GetNextPendingTranscodeJob`, `GetTranscodeQueueItemsPaginated` (when SortBy=Priority), `GetQueueStatistics` (active/next diagnostics) — all use the composite ORDER BY |
+| `Features/TranscodeQueue/QueueManagementBusinessService.py` | `CreateQueueItemFromMediaFileSimple`, `CreateQueueItemFromMediaFileWithProfile`, `CreateQueueItemFromMediaFile`, `CreateRemuxQueueItem`, `PopulateQueueForSubtitleFix` insert site — all write `Priority=0`. `CalculatePriority` retained for `ComputePriorityScore` (MediaFiles.PriorityScore) only |
+| `Features/TranscodeQueue/AudioFixPriorityHintsController.py` | Enforces `BoostedPriority IN [195, 200]` — fits the override window contract |
+| `Features/SQLQueries/SQLQueriesController.py` | The pending-queue diagnostic query uses the composite ORDER BY |
+| `Templates/Queue.html` | Priority modal accepts `[1, 200]`; `[1, 194]` is a no-op on claim order (CASE collapses to 0); `[195, 200]` jumps the queue |
 
-## Deviation from conventions
+## See also
 
-None. Each criterion is a pass/fail observable from outside the code (DB
-query, API call, page inspection, unit-test of the pure function). The
-formula constants live in code, not the DB, so changes are reviewable via
-git diff.
+- `Features/TranscodeQueue/next-batch-per-drive.feature.md` — the operator-facing UI card whose SQL shape this claim contract mirrors.
+- `Features/TranscodeQueue/priority-materialization.feature.md` — `MediaFiles.PriorityScore` column, maintained for non-claim readers; no longer the claim driver.
+- `Features/TranscodeQueue/audio-fix-priority-hints.flow.md` — the folder-pinning flow whose hints land in the override window.
+- `Features/TranscodeQueue/marginal-savings-gate.feature.md` — the queue-admission gate that decides whether a file enters the queue at all (the impact-savings math moved here).

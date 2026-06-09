@@ -173,7 +173,7 @@ def GetTranscodeQueue():
             "FileName, Directory, SizeMB, Status, Priority, "
             "DateAdded, DateStarted, ProcessingMode "
             "FROM TranscodeQueue "
-            "ORDER BY Priority DESC, DateAdded ASC "
+            "ORDER BY (CASE WHEN Priority >= 195 THEN Priority ELSE 0 END) DESC, SizeMB DESC NULLS LAST, DateAdded ASC "
             "LIMIT 100"
         )
 

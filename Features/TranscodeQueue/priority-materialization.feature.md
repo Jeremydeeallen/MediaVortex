@@ -165,12 +165,15 @@ admin endpoint for full-library backfill. See `transcode.flow.md` Stage
     inspect its PriorityScore; queue the file with its AssignedProfile;
     inspect the Priority value stored in TranscodeQueue -- both equal.
 
-17. The TranscodeQueue.Priority value is still authoritative at claim
-    time. Workers continue to claim by `ORDER BY Priority DESC,
-    DateAdded ASC` from TranscodeQueue, NOT by MediaFiles.PriorityScore.
-    Verifiable: review `Repositories/DatabaseManager.ClaimNextPendingTranscodeJob`
-    -- the FROM clause is TranscodeQueue, the ORDER BY references
-    TranscodeQueue.Priority. No change to worker claim path.
+17. `MediaFiles.PriorityScore` is NOT consulted on the worker claim path.
+    The claim order is owned by `queue-priority.feature.md` (largest
+    non-compliant first, with a 195-200 manual override window on
+    `TranscodeQueue.Priority`). `PriorityScore` remains for non-claim
+    readers -- SmartPopulate-style queue helpers, the bulk-backfill
+    script, and any operator query that wants "the system's impact
+    estimate" without consulting the live queue. Verifiable: grep
+    `Features/TranscodeQueue/TranscodeQueueRepository.py` for
+    `PriorityScore` -- returns zero matches in the claim/list path.
 
 ## Status
 
