@@ -1574,249 +1574,107 @@ class QueueManagementBusinessService:
                 return Override
         return DefaultProfileName
 
-    def _EvaluateCompliance(
-        self,
-        Row: Dict[str, Any],
-        EffectiveProfile: Optional[str],
-        Lookup: Dict[tuple, tuple],
-        AcceptableVideoCodecs: Optional[set] = None,
-        AcceptableContainers: Optional[set] = None,
-        AcceptableAudioCodecsMp4: Optional[set] = None,
-        MinSavingsMB: Optional[int] = None,
-        FloorCfg: Optional[Any] = None,
-    ) -> tuple:
-        """Pure compliance cascade. Returns (IsCompliant, RecommendedMode).
 
-        Mirrors transcode-vs-remux-routing.feature.md criterion 11 plus the
-        audio-completion.feature.md criteria 13-15.
-
-        None for IsCompliant means "undecidable" (hard-block or missing
-        inputs); otherwise true/false. RecommendedMode is 'Transcode',
-        'Remux', or None.
-
-        Codec / container / audio acceptability, savings threshold, and
-        audio bitrate floor are loaded from the data-driven tables
-        (`CodecCompatibility`, `QueueAdmissionConfig`). Callers in tight
-        loops should pass the pre-loaded sets / config to avoid per-row
-        DB round-trips. When omitted, this method loads them fresh per call.
-        """
-        # Reset transient row flags so stale values from a prior call don't leak.
-        Row['_DeferReason'] = None
-        Row['_RefusalReason'] = None
-
-        # a. Hard block: no English audio (includes files with zero audio streams)
-        if Row.get('HasExplicitEnglishAudio') is False:
-            Row['_RefusalReason'] = 'no_english_audio'
-            return (None, None)
-
-        # a2. Hard block: AudioCompletionService flagged this row as suspect
-        # (no_audio_stream / incompatible_codec_unsupported). The audio cannot
-        # be safely re-encoded or stream-copied; surface for operator review.
-        if Row.get('AudioCorruptSuspect') is True:
-            Row['_RefusalReason'] = 'audio_corrupt_suspect'
-            return (None, None)
-
-        # a3. Hard block: probed file with no audio stream at all.
-        # Belt-and-suspenders with a2 -- backfill marks these Suspect, but
-        # newly-probed rows without a recompute pass yet still need the
-        # in-cascade check.
-        if Row.get('HasExplicitEnglishAudio') is not None and not Row.get('AudioCodec') and Row.get('Resolution'):
-            Row['_RefusalReason'] = 'no_audio_stream'
-            return (None, None)
-
-        # a4. Measurement gate (linear-loudnorm.feature.md C9): any file that
-        # might run a loudnorm pass (AudioComplete is not True) requires all
-        # four ebur128 measurements present. Three sub-states:
-        #   LoudnessMeasuredAt IS NULL              -> never attempted; the
-        #     probe co-trigger will catch it. AdmissionDeferReason=
-        #     'awaiting_loudness_measurement'.
-        #   FailureReason IS NOT NULL               -> ebur128 ran and produced
-        #     no usable numbers (timeout, decode error, etc.). Needs operator
-        #     intervention. AdmissionDeferReason=
-        #     'loudness_measurement_failed'.
-        #   Measured but Threshold IS NULL          -> pre-threshold-capture
-        #     legacy data. The Step 3 backfill (BackfillLoudnessThreshold.py)
-        #     will catch up. Treat as 'awaiting' so it surfaces in the same
-        #     bucket as never-measured rows.
-        if Row.get('AudioComplete') is not True:
-            if (Row.get('SourceIntegratedLufs') is None
-                    or Row.get('SourceLoudnessRangeLU') is None
-                    or Row.get('SourceTruePeakDbtp') is None
-                    or Row.get('SourceIntegratedThresholdLufs') is None):
-                if Row.get('LoudnessMeasurementFailureReason') is not None:
-                    Row['_DeferReason'] = 'loudness_measurement_failed'
-                    Row['_RefusalReason'] = 'loudness_measurement_failed'
-                else:
-                    Row['_DeferReason'] = 'awaiting_loudness_measurement'
-                    Row['_RefusalReason'] = 'awaiting_loudness_measurement'
-                return (None, None)
-
-        # b. Effective profile cannot be resolved
-        if not EffectiveProfile:
-            Row['_RefusalReason'] = 'no_effective_profile'
-            return (None, None)
-
-        # Lazy-load gate config when caller didn't provide pre-loaded sets.
-        if AcceptableVideoCodecs is None:
-            AcceptableVideoCodecs = self.CodecCompatibilityRepo.GetAcceptableSet('VideoCodec')
-        if AcceptableContainers is None:
-            AcceptableContainers = self.CodecCompatibilityRepo.GetAcceptableSet('Container')
-        if AcceptableAudioCodecsMp4 is None:
-            AcceptableAudioCodecsMp4 = self.CodecCompatibilityRepo.GetAcceptableSet('AudioCodecMp4')
-        if MinSavingsMB is None or FloorCfg is None:
-            Cfg = self.QueueAdmissionConfigRepo.Get()
-            if MinSavingsMB is None:
-                MinSavingsMB = Cfg.MinTranscodeSavingsMB
-            if FloorCfg is None:
-                FloorCfg = Cfg
-
-        # Need a resolution category for the lookup key. Prefer the cached
-        # ResolutionCategory column; fall back to deriving from raw Resolution
-        # when the cache is NULL (older MediaVortex outputs and pre-cache rows).
-        ResKey = Row.get('ResolutionCategory')
-        if not ResKey:
-            ResKey = self._ResolutionCategoryFromPixels(Row.get('Resolution'))
-        if not ResKey:
-            Row['_RefusalReason'] = 'no_resolution_category'
-            return (None, None)
-
-        Settings = Lookup.get((EffectiveProfile, ResKey))
-        if not Settings:
-            Row['_RefusalReason'] = 'no_profile_thresholds'
-            return (None, None)
-
-        TargetVideoKbps, TargetAudioKbps, TargetResCat = Settings
-        if TargetVideoKbps is None or TargetAudioKbps is None:
-            Row['_RefusalReason'] = 'no_profile_thresholds'
-            return (None, None)
-
-        # Audio bitrate floor guard: a sub-floor source must never go through
-        # the Transcode path (audio re-encode would damage already-low-bitrate
-        # audio). See audio-completion.feature.md C15.
-        from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
-        AudioBitrate = Row.get('AudioBitrateKbps')
-        AudioChannels = Row.get('AudioChannels')
-        BelowAudioFloor = (
-            AudioBitrate is not None
-            and AudioChannels is not None
-            and int(AudioBitrate) <= AudioCompletionService.FloorForChannels(AudioChannels, FloorCfg)
-        )
-
-        # Compute the two independent eligibility flags
-        # (media-tabs-and-loudness.feature.md C15-C17, revised 2026-05-17).
-        ContainerRaw = (Row.get('ContainerFormat') or '').lower()
-        ContainerParts = {p.strip() for p in ContainerRaw.split(',') if p.strip()}
-        AudioCodec = (Row.get('AudioCodec') or '').lower()
-        IsNormalized = Row.get('AudioComplete') is True
-
-        # NeedsQuick: any of these makes the file a Quick Fix candidate
-        # (BuildRemuxCommand handles them all in one I/O-bound pass).
-        # Audio is only a "needs work" signal when LUFS is measured AND
-        # off-target. Without LUFS we don't claim audio needs work --
-        # avoids polluting the Quick Fix tab with unconfirmed candidates
-        # whose normalize pass might be a no-op (feature criterion 15,
-        # revised 2026-05-17 per operator data-driven feedback).
-        ContainerWrong = bool(ContainerParts and not (ContainerParts & AcceptableContainers))
-        AudioCodecWrong = bool(AudioCodec and AudioCodec not in AcceptableAudioCodecsMp4)
-        SourceLufs = Row.get('SourceIntegratedLufs')
-        AudioConfirmedOffTarget = (
-            (not IsNormalized)
-            and SourceLufs is not None
-            and (SourceLufs < AudioCompletionService.TARGET_LUFS - AudioCompletionService.TARGET_LUFS_TOLERANCE
-                 or SourceLufs > AudioCompletionService.TARGET_LUFS + AudioCompletionService.TARGET_LUFS_TOLERANCE)
-        )
-        NeedsQuick = ContainerWrong or AudioCodecWrong or AudioConfirmedOffTarget
-
-        # NeedsTranscode: any of these makes the file a Transcode candidate.
-        # The bitrate-floor guard prevents thrashing audio quality via
-        # generational re-encode; if floor is hit, suppress Transcode signals.
-        VideoCodec = (Row.get('Codec') or '').lower()
-        VideoCodecWrong = bool(VideoCodec and VideoCodec not in AcceptableVideoCodecs)
-
-        SrcRank = self.RESOLUTION_RANK.get(ResKey, -1)
-        TgtRank = self.RESOLUTION_RANK.get(TargetResCat, -1)
-        DownscaleNeeded = SrcRank > 0 and TgtRank >= 0 and SrcRank > TgtRank
-
-        SizeMB = Row.get('SizeMB') or 0
-        DurationMin = Row.get('DurationMinutes') or 0
-        SavingsExceedsThreshold = False
-        if SizeMB > 0 and DurationMin > 0 and (TargetVideoKbps or 0) > 0:
-            TargetSizeMB = ((TargetVideoKbps + (TargetAudioKbps or 0)) * DurationMin * 60.0) / (8 * 1024)
-            SavingsExceedsThreshold = (SizeMB - TargetSizeMB) >= MinSavingsMB
-
-        NeedsTranscode = (VideoCodecWrong or DownscaleNeeded or SavingsExceedsThreshold) and not BelowAudioFloor
-
-        # Persist the flags via Row mutation so RecomputeForFiles can pick
-        # them up in the same UPDATE pass without re-evaluating.
-        Row['_NeedsQuick'] = NeedsQuick
-        Row['_NeedsTranscode'] = NeedsTranscode
-
-        # RecommendedMode is the single "primary" mode for display/badging --
-        # Transcode wins for badge purposes when both flags fire (heaviest
-        # operation is the most informative summary). Tabs read the flags
-        # directly, not RecommendedMode, so a file with both is still
-        # offered in the Quick Fix tab.
-        if NeedsTranscode:
-            if VideoCodecWrong:
-                Row['_RefusalReason'] = 'video_codec_not_acceptable'
-            elif DownscaleNeeded:
-                Row['_RefusalReason'] = 'downscale_needed'
-            elif SavingsExceedsThreshold:
-                Row['_RefusalReason'] = 'savings_exceeds_threshold'
-            else:
-                Row['_RefusalReason'] = 'needs_transcode'
-            return (False, 'Transcode')
-        if NeedsQuick:
-            if ContainerWrong:
-                Row['_RefusalReason'] = 'container_not_acceptable'
-            elif AudioCodecWrong:
-                Row['_RefusalReason'] = 'audio_codec_not_acceptable'
-            elif AudioConfirmedOffTarget:
-                Row['_RefusalReason'] = 'audio_not_normalized'
-            else:
-                Row['_RefusalReason'] = 'needs_quick'
-            return (False, 'Quick')
-        return (True, None)
-
-    def EvaluateCandidateCompliance(
-        self,
-        CandidateRow: Dict[str, Any],
-        EffectiveProfile: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Public wrapper over `_EvaluateCompliance` for callers that want to
-        ask "would this MediaFile-shaped row admit through the cascade?"
-        without joining the bulk RecomputeForFiles loop.
-
-        Owns `compliance-gated-rename.feature.md` criterion 1 (the predicate
-        used by FileReplacement's pre-rename gate). Returns a dict for clarity:
-            {
-              'IsCompliant':     True | False | None,
-              'RecommendedMode': 'Transcode' | 'Quick' | None,
-              'RefusalReason':   <stable_snake_case_string> | None,
-            }
-        RefusalReason is None only when IsCompliant is True. For every other
-        outcome it carries the specific cascade reason (e.g. 'video_codec_not_acceptable',
-        'audio_not_normalized', 'awaiting_loudness_measurement'). Stable enough
-        to use as the disposition audit payload.
-
-        EffectiveProfile is resolved via the same cascade RecomputeForFiles uses
-        (ShowSettings -> SystemSettings.DefaultProfileName) when not supplied.
-        """
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
+    def EvaluateCandidateCompliance(self, CandidateRow: Dict[str, Any], EffectiveProfile: Optional[str] = None) -> Dict[str, Any]:
+        """Public wrapper over ComplianceEvaluator -- preserves the legacy {IsCompliant, RecommendedMode, RefusalReason} dict shape for ComplianceGate.Evaluate (compliance-gated-rename.C1) and other dict-shaped callers."""
+        from Features.Compliance.ComplianceComposition import BuildEvaluator, BuildRuleCache
         Lookup = self._LoadPriorityLookupTable()
         if EffectiveProfile is None:
             DefaultProfile = self._LoadDefaultProfileName()
             ShowOverrides = self._LoadShowProfileOverrides()
-            EffectiveProfile = self._GetEffectiveProfileFromCache(
-                CandidateRow.get('FilePath'), ShowOverrides, DefaultProfile
-            )
-        IsCompliant, RecommendedMode = self._EvaluateCompliance(
-            CandidateRow, EffectiveProfile, Lookup,
+            EffectiveProfile = self._GetEffectiveProfileFromCache(CandidateRow.get('FilePath'), ShowOverrides, DefaultProfile)
+        Mf = self._RowToMediaFileForCompliance(CandidateRow)
+        Profile = self._BuildEffectiveProfileObj(EffectiveProfile, Mf.ResolutionCategory, Lookup)
+        Decision = BuildEvaluator().Evaluate(Mf, Profile, BuildRuleCache())
+        LegacyMode = self._LegacyModeFromWorkBucket(Decision.WorkBucket)
+        RefusalReason = self._LegacyRefusalReasonFromDecision(Decision)
+        CandidateRow['_RefusalReason'] = RefusalReason
+        return {'IsCompliant': Decision.IsCompliant, 'RecommendedMode': LegacyMode, 'RefusalReason': RefusalReason}
+
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
+    def _RowToMediaFileForCompliance(self, Row: Dict[str, Any]):
+        """Helper for legacy-shim callers (RecomputeForFiles row, EvaluateCandidateCompliance CandidateRow) -- build a MediaFileModel from the dict for the new engine."""
+        from Models.MediaFileModel import MediaFileModel
+        return MediaFileModel(
+            Id=Row.get('Id') or Row.get('id'),
+            FileName=Row.get('FileName') or '',
+            SizeMB=float(Row.get('SizeMB') or 0),
+            DurationMinutes=Row.get('DurationMinutes'),
+            Resolution=Row.get('Resolution'),
+            ResolutionCategory=Row.get('ResolutionCategory') or self._ResolutionCategoryFromPixels(Row.get('Resolution')),
+            Codec=Row.get('Codec'),
+            VideoBitrateKbps=Row.get('VideoBitrateKbps'),
+            AudioCodec=Row.get('AudioCodec'),
+            AudioChannels=Row.get('AudioChannels'),
+            AudioBitrateKbps=Row.get('AudioBitrateKbps'),
+            AudioComplete=Row.get('AudioComplete'),
+            AudioCorruptSuspect=Row.get('AudioCorruptSuspect') if Row.get('AudioCorruptSuspect') is not None else False,
+            ContainerFormat=Row.get('ContainerFormat'),
+            SubtitleFormats=Row.get('SubtitleFormats'),
+            AssignedProfile=Row.get('AssignedProfile'),
+            HasExplicitEnglishAudio=Row.get('HasExplicitEnglishAudio'),
+            HasForcedSubtitles=Row.get('HasForcedSubtitles'),
+            SourceIntegratedLufs=Row.get('SourceIntegratedLufs'),
+            SourceLoudnessRangeLU=Row.get('SourceLoudnessRangeLU'),
+            SourceTruePeakDbtp=Row.get('SourceTruePeakDbtp'),
+            SourceIntegratedThresholdLufs=Row.get('SourceIntegratedThresholdLufs'),
+            LoudnessMeasurementFailureReason=Row.get('LoudnessMeasurementFailureReason'),
         )
-        return {
-            'IsCompliant': IsCompliant,
-            'RecommendedMode': RecommendedMode,
-            'RefusalReason': CandidateRow.get('_RefusalReason'),
-        }
+
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
+    def _BuildEffectiveProfileObj(self, ProfileName: Optional[str], ResolutionCategory: Optional[str], Lookup: Dict[tuple, tuple]):
+        """Build the EffectiveProfile model the new engine expects from the legacy (profile-name, res-cat, lookup) trio."""
+        from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
+        if not ProfileName:
+            return None
+        Hit = Lookup.get((ProfileName, ResolutionCategory)) if ResolutionCategory else None
+        if not Hit:
+            return EffectiveProfile(ProfileName=ProfileName, TargetVideoKbps=None, TargetAudioKbps=None, TargetResolutionCategory=None)
+        Vk, Ak, Tgt = Hit
+        return EffectiveProfile(ProfileName=ProfileName, TargetVideoKbps=Vk or None, TargetAudioKbps=Ak or None, TargetResolutionCategory=Tgt or ResolutionCategory)
+
+    @staticmethod
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C14
+    def _LegacyModeFromWorkBucket(Bucket: Optional[str]) -> Optional[str]:
+        """Map new WorkBucket enum to legacy RecommendedMode -- 'Transcode'/'Remux'->same; 'AudioFixOnly'->'Quick' (legacy conflates Remux+AudioFix); 'SubtitleFixOnly'->None (no legacy routing)."""
+        if Bucket == 'Transcode':
+            return 'Transcode'
+        if Bucket == 'Remux':
+            return 'Quick'
+        if Bucket == 'AudioFixOnly':
+            return 'Quick'
+        return None
+
+    @staticmethod
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C13
+    def _LegacyRefusalReasonFromDecision(Decision) -> Optional[str]:
+        """Map ComplianceDecision to a single legacy snake_case refusal string -- gate name when blocked; first applies-reason rule name when non-compliant; None when compliant."""
+        if Decision.GateBlocked is not None:
+            GateMap = {'EnglishAudio': 'no_english_audio', 'AudioCorruptSuspect': 'audio_corrupt_suspect', 'AudioStream': 'no_audio_stream', 'LoudnessMeasurements': 'awaiting_loudness_measurement', 'ProbeMetadata': 'no_probe_metadata', 'EffectiveProfile': 'no_effective_profile', 'ResolutionCategory': 'no_resolution_category', 'ProfileThresholds': 'no_profile_thresholds'}
+            return GateMap.get(Decision.GateBlocked, Decision.GateBlocked.lower())
+        if Decision.IsCompliant is True:
+            return None
+        for R in Decision.Reasons:
+            if R.get('Outcome') == 'applies':
+                Rule = R.get('Rule', '')
+                if Rule == 'ResolutionExceedsProfileTarget':
+                    return 'downscale_needed'
+                if Rule == 'AcceptableVideoCodecsCsv':
+                    return 'video_codec_not_acceptable'
+                if Rule == 'EstimatedSavingsMBThreshold':
+                    return 'savings_exceeds_threshold'
+                if Rule == 'AcceptableContainersCsv':
+                    return 'container_not_acceptable'
+                if Rule == 'AcceptableAudioCodecsMp4Csv':
+                    return 'audio_codec_not_acceptable'
+                if Rule == 'RequireAudioNormalized':
+                    return 'audio_not_normalized'
+                if Rule == 'LoudnessOffTarget':
+                    return 'audio_not_normalized'
+                if Rule == 'SubtitleFixApplies':
+                    return 'subtitle_format_not_acceptable'
+        return 'needs_work'
 
     # ─── Marginal-savings gate (data-driven queue admission) ──────────────
     # Owns marginal-savings-gate.feature.md criteria 1-7. Two collaborators:
@@ -2042,12 +1900,10 @@ class QueueManagementBusinessService:
             Lookup = self._LoadPriorityLookupTable()
             DefaultProfile = self._LoadDefaultProfileName()
             ShowOverrides = self._LoadShowProfileOverrides()
-            # Gate config -- load once, pass through to _EvaluateCompliance per row.
-            AcceptableVideoCodecs = self.CodecCompatibilityRepo.GetAcceptableSet('VideoCodec')
-            AcceptableContainers = self.CodecCompatibilityRepo.GetAcceptableSet('Container')
-            AcceptableAudioCodecsMp4 = self.CodecCompatibilityRepo.GetAcceptableSet('AudioCodecMp4')
-            FloorCfg = self.QueueAdmissionConfigRepo.Get()
-            MinSavingsMB = FloorCfg.MinTranscodeSavingsMB
+            # directive: compliance-solid-refactor | # see compliance-solid-refactor.C12
+            from Features.Compliance.ComplianceComposition import BuildEvaluator, BuildRuleCache
+            ComplianceEval = BuildEvaluator()
+            ComplianceCache = BuildRuleCache()
 
             # AudioFix folder pins (media-tabs-and-loudness.feature.md C22).
             # Load once per call; apply per-row to PriorityScore when the file
@@ -2125,16 +1981,19 @@ class QueueManagementBusinessService:
                         SuppressFallbackWarning=True,
                     )
 
-                    # Compliance evaluation -- pre-loaded gate config keeps
-                    # this loop's DB round-trips bounded.
-                    IsCompliant, RecommendedMode = self._EvaluateCompliance(
-                        r, EffectiveProfile, Lookup,
-                        AcceptableVideoCodecs=AcceptableVideoCodecs,
-                        AcceptableContainers=AcceptableContainers,
-                        AcceptableAudioCodecsMp4=AcceptableAudioCodecsMp4,
-                        MinSavingsMB=MinSavingsMB,
-                        FloorCfg=FloorCfg,
-                    )
+                    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
+                    MfModel = self._RowToMediaFileForCompliance(r)
+                    ProfileObj = self._BuildEffectiveProfileObj(EffectiveProfile, MfModel.ResolutionCategory, Lookup)
+                    Decision = ComplianceEval.Evaluate(MfModel, ProfileObj, ComplianceCache)
+                    IsCompliant = Decision.IsCompliant
+                    RecommendedMode = self._LegacyModeFromWorkBucket(Decision.WorkBucket)
+                    WorkBucket = Decision.WorkBucket
+                    OperationsNeededCsv = ','.join(sorted(Decision.OperationsNeeded)) if Decision.OperationsNeeded else None
+                    GateBlocked = Decision.GateBlocked
+                    r['_NeedsTranscode'] = (Decision.WorkBucket == 'Transcode')
+                    r['_NeedsQuick'] = (Decision.WorkBucket in ('Remux', 'AudioFixOnly'))
+                    r['_RefusalReason'] = self._LegacyRefusalReasonFromDecision(Decision)
+                    r['_DeferReason'] = GateBlocked if GateBlocked in ('LoudnessMeasurements',) else None
 
                     # AudioFix folder-pin boost: when the cascade routes a
                     # file to 'AudioFix' AND its FilePath matches a pinned
@@ -2159,6 +2018,9 @@ class QueueManagementBusinessService:
                         bool(r.get('_NeedsQuick', False)),
                         bool(r.get('_NeedsTranscode', False)),
                         r.get('_DeferReason'),
+                        WorkBucket,
+                        OperationsNeededCsv,
+                        GateBlocked,
                     ))
 
                     # Detect probed files with no audio stream (possibly corrupt).
@@ -2190,38 +2052,9 @@ class QueueManagementBusinessService:
             if not updates:
                 return 0
 
-            # Bulk UPDATE via VALUES. Quote NULLable text fields properly. id and
-            # score are ints (validated). Booleans -> 'true'/'false'/'NULL'.
-            def _SqlText(s):
-                if s is None:
-                    return 'NULL'
-                # Escape single quotes to keep the inline VALUES safe. ProfileName
-                # comes from Profiles.ProfileName which we control, but defense in
-                # depth -- this isn't a tight loop.
-                return "'" + str(s).replace("'", "''") + "'"
-
-            def _SqlBool(b):
-                if b is None:
-                    return 'NULL'
-                return 'true' if b else 'false'
-
-            values_clause = ','.join(
-                f"({i},{_SqlText(p)},{s},{_SqlBool(ic)},{_SqlText(rm)},{_SqlBool(nq)},{_SqlBool(nt)},{_SqlText(dr)})"
-                for i, p, s, ic, rm, nq, nt, dr in updates
-            )
-            db.ExecuteNonQuery(f"""
-                UPDATE MediaFiles
-                SET AssignedProfile = v.profile,
-                    PriorityScore = v.score,
-                    IsCompliant = v.compliant::boolean,
-                    RecommendedMode = v.mode,
-                    NeedsQuick = v.needs_quick::boolean,
-                    NeedsTranscode = v.needs_transcode::boolean,
-                    AdmissionDeferReason = v.defer_reason
-                FROM (VALUES {values_clause}) AS v(id, profile, score, compliant, mode, needs_quick, needs_transcode, defer_reason)
-                WHERE MediaFiles.Id = v.id
-            """)
-            return len(updates)
+            # directive: compliance-solid-refactor | # see compliance-solid-refactor.C23
+            from Features.Compliance.Repositories.ComplianceWriteRepository import ComplianceWriteRepository
+            return ComplianceWriteRepository().BulkWriteRecomputeResults(updates)
         except Exception as Ex:
             LoggingService.LogException(
                 f"RecomputeForFiles failed for {len(MediaFileIds)} ids",
