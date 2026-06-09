@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-09
-**Status:** Active -- phase: DELIVERING
+**Status:** Closed 2026-06-09
 **Slug:** compliance-solid-refactor
 **Interrupts:** local-staging (paused at `.claude/directives/paused/2026-06-09-local-staging.md`; resume by un-pausing after this closes)
 
