@@ -6,6 +6,59 @@
 
 *Per-entry area subsection assignment deferred to follow-up directive `migrate-bugs-compliance-deep`. Consult `memory/BUG-INDEX.md` for per-bug area metadata and the operationally-correct active/resolved classification (several entries below still bear `RESOLVED`/`FIXED` annotations in their headers despite living under `## Active`; the INDEX classifies them correctly).*
 
+### [BUG-0049] `BuildAudioFilters` raises `RuntimeError` on ungainable_peak instead of emitting dynamic-mode loudnorm; violates `linear-loudnorm.feature.md` C10 + C2
+**Date:** 2026-06-09 | **Area:** audio-pipeline | **Severity:** silent contract drift; ~20% of post-compliance-backfill Remux jobs refused
+
+**What happened:** Discovered 2026-06-09 during the post-compliance-backfill Remux burst on larry-worker-1 (compliance-solid-refactor Phase 8 smoke). `~20%` of Remux failures land in the `BuildAudioFilters: ungainable peak` raise path. Investigation revealed the raise contradicts the feature doc -- `linear-loudnorm.feature.md` C10 mandates a dynamic-mode fallback when `predicted_peak > TargetTruePeak`, and C2 explicitly says "Files that would have been blocked for ungainable peak (earlier draft) are now encoded in dynamic mode instead -- see criterion 10." The code never caught up to the contract change.
+
+**Violates:**
+- `Features/LoudnessAnalysis/linear-loudnorm.feature.md` **C10**: "If `predicted_peak <= TargetTruePeak`, emits linear-mode loudnorm. Otherwise emits dynamic-mode loudnorm with the same `measured_*` params, same target loudness, same target TP, no `linear=true` flag."
+- `Features/LoudnessAnalysis/linear-loudnorm.feature.md` **C2**: "Files that would have been blocked for ungainable peak (earlier draft) are now encoded in dynamic mode instead -- see criterion 10."
+
+**Concrete evidence (attempt 33824, larry-worker-1, MediaFileId=13508 Broad City S05E07):**
+```
+CommandBuilder._BuildRemuxShape failed (JobId=135747):
+BuildAudioFilters: ungainable peak for MediaFileId=13508
+(SourceIntegratedLufs=-24.60, gain=+1.60 dB, predicted_peak=-0.60 dBTP > target_TP=-2 dBTP).
+The admission gate in QueueManagementBusinessService should have deferred this file with
+AdmissionDeferReason='ungainable_peak'. linear-loudnorm.feature.md: 'Linear or refused -- never quietly different.'
+```
+The error string still references "Linear or refused -- never quietly different" -- the prior contract that C2 + C10 replaced. The compliance engine no longer implements `AdmissionDeferReason='ungainable_peak'` (the feature was retired when the dynamic fallback became the contract).
+
+**Operator preference context:** the hearing-accessibility intent here (dialogue clarity / lower explosions) means dynamic mode is operationally correct -- compresses the loud-quiet gap, boosts dialogue relative to action peaks. The current raise refuses to normalize exactly the files that would benefit most from compression. Fixing this bug aligns runtime behavior with both the doc contract AND operator preference.
+
+**Related (file separately if you want it tracked):** `Profiles.AudioFilter` column holds a hardcoded loudnorm string for each profile, bypassing `BuildAudioFilters` entirely on the Transcode path. Violates `linear-loudnorm.feature.md` C3 ("One source of truth for loudnorm parameters"). The hardcoded string omits `measured_*` params, so FFmpeg silently runs dynamic mode on Transcodes regardless of source measurements. Fixing BUG-0049 alone preserves this divergence; a follow-up cleanup would null/drop `Profiles.AudioFilter` and route Transcode through `BuildAudioFilters` like Remux does.
+
+**Look first:** `Models/CommandBuilder.py:BuildAudioFilters` lines 567-576 (the `if not LinearOk: raise RuntimeError(...)` block); `Features/LoudnessAnalysis/linear-loudnorm.feature.md` C2 + C10 + C3 for the contract; `Tests/Contract/TestLinearLoudnormEnforcement.py` for the test surface to invert; `linear-loudnorm.flow.md` ST? for the dynamic-mode mode-tracking parser (`AudioCompletionService.DetectNormalizationMode`).
+
+**Fix shape:** (1) replace the `if not LinearOk: raise RuntimeError(...)` block with: emit the same `loudnorm=...measured_*...` filter WITHOUT the `:linear=true` suffix; log `dynamic loudnorm: gain=+X.X dB, target_LRA=Y.Y, MediaFileId=Z` so operator visibility holds; let `MediaFiles.AudioNormalizationMode='dynamic'` be set by the post-flight FileReplacement parser per C1b. (2) Update `Tests/Contract/TestLinearLoudnormEnforcement.py` to assert: ungainable-peak input now produces a successful command (not a raise) AND the command contains `loudnorm=` AND does NOT contain `:linear=true`. (3) Drop the obsolete `ungainable_peak` mention from any error string that lingers (it references a deferral path the compliance engine no longer implements).
+
+---
+
+### [BUG-0048] _BuildRemuxShape missing `-f mp4 -movflags +faststart` -- BUG-0005 regression scoped only to the Transcode dispatch; every Remux job fails return code 234
+**Date:** 2026-06-09 | **Area:** command-builder | **Severity:** show-stopper
+
+**What happened:** Discovered during the post-compliance-backfill Remux burst on larry-worker-1 (compliance-solid-refactor Phase 8 smoke). Every Remux attempt fails with FFmpeg error `Unable to choose an output format for '...mp4.inprogress'; use a standard extension for the filename or specify the format manually. ... Error opening output files: Invalid argument` -> return code 234. `_BuildRemuxShape` in `Models/CommandBuilder.py` omits the `-f mp4 -movflags +faststart` flags that `_BuildTranscodeShape` includes, so FFmpeg cannot infer the container from the `.inprogress` extension.
+
+**Violates:** `command-builder.feature.md` C6 ("`-f mp4` is always present (BUG-0005). ... Removing `-f mp4` from any code path is a test failure.") and C7 ("`-movflags +faststart` is always present").
+
+**Why it got missed:** BUG-0005 fix landed in 2026-05-18 but scoped only to the Transcode dispatch. `Scripts/RegressionTestCommandBuilder.py.check_command` asserts both `-f mp4` and `-movflags +faststart` but only loops through the Transcode dispatch (ProcessingMode='Transcode') -- it never builds a Remux command. Pre-2026-06-09 Remux volume was sub-100 jobs/day (admission gate filtered most candidates), so the defect was masked by low traffic. The compliance-solid-refactor backfill produced thousands of `WorkBucket='Remux'` rows at scale and exposed the latent failure.
+
+**Concrete evidence (attempt 33824, larry-worker-1, MediaFileId=13508 Broad City S05E07):**
+```
+ffmpeg -i "/mnt/media_tv/Broad City/Season 5/Broad City - S05E07 - Shenanigans HDTV-720p.mkv" \
+  -map 0:v:0 -map 0:a:0 -c:v copy -tag:v hvc1 -c:a eac3 -b:a 224k \
+  -af "loudnorm=I=-23:LRA=11.00:TP=-2:measured_I=-19.60:..." \
+  -y "...HDTV-720p-mv.mp4.inprogress"
+```
+FFmpeg stderr: `[AVFormatContext] Unable to choose an output format ... [out#0] Error initializing the muxer ... Invalid argument`.
+
+**Look first:** `Models/CommandBuilder.py:_BuildRemuxShape` (~line 646) for the missing flags; `Models/CommandBuilder.py:_BuildTranscodeShape` (~line 146) for the correct shape to mirror; `Scripts/RegressionTestCommandBuilder.py` for the test-coverage gap (loop the dispatch, don't fix Transcode-only).
+
+**Fix shape:** (1) add `-f mp4 -movflags +faststart` to `_BuildRemuxShape` command assembly so the output flags are uniform across shapes; (2) extend `Scripts/RegressionTestCommandBuilder.py` `check_command` invocation to loop both Transcode AND Remux dispatches against the same assertions; (3) add `Tests/Contract/TestRemuxCommandShape.py` asserting `-f mp4` + `-movflags +faststart` + output `.mp4.inprogress` for one synthetic Remux job so the regression cannot recur silently.
+
+---
+
 ### [BUG-0046] Legacy acompressor+dynamic-loudnorm chain damaged 8,249 library files; population is closed but damage is permanent
 **Date:** 2026-06-08 | **Area:** audio-pipeline
 

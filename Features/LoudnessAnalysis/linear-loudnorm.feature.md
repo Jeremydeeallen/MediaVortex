@@ -211,7 +211,13 @@ pipeline.
     rule). If `predicted_peak <= TargetTruePeak`, emits linear-mode
     loudnorm (see criterion 12). Otherwise emits dynamic-mode loudnorm
     with the same `measured_*` params, same target loudness, same
-    target TP, no `linear=true` flag. The mode actually used is
+    target TP, no `linear=true` flag. **[BUG-0049]** Current code in
+    `Models/CommandBuilder.py:BuildAudioFilters` lines 567-576 violates
+    this by raising `RuntimeError` on the ungainable case instead of
+    emitting dynamic-mode loudnorm. Verifiable when fixed: a synthetic
+    ungainable-peak MediaFile passed to `BuildAudioFilters` returns a
+    non-None filter string containing `loudnorm=` and NOT containing
+    `:linear=true`; no exception is raised. The mode actually used is
     written to `MediaFiles.AudioNormalizationMode` by FileReplacement
     after the post-replacement FFprobe, by parsing the just-run
     FFmpeg command via `AudioCompletionService.DetectNormalizationMode`

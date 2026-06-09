@@ -55,6 +55,8 @@ context this contract serves.
 
 6. **`-f mp4` is always present** (BUG-0005). FFmpeg's extension-based muxer detection reads the LAST extension (`.inprogress`) and fails without an explicit format. Verifiable: every command emitted includes the literal token sequence `-f mp4` between the codec args and the output filename. Removing `-f mp4` from any code path is a test failure.
 
+6b. **[BUG-0048]** Criterion 6 + 7 MUST hold for the Remux dispatch shape, not just Transcode. Verifiable: `Scripts/RegressionTestCommandBuilder.py` (or equivalent contract test) builds one synthetic Job with `ProcessingMode='Remux'`, runs it through `BuildFFmpegCommand`, and asserts the emitted command contains both `-f mp4` and `-movflags +faststart`. The Transcode-only assertion loop in the prior coverage is a defect; the loop must exercise every dispatch shape.
+
 7. **`-movflags +faststart` is always present** for MP4 outputs. Standard web-streaming-friendly placement. Verifiable: same shape as criterion 6.
 
 8. **Paths are normalized at the boundary** (BUG fix 2026-05-18, `_NormalizeFfmpegPath`). InputPath and OutputPath both pass through `os.path.normpath(path.strip().strip('"'))` before being quoted into the command. Result: uniform native separators on the active platform; no mixed `\` and `/` shapes. Verifiable: regex search the emitted command for `\\.*?/` (forward slash AFTER a backslash within the same quoted path) returns no matches on Windows.

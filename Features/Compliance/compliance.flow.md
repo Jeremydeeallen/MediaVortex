@@ -10,11 +10,11 @@ Composition root: `Features/Compliance/ComplianceComposition.BuildEvaluator()` -
 
 Two callers in production:
 
-1. **Worker post-flight / probe completion** -- `MediaProbeBusinessService._ExecuteProbe` calls `QueueManagementBusinessService.RecomputeForFiles([Id])` which loops MediaFileIds -> per row builds `EffectiveProfile` (via `EffectiveProfileResolver.Resolve`) -> calls `Evaluate` -> accumulates updates -> `ComplianceWriteRepository.BulkWriteRecomputeResults` dual-writes legacy + new bucket columns.
+1. **Worker post-flight / probe completion** -- `MediaProbeBusinessService._ExecuteProbe` calls `QueueManagementBusinessService.RecomputeForFiles([Id])` which loops MediaFileIds -> per row builds `EffectiveProfile` (via `EffectiveProfileResolver.Resolve`) -> calls `Evaluate` -> accumulates updates -> `ComplianceWriteRepository.BulkWriteRecomputeResults` writes the materialized columns (`WorkBucket`, `OperationsNeededCsv`, `ComplianceGateBlocked`, `ComplianceEvaluatedAt`, `AssignedProfile`, `PriorityScore`, `IsCompliant`, `AdmissionDeferReason`).
 
-2. **Pre-rename compliance gate** -- `Features/FileReplacement/ComplianceGate.Evaluate(staged_path, source_mediafile_id, ffmpeg_command)` synthesizes a `CandidateRow` dict, calls `QueueManagementBusinessService.EvaluateCandidateCompliance(CandidateRow)` which delegates to `Evaluator.Evaluate` and adapts the result to the legacy `{IsCompliant, RecommendedMode, RefusalReason}` dict shape.
+2. **Pre-rename compliance gate** -- `Features/FileReplacement/ComplianceGate.Evaluate(staged_path, source_mediafile_id, ffmpeg_command)` synthesizes a `CandidateRow` dict, calls `QueueManagementBusinessService.EvaluateCandidateCompliance(CandidateRow)` which delegates to `Evaluator.Evaluate` and adapts the result to the `{IsCompliant, WorkBucket, RefusalReason}` dict shape consumed by `ComplianceGate.Evaluate`.
 
-3. **Admin recompute** -- `POST /api/Compliance/Recompute` -> `ComplianceRecomputeService.Recompute(MediaFileIds, DryRun)` -- same per-row loop as (1) but standalone (skips the legacy column writes; only writes the new bucket columns).
+3. **Admin recompute** -- `POST /api/Compliance/Recompute` -> `ComplianceRecomputeService.Recompute(MediaFileIds, DryRun)` -- same per-row loop as (1), standalone path.
 
 ## Stages
 
@@ -27,7 +27,7 @@ Two callers in production:
 | ST5 | Apply operations | `ComplianceRuleEngine.Run(Mf, Profile, Cache)` | Iterates 4 registered `IComplianceOperation` impls (Transcode, Remux, AudioFix, SubtitleFix). For each: load rules via `Cache.GetForOperation(op.Name)`; call `op.Apply(Mf, Profile, Rules)` -> `OperationResult(Applies: bool, Reasons: List[dict])`. Collect all results. |
 | ST6 | Resolve bucket | `ComplianceBucketResolver.Resolve(OperationsNeeded: frozenset)` | Pure function. Precedence: `Transcode` > `Remux` > `AudioFixOnly` > `SubtitleFixOnly` > None. `{AudioFix, SubtitleFix}` collapses to `AudioFixOnly` (audio takes precedence). |
 | ST7 | Emit decision | `ComplianceEvaluator.Evaluate` | Build `ComplianceDecision(IsCompliant=(Bucket is None), OperationsNeeded=frozenset, WorkBucket, GateBlocked=None, Reasons=flattened-from-all-ops)`. |
-| ST8 | Persist (bulk-write path only) | `ComplianceWriteRepository.BulkWriteRecomputeResults(Updates)` | Single bulk UPDATE FROM VALUES on `MediaFiles`: writes `WorkBucket`, `OperationsNeededCsv`, `ComplianceGateBlocked`, `ComplianceEvaluatedAt = NOW()`, plus the legacy columns (`AssignedProfile`, `PriorityScore`, `IsCompliant`, `RecommendedMode`, `NeedsQuick`, `NeedsTranscode`, `AdmissionDeferReason`) in the same UPDATE so dual-write is atomic. |
+| ST8 | Persist (bulk-write path only) | `ComplianceWriteRepository.BulkWriteRecomputeResults(Updates)` | Single bulk UPDATE FROM VALUES on `MediaFiles`: writes `WorkBucket`, `OperationsNeededCsv`, `ComplianceGateBlocked`, `ComplianceEvaluatedAt = NOW()`, `AssignedProfile`, `PriorityScore`, `IsCompliant`, `AdmissionDeferReason` atomically. |
 
 ## Seams
 
@@ -38,7 +38,7 @@ Two callers in production:
 | S3 | `ST3 -> ST4` (gate verdict) | `ComplianceGateChain.Apply` returns `Optional[str]` (gate Name or None) | gate name string from a fixed vocabulary (8 values) | When non-None, evaluator short-circuits and persists `ComplianceGateBlocked = <name>` | `Tests/Contract/TestComplianceEngine.TestGates` (10 cases) |
 | S4 | `ST5` per-operation result | each `IComplianceOperation.Apply` | `OperationResult(OperationName, Applies, Reasons: List[{Rule, Operator, Actual, Threshold, Outcome}])` | Engine aggregates `OperationsNeeded` from `{r.OperationName for r in results if r.Applies}`; aggregates `Reasons` list from all results' traces | `Tests/Contract/TestComplianceEngine.TestOperations` (8 cases) |
 | S5 | `ST6 -> ST7` (bucket resolved) | `ComplianceBucketResolver.Resolve` | `Optional[str]` from `{None, 'Transcode', 'Remux', 'AudioFixOnly', 'SubtitleFixOnly'}` | `ComplianceDecision.WorkBucket` carries it; downstream UI readers `WHERE WorkBucket = '...'` | `Tests/Contract/TestComplianceEngine.TestBucketResolverPrecedence` (6 cases) |
-| S6 | `ST8` write-back | `ComplianceWriteRepository.BulkWriteRecomputeResults` | Single bulk UPDATE FROM VALUES; row tuple shape: `(Id, AssignedProfile, PriorityScore, IsCompliant, LegacyMode, NeedsQuick, NeedsTranscode, DeferReason, WorkBucket, OperationsNeededCsv, ComplianceGateBlocked)` | All MediaFiles columns updated atomically; `ComplianceEvaluatedAt = NOW()` set in the same statement | Worker probe completion triggers it; `SELECT ComplianceEvaluatedAt FROM MediaFiles WHERE Id=<id>` advances on each recompute |
+| S6 | `ST8` write-back | `ComplianceWriteRepository.BulkWriteRecomputeResults` | Single bulk UPDATE FROM VALUES; row tuple shape: `(Id, AssignedProfile, PriorityScore, IsCompliant, DeferReason, WorkBucket, OperationsNeededCsv, ComplianceGateBlocked)` | All MediaFiles columns updated atomically; `ComplianceEvaluatedAt = NOW()` set in the same statement | Worker probe completion triggers it; `SELECT ComplianceEvaluatedAt FROM MediaFiles WHERE Id=<id>` advances on each recompute |
 
 ## Failure Modes
 
