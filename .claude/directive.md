@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-07
-**Status:** Active -- phase: VERIFYING
+**Status:** Active -- phase: DELIVERING
 **Slug:** local-staging
 **Interrupts:** quality-floor-lift (paused at `.claude/directives/paused/2026-06-07-quality-floor-lift.md`; resume by un-pausing after this closes)
 **Resumed:** 2026-06-09 -- 15/17 criteria shipped on prior pass; C9 (Mode A local-VMAF dispatch) and C12 (CrashRecoveryService orphan sweep) wiring in this session
@@ -147,14 +147,13 @@ Easy-to-forget rules:
 
 ### Promotions
 
-(Populated at DELIVERING. The criteria block above promotes to a NEW `Features/TranscodeJob/local-staging.feature.md` per R13. The `transcoded-output-placement.feature.md` Default-contract paragraph gets a one-line cross-link to `local-staging.feature.md` at the same DELIVERING transition.)
-
 | Source artifact | Target file | Commit |
 |---|---|---|
-| `## Acceptance Criteria` C1-C15 | `Features/TranscodeJob/local-staging.feature.md` | TBD |
-| Stage 5 staging subsection + S2 seam update | `transcode.flow.md` | TBD |
-| One-line cross-link from default contract to opt-in override | `Features/FileReplacement/transcoded-output-placement.feature.md` | TBD |
-| `feedback_ms_nfs_client_unreliable.md` cross-link | `memory/KNOWN-ISSUES.md` | TBD |
+| `## Acceptance Criteria` C1-C17 + Workflows + Seams + Files | NEW `Features/TranscodeJob/local-staging.feature.md` | this directive close |
+| Stage 5 (`ST6`) "File staging" subsection extended with Mode A vs Mode B branches + crash-recovery sweep mention | `transcode.flow.md` | this directive close |
+| `## Seams` S2 row extended with canonical / Mode B / Mode A producer variants + `VMAF=NULL` vs populated wire-shape note | `transcode.flow.md` | this directive close |
+| One-line cross-link from default-contract paragraph to opt-in override | `Features/FileReplacement/transcoded-output-placement.feature.md` | this directive close |
+| One-line cross-link to `feedback_ms_nfs_client_unreliable.md` + pointer to `local-staging.feature.md` as the mitigation | `memory/KNOWN-ISSUES.md` (head of `## Active`) | this directive close |
 
 ### Verification
 
@@ -184,4 +183,8 @@ Easy-to-forget rules:
 
 ### Decisions Made
 
-(Populated during execution as ambiguities surface. Pre-populated decisions live in `## Engineering Calls Already Made` above.)
+- **Mode A VMAF runs lean, not through QualityTestingQueue.** `RunLocalVmafForAttempt` is its own method; it does not synthesize a queue row + claim path. Reason: the queue is the cross-worker hand-off mechanism (Mode B's reason for existing); Mode A's entire point is that the same worker did both encode and VMAF, so the queue indirection is dead weight. Lean path writes `TranscodeAttempts.VMAF` directly + lets the existing `PostTranscodeDispositionService` make the Replace/Requeue/NoReplace call from the populated score. No new QualityTestResults row is created in Mode A -- the audit lives on the TranscodeAttempts row, same as Mode B's final state.
+- **Mode A fall-through on VMAF execution failure.** If `RunLocalVmafForAttempt` itself errors (ffmpeg crash, libvmaf failure, missing local file), the branch logs the error and continues to Mode B copy-back rather than failing the attempt. Reason: the canonical `.inprogress` then lands on the shared mount and a different VMAF-capable worker can claim it. Failing-closed would surface as a stuck attempt; falling through is the safer default.
+- **Crash-recovery sweep is worker-scoped, not host-scoped.** `_SweepLocalStagingOrphans` only deletes subdirs whose in-flight TFP query for `(MediaFileId, WorkerName=self)` is empty. Reason: two workers could theoretically share a scratch dir (operator misconfig); sweeping by host would cross-delete the other worker's in-flight work. Worker-scoped is the safe shape.
+- **Non-numeric scratch-dir entries are skipped.** `HandBrakeCLI`, `LibreHardwareMonitor-net472`, `Logs`, loose files at the scratch-dir root -- all preserved. Reason: `LocalScratchDir` doubles as a general worker working-dir on I9; the sweep must not nuke unrelated content.
+- **C9 verification is unit-level + disposition-level, not full encode-loop.** The branch logic in ProcessJob is conditional + the helper is independently verified; the cost of a full end-to-end Mode A encode (5-30 min) does not buy enough additional signal over the synthetic verification to justify the wall-clock spend mid-session. Operator's production smoke is the final sign-off.

@@ -6,6 +6,8 @@
 
 *Per-entry area subsection assignment deferred to follow-up directive `migrate-bugs-compliance-deep`. Consult `memory/BUG-INDEX.md` for per-bug area metadata and the operationally-correct active/resolved classification (several entries below still bear `RESOLVED`/`FIXED` annotations in their headers despite living under `## Active`; the INDEX classifies them correctly).*
 
+**SMB-on-Windows long-handle drops** (Microsoft SMB client EINVAL on long-duration handles under GPU-paced reads -- see memory `feedback_ms_nfs_client_unreliable.md` for the diagnostic pattern) are mitigated by **per-worker local staging** -- `Features/TranscodeJob/local-staging.feature.md`. Enable on Windows + SMB workers; leave OFF on Linux NFS workers.
+
 ### [BUG-0053] `Tests/Contract/TestMediaProbeUsesPath.py` SELECTs non-column `m.FilePath` -- psycopg2 UndefinedColumn during contract suite
 **Date:** 2026-06-09 | **Area:** tests | **Severity:** test-suite collection error
 

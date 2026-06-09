@@ -6,7 +6,7 @@
 
 Standardizes where MediaVortex writes transcoded output and what it names the final file after replacement. Two changes, one feature doc, one PR -- both touch the same FileReplacement output-path logic.
 
-1. **Placement.** Every worker writes the staged transcoded file to the same directory as its source ("InPlace" / side-by-side). The `Workers.StagingDirectory` column is no longer read; the column is dropped in this feature's migration. No per-worker scratch.
+1. **Placement.** Every worker writes the staged transcoded file to the same directory as its source ("InPlace" / side-by-side), unless the per-worker `LocalStagingEnabled=TRUE` opt-in routes the encode through worker-local scratch (see `Features/TranscodeJob/local-staging.feature.md` for the override contract; copy-back ensures the canonical side-by-side write still happens before downstream consumers read). The `Workers.StagingDirectory` column is no longer read; the column is dropped in this feature's migration.
 2. **Final naming.** After successful FileReplacement the output file is named `<basename>-mv.<ext>` (e.g. `Show.mkv` source -> `Show-mv.mp4` final). The `-mv` suffix is permanent and survives.
 
 Together these fix three problems with one change:
