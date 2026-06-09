@@ -114,6 +114,8 @@ class MediaProbeBusinessService:
                 MediaFile.AudioChannelLayout = MetadataResult.get('AudioChannelLayout')
                 MediaFile.AudioCodec = MetadataResult.get('AudioCodec')
                 MediaFile.SubtitleFormats = MetadataResult.get('SubtitleFormats')
+                # directive: compliance-solid-refactor | # see compliance-solid-refactor.C5b
+                MediaFile.HasForcedSubtitles = MetadataResult.get('HasForcedSubtitles')
                 MediaFile.ContainerFormat = MetadataResult.get('ContainerFormat')
                 MediaFile.OverallBitrate = MetadataResult.get('OverallBitrate')
                 MediaFile.AudioLanguages = MetadataResult.get('AudioLanguages')

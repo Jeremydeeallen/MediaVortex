@@ -54,6 +54,7 @@ class FFmpegAnalysisModel:
     # Subtitle Information
     Subtitles: Optional[str] = None
     SubtitleFormats: Optional[str] = None
+    HasForcedSubtitles: Optional[bool] = None
     
     # Metadata Information
     Title: Optional[str] = None
@@ -133,7 +134,8 @@ class FFmpegAnalysisModel:
             'HasExplicitEnglishAudio': self.HasExplicitEnglishAudio,
             'AudioStreamIndex': self.AudioStreamIndex,
             'SubtitleStreamIndex': self.SubtitleStreamIndex,
-            'SubtitleCodec': self.SubtitleCodec
+            'SubtitleCodec': self.SubtitleCodec,
+            'HasForcedSubtitles': self.HasForcedSubtitles,
         }
     
     @classmethod

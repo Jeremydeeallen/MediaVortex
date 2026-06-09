@@ -284,6 +284,8 @@ class FFmpegAnalysisService:
             if SubtitleStreams:
                 SubtitleLanguages = []
                 SubtitleCodecs = []
+                # directive: compliance-solid-refactor | # see compliance-solid-refactor.C5b
+                AnyForced = False
                 for SubStream in SubtitleStreams:
                     Language = SubStream.get('tags', {}).get('language')
                     if Language:
@@ -291,10 +293,16 @@ class FFmpegAnalysisService:
                     CodecName = SubStream.get('codec_name', '')
                     if CodecName and CodecName not in SubtitleCodecs:
                         SubtitleCodecs.append(CodecName)
+                    if int(SubStream.get('disposition', {}).get('forced', 0) or 0) == 1:
+                        AnyForced = True
                 if SubtitleLanguages:
                     AnalysisModel.Subtitles = ', '.join(SubtitleLanguages)
                 if SubtitleCodecs:
                     AnalysisModel.SubtitleFormats = ','.join(SubtitleCodecs)
+                AnalysisModel.HasForcedSubtitles = AnyForced
+            else:
+                # directive: compliance-solid-refactor | # see compliance-solid-refactor.C5b
+                AnalysisModel.HasForcedSubtitles = False
 
                 # Select preferred subtitle stream for potential SubtitleFix
                 SelectedSubStream, SubStreamIndex, _ = self.SelectPreferredSubtitleStream(SubtitleStreams)

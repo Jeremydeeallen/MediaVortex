@@ -179,23 +179,26 @@ class MediaProbeRepository(BaseRepository):
 
     # ─── Update Methods ────────────────────────────────────────────────
 
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C5b
     def UpdateMetadata(self, MediaFile: MediaFileModel):
         """Update only the metadata columns and failure tracking for a media file."""
         try:
-            Query = """UPDATE MediaFiles SET
-                        VideoBitrateKbps = %s, AudioBitrateKbps = %s, Resolution = %s,
-                        Codec = %s, DurationMinutes = %s, FrameRate = %s,
-                        TotalFrames = %s, CodecProfile = %s, ColorRange = %s,
-                        FieldOrder = %s, HasBFrames = %s, RefFrames = %s,
-                        PixelFormat = %s, Level = %s, AudioChannels = %s,
-                        AudioSampleRate = %s, AudioSampleFormat = %s, AudioChannelLayout = %s,
-                        AudioCodec = %s, SubtitleFormats = %s, ContainerFormat = %s,
-                        OverallBitrate = %s, AudioLanguages = %s, HasExplicitEnglishAudio = %s,
-                        ResolutionCategory = %s,
-                        FFprobeFailureCount = %s,
-                        LastFFprobeError = %s, LastFFprobeAttemptDate = %s,
-                        NeedsReprobe = COALESCE(%s, FALSE)
-                       WHERE Id = %s"""
+            Query = (
+                "UPDATE MediaFiles SET "
+                "VideoBitrateKbps = %s, AudioBitrateKbps = %s, Resolution = %s, "
+                "Codec = %s, DurationMinutes = %s, FrameRate = %s, "
+                "TotalFrames = %s, CodecProfile = %s, ColorRange = %s, "
+                "FieldOrder = %s, HasBFrames = %s, RefFrames = %s, "
+                "PixelFormat = %s, Level = %s, AudioChannels = %s, "
+                "AudioSampleRate = %s, AudioSampleFormat = %s, AudioChannelLayout = %s, "
+                "AudioCodec = %s, SubtitleFormats = %s, HasForcedSubtitles = %s, ContainerFormat = %s, "
+                "OverallBitrate = %s, AudioLanguages = %s, HasExplicitEnglishAudio = %s, "
+                "ResolutionCategory = %s, "
+                "FFprobeFailureCount = %s, "
+                "LastFFprobeError = %s, LastFFprobeAttemptDate = %s, "
+                "NeedsReprobe = COALESCE(%s, FALSE) "
+                "WHERE Id = %s"
+            )
             Params = (
                 MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
                 MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate,
@@ -203,7 +206,7 @@ class MediaProbeRepository(BaseRepository):
                 MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames,
                 MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels,
                 MediaFile.AudioSampleRate, MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout,
-                MediaFile.AudioCodec, MediaFile.SubtitleFormats, MediaFile.ContainerFormat,
+                MediaFile.AudioCodec, MediaFile.SubtitleFormats, MediaFile.HasForcedSubtitles, MediaFile.ContainerFormat,
                 MediaFile.OverallBitrate, MediaFile.AudioLanguages, MediaFile.HasExplicitEnglishAudio,
                 MediaFile.ResolutionCategory,
                 MediaFile.FFprobeFailureCount,
