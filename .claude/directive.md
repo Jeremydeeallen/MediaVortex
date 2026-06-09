@@ -1,9 +1,10 @@
 # Current Directive
 
 **Set:** 2026-06-07
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: VERIFYING
 **Slug:** local-staging
 **Interrupts:** quality-floor-lift (paused at `.claude/directives/paused/2026-06-07-quality-floor-lift.md`; resume by un-pausing after this closes)
+**Resumed:** 2026-06-09 -- 15/17 criteria shipped on prior pass; C9 (Mode A local-VMAF dispatch) and C12 (CrashRecoveryService orphan sweep) wiring in this session
 
 ## Outcome
 
@@ -157,7 +158,29 @@ Easy-to-forget rules:
 
 ### Verification
 
-(Populated at VERIFYING; one entry per acceptance criterion.)
+| ID | Criterion | Status | Evidence |
+|---|---|---|---|
+| C1 | Schema migration idempotent | PASS | `Scripts/SQLScripts/AddLocalStagingColumns.py` exists; re-run is no-op (verified prior pass, commit `c8f1790`). |
+| C2 | Post-migration default OFF | PASS | `SELECT COUNT(*) FILTER (WHERE LocalStagingEnabled=TRUE) FROM Workers` returned 1 -- I9-2024 only, which was explicitly enabled by operator. All other workers FALSE. |
+| C3 | LocalStagingService SRP, no cache | PASS | `Features/TranscodeJob/LocalStagingService.py` exists; `grep -n 'self._cached' Features/TranscodeJob/LocalStagingService.py` returns 0; class composes WorkersRepository + DatabaseService, no inheritance. |
+| C4 | ShouldStage delegation | PASS | `ProcessTranscodeQueueService.py:1182` calls `Staging.ShouldStage`; `grep -n 'shutil.copy' Features/TranscodeJob/ProcessTranscodeQueueService.py` returns 0. |
+| C5 | 3-condition ShouldStage gate + fresh DB read | PASS | `Tests/Contract/TestLocalStaging.py` -- 16/16 pass; covers truth table + mid-test UPDATE honoring. |
+| C6 | Backplane NFS workers untouched | PASS | Operator-verified -- wakko / dot Status = Online, LocalStagingEnabled = FALSE post-migration. |
+| C7 | Local-path routing through ffmpeg | PASS | `ProcessTranscodeQueueService.py:438, :2023` wire LocalSrcPath / LocalOutPath into TemporaryFilePaths; live since 2026-06-08 (Mune Guardian, I9-2024). |
+| C8 | One-knob-per-attempt | PASS | Code review -- staging only changes `-i` argument + output `.inprogress` path; codec / bitrate / scale / audio / loudnorm / pix_fmt arguments are emitted from the same `CommandBuilder` branch regardless of staging. |
+| C9 | Mode A local-VMAF-first | PASS | Synthetic verification 2026-06-09: `QualityTestingBusinessService.RunLocalVmafForAttempt(33882, modea_src.mp4, modea_out.mp4)` returned `{Success: True, VMAFScore: 50.0965593125}`; `TranscodeAttempts.VMAF` persisted; `PostTranscodeDispositionService.DecidePostTranscodeDisposition(33882)` returned `Requeue / VmafBelowMin` against MinThreshold=84.0. ProcessJob branch verified by code-read -- `SkipModeBCopyBack=True` suppresses Mode B copy-back when score < min, suppressing canonical `.inprogress` and FileReplacement. |
+| C10 | Mode B cross-worker VMAF hand-off | PASS | Live since 2026-06-08, Mune Guardian on I9-2024 (operator-confirmed prior session). |
+| C11 | Cleanup on attempt-finalize | PASS | `ProcessTranscodeQueueService.py:1678, :2081` wire `_CleanupLocalScratchForAttempt` -> `LocalStagingService.CleanupJobScratchDir`; idempotent via `shutil.rmtree(ignore_errors=True)`. |
+| C12 | CrashRecoveryService orphan sweep | PASS | Synthetic verification 2026-06-09: dropped `C:\MediaVortex\999999999\dummy.txt` orphan + 7 real prior-session orphans existed; `CrashRecoveryService(WorkerName='I9-2024')._SweepLocalStagingOrphans()` returned 8; all 8 numeric subdirs deleted, 3 non-numeric (HandBrakeCLI, LibreHardwareMonitor-net472, Logs) + 1 loose file preserved. Per-worker scoped via `WHERE ta.WorkerName = self.WorkerName`. |
+| C13 | /Activity worker modal LocalStaging section | PASS | Live since `41ee4b2`; operator-confirmed GUI surface. |
+| C14 | Worker-tile compact rendering | PASS | Live since `41ee4b2`; operator-confirmed GUI surface. |
+| C15 | transcode.flow.md Stage 5 staging subsection + log line | PASS | Promoted to flow doc at `41ee4b2`; log field `StagedFromCanonical` emitted at `ProcessTranscodeQueueService.py:483-490`. |
+| C16 | /settings MinSizeMB card | PASS | Live since `e84edbe`; operator-tunable end-to-end (verified by re-flow through `LocalStagingConfigRepository.Get()` per call -- db-is-authority). |
+| C17 | LocalStagingConfigRepository sole emitter | PASS | `grep -rn 'LocalStagingConfig' --include='*.py'` outside repo file returns only call-site references via `LocalStagingConfigRepository().Get()`. |
+
+**Restored after C9 / C12 synthetic verifications:** `PostTranscodeGateConfig.QualityTestEnabled` -> FALSE (prior state); synthetic `TranscodeAttempt` 33882 deleted; `modea_src.mp4` / `modea_out.mp4` deleted.
+
+**Side effect noted, not a defect:** C12 sweep cleaned 7 real orphans from prior sessions during synthetic verification (`MediaFileId` 21679, 604850, 61242, 61362, 619064, 622057, 621000). The 619064 dir was Mune Guardian leftover. This is the function operating correctly under live conditions.
 
 ### Decisions Made
 
