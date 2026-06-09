@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-07
-**Status:** Active -- phase: DELIVERING
+**Status:** Closed -- 2026-06-09 (C9 + C12 wired this session; full delivery; promotions landed)
 **Slug:** local-staging
 **Interrupts:** quality-floor-lift (paused at `.claude/directives/paused/2026-06-07-quality-floor-lift.md`; resume by un-pausing after this closes)
 **Resumed:** 2026-06-09 -- 15/17 criteria shipped on prior pass; C9 (Mode A local-VMAF dispatch) and C12 (CrashRecoveryService orphan sweep) wiring in this session
