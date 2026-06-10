@@ -429,37 +429,56 @@ class WorkerServiceApp:
         except Exception as e:
             LoggingService.LogException("Error stopping quality test capability", e, "WorkerService", "_StopQualityTestCapability")
 
+    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C16
     def _StartRemuxCapability(self):
-        """Initialize and start the remux processing capability."""
+        """Initialize the remux processing capability via WorkerLoopService (replaces ProcessRemuxQueueService -- closes BUG-0051)."""
         if self.RemuxService is not None:
             return
         try:
-            from Features.TranscodeJob.ProcessRemuxQueueService import ProcessRemuxQueueService
-            self.RemuxService = ProcessRemuxQueueService(
+            from Features.TranscodeJob.Worker.WorkerLoopService import WorkerLoopService
+            from Features.TranscodeJob.Worker.JobProcessorRegistry import JobProcessorRegistry
+            from Features.TranscodeJob.Worker.RemuxJobProcessor import RemuxJobProcessor
+            from Features.TranscodeJob.ProcessTranscodeQueueService import ProcessTranscodeQueueService
+            QueueService = ProcessTranscodeQueueService(
                 DatabaseManagerInstance=self.DatabaseManager,
                 WorkerName=self.WorkerName,
-                WorkerConfig=self.WorkerConfig
+                WorkerConfig=self.WorkerConfig,
             )
+            Registry = JobProcessorRegistry({
+                'Remux': RemuxJobProcessor(QueueService),
+                'Quick': RemuxJobProcessor(QueueService),
+                'AudioFix': RemuxJobProcessor(QueueService),
+            })
             MaxJobs = self.CurrentRemuxConcurrency
-            Result = self.RemuxService.Run(MaxConcurrentJobs=MaxJobs)
+            self.RemuxService = WorkerLoopService(
+                DatabaseManager=self.DatabaseManager,
+                JobProcessorRegistryInstance=Registry,
+                WorkerName=self.WorkerName,
+                TranscodeEnabled=False,
+                RemuxEnabled=True,
+                MaxConcurrentTranscodeJobs=0,
+                MaxConcurrentRemuxJobs=MaxJobs,
+            )
+            Result = self.RemuxService.Run()
             if Result.get("Success", False):
-                LoggingService.LogInfo(f"Remux capability started ({MaxJobs} concurrent jobs)", "WorkerService", "_StartRemuxCapability")
+                LoggingService.LogInfo(f"Remux capability started via WorkerLoopService ({MaxJobs} concurrent jobs)", "WorkerService", "_StartRemuxCapability")
             else:
                 LoggingService.LogError(f"Failed to start remux: {Result.get('ErrorMessage', 'Unknown')}", "WorkerService", "_StartRemuxCapability")
         except Exception as e:
             LoggingService.LogException("Error starting remux capability", e, "WorkerService", "_StartRemuxCapability")
 
+    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C16
     def _StopRemuxCapability(self):
-        """Stop the remux processing capability gracefully."""
+        """Stop the remux processing capability gracefully (WorkerLoopService Stop API)."""
         if self.RemuxService is None:
             return
         try:
-            LoggingService.LogInfo("Stopping remux capability...", "WorkerService", "_StopRemuxCapability")
-            self.RemuxService.StopRequested = True
+            LoggingService.LogInfo("Stopping remux capability (WorkerLoopService)...", "WorkerService", "_StopRemuxCapability")
+            self.RemuxService.Stop()
             if self.RemuxService.ProcessingThread and self.RemuxService.ProcessingThread.is_alive():
                 self.RemuxService.ProcessingThread.join(timeout=300)
             self.RemuxService.IsProcessing = False
-            self.RemuxService.ActiveJobs.clear()
+            self.RemuxService.ActiveRemuxJobs.clear()
             self.RemuxService = None
             LoggingService.LogInfo("Remux capability stopped", "WorkerService", "_StopRemuxCapability")
         except Exception as e:

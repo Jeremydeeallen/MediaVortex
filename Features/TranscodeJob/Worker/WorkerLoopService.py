@@ -1,0 +1,135 @@
+import threading
+import time
+from typing import Dict, Any, Optional
+from Core.Logging.LoggingService import LoggingService
+from Features.TranscodeJob.Worker.JobProcessorRegistry import JobProcessorRegistry
+
+
+# directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+class WorkerLoopService:
+    """Unified worker loop service; polls Transcode + Remux queues per worker capabilities and dispatches via JobProcessorRegistry. Replaces the dual ProcessTranscodeQueueService / ProcessRemuxQueueService poller pair."""
+
+    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    def __init__(self, DatabaseManager, JobProcessorRegistryInstance: JobProcessorRegistry, WorkerName: str,
+                 TranscodeEnabled: bool, RemuxEnabled: bool, AcceptsInterlaced: bool = True,
+                 MaxConcurrentTranscodeJobs: int = 1, MaxConcurrentRemuxJobs: int = 2):
+        """Inject DB + registry + worker capability + concurrency knobs."""
+        self.DatabaseManager = DatabaseManager
+        self.JobProcessorRegistry = JobProcessorRegistryInstance
+        self.WorkerName = WorkerName
+        self.TranscodeEnabled = TranscodeEnabled
+        self.RemuxEnabled = RemuxEnabled
+        self.AcceptsInterlaced = AcceptsInterlaced
+        self.MaxConcurrentTranscodeJobs = MaxConcurrentTranscodeJobs
+        self.MaxConcurrentRemuxJobs = MaxConcurrentRemuxJobs
+        self.ActiveTranscodeJobs = []
+        self.ActiveRemuxJobs = []
+        self.IsProcessing = False
+        self.StopRequested = False
+        self.ProcessingThread = None
+
+    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    def Run(self) -> Dict[str, Any]:
+        """Start the unified processing loop on a daemon thread."""
+        try:
+            if self.IsProcessing:
+                return {"Success": False, "ErrorMessage": "WorkerLoopService is already running"}
+            self.StopRequested = False
+            self.IsProcessing = True
+            self.ProcessingThread = threading.Thread(target=self.ProcessQueueLoop, daemon=True)
+            self.ProcessingThread.start()
+            LoggingService.LogInfo(f"WorkerLoopService started (Transcode={self.TranscodeEnabled}, Remux={self.RemuxEnabled})", "WorkerLoopService", "Run")
+            return {"Success": True, "Message": "WorkerLoopService running"}
+        except Exception as Ex:
+            self.IsProcessing = False
+            LoggingService.LogException("Failed to start WorkerLoopService", Ex, "WorkerLoopService", "Run")
+            return {"Success": False, "ErrorMessage": str(Ex)}
+
+    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    def Stop(self) -> Dict[str, Any]:
+        """Signal the loop to stop on the next tick; wait for in-flight jobs to drain."""
+        try:
+            self.StopRequested = True
+            LoggingService.LogInfo("WorkerLoopService stop requested", "WorkerLoopService", "Stop")
+            return {"Success": True, "Message": "Stop signal sent"}
+        except Exception as Ex:
+            LoggingService.LogException("Failed to stop WorkerLoopService", Ex, "WorkerLoopService", "Stop")
+            return {"Success": False, "ErrorMessage": str(Ex)}
+
+    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    def GetStatus(self) -> Dict[str, Any]:
+        """Return current loop status + active job counts."""
+        return {
+            "Success": True,
+            "IsProcessing": self.IsProcessing,
+            "TranscodeEnabled": self.TranscodeEnabled,
+            "RemuxEnabled": self.RemuxEnabled,
+            "ActiveTranscodeJobs": len([T for T in self.ActiveTranscodeJobs if T.is_alive()]),
+            "ActiveRemuxJobs": len([T for T in self.ActiveRemuxJobs if T.is_alive()]),
+        }
+
+    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    def ProcessQueueLoop(self):
+        """Main loop: alternates between Transcode + Remux claim queries per worker capability."""
+        try:
+            LoggingService.LogInfo("WorkerLoopService.ProcessQueueLoop entering", "WorkerLoopService", "ProcessQueueLoop")
+            while not self.StopRequested:
+                ClaimedAny = False
+                if self.TranscodeEnabled and len([T for T in self.ActiveTranscodeJobs if T.is_alive()]) < self.MaxConcurrentTranscodeJobs:
+                    Job = self._ClaimTranscodeJob()
+                    if Job:
+                        Thread = threading.Thread(target=self._DispatchJob, args=(Job,), daemon=True)
+                        Thread.start()
+                        self.ActiveTranscodeJobs.append(Thread)
+                        ClaimedAny = True
+                if self.RemuxEnabled and len([T for T in self.ActiveRemuxJobs if T.is_alive()]) < self.MaxConcurrentRemuxJobs:
+                    Job = self._ClaimRemuxJob()
+                    if Job:
+                        Thread = threading.Thread(target=self._DispatchJob, args=(Job,), daemon=True)
+                        Thread.start()
+                        self.ActiveRemuxJobs.append(Thread)
+                        ClaimedAny = True
+                if not ClaimedAny:
+                    time.sleep(2)
+                self.ActiveTranscodeJobs = [T for T in self.ActiveTranscodeJobs if T.is_alive()]
+                self.ActiveRemuxJobs = [T for T in self.ActiveRemuxJobs if T.is_alive()]
+            for T in self.ActiveTranscodeJobs + self.ActiveRemuxJobs:
+                if T.is_alive():
+                    T.join(timeout=300)
+            LoggingService.LogInfo("WorkerLoopService.ProcessQueueLoop exiting", "WorkerLoopService", "ProcessQueueLoop")
+        except Exception as Ex:
+            LoggingService.LogException("Exception in WorkerLoopService loop", Ex, "WorkerLoopService", "ProcessQueueLoop")
+        finally:
+            self.IsProcessing = False
+
+    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    def _ClaimTranscodeJob(self):
+        """Claim the next pending Transcode job via TranscodeQueueRepository."""
+        try:
+            return self.DatabaseManager.ClaimNextPendingTranscodeJob(self.WorkerName, AcceptsInterlaced=self.AcceptsInterlaced)
+        except Exception as Ex:
+            LoggingService.LogException("Failed to claim Transcode job", Ex, "WorkerLoopService", "_ClaimTranscodeJob")
+            return None
+
+    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    def _ClaimRemuxJob(self):
+        """Claim the next pending Remux job via TranscodeQueueRepository."""
+        try:
+            return self.DatabaseManager.ClaimNextPendingRemuxJob(self.WorkerName)
+        except Exception as Ex:
+            LoggingService.LogException("Failed to claim Remux job", Ex, "WorkerLoopService", "_ClaimRemuxJob")
+            return None
+
+    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    def _DispatchJob(self, Job):
+        """Look up the JobProcessor for Job.ProcessingMode and run it."""
+        try:
+            Mode = getattr(Job, 'ProcessingMode', None) or 'Transcode'
+            if getattr(Job, 'IsTestMode', False):
+                Mode = 'TestVariant'
+            Processor = self.JobProcessorRegistry.Get(Mode)
+            Processor.Process(Job)
+        except KeyError as KeyEx:
+            LoggingService.LogError(f"No JobProcessor registered for ProcessingMode={Mode!r} (Job.Id={getattr(Job, 'Id', None)})", "WorkerLoopService", "_DispatchJob")
+        except Exception as Ex:
+            LoggingService.LogException(f"_DispatchJob failed for Job.Id={getattr(Job, 'Id', None)}", Ex, "WorkerLoopService", "_DispatchJob")

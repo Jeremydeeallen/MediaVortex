@@ -56,18 +56,18 @@ class TestQualityTestLoopStopsOnStopRequested(unittest.TestCase):
         self.assertTrue(Exited, f"QualityTest loop did not exit within {_STOP_RESPONSE_BUDGET_SEC}s of StopRequested=True")
 
 
+# directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C17
 class TestRemuxLoopStopsOnStopRequested(unittest.TestCase):
+    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C17
     def test_stop_request_exits_loop(self):
-        from Features.TranscodeJob.ProcessRemuxQueueService import ProcessRemuxQueueService
-        Svc = ProcessRemuxQueueService.__new__(ProcessRemuxQueueService)
-        Svc.IsProcessing = True
-        Svc.MaxConcurrentJobs = 1
-        Svc.ActiveJobs = []
-        Svc.StopRequested = False
-        Svc.GetNextJob = lambda: None
-        Svc.ProcessJob = lambda Job: None
+        from Features.TranscodeJob.Worker.WorkerLoopService import WorkerLoopService
+        from unittest.mock import MagicMock
+        Db = MagicMock()
+        Db.ClaimNextPendingRemuxJob.return_value = None
+        Registry = MagicMock()
+        Svc = WorkerLoopService(DatabaseManager=Db, JobProcessorRegistryInstance=Registry, WorkerName="test", TranscodeEnabled=False, RemuxEnabled=True)
         Exited = _RunLoopAndStop(Svc.ProcessQueueLoop, lambda: setattr(Svc, "StopRequested", True))
-        self.assertTrue(Exited, f"Remux loop did not exit within {_STOP_RESPONSE_BUDGET_SEC}s of StopRequested=True")
+        self.assertTrue(Exited, f"WorkerLoopService Remux loop did not exit within {_STOP_RESPONSE_BUDGET_SEC}s of StopRequested=True")
 
 
 class TestScanStopScanningFlipsStopRequested(unittest.TestCase):
