@@ -10,7 +10,6 @@ from Core.Models.MediaFileModel import MediaFileModel
 from Core.Models.TranscodeAttemptModel import TranscodeAttemptModel
 from Core.Models.TranscodeFileModel import TranscodeFileModel
 from Repositories.DatabaseManager import DatabaseManager
-from Models.CommandBuilder import CommandBuilder
 from Features.TranscodeJob.Emit.EncodeShapeRegistry import EncodeShapeRegistry
 from Features.TranscodeJob.Emit.TranscodeShape import TranscodeShape
 from Features.TranscodeJob.Emit.RemuxShape import RemuxShape
@@ -49,7 +48,6 @@ class ProcessTranscodeQueueService:
 
     # directive: nvenc-rate-anchored-remediation
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
-                 CommandBuilderInstance: CommandBuilder = None,
                  VideoTranscodingInstance: VideoTranscodingService = None,
                  QueueManagementInstance: QueueManagementService = None,
                  DispositionDispatcherInstance: DispositionDispatcher = None,

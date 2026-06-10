@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from Models.CommandBuilder import CommandBuilder
+from Features.TranscodeJob.Emit.AudioFilterBuilder import AudioFilterBuilder
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -41,8 +41,7 @@ class TestLinearLoudnormEnforcement(unittest.TestCase):
             SourceTruePeakDbtp=-8.0,
             SourceIntegratedThresholdLufs=-30.0,
         )
-        Cb = CommandBuilder()
-        Filter = Cb.BuildAudioFilters(Mf)
+        Filter = AudioFilterBuilder().Build(Mf)
         if Filter is None:
             self.skipTest("AudioNormalizationEnabled is off in SystemSettings")
         self.assertIn('loudnorm=', Filter)
@@ -59,9 +58,8 @@ class TestLinearLoudnormEnforcement(unittest.TestCase):
             SourceTruePeakDbtp=-3.0,
             SourceIntegratedThresholdLufs=-40.0,
         )
-        Cb = CommandBuilder()
         try:
-            Result = Cb.BuildAudioFilters(Mf)
+            Result = AudioFilterBuilder().Build(Mf)
         except RuntimeError as Ex:
             Message = str(Ex)
             self.assertIn('ungainable_peak', Message)
