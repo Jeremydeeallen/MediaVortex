@@ -117,9 +117,11 @@ class QueueManagementBusinessService:
             successfullyTranscodedPaths = {R.get('FilePath', '') for R in _SuccessRows}
             LoggingService.LogInfo(f"Found {len(successfullyTranscodedPaths)} already successfully transcoded files", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
 
-            # Import adaptive quality service for VMAF-based retranscode checks
-            from Services.AdaptiveQualityService import AdaptiveQualityService
-            adaptiveService = AdaptiveQualityService(self.DatabaseManager)
+            # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C10
+            from Features.QualityTesting.Disposition.RetranscodeDecider import RetranscodeDecider
+            from Features.TranscodeJob.Adjustments.AdjustmentRegistry import AdjustmentRegistry
+            retranscodeDecider = RetranscodeDecider(AttemptRepository=self.DatabaseManager)
+            adjustmentRegistry = AdjustmentRegistry()
 
             itemsAdded = 0
             itemsSkipped = 0
@@ -141,7 +143,7 @@ class QueueManagementBusinessService:
                 # Check if file was previously transcoded - if so, check VMAF for retranscode decision
                 if mediaFile.FilePath in successfullyTranscodedPaths:
                     # Check if file should be retranscoded based on VMAF
-                    shouldRetranscode, previousAttempt = adaptiveService.ShouldRetranscode(mediaFile.Id)
+                    shouldRetranscode, previousAttempt = retranscodeDecider.Decide(mediaFile.Id)
 
                     if not shouldRetranscode:
                         # VMAF >= 80, quality already acceptable - skip retranscode
@@ -157,7 +159,10 @@ class QueueManagementBusinessService:
 
                         if previousCRF and vmafScore is not None and vmafScore < 80:
                             # Calculate what the adjusted CRF would be
-                            adjustedCRF = adaptiveService.CalculateAdjustedCRF(previousCRF, vmafScore)
+                            adjustedCRF = adjustmentRegistry.Get('cq').Calculate(
+                                PreviousAttempt={'Quality': previousCRF, 'VMAF': vmafScore},
+                                ProfileSettings={}, GateThreshold=80.0,
+                            ).CRF
 
                             # Validate adjustment
                             minCRF = 15
@@ -2073,10 +2078,12 @@ class QueueManagementBusinessService:
             else:
                 LoggingService.LogWarning(f"Force adding {mediaFile.FileName} to queue (admission gate overridden)", "QueueManagementBusinessService", "AddJobToQueue")
 
-            # Check for previous attempts and validate CRF adjustment
-            from Services.AdaptiveQualityService import AdaptiveQualityService
-            adaptiveService = AdaptiveQualityService(self.DatabaseManager)
-            shouldRetranscode, previousAttempt = adaptiveService.ShouldRetranscode(mediaFile.Id)
+            # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C10
+            from Features.QualityTesting.Disposition.RetranscodeDecider import RetranscodeDecider
+            from Features.TranscodeJob.Adjustments.AdjustmentRegistry import AdjustmentRegistry
+            retranscodeDecider = RetranscodeDecider(AttemptRepository=self.DatabaseManager)
+            adjustmentRegistry = AdjustmentRegistry()
+            shouldRetranscode, previousAttempt = retranscodeDecider.Decide(mediaFile.Id)
 
             if not shouldRetranscode:
                 # VMAF >= 80, quality already acceptable - skip retranscode
@@ -2096,7 +2103,10 @@ class QueueManagementBusinessService:
 
                 if previousCRF and vmafScore is not None and vmafScore < 80:
                     # Calculate what the adjusted CRF would be
-                    adjustedCRF = adaptiveService.CalculateAdjustedCRF(previousCRF, vmafScore)
+                    adjustedCRF = adjustmentRegistry.Get('cq').Calculate(
+                        PreviousAttempt={'Quality': previousCRF, 'VMAF': vmafScore},
+                        ProfileSettings={}, GateThreshold=80.0,
+                    ).CRF
 
                     # Validate adjustment
                     minCRF = 15
