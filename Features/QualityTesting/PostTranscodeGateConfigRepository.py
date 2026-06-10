@@ -15,11 +15,9 @@ class PostTranscodeGateConfigRepository(BaseRepository):
     def Get(self) -> PostTranscodeGateConfigModel:
         try:
             Rows = self.ExecuteQuery(
-                """
-                SELECT Id, VmafAutoReplaceMinThreshold, VmafAutoReplaceMaxThreshold,
-                       WhenVmafUnavailable, QualityTestEnabled, LastUpdated
-                FROM PostTranscodeGateConfig WHERE Id = 1
-                """
+                "SELECT Id, VmafAutoReplaceMinThreshold, VmafAutoReplaceMaxThreshold, "
+                "WhenVmafUnavailable, QualityTestEnabled, MaxRequeueAttempts, LastUpdated "
+                "FROM PostTranscodeGateConfig WHERE Id = 1"
             )
             if not Rows:
                 LoggingService.LogWarning(
@@ -35,6 +33,7 @@ class PostTranscodeGateConfigRepository(BaseRepository):
                 VmafAutoReplaceMaxThreshold=float(R['VmafAutoReplaceMaxThreshold']),
                 WhenVmafUnavailable=R['WhenVmafUnavailable'],
                 QualityTestEnabled=bool(R['QualityTestEnabled']),
+                MaxRequeueAttempts=int(R['MaxRequeueAttempts']),
                 LastUpdated=R.get('LastUpdated'),
             )
         except Exception as Ex:
