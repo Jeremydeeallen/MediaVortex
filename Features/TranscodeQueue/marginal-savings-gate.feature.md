@@ -22,6 +22,8 @@ Operator dogfood (2026-05-10). Operator wanted to use `AV1 P4 FG6 >720p` to comp
 
 2. A queue-admission attempt where the source resolution is **less than** the target resolution (upscale) is **blocked** regardless of estimated savings. Verifiable: assign a profile that targets `1080p` to a `480p` file, run populate, observe no `TranscodeQueue` row created and a log entry naming the source/target resolutions.
 
+2b. Criterion 2 MUST hold for every `(source, target)` pair where source < target -- 480p->720p, 480p->1080p, 720p->1080p, 480p->2160p, 720p->2160p, 1080p->2160p -- not just the 480p->1080p path. The upscale gate uses `ProfileRepository.GetProfileMaxTarget(ProfileName)` (max rank across all the profile's `TranscodeDownTo` values, ignoring blank / 'No downscaling') rather than the per-source-row's `TranscodeDownTo`, which collapses to source when the row is blank. Verifiable: `py -m pytest Tests/Contract/TestUpscaleBlockEnforcement.py` iterates the Cartesian product and asserts every upscale pair is blocked with reason starting `Upscale`.
+
 3. A queue-admission attempt where the estimated savings is **less than** `SystemSettings('MinTranscodeSavingsMB')` is **blocked** with reason `MarginalSavings`. Verifiable: pick a file whose source size is small enough that bitrate-based estimation projects savings below the configured threshold, run populate, observe no queue row and a log entry that names the source MB, target MB, savings MB, and threshold MB.
 
 4. A queue-admission attempt where the source resolution is **greater than** the target resolution and savings are sufficient is **admitted as `Mode='Transcode'`**. Verifiable: 1080p source + `>480p` profile, populate, observe queue row with `Mode='Transcode'`.

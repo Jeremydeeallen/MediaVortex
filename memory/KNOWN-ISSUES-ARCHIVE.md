@@ -849,3 +849,14 @@ Observed: Bachelor in Paradise S10E01 was successfully transcoded earlier today,
 
 ---
 
+### [BUG-0054] Upscale block misses 480p->720p step -- 720p profile against 480p source queues an upscale | resolved: 2026-06-09
+**Date:** 2026-06-09 | **Area:** transcode-queue | **Severity:** CRITICAL -- silent contract drift; quality regression on every accidental 720p selection against a 480p source
+
+**What happened:** Operator dogfood 2026-06-09. `marginal-savings-gate.feature.md` C2 mandates that upscales are blocked regardless of savings. C2's verifiable example uses 480p->1080p; the implementation honored the 1080p case but let 480p->720p through.
+
+**Root cause:** `ProfileRepository.GetProfileSettingsForTargetResolution` returns `TargetResolution=SourceResolution` when the per-source-row's `TranscodeDownTo` is blank or `'No downscaling'` (the line: `actualTargetResolution = SourceResolution if targetResolution == 'No downscaling' else targetResolution`). Every 720p-target profile in production (e.g. `SVT-AV1 P6 FG8 CRF26 >720p`) has its `Resolution='480p'` threshold row with `TranscodeDownTo=''`. The upscale gate then compared 480p vs 480p (= 0, not < 0) and admitted the file even though the profile's intent is 720p output. Same vulnerability applied to >1080p profiles for 480p / 720p sources; the operator's "1080p target works" claim was unverified.
+
+**Fix:** Added `ProfileRepository.GetProfileMaxTarget(ProfileName)` returning the highest TranscodeDownTo rank across the profile's rows (ignoring blank / 'No downscaling'). `EvaluateQueueAdmission` now reads `UpscaleTarget = ProfileSettings.get('ProfileMaxTarget') or ProfileSettings.get('TargetResolution')` -- the per-source row remains the encoder target, but the upscale gate compares against the profile's overall intent. `GetMediaFilesByFolderAndResolutionFilter` (the pre-filter used by populate-with-folder path) was switched to the same helper, replacing its "first non-empty TranscodeDownTo" heuristic. Contract test `Tests/Contract/TestUpscaleBlockEnforcement.py` iterates the full Cartesian product per C2b.
+
+---
+

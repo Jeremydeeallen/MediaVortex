@@ -35,6 +35,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 
 ## Recently Resolved (last 10)
 
+- BUG-0054 | resolved | transcode-queue | Upscale block missed 480p->720p step; root cause = ProfileSettings.TargetResolution collapses to source when per-source-row TranscodeDownTo is blank/'No downscaling'; fix = ProfileRepository.GetProfileMaxTarget(profile) read by EvaluateQueueAdmission + Cartesian contract test | 2026-06-09 -> 2026-06-09
 - BUG-0047 | resolved | transcode-queue | dot-worker-1 not claiming NVENC silent no-op; root cause = no GPU passthrough in Docker (fixed by linux-nvenc-passthrough); operator-visibility GUI checkbox + tile warning badge shipped via worker-routing C15 | 2026-06-08 -> 2026-06-08
 - BUG-0042 | resolved | activity-page | Active Jobs list omits VMAF runs while badge counts them; operator kills workers thinking they are hung, orphaning claimed rows | 2026-06-03 -> 2026-06-03
 - BUG-0032 | resolved | file-replacement | Stale .orig recovery for at-risk files | 2026-05-14 -> 2026-06-02
@@ -44,4 +45,3 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0005 | resolved | transcode-queue | FFmpeg muxer auto-detect fails on .mp4.inprogress | 2026-05-18 -> 2026-06-02
 - BUG-0003 | resolved | audio-completion | Remux profile re-encodes audio | 2026-05-16 -> 2026-06-02
 - BUG-0004 | resolved | worker-lifecycle | Workers.Status=Paused does not gate capability claiming | 2026-05-18 -> 2026-06-02
-- BUG-0011 | resolved | jellyfin-notify | JellyfinNotify HTTP 500, WARNING does not log payload | 2026-05-22 -> 2026-06-02

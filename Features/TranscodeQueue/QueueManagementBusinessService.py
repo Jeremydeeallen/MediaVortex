@@ -843,14 +843,8 @@ class QueueManagementBusinessService:
                 LoggingService.LogWarning(f"No profile thresholds found for profile {profile.ProfileName}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
                 return []
 
-            # Step 1: Get target resolution once from profile thresholds
-            # Find a threshold with a valid TranscodeDownTo value (use first one found)
-            targetResolution = None
-            for threshold in profileThresholds:
-                transcodeDownTo = threshold.TranscodeDownTo or ""
-                if transcodeDownTo and transcodeDownTo.strip() != "" and transcodeDownTo.lower() != "no downscaling":
-                    targetResolution = transcodeDownTo.strip()
-                    break
+            # Step 1: profile-max-target -- # see marginal-savings-gate.C2b (BUG-0054)
+            targetResolution = self.ProfileRepository.GetProfileMaxTarget(profile.ProfileName)
 
             if not targetResolution:
                 LoggingService.LogWarning(f"No valid TranscodeDownTo found in profile {profile.ProfileName} thresholds", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
@@ -1733,18 +1727,18 @@ class QueueManagementBusinessService:
         if AdmissionConfig is None:
             AdmissionConfig = self.QueueAdmissionConfigRepo.Get()
 
-        # 1. Upscale block: source resolution < target resolution.
+        # 1. Upscale block -- # see marginal-savings-gate.C2b (BUG-0054)
         SourceResolution = getattr(MediaFile, 'Resolution', None) or ''
-        TargetResolution = ProfileSettings.get('TargetResolution') or ''
-        if SourceResolution and TargetResolution:
+        UpscaleTarget = ProfileSettings.get('ProfileMaxTarget') or ProfileSettings.get('TargetResolution') or ''
+        if SourceResolution and UpscaleTarget:
             try:
                 from Services.ResolutionService import ResolutionService
-                Cmp = ResolutionService().CompareResolutions(SourceResolution, TargetResolution)
+                Cmp = ResolutionService().CompareResolutions(SourceResolution, UpscaleTarget)
                 if Cmp is not None and Cmp < 0:
-                    return (True, f"Upscale (source {SourceResolution} < target {TargetResolution})")
+                    return (True, f"Upscale (source {SourceResolution} < profile target {UpscaleTarget})")
             except Exception as Ex:
                 LoggingService.LogException(
-                    f"Resolution compare failed for {SourceResolution} vs {TargetResolution}",
+                    f"Resolution compare failed for {SourceResolution} vs {UpscaleTarget}",
                     Ex, "QueueManagementBusinessService", "EvaluateQueueAdmission",
                 )
 
@@ -1790,13 +1784,17 @@ class QueueManagementBusinessService:
             ProfileSettings = self.ProfileRepository.GetProfileSettingsForTargetResolution(
                 ProfileName, MediaFile.Resolution
             )
+            ProfileMaxTarget = self.ProfileRepository.GetProfileMaxTarget(ProfileName)
         except Exception as Ex:
             LoggingService.LogException(
                 f"Failed to load ProfileSettings for {ProfileName} / {MediaFile.Resolution}",
                 Ex, "QueueManagementBusinessService", "EvaluateQueueAdmissionForProfile",
             )
             return (True, 'MissingProfile')
-        return self.EvaluateQueueAdmission(MediaFile, ProfileSettings or {}, AdmissionConfig)
+        Settings = dict(ProfileSettings) if ProfileSettings else {}
+        if Settings and ProfileMaxTarget:
+            Settings['ProfileMaxTarget'] = ProfileMaxTarget
+        return self.EvaluateQueueAdmission(MediaFile, Settings, AdmissionConfig)
 
     def ComputePriorityScore(self, MediaFileId: int) -> Optional[int]:
         """Recompute and persist MediaFiles.PriorityScore for a single file.

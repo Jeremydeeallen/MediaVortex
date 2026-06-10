@@ -553,6 +553,38 @@ class ProfileRepository(BaseRepository):
             LoggingService.LogException("Exception getting profile settings for target resolution", e, "ProfileRepository", "GetProfileSettingsForTargetResolution")
             return None
 
+    def GetProfileMaxTarget(self, ProfileName: str) -> Optional[str]:
+        """Max rank(TranscodeDownTo) across profile rows; # see marginal-savings-gate.C2b."""
+        try:
+            query = (
+                "SELECT pt.TranscodeDownTo "
+                "FROM ProfileThresholds pt "
+                "JOIN Profiles p ON pt.ProfileId = p.Id "
+                "WHERE p.ProfileName = %s"
+            )
+            rows = self.ExecuteQuery(query, (ProfileName,))
+            Ranks = {'480p': 0, '720p': 1, '1080p': 2, '2160p': 3}
+            BestRank = -1
+            BestLabel: Optional[str] = None
+            for Row in rows:
+                Raw = (Row.get('TranscodeDownTo') or '').strip()
+                if not Raw or Raw.lower() == 'no downscaling':
+                    continue
+                Label = self._ConvertPixelDimensionsToResolutionCategory(Raw) if 'x' in Raw else Raw
+                Rank = Ranks.get(Label)
+                if Rank is None:
+                    continue
+                if Rank > BestRank:
+                    BestRank = Rank
+                    BestLabel = Label
+            return BestLabel
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"Exception getting profile max target for {ProfileName}",
+                Ex, "ProfileRepository", "GetProfileMaxTarget",
+            )
+            return None
+
     def _ConvertPixelDimensionsToResolutionCategory(self, PixelDimensions: str) -> str:
         """Convert pixel dimensions (e.g., '3840x2160') to resolution category (e.g., '2160p')."""
         try:
