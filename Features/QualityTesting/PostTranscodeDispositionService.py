@@ -1,266 +1,64 @@
-import json
-from datetime import datetime, timezone
-from typing import Optional, Tuple
+from typing import Tuple
 
-from Core.Logging.LoggingService import LoggingService
+from Features.QualityTesting.Disposition.AttemptCleanupService import AttemptCleanupService
+from Features.QualityTesting.Disposition.ComplianceFailureRecorder import ComplianceFailureRecorder
+from Features.QualityTesting.Disposition.DispositionDispatcher import DispositionDispatcher
+from Features.QualityTesting.Disposition.PostTranscodeDispositionDecider import PostTranscodeDispositionDecider
+from Features.QualityTesting.Disposition.RetryBudgetService import RetryBudgetService
+from Features.QualityTesting.Models.DispositionResult import DispositionResult
+from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
 from Core.Database.DatabaseService import DatabaseService
 from Repositories.DatabaseManager import DatabaseManager
-from Features.QualityTesting.PostTranscodeGateConfigRepository import (
-    PostTranscodeGateConfigRepository,
-)
-from Features.QualityTesting.Models.DispositionResult import DispositionResult
 
 
-DISPOSITIONS = ('Pending', 'Replace', 'BypassReplace', 'NoReplace', 'Requeue', 'Discard')
-
-REASONS = (
-    'TranscodeFailed',
-    'NoSavings',
-    'QualityTestNotRequired',
-    'AwaitingVmaf',
-    'VmafBelowMin',
-    'VmafPassed',
-    'VmafAboveMax',
-    'VmafServicePaused',
-    'VmafServicePausedBypassed',
-    'VmafCapabilityNotConfigured',
-    'QualityTestingGloballyDisabled',
-    'OperatorForcedReplace',
-    'OperatorDiscarded',
-    'TestMode',
-    'ComplianceGateFailed',
-)
-
-
-# directive: filereplacement-decompose | see post-transcode-disposition.feature.md
+# directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C11
 class PostTranscodeDispositionService:
-    """Single decision function for post-transcode disposition; see post-transcode-disposition.feature.md."""
+    """Thin facade preserving backward-compat for existing tests + smoke scripts; delegates to ST7 Disposition layer (Phase 3 lifts construction to WorkerCompositionRoot)."""
 
-    # directive: filereplacement-decompose
-    def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
-                 GateConfigRepoInstance: PostTranscodeGateConfigRepository = None):
+    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C11
+    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, GateConfigRepoInstance: PostTranscodeGateConfigRepository = None):
+        """Stash DB manager + gate-config repo; construct child services on demand."""
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.GateConfigRepo = GateConfigRepoInstance or PostTranscodeGateConfigRepository()
 
-    # directive: filereplacement-decompose | see post-transcode-disposition.C1, C2
+    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C11
     def DecidePostTranscodeDisposition(self, TranscodeAttemptId: int) -> DispositionResult:
-        """Decide disposition for an attempt; idempotent on non-Pending; see post-transcode-disposition.C1, C2."""
-        try:
-            Db = DatabaseService()
-            # allow: R12 SQL preexisting; relocate to TranscodeAttemptsRepository in follow-up
-            Rows = Db.ExecuteQuery(
-                """
-                SELECT Success, OldSizeBytes, NewSizeBytes, QualityTestRequired, VMAF,
-                       Disposition, DispositionReason, TestVariantSetId
-                FROM TranscodeAttempts WHERE Id = %s
-                """,
-                (TranscodeAttemptId,),
-            )
-            if not Rows:
-                LoggingService.LogError(
-                    f"DecidePostTranscodeDisposition: TranscodeAttempt {TranscodeAttemptId} not found",
-                    "PostTranscodeDispositionService", "DecidePostTranscodeDisposition",
-                )
-                return DispositionResult(Disposition='Discard', Reason='TranscodeFailed',
-                                         AuditPayload={'error': 'attempt_not_found'})
-            Row = Rows[0]
+        """Delegate to DispositionDispatcher.Dispatch (preserves legacy return shape)."""
+        Db = DatabaseService()
+        Cleanup = AttemptCleanupService(Db)
+        Retry = RetryBudgetService(AttemptRepository=self.DatabaseManager, GateConfigRepository=self.GateConfigRepo)
+        return DispositionDispatcher(
+            Decider=PostTranscodeDispositionDecider(),
+            GateConfigRepository=self.GateConfigRepo,
+            AttemptCleanupService=Cleanup,
+            DatabaseService=Db,
+            RetryBudgetService=Retry,
+        ).Dispatch(TranscodeAttemptId)
 
-            ExistingDisposition = Row.get('Disposition')
-            ExistingReason = Row.get('DispositionReason')
-            if ExistingDisposition and ExistingDisposition != 'Pending':
-                LoggingService.LogDebug(
-                    f"Disposition already committed for TranscodeAttempt {TranscodeAttemptId}: "
-                    f"{ExistingDisposition} ({ExistingReason})",
-                    "PostTranscodeDispositionService", "DecidePostTranscodeDisposition",
-                )
-                return DispositionResult(
-                    Disposition=ExistingDisposition,
-                    Reason=ExistingReason or '',
-                    AuditPayload={'cached': True},
-                )
+    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C11
+    def _DecideFromInputs(self, Success, OldSize, NewSize, QualityTestRequired, VmafScore, VmafCapableWorkerOnline, GateConfig) -> Tuple[str, str]:
+        """Delegate the pure-function decision to PostTranscodeDispositionDecider; returns legacy (Disposition, Reason) tuple."""
+        Attempt = {
+            'Success': Success, 'OldSize': OldSize, 'NewSize': NewSize,
+            'QualityTestRequired': QualityTestRequired, 'VmafScore': VmafScore,
+            'VmafCapableWorkerOnline': VmafCapableWorkerOnline,
+        }
+        GateInput = {
+            'VmafAutoReplaceMinThreshold': float(getattr(GateConfig, 'VmafAutoReplaceMinThreshold', 80.0)),
+            'VmafAutoReplaceMaxThreshold': float(getattr(GateConfig, 'VmafAutoReplaceMaxThreshold', 98.0)),
+            'WhenVmafUnavailable': getattr(GateConfig, 'WhenVmafUnavailable', 'block'),
+            'QualityTestEnabled': bool(getattr(GateConfig, 'QualityTestEnabled', True)),
+        }
+        Outcome = PostTranscodeDispositionDecider().Decide(Attempt, GateInput)
+        return (Outcome.Action, Outcome.Reason)
 
-            TestVariantSetId = Row.get('TestVariantSetId')
-            if TestVariantSetId is not None:
-                self._CommitDisposition(TranscodeAttemptId, 'NoReplace', 'TestMode')
-                LoggingService.LogInfo(
-                    f"Disposition for TranscodeAttempt {TranscodeAttemptId}: NoReplace "
-                    f"(Reason=TestMode, TestVariantSetId={TestVariantSetId}) -- source preservation guaranteed",
-                    "PostTranscodeDispositionService", "DecidePostTranscodeDisposition",
-                )
-                return DispositionResult(
-                    Disposition='NoReplace',
-                    Reason='TestMode',
-                    AuditPayload={'TranscodeAttemptId': TranscodeAttemptId, 'TestVariantSetId': TestVariantSetId, 'shortCircuit': True},
-                )
-
-            Success = bool(Row.get('Success'))
-            OldSize = Row.get('OldSizeBytes') or 0
-            NewSize = Row.get('NewSizeBytes') or 0
-            QualityTestRequired = bool(Row.get('QualityTestRequired'))
-            VmafScore = Row.get('VMAF')
-
-            # allow: R12 SQL preexisting; relocate to WorkersRepository in follow-up
-            CapableRows = DatabaseService().ExecuteQuery(
-                """
-                SELECT 1 FROM Workers
-                WHERE QualityTestEnabled = TRUE
-                  AND Status = 'Online'
-                  AND LastHeartbeat > NOW() - INTERVAL '90 seconds'
-                LIMIT 1
-                """,
-            )
-            VmafCapableWorkerOnline = bool(CapableRows)
-
-            GateConfig = self.GateConfigRepo.Get()
-
-            AuditPayload = {
-                'TranscodeAttemptId': TranscodeAttemptId,
-                'Success': Success,
-                'OldSizeBytes': OldSize,
-                'NewSizeBytes': NewSize,
-                'QualityTestRequired': QualityTestRequired,
-                'VmafScore': VmafScore,
-                'VmafCapableWorkerOnline': VmafCapableWorkerOnline,
-                'VmafAutoReplaceMinThreshold': GateConfig.VmafAutoReplaceMinThreshold,
-                'VmafAutoReplaceMaxThreshold': GateConfig.VmafAutoReplaceMaxThreshold,
-                'WhenVmafUnavailable': GateConfig.WhenVmafUnavailable,
-                'QualityTestEnabled': bool(getattr(GateConfig, 'QualityTestEnabled', True)),
-            }
-
-            Disposition, Reason = self._DecideFromInputs(
-                Success=Success,
-                OldSize=OldSize,
-                NewSize=NewSize,
-                QualityTestRequired=QualityTestRequired,
-                VmafScore=VmafScore,
-                VmafCapableWorkerOnline=VmafCapableWorkerOnline,
-                GateConfig=GateConfig,
-            )
-
-            self._CommitDisposition(TranscodeAttemptId, Disposition, Reason)
-
-            LoggingService.LogInfo(
-                f"Disposition for TranscodeAttempt {TranscodeAttemptId}: {Disposition} "
-                f"(Reason={Reason}) inputs={json.dumps(AuditPayload, default=str)}",
-                "PostTranscodeDispositionService", "DecidePostTranscodeDisposition",
-            )
-
-            return DispositionResult(
-                Disposition=Disposition,
-                Reason=Reason,
-                AuditPayload=AuditPayload,
-            )
-
-        except Exception as Ex:
-            LoggingService.LogException(
-                f"DecidePostTranscodeDisposition failed for TranscodeAttempt {TranscodeAttemptId}",
-                Ex, "PostTranscodeDispositionService", "DecidePostTranscodeDisposition",
-            )
-            return DispositionResult(Disposition='Pending', Reason='', AuditPayload={'error': str(Ex)})
-
-    # directive: filereplacement-decompose | see transcode.ST6
-    def _DecideFromInputs(self, Success, OldSize, NewSize, QualityTestRequired,
-                          VmafScore, VmafCapableWorkerOnline, GateConfig) -> Tuple[str, str]:
-        """Decision table from transcode.flow.md ST6 encoded; see transcode.ST6."""
-        if not Success:
-            return ('Discard', 'TranscodeFailed')
-
-        if not getattr(GateConfig, 'QualityTestEnabled', True):
-            return ('BypassReplace', 'QualityTestingGloballyDisabled')
-
-        if not QualityTestRequired:
-            return ('BypassReplace', 'QualityTestNotRequired')
-
-        if NewSize and OldSize and NewSize >= OldSize:
-            return ('Discard', 'NoSavings')
-
-        if VmafScore is not None:
-            try:
-                Score = float(VmafScore)
-            except (TypeError, ValueError):
-                Score = None
-            if Score is not None:
-                if Score < float(GateConfig.VmafAutoReplaceMinThreshold):
-                    return ('Requeue', 'VmafBelowMin')
-                if Score <= float(GateConfig.VmafAutoReplaceMaxThreshold):
-                    return ('Replace', 'VmafPassed')
-                return ('NoReplace', 'VmafAboveMax')
-
-        return ('Pending', 'AwaitingVmaf')
-
-    # directive: filereplacement-decompose
-    def _CommitDisposition(self, TranscodeAttemptId: int, Disposition: str, Reason: str) -> None:
-        """Write audit columns and TFP cleanup chokepoint; see post-transcode-pipeline.C15."""
-        if Disposition not in DISPOSITIONS:
-            LoggingService.LogError(
-                f"Refusing to commit invalid Disposition={Disposition!r} for attempt {TranscodeAttemptId}",
-                "PostTranscodeDispositionService", "_CommitDisposition",
-            )
-            return
-        if Reason and Reason not in REASONS:
-            LoggingService.LogError(
-                f"Refusing to commit invalid Reason={Reason!r} for attempt {TranscodeAttemptId}",
-                "PostTranscodeDispositionService", "_CommitDisposition",
-            )
-            return
-        try:
-            # allow: R12 SQL preexisting; relocate to TranscodeAttemptsRepository in follow-up
-            DatabaseService().ExecuteNonQuery(
-                """
-                UPDATE TranscodeAttempts
-                SET Disposition = %s,
-                    DispositionReason = %s,
-                    DispositionDecidedAt = %s
-                WHERE Id = %s
-                """,
-                (Disposition, Reason or None, datetime.now(timezone.utc), TranscodeAttemptId),
-            )
-        except Exception as Ex:
-            LoggingService.LogException(
-                f"_CommitDisposition failed for attempt {TranscodeAttemptId}",
-                Ex, "PostTranscodeDispositionService", "_CommitDisposition",
-            )
-            return
-
-        # see post-transcode-pipeline.C15
-        if Disposition in ('Discard', 'NoReplace', 'Requeue'):
-            self.CleanupTemporaryFilePaths(TranscodeAttemptId)
-
-    # directive: filereplacement-decompose | see post-transcode-pipeline.C15
+    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C11
     def CleanupTemporaryFilePaths(self, TranscodeAttemptId: int) -> None:
-        """Delete TFP row; chokepoint for every non-Pending terminal exit; see post-transcode-pipeline.C15."""
-        try:
-            DatabaseService().ExecuteNonQuery(
-                "DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
-                (TranscodeAttemptId,),
-            )
-        except Exception as Ex:
-            LoggingService.LogException(
-                f"CleanupTemporaryFilePaths failed for attempt {TranscodeAttemptId}",
-                Ex, "PostTranscodeDispositionService", "CleanupTemporaryFilePaths",
-            )
+        """Delegate to AttemptCleanupService.Cleanup."""
+        AttemptCleanupService(DatabaseService()).Cleanup(TranscodeAttemptId)
 
-    # directive: filereplacement-decompose | see compliance-gated-rename.C2
+    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C11
     def RecordComplianceGateFailure(self, TranscodeAttemptId: int, CascadeReason: str) -> None:
-        """Override Replace/BypassReplace -> NoReplace/ComplianceGateFailed; see compliance-gated-rename.C2."""
-        try:
-            # allow: R12 SQL preexisting; relocate to TranscodeAttemptsRepository in follow-up
-            DatabaseService().ExecuteNonQuery(
-                """
-                UPDATE TranscodeAttempts
-                SET ErrorMessage = %s
-                WHERE Id = %s
-                """,
-                (f'ComplianceGateFailed: {CascadeReason}', TranscodeAttemptId),
-            )
-        except Exception as Ex:
-            LoggingService.LogException(
-                f"RecordComplianceGateFailure: failed to write ErrorMessage for attempt {TranscodeAttemptId}",
-                Ex, "PostTranscodeDispositionService", "RecordComplianceGateFailure",
-            )
-        self._CommitDisposition(TranscodeAttemptId, 'NoReplace', 'ComplianceGateFailed')
-        LoggingService.LogInfo(
-            f"Disposition overridden for TranscodeAttempt {TranscodeAttemptId}: "
-            f"NoReplace (Reason=ComplianceGateFailed, CascadeReason={CascadeReason})",
-            "PostTranscodeDispositionService", "RecordComplianceGateFailure",
-        )
+        """Delegate to ComplianceFailureRecorder.Record."""
+        Db = DatabaseService()
+        ComplianceFailureRecorder(DatabaseService=Db, AttemptCleanupService=AttemptCleanupService(Db)).Record(TranscodeAttemptId, CascadeReason)

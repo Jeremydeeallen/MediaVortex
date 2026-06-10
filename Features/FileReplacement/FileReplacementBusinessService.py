@@ -236,8 +236,10 @@ class FileReplacementBusinessService:
                 )
                 self.DatabaseManager.SaveTranscodeAttempt(transcode_attempt)
 
-                from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
-                PostTranscodeDispositionService().CleanupTemporaryFilePaths(TranscodeAttemptId)
+                # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C11
+                from Features.QualityTesting.Disposition.AttemptCleanupService import AttemptCleanupService
+                from Core.Database.DatabaseService import DatabaseService
+                AttemptCleanupService(DatabaseService()).Cleanup(TranscodeAttemptId)
 
                 LoggingService.LogInfo(
                     f"Replaced file for TranscodeAttempt {TranscodeAttemptId} "

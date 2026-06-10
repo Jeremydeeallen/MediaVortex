@@ -39,6 +39,25 @@ class QualityTestingBusinessService:
         self.ActiveFFmpegThread = None
         self._Worker: Worker = worker if worker is not None else Worker.Current()
 
+    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C11
+    def _BuildDispositionDispatcher(self):
+        """Compose DispositionDispatcher with default deps; Phase 3 lifts this to WorkerCompositionRoot."""
+        from Features.QualityTesting.Disposition.DispositionDispatcher import DispositionDispatcher
+        from Features.QualityTesting.Disposition.PostTranscodeDispositionDecider import PostTranscodeDispositionDecider
+        from Features.QualityTesting.Disposition.AttemptCleanupService import AttemptCleanupService
+        from Features.QualityTesting.Disposition.RetryBudgetService import RetryBudgetService
+        from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
+        from Core.Database.DatabaseService import DatabaseService
+        GateRepo = PostTranscodeGateConfigRepository()
+        Db = DatabaseService()
+        return DispositionDispatcher(
+            Decider=PostTranscodeDispositionDecider(),
+            GateConfigRepository=GateRepo,
+            AttemptCleanupService=AttemptCleanupService(Db),
+            DatabaseService=Db,
+            RetryBudgetService=RetryBudgetService(AttemptRepository=self.DatabaseManager, GateConfigRepository=GateRepo),
+        )
+
     # directive: path-class-perfection | # see path.C26
     def _GetWorker(self) -> Worker:
         return self._Worker
@@ -343,7 +362,7 @@ class QualityTestingBusinessService:
                 if ProgressId and result_id:
                     self.UpdateQualityTestResultsWithScore(result_id, vmaf_score, result, vmaf_metrics)
 
-                from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
+                # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C11
                 ta_id = JobDetails.get('TranscodeAttemptId')
                 AutoReplaceTriggered = False
                 if ta_id:
@@ -358,7 +377,7 @@ class QualityTestingBusinessService:
                             f"Auto-capture stills failed (non-fatal) for attempt {ta_id}",
                             AutoCapEx, "QualityTestingBusinessService", "_AutoCaptureStillsIfPolicyFires",
                         )
-                    DispositionResult = PostTranscodeDispositionService(self.DatabaseManager).DecidePostTranscodeDisposition(ta_id)
+                    DispositionResult = self._BuildDispositionDispatcher().Dispatch(ta_id)
                     if DispositionResult.Disposition in ('Replace', 'BypassReplace'):
                         from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
                         FileReplacementBusinessService(self.DatabaseManager).ProcessFileReplacement(ta_id)
@@ -1804,8 +1823,8 @@ class QualityTestingBusinessService:
 
             LoggingService.LogInfo(f"Quality test skipped for TranscodeAttempt {TranscodeAttemptId}, deciding disposition",
                                  "QualityTestingBusinessService", "SkipQualityTest")
-            from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
-            PostTranscodeDispositionService(self.DatabaseManager).DecidePostTranscodeDisposition(TranscodeAttemptId)
+            # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C11
+            self._BuildDispositionDispatcher().Dispatch(TranscodeAttemptId)
             from Services.FileReplacementBusinessService import FileReplacementBusinessService
             file_replacement_service = FileReplacementBusinessService(self.DatabaseManager)
             replacement_result = file_replacement_service.ProcessFileReplacement(TranscodeAttemptId)
