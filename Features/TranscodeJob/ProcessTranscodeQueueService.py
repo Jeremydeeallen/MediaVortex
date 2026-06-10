@@ -11,6 +11,18 @@ from Core.Models.TranscodeAttemptModel import TranscodeAttemptModel
 from Core.Models.TranscodeFileModel import TranscodeFileModel
 from Repositories.DatabaseManager import DatabaseManager
 from Models.CommandBuilder import CommandBuilder
+from Features.TranscodeJob.Emit.EncodeShapeRegistry import EncodeShapeRegistry
+from Features.TranscodeJob.Emit.TranscodeShape import TranscodeShape
+from Features.TranscodeJob.Emit.RemuxShape import RemuxShape
+from Features.TranscodeJob.Emit.SubtitleFixShape import SubtitleFixShape
+from Features.TranscodeJob.Emit.ResolutionCalculator import ResolutionCalculator
+from Features.TranscodeJob.Emit.OutputFilenameBuilder import OutputFilenameBuilder
+from Features.TranscodeJob.Emit.CodecParameterAssembler import CodecParameterAssembler
+from Features.TranscodeJob.Emit.AudioCodecArgsBuilder import AudioCodecArgsBuilder
+from Features.TranscodeJob.Emit.AudioFilterBuilder import AudioFilterBuilder
+from Features.TranscodeJob.Emit.VideoFilterBuilder import VideoFilterBuilder
+from Features.TranscodeJob.Emit.MediaProbeAdapter import MediaProbeAdapter
+from Features.TranscodeJob.Emit.UngainablePeakError import UngainablePeakError
 from Features.TranscodeJob.VideoTranscodingService import VideoTranscodingService
 from Services.QueueManagementService import QueueManagementService
 from Features.QualityTesting.Disposition.DispositionDispatcher import DispositionDispatcher
@@ -44,10 +56,10 @@ class ProcessTranscodeQueueService:
                  WorkerName: str = None,
                  WorkerConfig: dict = None, TranscodeQueueRepositoryInstance: Optional[TranscodeQueueRepository] = None, CodecFlagsRepositoryInstance: Optional[CodecFlagsRepository] = None, SystemSettingsRepositoryInstance: Optional[SystemSettingsRepository] = None, ActiveJobRepositoryInstance: Optional[ActiveJobRepository] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
-        self.CommandBuilder = CommandBuilderInstance or CommandBuilder()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
         self.QueueManagement = QueueManagementInstance or QueueManagementService(DatabaseManagerInstance=self.DatabaseManager)
         self.DispositionDispatcher = DispositionDispatcherInstance or self._BuildDefaultDispositionDispatcher()
+        self.EncodeShapeRegistry = self._BuildDefaultEncodeShapeRegistry()
 
         # Worker identity for distributed transcoding
         import socket
@@ -111,6 +123,27 @@ class ProcessTranscodeQueueService:
         self.CodecFlagsRepository = CodecFlagsRepositoryInstance or CodecFlagsRepository()
         self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
         self.ActiveJobRepository = ActiveJobRepositoryInstance or ActiveJobRepository()
+
+    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C16
+    def _BuildDefaultEncodeShapeRegistry(self) -> EncodeShapeRegistry:
+        """Compose the default EncodeShapeRegistry; Phase 3 lifts this to WorkerCompositionRoot."""
+        Resolution = ResolutionCalculator()
+        Filename = OutputFilenameBuilder()
+        CodecAssembler = CodecParameterAssembler()
+        AudioCodec = AudioCodecArgsBuilder()
+        AudioFilter = AudioFilterBuilder(DatabaseManagerInstance=self.DatabaseManager)
+        VideoFilter = VideoFilterBuilder()
+        Probe = MediaProbeAdapter(FFprobePath=self.FFprobePath)
+        TranscodeS = TranscodeShape(Resolution, Filename, CodecAssembler, AudioCodec, AudioFilter, VideoFilter, Probe)
+        RemuxS = RemuxShape(Filename, AudioCodec, AudioFilter, Probe)
+        SubtitleS = SubtitleFixShape(Filename, AudioCodec, AudioFilter, Probe)
+        return EncodeShapeRegistry({
+            'Transcode': TranscodeS,
+            'Remux': RemuxS,
+            'Quick': RemuxS,
+            'AudioFix': RemuxS,
+            'SubtitleFix': SubtitleS,
+        })
 
     # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C9
     def _BuildDefaultDispositionDispatcher(self) -> DispositionDispatcher:
@@ -915,7 +948,8 @@ class ProcessTranscodeQueueService:
             TargetLocalPath = LocalJoin(LocalDirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
 
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building remux command...")
-            CommandResult = self.CommandBuilder.BuildFFmpegCommand(
+            # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C16
+            _Spec = self.EncodeShapeRegistry.Get(Job.ProcessingMode).Build(
                 MediaFile, Job,
                 Context={
                     'InputPath': EffectiveInputPath,
@@ -925,6 +959,7 @@ class ProcessTranscodeQueueService:
                     'OutputDirectory': LocalDirname(EffectiveInputPath),
                 },
             )
+            CommandResult = {'Command': _Spec.Command, 'OutputPath': _Spec.OutputPath} if _Spec else None
             if not CommandResult:
                 self.HandleJobFailure(Job, "Failed to build remux command", TranscodeAttemptId, ActiveJobId)
                 return
@@ -1037,7 +1072,8 @@ class ProcessTranscodeQueueService:
 
             # Build subtitle fix command (pass effective input path)
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building subtitle fix command...")
-            CommandResult = self.CommandBuilder.BuildFFmpegCommand(
+            # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C16
+            _Spec = self.EncodeShapeRegistry.Get(Job.ProcessingMode).Build(
                 MediaFile, Job,
                 Context={
                     'InputPath': EffectiveInputPath,
@@ -1046,6 +1082,7 @@ class ProcessTranscodeQueueService:
                     'OutputDirectory': LocalDirname(EffectiveInputPath),
                 },
             )
+            CommandResult = {'Command': _Spec.Command, 'OutputPath': _Spec.OutputPath} if _Spec else None
             if not CommandResult:
                 self.HandleJobFailure(Job, "Failed to build subtitle fix command", TranscodeAttemptId, ActiveJobId)
                 return
@@ -1396,9 +1433,15 @@ class ProcessTranscodeQueueService:
     # directive: nvenc-rate-anchored-remediation
     def BuildTranscodeCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel,
                               TranscodingSettings: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Build the complete transcoding command."""
+        """Build the complete transcoding command via EncodeShapeRegistry; UngainablePeakError propagates for caller deferral."""
         try:
-            return self.CommandBuilder.BuildFFmpegCommand(MediaFile, Job, Context=TranscodingSettings)
+            # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C16
+            Spec = self.EncodeShapeRegistry.Get(Job.ProcessingMode).Build(MediaFile, Job, TranscodingSettings)
+            if Spec is None:
+                return None
+            return {'Command': Spec.Command, 'OutputPath': Spec.OutputPath}
+        except UngainablePeakError:
+            raise
         except Exception as e:
             LoggingService.LogException("Exception building transcode command", e, "ProcessTranscodeQueueService", "BuildTranscodeCommand")
             return None
