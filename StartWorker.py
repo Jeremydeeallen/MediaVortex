@@ -31,7 +31,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from Core.PathStorage import LocalExists
+from Core.Path.LocalPath import LocalExists
 
 RootDirectory = Path(__file__).resolve().parent
 

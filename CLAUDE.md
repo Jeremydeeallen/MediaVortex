@@ -53,7 +53,7 @@ DatabaseService.ExecuteQuery(...)       # SELECT, returns list[CaseInsensitiveDi
 DatabaseService.ExecuteNonQuery(...)    # INSERT/UPDATE/DELETE, auto-commits
 
 # Paths -- never os.path on a path-named variable; use Core.PathStorage
-from Core.PathStorage import ParentDir, LastSegment, Join, Normalize, PathsEqual, Exists, LocalExists, Resolve
+from Core.Path.LocalPath import LocalExists, LocalBasename, LocalDirname, LocalJoin, LocalSplitExt, LocalIsFile, LocalIsDir, LocalGetSize, LocalGetMTime
 # Run /mediavortex-paths for the full lookup (os.path.* -> canonical mapping + canonical-vs-local decision).
 ```
 

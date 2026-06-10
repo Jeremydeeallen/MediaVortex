@@ -25,7 +25,7 @@ def ProbableMediaFile(Db):
     """Find a MediaFile with typed-pair populated whose Resolve-able path exists on disk; skip if none available on this host."""
     Worker_ = Worker.Current(Db=Db)
     Rows = Db.ExecuteQuery(
-        "SELECT Id, FilePath, StorageRootId, RelativePath FROM MediaFiles "
+        "SELECT Id, StorageRootId, RelativePath FROM MediaFiles "
         "WHERE StorageRootId IS NOT NULL AND RelativePath IS NOT NULL "
         "ORDER BY Id LIMIT 200"
     )
@@ -49,9 +49,8 @@ def test_resolve_worker_local_against_live_row(ProbableMediaFile):
     Mf = type("Mf", (), {})()
     Mf.StorageRootId = Row["StorageRootId" if "StorageRootId" in Row else "storagerootid"]
     Mf.RelativePath = Row["RelativePath" if "RelativePath" in Row else "relativepath"]
-    Mf.FilePath = Row["FilePath" if "FilePath" in Row else "filepath"]
     from Core.Path.PathFs import Exists as _PathFsExists
-    LocalPath, PathObj = Svc._ResolveWorkerLocal(Mf, Mf.FilePath)
+    LocalPath, PathObj = Svc._ResolveWorkerLocal(Mf, "")
     assert PathObj is not None
     assert _PathFsExists(PathObj, Svc._GetWorker())
     assert isinstance(LocalPath, str) and len(LocalPath) > 0
