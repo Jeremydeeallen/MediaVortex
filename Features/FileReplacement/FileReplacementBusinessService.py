@@ -266,10 +266,13 @@ class FileReplacementBusinessService:
             if replacement_result.get('ComplianceGateRefused'):
                 CascadeReason = replacement_result.get('CascadeReason') or 'unknown'
                 try:
-                    from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
-                    PostTranscodeDispositionService().RecordComplianceGateFailure(
-                        TranscodeAttemptId, CascadeReason
-                    )
+                    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C9
+                    from Features.QualityTesting.Disposition.ComplianceFailureRecorder import ComplianceFailureRecorder
+                    from Features.QualityTesting.Disposition.AttemptCleanupService import AttemptCleanupService
+                    from Core.Database.DatabaseService import DatabaseService
+                    DbSvc = DatabaseService()
+                    Recorder = ComplianceFailureRecorder(DatabaseService=DbSvc, AttemptCleanupService=AttemptCleanupService(DbSvc))
+                    Recorder.Record(TranscodeAttemptId, CascadeReason)
                 except Exception as DispEx:
                     LoggingService.LogException(
                         f"Failed to record ComplianceGateFailed disposition for attempt {TranscodeAttemptId}",

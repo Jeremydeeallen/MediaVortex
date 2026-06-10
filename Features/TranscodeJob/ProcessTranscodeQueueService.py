@@ -14,6 +14,14 @@ from Models.CommandBuilder import CommandBuilder
 from Features.TranscodeJob.VideoTranscodingService import VideoTranscodingService
 from Services.QueueManagementService import QueueManagementService
 from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
+from Features.QualityTesting.Disposition.DispositionDispatcher import DispositionDispatcher
+from Features.QualityTesting.Disposition.PostTranscodeDispositionDecider import PostTranscodeDispositionDecider
+from Features.QualityTesting.Disposition.AttemptCleanupService import AttemptCleanupService
+from Features.QualityTesting.Disposition.RetryBudgetService import RetryBudgetService
+from Features.QualityTesting.Disposition.RetranscodeDecider import RetranscodeDecider
+from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
+from Features.TranscodeJob.Adjustments.AdjustmentRegistry import AdjustmentRegistry
+from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
 from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalJoin, LocalSplitExt, LocalExists
@@ -33,14 +41,14 @@ class ProcessTranscodeQueueService:
                  CommandBuilderInstance: CommandBuilder = None,
                  VideoTranscodingInstance: VideoTranscodingService = None,
                  QueueManagementInstance: QueueManagementService = None,
-                 DispositionInstance: PostTranscodeDispositionService = None,
+                 DispositionDispatcherInstance: DispositionDispatcher = None,
                  WorkerName: str = None,
                  WorkerConfig: dict = None, TranscodeQueueRepositoryInstance: Optional[TranscodeQueueRepository] = None, CodecFlagsRepositoryInstance: Optional[CodecFlagsRepository] = None, SystemSettingsRepositoryInstance: Optional[SystemSettingsRepository] = None, ActiveJobRepositoryInstance: Optional[ActiveJobRepository] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.CommandBuilder = CommandBuilderInstance or CommandBuilder()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
         self.QueueManagement = QueueManagementInstance or QueueManagementService(DatabaseManagerInstance=self.DatabaseManager)
-        self.Disposition = DispositionInstance or PostTranscodeDispositionService(self.DatabaseManager)
+        self.DispositionDispatcher = DispositionDispatcherInstance or self._BuildDefaultDispositionDispatcher()
 
         # Worker identity for distributed transcoding
         import socket
@@ -105,7 +113,22 @@ class ProcessTranscodeQueueService:
         self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
         self.ActiveJobRepository = ActiveJobRepositoryInstance or ActiveJobRepository()
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C9
+    def _BuildDefaultDispositionDispatcher(self) -> DispositionDispatcher:
+        """Compose the default DispositionDispatcher graph; Phase 3 lifts this to WorkerCompositionRoot."""
+        GateRepo = PostTranscodeGateConfigRepository()
+        Db = DatabaseService()
+        Cleanup = AttemptCleanupService(Db)
+        Retry = RetryBudgetService(AttemptRepository=self.DatabaseManager, GateConfigRepository=GateRepo)
+        return DispositionDispatcher(
+            Decider=PostTranscodeDispositionDecider(),
+            GateConfigRepository=GateRepo,
+            AttemptCleanupService=Cleanup,
+            DatabaseService=Db,
+            RetryBudgetService=Retry,
+        )
+
+    # directive: nvenc-rate-anchored-remediation | # see transcode.ST6
     def Run(self, MaxConcurrentJobs: int = 1) -> Dict[str, Any]:
         """Start processing the transcoding queue with specified concurrent jobs."""
         try:
@@ -1141,7 +1164,7 @@ class ProcessTranscodeQueueService:
         call. See Features/QualityTesting/post-transcode-disposition.feature.md.
         """
         try:
-            Result = self.Disposition.DecidePostTranscodeDisposition(TranscodeAttemptId)
+            Result = self.DispositionDispatcher.Dispatch(TranscodeAttemptId)
             Disposition = Result.Disposition
 
             if Disposition in ('Replace', 'BypassReplace'):
@@ -1321,26 +1344,29 @@ class ProcessTranscodeQueueService:
                 LoggingService.LogDebug(f"No CRF override found. Tried keys: CRFOverride_{normalizedPath}, CRFOverride_{fileName}, CRFOverride_{normalizedPath[0] if ':' in normalizedPath else ''}:{normalizedPath.split(':', 1)[1].lstrip('/').replace('/', '') if ':' in normalizedPath else ''}",
                                       "ProcessTranscodeQueueService", "GetTranscodingSettings")
 
-            # If no override was successfully applied, check for previous attempts and adjust CRF if needed
+            # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C10
             if not overrideApplied:
-                from Services.AdaptiveQualityService import AdaptiveQualityService
-                adaptiveService = AdaptiveQualityService(self.DatabaseManager)
-                previousAttempt = adaptiveService.GetLatestTranscodeAttemptWithVMAF(Job.MediaFileId)
+                Decider = RetranscodeDecider(AttemptRepository=self.DatabaseManager)
+                _, previousAttempt = Decider.Decide(Job.MediaFileId)
 
                 if previousAttempt:
                     previousCRF = previousAttempt.get('Quality')
                     vmafScore = previousAttempt.get('VMAF')
 
                     if previousCRF and vmafScore is not None and vmafScore < 80:
-                        # Calculate adjusted CRF
-                        adjustedCRF = adaptiveService.CalculateAdjustedCRF(previousCRF, vmafScore)
+                        Calculator = AdjustmentRegistry().Get('cq')
+                        Overrides = Calculator.Calculate(
+                            PreviousAttempt={'Quality': previousCRF, 'VMAF': vmafScore},
+                            ProfileSettings=ProfileSettings,
+                            GateThreshold=80.0,
+                        )
+                        adjustedCRF = Overrides.CRF
                         currentCRF = ProfileSettings.get('Quality')
 
                         if adjustedCRF:
                             finalCRF = min(adjustedCRF, currentCRF)
                             ProfileSettings['Quality'] = finalCRF
 
-                            # Log adjustment decision at Info level
                             logMessage = f"CRF selection for {Job.FilePath}: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Calculated CRF={adjustedCRF}, Profile CRF={currentCRF}, Selected CRF={finalCRF} (minimum)"
                             LoggingService.LogInfo(logMessage, "ProcessTranscodeQueueService", "GetTranscodingSettings")
 
