@@ -57,7 +57,6 @@ class ProcessTranscodeQueueService:
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
         self.QueueManagement = QueueManagementInstance or QueueManagementService(DatabaseManagerInstance=self.DatabaseManager)
         self.DispositionDispatcher = DispositionDispatcherInstance or self._BuildDefaultDispositionDispatcher()
-        self.EncodeShapeRegistry = self._BuildDefaultEncodeShapeRegistry()
 
         # Worker identity for distributed transcoding
         import socket
@@ -121,6 +120,8 @@ class ProcessTranscodeQueueService:
         self.CodecFlagsRepository = CodecFlagsRepositoryInstance or CodecFlagsRepository()
         self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
         self.ActiveJobRepository = ActiveJobRepositoryInstance or ActiveJobRepository()
+        # directive: perfect-solid-transcode-pipeline-phase3 -- compose AFTER FFprobePath resolved
+        self.EncodeShapeRegistry = self._BuildDefaultEncodeShapeRegistry()
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C16
     def _BuildDefaultEncodeShapeRegistry(self) -> EncodeShapeRegistry:
