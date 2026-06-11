@@ -11,13 +11,13 @@ Before promoting a transcoded `.inprogress` file to its final `-mv.<ext>` name, 
 | #  | User action | Surface element | Handler | Backing class.method |
 |----|-------------|-----------------|---------|----------------------|
 | W1 | Worker finishes encode; `.inprogress` is on disk | (internal -- post-encode chain) | `_ProcessCompleteFileReplacement` calls gate | `Features/FileReplacement/TranscodedOutputPlacement.py:Execute` -> `ComplianceGate.Evaluate` |
-| W2 | Operator audits a refused attempt | Activity page | `SELECT ... WHERE DispositionReason = 'ComplianceGateFailed'` | `Features/QualityTesting/PostTranscodeDispositionService.RecordComplianceGateFailure` |
+| W2 | Operator audits a refused attempt | Activity page | `SELECT ... WHERE DispositionReason = 'ComplianceGateFailed'` | `Features/QualityTesting/Disposition/ComplianceFailureRecorder.Record` |
 
 ## Success Criteria
 
 C1. `ComplianceGate.Evaluate(LocalStagedPath, SourceMediaFileId, FFmpegCommand)` returns `{'Compliant': True, 'RefusalReason': None}` only when the cascade returns `IsCompliant=True AND RecommendedMode=None`. Verifiable: contract test seeds a known-compliant + a known-noncompliant candidate and asserts the gate matches.
 
-C2. On refusal, the caller deletes the `.inprogress` and invokes `PostTranscodeDispositionService.RecordComplianceGateFailure(attemptId, cascadeReason)`, which UPDATEs `TranscodeAttempts.Disposition='NoReplace'`, `DispositionReason='ComplianceGateFailed'`, `ErrorMessage='ComplianceGateFailed: <reason>'`. Verifiable: force a gate refusal; assert the three column values + the absence of `.inprogress` on disk.
+C2. On refusal, the caller deletes the `.inprogress` and invokes `ComplianceFailureRecorder.Record(attemptId, cascadeReason)`, which UPDATEs `TranscodeAttempts.Disposition='NoReplace'`, `DispositionReason='ComplianceGateFailed'`, `ErrorMessage='ComplianceGateFailed: <reason>'`. Verifiable: force a gate refusal; assert the three column values + the absence of `.inprogress` on disk.
 
 C3. The source MediaFile is untouched on refusal. Verifiable: SELECT the source row's mtime + path + size before and after a refusal; no change.
 
@@ -33,7 +33,7 @@ C6. Loudnorm-just-ran exemption: when the FFmpeg command emitted for this attemp
 |---|---|---|---|---|---|
 | S1 | `TranscodedOutputPlacement.Execute -> ComplianceGate.Evaluate` | `_ProcessCompleteFileReplacement` (worker post-encode chain) | `(LocalStagedPath: str, SourceMediaFileId: int, FFmpegCommand: Optional[str])` | `{'Compliant': bool, 'RefusalReason': Optional[str]}` | `Tests/Contract/TestComplianceGate.py` (to be created) |
 | S2 | `ComplianceGate.Evaluate -> QueueManagementBusinessService.EvaluateCandidateCompliance` | `Evaluate` synthesizes candidate row from probe + source carry-forward | dict with FilePath, Resolution, Codec, ContainerFormat, AudioCodec, AudioChannels, AssignedProfile, HasExplicitEnglishAudio, AudioLanguages, AudioComplete, AudioCorruptSuspect, SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, SourceIntegratedThresholdLufs | `{'IsCompliant': bool, 'RecommendedMode': Optional[str], 'RefusalReason': Optional[str]}` | Cascade unit test in TranscodeQueue suite |
-| S3 | Refusal -> `PostTranscodeDispositionService.RecordComplianceGateFailure` | `Evaluate` returns refusal; caller invokes dispositioner | `(TranscodeAttemptId: int, CascadeReason: str)` | UPDATE TranscodeAttempts SET Disposition='NoReplace', DispositionReason='ComplianceGateFailed', ErrorMessage=... | Tests/Contract/TestPostTranscodeDisposition.py |
+| S3 | Refusal -> `ComplianceFailureRecorder.Record` | `Evaluate` returns refusal; caller invokes ComplianceFailureRecorder | `(TranscodeAttemptId: int, CascadeReason: str)` | UPDATE TranscodeAttempts SET Disposition='NoReplace', DispositionReason='ComplianceGateFailed', ErrorMessage=...; TFP cleanup chained via AttemptCleanupService | `Tests/Contract/TestDispositionDispatcher.py` + `Tests/Contract/TestPostTranscodeDisposition.py` |
 
 ## Status
 
@@ -50,5 +50,5 @@ Features/FileReplacement/ComplianceGate.py
 | File | Role |
 |------|------|
 | `Features/FileReplacement/ComplianceGate.py` | The gate implementation (Evaluate method) |
-| `Features/QualityTesting/PostTranscodeDispositionService.py` | `RecordComplianceGateFailure` records the override |
+| `Features/QualityTesting/Disposition/ComplianceFailureRecorder.py` | `Record` writes ErrorMessage + disposition override; delegates TFP cleanup |
 | `Features/TranscodeQueue/QueueManagementBusinessService.py` | `EvaluateCandidateCompliance` is the cascade predicate the gate calls |
