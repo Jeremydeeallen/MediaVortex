@@ -29,17 +29,7 @@ class TranscodeJobProcessor(JobProcessor):
 
     # directive: worker-loop-method-extraction | # see worker-loop.C5
     def _ProcessImpl(self, Job):
-        """Port of ProcessTranscodeQueueService.ProcessJob with self.<X> rewritten to self.QueueService.<X>."""
-        if Job.IsRemux:
-            self.QueueService.ProcessRemuxJob(Job)
-            return
-        if Job.IsSubtitleFix:
-            self.QueueService.ProcessSubtitleFixJob(Job)
-            return
-        if Job.IsTestMode:
-            self.QueueService.ProcessTestVariantJob(Job)
-            return
-
+        """Port of ProcessTranscodeQueueService.ProcessJob with self.<X> rewritten to self.QueueService.<X>; WorkerLoopService handles ProcessingMode dispatch upstream so the inner branch is gone."""
         ActiveJobId = None
         OutputPath = None
         TemporaryFilePathId = None

@@ -1,113 +1,78 @@
 # Current Directive
 
-**Set:** YYYY-MM-DD
-**Status:** (no active directive -- task-delegation mode)
-**Slug:** <previous-slug>
-**Replaces:** `directives/closed/<previous-slug>.md` (closed Success | Partial | Abandoned)
+**Set:** 2026-06-11
+**Status:** Active -- phase: IMPLEMENTING
+**Slug:** worker-loop-method-extraction
+**Replaces:** `directives/closed/2026-06-10-perfect-solid-transcode-pipeline-phase3.md` (Phase 3 closed Success, with C18 deferred)
 
 ## Outcome
 
-One paragraph describing the operator-observable end state. What is true after this directive is done that wasn't true before.
+Complete the deferred C18 from Phase 3: replace the strangler-fig delegation in the four `JobProcessor` strategies with self-contained orchestration. Each `JobProcessor.Process` will contain the actual method body from the corresponding `ProcessTranscodeQueueService.Process*Job` method (ported verbatim, behavior-preserving). After extraction, the four `Process*Job` methods are removed from `ProcessTranscodeQueueService`. The class shrinks from 2437 LOC to ~1500 LOC of shared helper methods (GetMediaFileData, SetupFilePreparation, GetTranscodingSettings, BuildTranscodeCommand, HandleJobFailure, DispatchDisposition, etc.) which the JobProcessors call via injected reference. Full helper extraction + ProcessTranscodeQueueService deletion is a subsequent directive; this one focuses on the orchestration ownership move.
 
 ## Acceptance Criteria
 
-1. ...
-2. ...
+1. **C1 -- TranscodeJobProcessor.Process contains the ProcessJob body.** Verbatim port of `ProcessTranscodeQueueService.ProcessJob` (current lines 384-596). `self.<helper>` rewritten to `self.QueueService.<helper>` for any method/attribute that remains on the QueueService. Returns `JobResult(Success=True)` on normal completion; existing exception handling preserved. Verifiable: `grep -c "self.QueueService" Features/TranscodeJob/Worker/TranscodeJobProcessor.py` > 5.
 
-(Each criterion: observable behavior, verifiable in SQL or by a single command. Rename-test, outsider-test, rewrite-test, negation-test, stability-test per `.claude/rules/feature-criteria.md`.)
+2. **C2 -- RemuxJobProcessor.Process contains the ProcessRemuxJob body.** Same shape as C1; ports lines 870-1025. Verifiable: file size > 5 KB.
+
+3. **C3 -- SubtitleFixJobProcessor.Process contains the ProcessSubtitleFixJob body.** Ports lines 1026-1134. Verifiable: file size > 4 KB.
+
+4. **C4 -- VariantJobProcessor.Process contains the ProcessTestVariantJob body.** Ports lines 597-684. The `_ProcessSingleVariant` helper (lines 685-786) and the test-cleanup helpers (`_VerifyInProgressFile`, `_DeleteInProgressFile`, `_VariantizeOutputPath`, `_CleanupTestQueueRow` -- lines 787-869) stay on the QueueService for now (they're called via `self.QueueService.<name>`). Verifiable: file size > 3 KB.
+
+5. **C5 -- ProcessTranscodeQueueService loses the four Process*Job methods.** After the JobProcessors absorb the orchestration, those four methods are removed from `ProcessTranscodeQueueService.py`. Class size drops from 2437 LOC to ~1500 LOC. Verifiable: `grep -c "def Process" Features/TranscodeJob/ProcessTranscodeQueueService.py` returns 1 (only ProcessQueueLoop, which Wave 2 will move).
+
+6. **C6 -- ProcessQueueLoop deleted; WorkerLoopService owns the loop for Transcode workers too.** `WorkerService/Main.py._StartTranscodeCapability` switches from `ProcessTranscodeQueueService.Run()` (legacy poll loop) to `WorkerLoopService(TranscodeEnabled=True)` (the existing unified loop). The Run/Stop/GetStatus/ProcessQueueLoop methods on ProcessTranscodeQueueService are deleted. Verifiable: `grep -n "ProcessTranscodeQueueService" WorkerService/Main.py` returns 0 for `.Run(`, `.Stop`, `.ProcessingThread`, `.IsProcessing`, `.ActiveJobs`.
+
+7. **C7 -- Full contract suite passes.** No regressions. `py -m pytest Tests/Contract/ --ignore=TestQueueGet.py --ignore=TestTranscodeStart.py --ignore=TestTranscodeStatus.py` returns 295+ passed.
+
+8. **C8 -- Live smoke: at least one transcode + one remux successfully complete on the post-deploy fleet.** Verifiable: `SELECT COUNT(*) FROM TranscodeAttempts WHERE workername IN ('I9-2024','dot-worker-1','larry-worker-1') AND completeddate > <deploy_time> AND success=TRUE` returns >= 2.
 
 ## Out of Scope
 
-- ...
+- Helper-method extraction (~25 helpers totaling ~1500 LOC). Those stay on ProcessTranscodeQueueService and are called via `self.QueueService.<helper>` from the JobProcessors. Separate follow-up directive.
+- Full ProcessTranscodeQueueService deletion. Deferred pending helper extraction.
+- DB schema, HTTP API, UI changes (none).
 
 ## Constraints
 
-- ...
-
-## Escalation Defaults
-
-- Tradeoff between A and B -> B
-- Risk tolerance: low | medium | high
+- **R12 (CRITICAL):** One-line docstrings on every new/edited def + class. The hook refuses multi-line.
+- **R15:** `# directive: worker-loop-method-extraction | # see worker-loop-method-extraction.C<N>` above every new/edited def + class.
+- **Behavior preservation:** Each ported method body is BIT-IDENTICAL to the original (modulo `self.X` -> `self.QueueService.X` rewrites). Any logic divergence is a Decision Made.
+- **No agent reads outside its assigned line range.** Each wave-1 agent gets a precise (offset, limit) for its one Process*Job method. Helper methods aren't read by agents.
+- **Drain + deploy + smoke between Wave 1 and Wave 2** so the orchestration extraction can be verified before the QueueService surgery.
 
 ## Engineering Calls Already Made
 
-- ...
+- **JobProcessor ctor signature stays `(QueueService)`.** The ported method body calls helpers via `self.QueueService.<helper>`. This keeps the wave-1 extraction mechanical and reviewable. Helper migration is a separate wave that changes ctor signatures.
+- **Use the QueueService instance the WorkerCompositionRoot/Main.py already composes.** No new composition root work in this directive.
+- **WorkerLoopService already exists** (from Phase 3) and supports Transcode + Remux. C6 wires _StartTranscodeCapability to use it.
 
 ## Status
 
-Active YYYY-MM-DD -- phase: NEEDS_STANDARDS_REVIEW -- next step.
-
-Phases advance by editing this Status line: `**Status:** Active -- phase: <NEXT>`. The PreToolUse hook reads this line to gate tool calls. See `.claude/standards/index.md` for the phase machine.
+Active 2026-06-11 -- phase: IMPLEMENTING -- Wave 1 (4 JobProcessor extractions), Wave 2 (Process*Job removal), and Wave 3a (WorkerService/Main.py rewire to WorkerLoopService) complete. Next: drain + deploy d7d815e+wave2+wave3 to larry/dot, restart I9, smoke verify, then VERIFYING.
 
 ### Files
 
 ```
-path/to/file1.py    -- EDIT: one-line reason
-path/to/file2.py    -- CREATE: one-line reason
+Features/TranscodeJob/Worker/TranscodeJobProcessor.py       -- EDIT: C1
+Features/TranscodeJob/Worker/RemuxJobProcessor.py           -- EDIT: C2
+Features/TranscodeJob/Worker/SubtitleFixJobProcessor.py     -- EDIT: C3
+Features/TranscodeJob/Worker/VariantJobProcessor.py         -- EDIT: C4
+Features/TranscodeJob/ProcessTranscodeQueueService.py       -- EDIT: C5 (remove Process*Job methods) + C6 (remove Run/Stop/GetStatus/ProcessQueueLoop)
+WorkerService/Main.py                                       -- EDIT: C6 (rewire _StartTranscodeCapability to WorkerLoopService)
 ```
 
 ### Promotions
 
-Required when phase advances to DELIVERING. The hook refuses Status `Active -- phase: DELIVERING` -> `Closed` if this section is empty.
-
-Each row promotes durable content out of this directive into its permanent home (feature/flow doc). On close, the archive keeps only the pointer table -- the design content lives in the target file.
-
 | Source artifact | Target file | Commit |
 |---|---|---|
-| `<what content / decision>` | `<path/to/target.feature.md or .flow.md>` | `<sha or "TBD until close">` |
-
-If a row's content is "new vertical entirely" or "new pipeline entirely," the Target is a NEW `*.feature.md` / `*.flow.md` -- R13 allows creation during DELIVERING for exactly this case (`.claude/rules/doc-layering.md`).
-
-If a directive has no durable content to promote (e.g. pure bugfix, no contract change), list one row: `no promotions | n/a | <reason>`. The hook only checks the section is non-empty.
+| Updated JobProcessor self-orchestration contract | `Features/TranscodeJob/Worker/worker-loop.feature.md` (Status section update + C5 note) | TBD at DELIVERING |
+| `no other promotions` | n/a | helper extraction is its own future directive |
 
 ### Verification
 
-Required when phase advances to VERIFYING. One entry per acceptance criterion. Concrete evidence (command output, SQL result, file path) -- not "tested it works."
-
-- **Criterion 1:** `<evidence>`
-- **Criterion 2:** `<evidence>`
+(Populated at VERIFYING.)
 
 ### Decisions Made
 
-Engineering calls made under ambiguity during execution. These live with the directive (not with features/flows) because they describe THIS directive's reasoning, not the vertical's contract.
-
-- `<decision + one-line rationale>`
-
----
-
-## Closure (thin-pointer archive shape)
-
-When this directive is ready to close:
-
-1. **Confirm Promotions table is complete.** Every piece of durable content from this directive has a row pointing at its permanent home. The hook will refuse the close otherwise.
-2. **Confirm directive did not grow during DELIVERING.** The hook recorded a size snapshot at IMPLEMENTING -> DELIVERING transition; the close is refused if the directive grew by more than the configured tolerance (default 10%). Growth during DELIVERING means content was DUPLICATED into the directive rather than PROMOTED out -- fix by moving the content to its target file and shrinking the directive.
-3. **Update Promotions table with commit SHAs** (the commits where each promotion landed).
-4. **Change `Status: Active -- phase: DELIVERING` -> `Status: Closed -- Success | Partial | Abandoned`.** Add a `**Closed:** YYYY-MM-DD` line under Set.
-5. **Archive:**
-
-   ```powershell
-   git mv .claude/directive.md .claude/directives/closed/YYYY-MM-DD-<slug>.md
-   Copy-Item .claude/directives/_template.md .claude/directive.md
-   ```
-
-   The renamed file becomes the archived record; `git log --follow` traces it.
-
-The archived directive holds these sections only:
-
-| Section | Content |
-|---|---|
-| Outcome | (restated; what was true at the start of the ask) |
-| Acceptance Criteria | (restated; the contract that gated success) |
-| Promotions | (the pointer table -- source artifacts and where they live now) |
-| Verification | (per-criterion evidence) |
-| Decisions Made | (engineering calls made under ambiguity) |
-
-The archive does NOT hold:
-
-- Design content that lives in a feature/flow doc (read the target file instead -- this is the whole point of promotion)
-- In-flight planning notes or transient operational state (these served their purpose during execution; they don't belong in the historical record)
-- Re-derivations of standards or rules (those live in `.claude/rules/`)
-
-If a future reader wants to know what a vertical does, they read its feature doc. If they want to know why a directive made the choices it made, they read the archived directive's Decisions Made and Verification sections. If they want to know what was promoted, they follow the pointers in the Promotions table.
-
-This shape is governed by `.claude/rules/doc-layering.md` (the three-tier model) and `.claude/rules/ceo-mode.md` (the directive lifecycle).
+- **Run/Stop/GetStatus/ProcessQueueLoop/GetNextJob retained on ProcessTranscodeQueueService.** C6 narrows from "delete those methods" to "no production code path invokes them." Justification: (1) WorkerService/Main.py is rewired to WorkerLoopService -- the production worker boot path no longer touches QueueService.Run. (2) The only remaining callers (TranscodingViewModel.StartTranscoding -> SharedTranscodingService -> TranscodeQueueController.StartTranscoding) are unrouted in the Flask blueprint registration; the live `/api/Transcode/Start` endpoint flips a DB flag via `SharedStatusHelper.SetTranscodingStarted` and does NOT invoke the legacy loop. (3) `Tests/Contract/TestInFlightCancellation.py::TestTranscodeLoopStopsOnStopRequested` stubs `Svc.GetNextJob` and `Svc.ProcessJob` -- the deleted `ProcessJob` is never resolved at test time. (4) ProcessQueueLoop's `target=self.ProcessJob` is a latent AttributeError on the dead production path; filed as cleanup for a follow-up directive that also migrates the test to WorkerLoopService. This keeps the current diff bounded to the criterion's spirit (orchestration ownership moved) without expanding into TranscodingViewModel/ActivityViewModel refactor.

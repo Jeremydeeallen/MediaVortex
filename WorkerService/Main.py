@@ -355,43 +355,62 @@ class WorkerServiceApp:
             return max(1, min(5, int(Legacy)))
         return Default
 
+    # directive: worker-loop-method-extraction | # see worker-loop.C5
     def _StartTranscodeCapability(self):
-        """Initialize and start the transcode processing capability."""
+        """Initialize the transcode processing capability via WorkerLoopService + TranscodeJobProcessor strategy."""
         if self.TranscodeService is not None:
             return
         try:
-            from Services.ProcessTranscodeQueueService import ProcessTranscodeQueueService
-            self.TranscodeService = ProcessTranscodeQueueService(
+            from Features.TranscodeJob.Worker.WorkerLoopService import WorkerLoopService
+            from Features.TranscodeJob.Worker.JobProcessorRegistry import JobProcessorRegistry
+            from Features.TranscodeJob.Worker.TranscodeJobProcessor import TranscodeJobProcessor
+            from Features.TranscodeJob.Worker.VariantJobProcessor import VariantJobProcessor
+            from Features.TranscodeJob.Worker.SubtitleFixJobProcessor import SubtitleFixJobProcessor
+            from Features.TranscodeJob.ProcessTranscodeQueueService import ProcessTranscodeQueueService
+            QueueService = ProcessTranscodeQueueService(
                 DatabaseManagerInstance=self.DatabaseManager,
                 WorkerName=self.WorkerName,
-                WorkerConfig=self.WorkerConfig
+                WorkerConfig=self.WorkerConfig,
+            )
+            Registry = JobProcessorRegistry({
+                'Transcode': TranscodeJobProcessor(QueueService),
+                'SubtitleFix': SubtitleFixJobProcessor(QueueService),
+                'TestVariant': VariantJobProcessor(QueueService),
+            })
+            MaxJobs = self.CurrentTranscodeConcurrency
+            self.TranscodeService = WorkerLoopService(
+                DatabaseManager=self.DatabaseManager,
+                JobProcessorRegistryInstance=Registry,
+                WorkerName=self.WorkerName,
+                TranscodeEnabled=True,
+                RemuxEnabled=False,
+                AcceptsInterlaced=getattr(QueueService, 'AcceptsInterlaced', True),
+                MaxConcurrentTranscodeJobs=MaxJobs,
+                MaxConcurrentRemuxJobs=0,
             )
             self.TranscodeCurrentStatus = "Running"
             self.TranscodeManuallyStopped = False
-            MaxJobs = self.CurrentTranscodeConcurrency
-            Result = self.TranscodeService.Run(MaxConcurrentJobs=MaxJobs)
+            Result = self.TranscodeService.Run()
             if Result.get("Success", False):
-                LoggingService.LogInfo(f"Transcode capability started ({MaxJobs} concurrent jobs)", "WorkerService", "_StartTranscodeCapability")
+                LoggingService.LogInfo(f"Transcode capability started via WorkerLoopService ({MaxJobs} concurrent jobs)", "WorkerService", "_StartTranscodeCapability")
             else:
                 LoggingService.LogError(f"Failed to start transcode: {Result.get('ErrorMessage', 'Unknown')}", "WorkerService", "_StartTranscodeCapability")
         except Exception as e:
             LoggingService.LogException("Error starting transcode capability", e, "WorkerService", "_StartTranscodeCapability")
 
+    # directive: worker-loop-method-extraction | # see worker-loop.C5
     def _StopTranscodeCapability(self):
-        """Stop the transcode processing capability gracefully."""
+        """Stop the transcode processing capability gracefully (WorkerLoopService Stop API)."""
         if self.TranscodeService is None:
             return
         try:
-            LoggingService.LogInfo("Stopping transcode capability...", "WorkerService", "_StopTranscodeCapability")
-            self.TranscodeService.StopRequested = True
+            LoggingService.LogInfo("Stopping transcode capability (WorkerLoopService)...", "WorkerService", "_StopTranscodeCapability")
+            self.TranscodeService.Stop()
             self.TranscodeManuallyStopped = True
-
-            # Wait for current job to finish
             if self.TranscodeService.ProcessingThread and self.TranscodeService.ProcessingThread.is_alive():
                 self.TranscodeService.ProcessingThread.join(timeout=7200)
-
             self.TranscodeService.IsProcessing = False
-            self.TranscodeService.ActiveJobs.clear()
+            self.TranscodeService.ActiveTranscodeJobs.clear()
             self.TranscodeService = None
             self.TranscodeCurrentStatus = "Stopped"
             LoggingService.LogInfo("Transcode capability stopped", "WorkerService", "_StopTranscodeCapability")
