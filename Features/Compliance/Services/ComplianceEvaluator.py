@@ -28,6 +28,5 @@ class ComplianceEvaluator:
         Results = self.RuleEngine.Run(Mf, Profile, Cache)
         OperationsNeeded = frozenset(R.OperationName for R in Results if R.Applies)
         Reasons = [Reason for R in Results for Reason in R.Reasons]
-        Bucket = self.BucketResolver.Resolve(OperationsNeeded)
-        IsCompliant = (Bucket is None)
+        IsCompliant, Bucket = self.BucketResolver.Resolve(OperationsNeeded)
         return ComplianceDecision(IsCompliant=IsCompliant, OperationsNeeded=OperationsNeeded, WorkBucket=Bucket, GateBlocked=None, Reasons=Reasons)

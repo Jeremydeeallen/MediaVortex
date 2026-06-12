@@ -41,11 +41,12 @@ class ComplianceRecomputeService:
             Updates.append((Mf.Id, Decision))
 
         if not DryRun:
+            # directive: compliance-writeback-invariant | # see compliance.C7
             for MfId, Decision in Updates:
                 OpsCsv = ','.join(sorted(Decision.OperationsNeeded)) if Decision.OperationsNeeded else None
                 self.DB.ExecuteNonQuery(
-                    "UPDATE MediaFiles SET WorkBucket = %s, OperationsNeededCsv = %s, ComplianceGateBlocked = %s, ComplianceEvaluatedAt = NOW() WHERE Id = %s",
-                    (Decision.WorkBucket, OpsCsv, Decision.GateBlocked, MfId),
+                    "UPDATE MediaFiles SET IsCompliant = %s, WorkBucket = %s, OperationsNeededCsv = %s, ComplianceGateBlocked = %s, ComplianceEvaluatedAt = NOW() WHERE Id = %s",
+                    (Decision.IsCompliant, Decision.WorkBucket, OpsCsv, Decision.GateBlocked, MfId),
                 )
             LoggingService.LogInfo(f"ComplianceRecomputeService: evaluated {len(Updates)} rows; bucketed={Bucketed}; gate_blocked={GateBlocked}", "ComplianceRecomputeService", "Recompute")
 

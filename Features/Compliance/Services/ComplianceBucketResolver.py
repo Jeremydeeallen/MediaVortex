@@ -1,21 +1,21 @@
-from typing import FrozenSet, Optional
+from typing import FrozenSet, Optional, Tuple
 
 
-# directive: compliance-solid-refactor | # see compliance-solid-refactor.C14
+# directive: compliance-writeback-invariant | # see compliance.C8
 class ComplianceBucketResolver:
-    """Pure function: map OperationsNeeded set to a single WorkBucket -- see compliance-solid-refactor.C14 for precedence rules."""
+    """Pure function: map OperationsNeeded to co-mutated (IsCompliant, WorkBucket) per compliance.C8 (sole producer)."""
 
-    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C14
-    def Resolve(self, OperationsNeeded: FrozenSet[str]) -> Optional[str]:
-        """Return 'Transcode' / 'Remux' / 'AudioFixOnly' / 'SubtitleFixOnly' / None per C14 precedence."""
+    # directive: compliance-writeback-invariant | # see compliance.C8
+    def Resolve(self, OperationsNeeded: FrozenSet[str]) -> Tuple[bool, Optional[str]]:
+        """Return (IsCompliant, WorkBucket). C3 precedence: Transcode > Remux > AudioFixOnly > SubtitleFixOnly. Empty ops -> (True, None); non-empty -> (False, Bucket). Sole producer of the (IsCompliant, WorkBucket) pair (compliance.C8)."""
         if not OperationsNeeded:
-            return None
+            return (True, None)
         if 'Transcode' in OperationsNeeded:
-            return 'Transcode'
+            return (False, 'Transcode')
         if 'Remux' in OperationsNeeded:
-            return 'Remux'
+            return (False, 'Remux')
         if 'AudioFix' in OperationsNeeded:
-            return 'AudioFixOnly'
+            return (False, 'AudioFixOnly')
         if 'SubtitleFix' in OperationsNeeded:
-            return 'SubtitleFixOnly'
-        return None
+            return (False, 'SubtitleFixOnly')
+        return (True, None)

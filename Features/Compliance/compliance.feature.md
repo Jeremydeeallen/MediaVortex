@@ -47,6 +47,14 @@ The contract that survives directive close:
 
 5. **OCP**: adding a new operation requires only a new `IComplianceOperation` impl file + new rule table seed + register in `ComplianceComposition.BuildEvaluator()`. No edits to existing operations, gates, evaluator, or resolver.
 
+6. **[BUG-0062] Writeback consistency invariant.** Every `MediaFiles` row written by `BulkWriteRecomputeResults` satisfies the bucket-precedence rule from C3 at the SQL level: `(IsCompliant = TRUE AND WorkBucket IS NULL AND (OperationsNeededCsv IS NULL OR OperationsNeededCsv = '')) OR (IsCompliant = FALSE AND WorkBucket IS NOT NULL AND OperationsNeededCsv IS NOT NULL AND OperationsNeededCsv != '') OR (IsCompliant IS NULL AND ComplianceGateBlocked IS NOT NULL)`. The three-way disjunction is the only legal post-recompute shape. Verifiable: `SELECT COUNT(*) FROM MediaFiles WHERE IsCompliant=TRUE AND WorkBucket IS NOT NULL` returns 0 after any full or partial recompute completes. A `Tests/Contract/TestComplianceWriteConsistency.py` asserts the invariant against the live DB.
+
+7. **[BUG-0062] Constructor self-validation (Layer 1).** `ComplianceDecision.__post_init__` raises `ContradictoryDecisionError` (typed subclass of `ValueError`, grep-able in production logs) when the C3 three-way disjunction is violated at construction. No call site can instantiate a contradictory `ComplianceDecision`. `OperationsNeeded` is additionally validated as a subset of `{'Transcode', 'Remux', 'AudioFix', 'SubtitleFix'}`. Verifiable: synthetic invalid construction (`IsCompliant=True, WorkBucket='Transcode'`) raises `ContradictoryDecisionError` carrying the offending tuple in its message.
+
+8. **[BUG-0062] BucketResolver is the sole co-producer of `(IsCompliant, WorkBucket)`.** `ComplianceBucketResolver.Resolve(OperationsNeeded)` returns a `Tuple[bool, Optional[str]]` -- IsCompliant and WorkBucket are co-mutated by ONE pure function, never set independently. `ComplianceEvaluator.Evaluate` uses the resolver's return tuple directly; no `IsCompliant = (Bucket is None)` local recompute. Verifiable: a unit test asserts every legal `OperationsNeeded` set produces a tuple that passes C7's constructor validation; mutating one element of the tuple breaks the other.
+
+9. **[BUG-0062] SQL CHECK constraint (Layer 3).** `MediaFiles` carries a CHECK constraint `chk_compliance_consistency` enforcing the C6 three-way disjunction at storage. INSERT/UPDATE that would violate the invariant raises `CheckViolation` (`psycopg2.errors.CheckViolation`, SQLSTATE `23514`). Rollback is single-statement: `ALTER TABLE MediaFiles DROP CONSTRAINT chk_compliance_consistency;`. Verifiable: `SELECT conname FROM pg_constraint WHERE conname='chk_compliance_consistency'` returns one row; a synthetic UPDATE setting (`IsCompliant=TRUE, WorkBucket='Transcode'`) raises `CheckViolation`.
+
 ## Seams
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |

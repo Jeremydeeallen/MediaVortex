@@ -241,23 +241,23 @@ class TestBucketResolverPrecedence(unittest.TestCase):
         from Features.Compliance.Services.ComplianceBucketResolver import ComplianceBucketResolver
         self.R = ComplianceBucketResolver()
 
-    def test_empty_set_returns_none(self):
-        self.assertIsNone(self.R.Resolve(frozenset()))
+    def test_empty_set_returns_compliant_no_bucket(self):
+        self.assertEqual(self.R.Resolve(frozenset()), (True, None))
 
     def test_transcode_wins(self):
-        self.assertEqual(self.R.Resolve(frozenset({'Transcode', 'Remux', 'AudioFix'})), 'Transcode')
+        self.assertEqual(self.R.Resolve(frozenset({'Transcode', 'Remux', 'AudioFix'})), (False, 'Transcode'))
 
     def test_remux_wins_over_audiofix(self):
-        self.assertEqual(self.R.Resolve(frozenset({'Remux', 'AudioFix'})), 'Remux')
+        self.assertEqual(self.R.Resolve(frozenset({'Remux', 'AudioFix'})), (False, 'Remux'))
 
     def test_audiofix_alone(self):
-        self.assertEqual(self.R.Resolve(frozenset({'AudioFix'})), 'AudioFixOnly')
+        self.assertEqual(self.R.Resolve(frozenset({'AudioFix'})), (False, 'AudioFixOnly'))
 
     def test_subtitlefix_alone(self):
-        self.assertEqual(self.R.Resolve(frozenset({'SubtitleFix'})), 'SubtitleFixOnly')
+        self.assertEqual(self.R.Resolve(frozenset({'SubtitleFix'})), (False, 'SubtitleFixOnly'))
 
     def test_audiofix_subtitlefix_collapses_to_audiofixonly(self):
-        self.assertEqual(self.R.Resolve(frozenset({'AudioFix', 'SubtitleFix'})), 'AudioFixOnly')
+        self.assertEqual(self.R.Resolve(frozenset({'AudioFix', 'SubtitleFix'})), (False, 'AudioFixOnly'))
 
 
 if __name__ == '__main__':

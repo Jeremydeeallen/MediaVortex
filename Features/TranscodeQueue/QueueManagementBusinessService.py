@@ -2005,9 +2005,15 @@ class QueueManagementBusinessService:
             if not updates:
                 return 0
 
-            # directive: compliance-solid-refactor | # see compliance-solid-refactor.C23
+            # directive: compliance-writeback-invariant | # see compliance.C8
             from Features.Compliance.Repositories.ComplianceWriteRepository import ComplianceWriteRepository
-            return ComplianceWriteRepository().BulkWriteRecomputeResults(updates)
+            Written, Refused = ComplianceWriteRepository().BulkWriteRecomputeResults(updates)
+            if Refused:
+                LoggingService.LogWarning(
+                    "BUG-0062: ComplianceWriteRepository refused " + str(Refused) + " contradictory tuple(s) of " + str(len(updates)) + " submitted in RecomputeForFiles batch",
+                    "QueueManagementBusinessService", "RecomputeForFiles"
+                )
+            return Written
         except Exception as Ex:
             LoggingService.LogException(
                 f"RecomputeForFiles failed for {len(MediaFileIds)} ids",
