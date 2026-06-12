@@ -860,3 +860,85 @@ Observed: Bachelor in Paradise S10E01 was successfully transcoded earlier today,
 
 ---
 
+### [BUG-0048] _BuildRemuxShape missing `-f mp4 -movflags +faststart` -- BUG-0005 regression scoped only to the Transcode dispatch; every Remux job fails return code 234 | resolved: 2026-06-12
+**Date:** 2026-06-09 | **Area:** command-builder | **Severity:** show-stopper
+**Closed by:** `perfect-solid-transcode-pipeline-phase2` -- RemuxShape now unconditionally emits `-f mp4 -movflags +faststart`; contract test asserts both flags for every dispatch shape.
+
+**What happened:** Discovered during the post-compliance-backfill Remux burst on larry-worker-1 (compliance-solid-refactor Phase 8 smoke). Every Remux attempt fails with FFmpeg error `Unable to choose an output format for '...mp4.inprogress'; use a standard extension for the filename or specify the format manually. ... Error opening output files: Invalid argument` -> return code 234. `_BuildRemuxShape` in `Models/CommandBuilder.py` omits the `-f mp4 -movflags +faststart` flags that `_BuildTranscodeShape` includes, so FFmpeg cannot infer the container from the `.inprogress` extension.
+
+**Violates:** `command-builder.feature.md` C6 ("`-f mp4` is always present (BUG-0005). ... Removing `-f mp4` from any code path is a test failure.") and C7 ("`-movflags +faststart` is always present").
+
+**Why it got missed:** BUG-0005 fix landed in 2026-05-18 but scoped only to the Transcode dispatch. `Scripts/RegressionTestCommandBuilder.py.check_command` asserts both `-f mp4` and `-movflags +faststart` but only loops through the Transcode dispatch (ProcessingMode='Transcode') -- it never builds a Remux command. Pre-2026-06-09 Remux volume was sub-100 jobs/day (admission gate filtered most candidates), so the defect was masked by low traffic. The compliance-solid-refactor backfill produced thousands of `WorkBucket='Remux'` rows at scale and exposed the latent failure.
+
+**Concrete evidence (attempt 33824, larry-worker-1, MediaFileId=13508 Broad City S05E07):**
+```
+ffmpeg -i "/mnt/media_tv/Broad City/Season 5/Broad City - S05E07 - Shenanigans HDTV-720p.mkv" \
+  -map 0:v:0 -map 0:a:0 -c:v copy -tag:v hvc1 -c:a eac3 -b:a 224k \
+  -af "loudnorm=I=-23:LRA=11.00:TP=-2:measured_I=-19.60:..." \
+  -y "...HDTV-720p-mv.mp4.inprogress"
+```
+FFmpeg stderr: `[AVFormatContext] Unable to choose an output format ... [out#0] Error initializing the muxer ... Invalid argument`.
+
+**Fix:** RemuxShape now uses the same emit path as TranscodeShape and unconditionally produces `-f mp4 -movflags +faststart`. RegressionTestCommandBuilder + new `Tests/Contract/TestRemuxCommandShape.py` exercise both dispatches against the same assertions.
+
+---
+
+### [BUG-0049] `BuildAudioFilters` raises `RuntimeError` on ungainable_peak instead of emitting dynamic-mode loudnorm; violates `linear-loudnorm.feature.md` C10 + C2 | resolved: 2026-06-12
+**Date:** 2026-06-09 | **Area:** audio-pipeline | **Severity:** silent contract drift; ~20% of post-compliance-backfill Remux jobs refused
+**Closed by:** `perfect-solid-transcode-pipeline-phase2` -- emit side now raises typed `UngainablePeakError` instead of bare RuntimeError; CommandBuilder catches it and emits dynamic-mode loudnorm per C10. `Profiles.AudioFilter` hardcoded string divergence flagged for follow-up.
+
+**What happened:** Discovered 2026-06-09 during the post-compliance-backfill Remux burst on larry-worker-1 (compliance-solid-refactor Phase 8 smoke). `~20%` of Remux failures land in the `BuildAudioFilters: ungainable peak` raise path. Investigation revealed the raise contradicts the feature doc -- `linear-loudnorm.feature.md` C10 mandates a dynamic-mode fallback when `predicted_peak > TargetTruePeak`, and C2 explicitly says "Files that would have been blocked for ungainable peak (earlier draft) are now encoded in dynamic mode instead -- see criterion 10." The code never caught up to the contract change.
+
+**Concrete evidence (attempt 33824, larry-worker-1, MediaFileId=13508 Broad City S05E07):**
+```
+CommandBuilder._BuildRemuxShape failed (JobId=135747):
+BuildAudioFilters: ungainable peak for MediaFileId=13508
+(SourceIntegratedLufs=-24.60, gain=+1.60 dB, predicted_peak=-0.60 dBTP > target_TP=-2 dBTP).
+```
+
+**Operator preference context:** the hearing-accessibility intent here (dialogue clarity / lower explosions) means dynamic mode is operationally correct -- compresses the loud-quiet gap, boosts dialogue relative to action peaks. The current raise refused to normalize exactly the files that would benefit most from compression. Fixing this bug aligned runtime behavior with both the doc contract AND operator preference.
+
+**Fix:** Emit-side raises typed `UngainablePeakError`; CommandBuilder catches the typed exception and emits dynamic-mode loudnorm (same `measured_*` params, no `:linear=true`). `MediaFiles.AudioNormalizationMode='dynamic'` is set post-flight by `AudioCompletionService.DetectNormalizationMode`. Contract test `Tests/Contract/TestLinearLoudnormEnforcement.py` asserts the dynamic-mode emit path.
+
+---
+
+### [BUG-0050] `AdaptiveQualityService.ShouldRetranscode` references undefined `FilePath` in `LogDebug` at line 160 -- `NameError` on every first-attempt path | resolved: 2026-06-12
+**Date:** 2026-06-09 | **Area:** quality-testing | **Severity:** masked failure -- first-attempt logging broken, decision short-circuits
+**Closed by:** `perfect-solid-transcode-pipeline` Phase 1 -- AdaptiveQualityService.py deleted; replaced by `RetranscodeDecider.py` (pure function, no `FilePath` identifier in scope). Structurally impossible to reintroduce the NameError.
+
+**What happened:** Discovered 2026-06-09 during ERROR-log scan post-Phase-7. `Features/TranscodeJob/AdaptiveQualityService.py:160` reads `LoggingService.LogDebug(f"No previous attempt for {FilePath}, should transcode", ...)`. `FilePath` is undefined in this scope -- the method takes `MediaFileId` (int), not a file path. Python raises `NameError: name 'FilePath' is not defined` on the f-string interpolation, which the surrounding `try:` swallows... but the `LogDebug` is INSIDE an `if not previousAttempt:` branch that returns `(True, None)`. If the NameError fires before the return, the method probably returns `(False, None)` (default exception path) and the caller may proceed differently than expected.
+
+**Fix (structural):** Phase 1 rebuilt the ST7 disposition layer. The `RetranscodeDecider` pure function exposes `Decide(MediaFileId, AttemptRepository) -> RetranscodeDecision`. `grep -n "FilePath" Features/QualityTesting/Disposition/RetranscodeDecider.py` returns 0 hits -- the BUG-0050 NameError class no longer exists. Contract test `Tests/Contract/TestRetranscodeDecider.py::test_first_attempt_returns_should_transcode` covers the previously-broken path.
+
+---
+
+### [BUG-0051] `ProcessRemuxQueueService._ClaimNextRemuxJob` raises `AttributeError: 'ProcessRemuxQueueService' object has no attribute 'DatabaseManager'` | resolved: 2026-06-12
+**Date:** 2026-06-09 | **Area:** transcode-queue | **Severity:** workers losing the claim path
+**Closed by:** `perfect-solid-transcode-pipeline-phase3` commit 39d04a1 -- `ProcessRemuxQueueService.py` deleted; the duplicate composition root no longer exists. RemuxJobProcessor + WorkerLoopService replace it.
+
+**What happened:** Discovered 2026-06-09 in ERROR logs surrounding the post-restart larry-worker-1 + I9 transcode burst. `ProcessRemuxQueueService._ClaimNextRemuxJob` (line 124-130) called `self.DatabaseManager.ClaimNextPendingRemuxJob(...)` but the runtime error reported the attribute missing despite `__init__` assignment. Suspected causes (stale code, swallowed `__init__` exception, threading race, attribute-name mismatch) were never pinned down because the file was deleted before reproduction.
+
+**Fix (structural):** Phase 3 deleted `Features/TranscodeJob/ProcessRemuxQueueService.py`. `grep -rn "ProcessRemuxQueueService" --include='*.py' .` returns 0 production hits. The intermittent AttributeError surface no longer exists. Remux capability routes through `WorkerLoopService(RemuxEnabled=True)` + `RemuxJobProcessor`. Live verified post-deploy at 39d04a1 (0 occurrences of `has no attribute DatabaseManager` in Logs over 48h observation window).
+
+---
+
+### [BUG-0052] `Core.PathStorage` module deleted but 6 importers still import from it -- ModuleNotFoundError on invocation | resolved: 2026-06-12
+**Date:** 2026-06-09 | **Area:** path-storage | **Severity:** production-importer broken (StartWorker.py)
+**Closed by:** Prereq hotfix commit 42ed437 (shipped before perfect-solid-transcode-pipeline Phase 1). Six importers migrated to `Core.Path.LocalPath` / `Core.Path.PathFs`; CLAUDE.md docs swept.
+
+**What happened:** Discovered 2026-06-09 during Phase 7 cleanup of the compliance directive. `Core/PathStorage.py` source file had been deleted but `Core/__pycache__/PathStorage.cpython-313.pyc` remained. Six callers still imported from the dead module: `StartWorker.py:34`, `_check_path.py`, `Tests/Unit/TestPathStorageShapeOps.py`, plus three Tests/Pipeline files already fixed in Phase 7.
+
+**Fix:** Migrated each importer to the canonical `from Core.Path.LocalPath import ...` (or the `Path` + `Worker` resolver pattern for path-resolution use cases). Swept `CLAUDE.md` paths section to remove the stale `from Core.PathStorage import ...` documentation. Deleted the stranded `.pyc` cache. Pre-Phase-1 ship so fresh container bootstrap on larry succeeded.
+
+---
+
+### [BUG-0053] `Tests/Contract/TestMediaProbeUsesPath.py` SELECTs non-column `m.FilePath` -- psycopg2 UndefinedColumn during contract suite | resolved: 2026-06-12
+**Date:** 2026-06-09 | **Area:** tests | **Severity:** test-suite collection error
+**Closed by:** Prereq hotfix commit 42ed437 -- SELECT rewritten to use typed pair `(StorageRootId, RelativePath)`; FilePath reconstructed in Python via `Path(...).CanonicalDisplay(GetPrefixMap())`.
+
+**What happened:** Discovered 2026-06-09 during post-Phase-7 contract suite run. `Tests/Contract/TestMediaProbeUsesPath.py` line 27 issued `SELECT Id, FilePath, StorageRootId, RelativePath FROM MediaFiles ...` -- `FilePath` is a computed model property (synthesized from typed pair via `PathStorageRoots` singleton), not a DB column. psycopg2 returned `UndefinedColumn: column "filepath" does not exist`. The test errored out during collection; the assertion never ran.
+
+**Fix:** Replaced the SELECT with `SELECT Id, StorageRootId, RelativePath FROM MediaFiles ...`; reconstructed FilePath in Python via `Path(StorageRootId, RelativePath).CanonicalDisplay(GetPrefixMap())` where the test needed the canonical display form.
+
+---
+
