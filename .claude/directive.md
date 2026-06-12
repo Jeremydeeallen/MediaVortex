@@ -66,9 +66,45 @@ Today the compliance engine writes `IsCompliant=TRUE` alongside non-null `WorkBu
 
 ## Status
 
-**Phase:** NEEDS_PLAN (the `**Status:**` line at the top is the hook-authoritative source — edit it to advance phase)
-**Last touched:** 2026-06-12 by Claude (CEO blanket approval received -- "implement until fully implemented perfectly deployed and tested"; AC5 amended to immediate-smoke-evidence ceiling)
-**Sequencing decision (B-first vs A-first):** B-first confirmed
+**Phase:** DELIVERING (the `**Status:**` line at the top is the hook-authoritative source — edit it to advance phase)
+**Last touched:** 2026-06-12 by Claude (delivery report drafted; commit 83ce273; awaiting final close)
+**Sequencing decision (B-first vs A-first):** B-first confirmed; Cluster A (BUG-0061) remains a separate directive
+
+### Delivery Report
+
+DIRECTIVE: Compliance Writeback Invariant Enforcement (BUG-0062)
+
+STATUS: Done
+
+WHAT SHIPPED (commit 83ce273):
+- Layer 1: `ComplianceDecision.__post_init__` raises `ContradictoryDecisionError` on C3 violation; `OperationsNeeded` validated as subset of canonical 4.
+- Layer 1.5: `ComplianceBucketResolver.Resolve` is the sole co-producer of `(IsCompliant, WorkBucket)` (returns the tuple); `ComplianceEvaluator.Evaluate` no longer computes `IsCompliant` locally.
+- Layer 2: `ComplianceWriteRepository.BulkWriteRecomputeResults` validates each tuple, refuses + WARN-logs invalid rows, returns `(written, refused)`; `QueueManagementBusinessService.RecomputeForFiles` surfaces the refused count.
+- Layer 3: SQL CHECK `chk_compliance_consistency` on `MediaFiles` refuses contradictory rows (`psycopg2.errors.CheckViolation`, SQLSTATE 23514). Idempotent migration; one-statement rollback.
+- Admin recompute path bug (discovered + fixed in scope): `ComplianceRecomputeService.Recompute` UPDATE now writes `IsCompliant` alongside `WorkBucket`. This is the upstream producer of many of the 5703 contradictions.
+- New CI test `Tests/Contract/TestComplianceWriteConsistency.py` (18 tests / 8 subtests) asserts each layer in isolation + live DB-wide invariant.
+
+HOW TO USE IT (operator-facing):
+- Verify the invariant any time: `py -m pytest Tests/Contract/TestComplianceWriteConsistency.py -v`
+- Live narrow-bug count: `SELECT COUNT(*) FROM MediaFiles WHERE IsCompliant=TRUE AND WorkBucket IS NOT NULL` (must be 0).
+- Live strict AC1 predicate: see directive AC1 — must be 0 after any full recompute.
+- Grep production logs for the typed signals: `ContradictoryDecisionError` (Layer 1), `BUG-0062 layer-2 refusal` (Layer 2), `chk_compliance_consistency` (Layer 3).
+- Rollback (if ever needed): `ALTER TABLE MediaFiles DROP CONSTRAINT chk_compliance_consistency;` (one statement, seconds). L1+L2 continue to enforce.
+- Re-remediate (idempotent): `py Scripts/SQLScripts/RemediateComplianceWritebackInvariant.py` — on a clean DB prints `PRE narrow=0, POST narrow=0, status=OK`.
+
+WHAT YOU NEED TO EXECUTE (steps Claude cannot perform): None. Remediation already executed on I9; CHECK constraint already applied. CI test is committed; future PRs will run it.
+
+CRITERIA VERIFICATION: see `### Verification` table above. AC1-AC5 all PASS.
+
+DECISIONS I MADE (without consulting):
+- Restored the `ComplianceRecomputeService.Recompute` UPDATE to include `IsCompliant` — this is the suspected upstream producer of many of the 5703 contradictory rows and fits "only the writeback path is wrong" scope.
+- Added a 4th disjunct to the SQL CHECK allowing the "never-evaluated" all-NULL state so scanner INSERTs do not fail. Post-remediation, every existing row is in one of the three documented valid states; fresh inserts transit through the 4th state briefly until the first probe.
+- Adopted `LoggingService.LogWarning(...)` (existing convention) for Layer-2 refusal logging rather than introducing a new structured-event surface.
+- Updated `TestBucketResolverPrecedence` cases to expect the new `(IsCompliant, WorkBucket)` tuple — the test owns the signature contract; the assertion update belongs in the same logical change.
+
+KNOWN GAPS / DEFERRED:
+- Cluster A (BUG-0061 failure-accounting) and Cluster C (BUG-0063) remain separate directives per the B-first sequencing decision.
+- The legacy `_EvaluateCompliance` shim in `QueueManagementBusinessService` is still listed Out of Scope; cleanup is a separate directive.
 
 ### Session Resumption (read FIRST if you boot into this directive cold)
 
@@ -157,11 +193,14 @@ Features/Compliance/compliance.flow.md                       -- EDIT: add Writeb
 
 | Source artifact in directive | Target file | Commit |
 |---|---|---|
-| AC1 — Invariant SQL predicate | `Features/Compliance/compliance.feature.md` C9 | -- |
-| AC2 — Three-layer architecture | `Features/Compliance/compliance.feature.md` C7 (constructor) + C8 (BucketResolver sole producer) | -- |
-| AC2 — Seams enumeration | `Features/Compliance/compliance.flow.md` new ST<N> + S<N> rows | -- |
-| AC3 — CI invariant test | `Tests/Contract/TestComplianceWriteConsistency.py` (file is the artifact) | -- |
-| AC4 — Rollback procedure | `Features/Compliance/compliance.feature.md` Operations section | -- |
+| AC1 — Invariant SQL predicate (three-way disjunction) | `Features/Compliance/compliance.feature.md` C9 (SQL CHECK) | 83ce273 |
+| AC2 — Three-layer architecture (constructor + bucket-resolver sole producer) | `Features/Compliance/compliance.feature.md` C7 (constructor self-validation) + C8 (BucketResolver co-mutator) | 83ce273 |
+| AC2 — Seams enumeration (writeback validation stage + cross-layer seam) | `Features/Compliance/compliance.flow.md` ST9 Writeback Validation + S7 writeback invariant | 83ce273 |
+| AC3 — CI invariant test (file is the artifact) | `Tests/Contract/TestComplianceWriteConsistency.py` (18 tests / 8 subtests) | 83ce273 |
+| AC4 — Rollback procedure (single-statement DDL) | `Features/Compliance/compliance.feature.md` C9 last sentence (`ALTER TABLE MediaFiles DROP CONSTRAINT chk_compliance_consistency`) | 83ce273 |
+| Layer-2 producer wiring (RecomputeForFiles surfaces refused count) | `Features/TranscodeQueue/QueueManagementBusinessService.py:RecomputeForFiles` WARN log | 83ce273 |
+| Layer-1 wire-up (Evaluator routes through BucketResolver tuple) | `Features/Compliance/Services/ComplianceEvaluator.py:Evaluate` (no more local IsCompliant compute) | 83ce273 |
+| Admin recompute path fix (IsCompliant now written alongside WorkBucket) | `Features/Compliance/Services/ComplianceRecomputeService.py:Recompute` UPDATE | 83ce273 |
 
 ---
 
