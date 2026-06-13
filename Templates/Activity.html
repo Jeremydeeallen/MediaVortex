@@ -20,15 +20,9 @@
     <!-- Active Jobs -->
     <div class="card mb-4">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
-            <h6 class="mb-0"><i class="fas fa-film me-2"></i>Active Jobs</h6>
+            <h6 class="mb-0"><i class="fas fa-film me-2"></i>Active Transcode Jobs<span id="ActiveJobsHeaderSuffix"></span></h6>
             <div class="d-flex align-items-center gap-2">
                 <span id="TranscodeStatusBadge" class="badge bg-secondary">Loading...</span>
-                <button id="BtnStopAfterJob" class="btn btn-warning btn-sm" onclick="ActivityPage.StopAfterJob()" disabled>
-                    <i class="fas fa-stop-circle me-1"></i>Stop After This Job
-                </button>
-                <button id="BtnResume" class="btn btn-success btn-sm d-none" onclick="ActivityPage.ResumeTranscoding()">
-                    <i class="fas fa-play-circle me-1"></i>Resume
-                </button>
             </div>
         </div>
         <div class="card-body p-0">
@@ -477,15 +471,14 @@ var ActivityPage = (function() {
         var ActiveJobs = D.ActiveJobs || [];
 
         var Badge = document.getElementById('TranscodeStatusBadge');
-        var BtnStop = document.getElementById('BtnStopAfterJob');
-        var BtnResume = document.getElementById('BtnResume');
         var NoJob = document.getElementById('NoJobInfo');
         var JobsTable = document.getElementById('ActiveJobsTable');
         var JobsBody = document.getElementById('ActiveJobsBody');
 
         var R = RenderTranscodeStatusBadge(Badge, Status, IsProcessing);
-        BtnStop.disabled = R.StopDisabled;
-        BtnResume.classList.toggle('d-none', !R.ShowResume);
+        // directive: activity-dashboard-polish -- C1 dynamic header suffix.
+        var TotalRunning = ActiveJobs.length + (Array.isArray(VmafJobs) ? VmafJobs.filter(function(v){return v;}).length : 0);
+        document.getElementById('ActiveJobsHeaderSuffix').textContent = TotalRunning > 0 ? ' (' + TotalRunning + ' running)' : '';
 
         var TranscodeRows = ActiveJobs.map(function(Job) {
             var FileName = Job.FileName || Job.FilePath.split(/[/\\]/).pop();
@@ -512,7 +505,7 @@ var ActivityPage = (function() {
             var ModeBadgeClass = (Mode === 'Remux') ? 'bg-info'
                                 : (Mode === 'SubtitleFix') ? 'bg-warning text-dark'
                                 : 'bg-primary';
-            return '<tr' + RowClass + '>' +
+            return '<tr data-attempt-id="' + (Job.QueueId || Job.AttemptId || '') + '"' + RowClass + '>' +
                 '<td class="ps-3">' + StatusIcon +
                     '<span title="' + (Job.FilePath || '').replace(/"/g, '&quot;') + '">' + EscapeHtml(FileName) + '</span></td>' +
                 '<td><span class="badge ' + ModeBadgeClass + '">' + EscapeHtml(Mode) + '</span></td>' +
@@ -522,7 +515,7 @@ var ActivityPage = (function() {
                 // directive: activity-dashboard-solid -- C2: prefer smoothed FPS/Speed/ETA when fresh; render '--' when stale (vs '-' for "never sampled").
                 '<td>' + (IsStuck ? '-' : (Job.SmoothingStale ? '<span class="text-muted">--</span>' : (Job.SmoothedFPS != null ? parseFloat(Job.SmoothedFPS).toFixed(1) : (Job.CurrentFPS ? parseFloat(Job.CurrentFPS).toFixed(1) : '-')))) + '</td>' +
                 '<td>' + (IsStuck ? '-' : (Job.SmoothingStale ? '<span class="text-muted">--</span>' : (Job.SmoothedSpeed != null ? (Job.SmoothedSpeed.toFixed(2) + 'x') : (Job.CurrentSpeed || '-')))) + '</td>' +
-                '<td>' + (IsStuck ? '-' : (Job.SmoothingStale ? '<span class="text-muted">--:--:--</span>' : (Job.EtaSeconds != null ? FormatEtaSec(Job.EtaSeconds) : (Job.ETA || '-')))) + '</td>' +
+                '<td data-eta-cell="1">' + (IsStuck ? '-' : (Job.SmoothingStale ? '<span class="text-muted">--:--:--</span>' : (Job.EtaSeconds != null ? FormatEtaSec(Job.EtaSeconds) : (Job.ETA || '-')))) + '</td>' +
                 '<td class="text-center">' + ResetBtn + '</td>' +
             '</tr>';
         });
@@ -613,7 +606,7 @@ var ActivityPage = (function() {
         if (CombinedHtml) {
             JobsTable.classList.remove('d-none');
             JobsBody.innerHTML = CombinedHtml;
-            RenderJobFooter(ActiveJobs);
+            RenderJobFooter(ActiveJobs); ReconcileEtaTimers(ActiveJobs);
         } else {
             JobsTable.classList.add('d-none');
             JobsBody.innerHTML = '';
@@ -677,37 +670,35 @@ var ActivityPage = (function() {
         }
     }
 
-    function StopAfterJob() {
-        if (!confirm('Stop transcoding after the current job finishes?')) return;
-        fetch('/api/Transcode/Stop', { method: 'POST' })
-            .then(function(R) { return R.json(); })
-            .then(function(Result) {
-                if (Result.Success) {
-                    showToastAlert('Transcode will stop after the current job.', 'success');
-                    LoadOverview();
-                } else {
-                    showToastAlert(Result.ErrorMessage || 'Failed to stop.', 'danger');
-                }
-            })
-            .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
+    // directive: activity-dashboard-polish -- ETACountdownTimer; smooth per-second decrement between polls, server-resets on delta > 5s.
+    var EtaTimers = {};
+    function EtaTick() {
+        Object.keys(EtaTimers).forEach(function(Id) {
+            var State = EtaTimers[Id];
+            if (State.Eta == null) return;
+            State.Eta = Math.max(0, State.Eta - 1);
+            var Row = document.querySelector('tr[data-attempt-id="' + Id + '"]');
+            if (!Row) { delete EtaTimers[Id]; return; }
+            var Cell = Row.querySelector('td[data-eta-cell]');
+            if (Cell) Cell.textContent = FormatEtaSec(State.Eta);
+        });
     }
-
-    function ResumeTranscoding() {
-        fetch('/api/Transcode/Start', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ MaxConcurrentJobs: 1 })
-        })
-            .then(function(R) { return R.json(); })
-            .then(function(Result) {
-                if (Result.Success) {
-                    showToastAlert('Transcoding resumed.', 'success');
-                    LoadOverview();
-                } else {
-                    showToastAlert(Result.ErrorMessage || 'Failed to resume.', 'danger');
-                }
-            })
-            .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
+    setInterval(EtaTick, 1000);
+    function ReconcileEtaTimers(ActiveJobs) {
+        var Seen = {};
+        (ActiveJobs || []).forEach(function(Job) {
+            var Id = Job.QueueId || Job.AttemptId;
+            if (Id == null || Job.EtaSeconds == null) return;
+            Seen[Id] = true;
+            var Server = Job.EtaSeconds;
+            var State = EtaTimers[Id];
+            if (!State || State.Eta == null || Math.abs(State.Eta - Server) > 5) {
+                EtaTimers[Id] = { Eta: Server, LastServerEta: Server };
+            } else {
+                State.LastServerEta = Server;
+            }
+        });
+        Object.keys(EtaTimers).forEach(function(Id) { if (!Seen[Id]) delete EtaTimers[Id]; });
     }
 
     function ResetStuckJob(QueueId) {
@@ -733,7 +724,8 @@ var ActivityPage = (function() {
     function LoadWorkers() {
         var ShowDisabled = document.getElementById('ShowDisabledToggle').checked;
         var Url = '/api/TeamStatus/Workers' + (ShowDisabled ? '?IncludeDisabled=true' : '');
-        fetch(Url)
+        // directive: activity-dashboard-polish -- return promise so AC10 inline re-render can chain.
+        var P = fetch(Url)
             .then(function(R) { return R.json(); })
             .then(function(Data) {
                 if (Data.Success && Data.Data) {
@@ -754,6 +746,7 @@ var ActivityPage = (function() {
                 }
             })
             .catch(function(E) { console.error('VersionStatus error:', E); });
+        return P;
     }
 
     function RenderVersionBanner(VS) {
@@ -1144,14 +1137,7 @@ var ActivityPage = (function() {
         bootstrap.Modal.getOrCreateInstance(document.getElementById('WorkerSettingsModal')).hide();
     }
 
-    function SetMachineStatus(MachineGroup, NewStatus) {
-        if (!confirm('Set all workers on "' + MachineGroup + '" to ' + NewStatus + '?')) return;
-        (Workers || []).forEach(function(W) {
-            if (GetMachineGroup(W.WorkerName) === MachineGroup) {
-                SetWorkerStatus(W.WorkerName, NewStatus);
-            }
-        });
-    }
+    function SetMachineStatus(MachineGroup, NewStatus) { SetMachineStatusBulk(MachineGroup, NewStatus); }
 
     function SetWorkerConcurrency(WorkerName, Column, RawValue) {
         var Value = parseInt(RawValue, 10);
@@ -1197,11 +1183,38 @@ var ActivityPage = (function() {
             .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
     }
 
+    // directive: activity-dashboard-polish -- bulk endpoint hookup (one POST instead of N).
     function SetAllWorkersStatus(NewStatus) {
         if (!confirm('Set all workers to ' + NewStatus + '?')) return;
-        Workers.forEach(function(W) {
-            SetWorkerStatus(W.WorkerName, NewStatus);
-        });
+        var Names = (Workers || []).map(function(W) { return W.WorkerName; });
+        BulkSetWorkerStatus(Names, NewStatus);
+    }
+    function SetMachineStatusBulk(MachineGroup, NewStatus) {
+        if (!confirm('Set all workers on "' + MachineGroup + '" to ' + NewStatus + '?')) return;
+        var Names = (Workers || []).filter(function(W) { return GetMachineGroup(W.WorkerName) === MachineGroup; }).map(function(W) { return W.WorkerName; });
+        if (!Names.length) return;
+        BulkSetWorkerStatus(Names, NewStatus);
+    }
+    function BulkSetWorkerStatus(WorkerNames, NewStatus) {
+        if (!WorkerNames || !WorkerNames.length) return;
+        fetch('/api/TeamStatus/Workers/BulkStatus', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ Status: NewStatus, WorkerNames: WorkerNames })
+        })
+            .then(function(R) { return R.json(); })
+            .then(function(Result) {
+                var D = (Result && Result.Data) || {};
+                var Sum = D.Summary || {};
+                if (Result && Result.Success) {
+                    showToastAlert((Sum.OkCount || WorkerNames.length) + ' worker(s) set to ' + NewStatus, 'success');
+                } else {
+                    var FailNames = (D.Results || []).filter(function(r){ return !r.Success; }).map(function(r){ return r.WorkerName; });
+                    showToastAlert((Sum.OkCount || 0) + ' of ' + WorkerNames.length + ' succeeded; failed: ' + (FailNames.join(', ') || '(unknown)'), 'warning');
+                }
+                LoadWorkers();
+            })
+            .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
     }
 
     function ToggleWorkerCapability(WorkerName, Column, CurrentValue) {
@@ -1220,7 +1233,8 @@ var ActivityPage = (function() {
                 if (Result.Success) {
                     var Pretty = Column.replace(/Enabled$/, '');
                     showToastAlert(WorkerName + ' ' + Pretty + ' set to ' + NewValue, 'success');
-                    LoadWorkers();
+                    // directive: activity-dashboard-polish -- AC10 inline re-render: if modal is open for this worker, re-render it after LoadWorkers settles.
+                    LoadWorkers().then(function() { if (CurrentSettingsWorker === WorkerName) { OpenWorkerSettings(WorkerName); } }).catch(function() {});
                 } else {
                     showToastAlert(Result.ErrorMessage || Result.Message || 'Failed to update worker capability.', 'danger');
                 }
@@ -1386,8 +1400,6 @@ var ActivityPage = (function() {
     document.addEventListener('DOMContentLoaded', Init);
 
     return {
-        StopAfterJob: StopAfterJob,
-        ResumeTranscoding: ResumeTranscoding,
         ResetStuckJob: ResetStuckJob,
         StopScan: StopScan,
         SetWorkerStatus: SetWorkerStatus,

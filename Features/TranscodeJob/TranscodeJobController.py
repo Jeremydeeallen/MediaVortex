@@ -55,34 +55,6 @@ def StartTranscoding():
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
 
 
-@TranscodeJobBlueprint.route('/Stop', methods=['POST'])
-def StopTranscoding():
-    """Graceful stop - allow current transcoding to complete before stopping."""
-    try:
-        LoggingService.LogFunctionEntry("StopTranscoding", "TranscodeJobController")
-
-        # Set status to Stopped — TranscodeService will finish current job then go idle
-        success = SharedStatusHelper.SetTranscodingStopped()
-
-        if success:
-            return jsonify({
-                "Success": True,
-                "Message": "Stop requested — transcoding will finish the current job then stop",
-                "Status": "Stopped"
-            })
-        else:
-            LoggingService.LogError("Failed to request stop", "TranscodeJobController", "StopTranscoding")
-            return jsonify({
-                "Success": False,
-                "ErrorMessage": "Failed to request stop"
-            }), 500
-
-    except Exception as e:
-        errorMsg = f"Exception requesting stop: {str(e)}"
-        LoggingService.LogException(errorMsg, e, "TranscodeJobController", "StopTranscoding")
-        return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
-
-
 @TranscodeJobBlueprint.route('/TerminateNow', methods=['POST'])
 def TerminateTranscodingNow():
     """Terminate transcoding immediately - kill processes and reset queue."""
@@ -462,49 +434,6 @@ def PauseTranscoding():
         errorMsg = f"Exception pausing transcoding: {str(e)}"
         LoggingService.LogException(errorMsg, e, "TranscodeJobController", "PauseTranscoding")
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
-
-@TranscodeJobBlueprint.route('/Resume', methods=['POST'])
-def ResumeTranscoding():
-    """Resume transcoding queue and restore jobs to P-cores."""
-    try:
-        LoggingService.LogFunctionEntry("ResumeTranscoding", "TranscodeJobController")
-
-        from Repositories.DatabaseManager import DatabaseManager
-        db_manager = DatabaseManager()
-
-        # Restore active jobs to their original core tier before resuming queue
-        try:
-            from Services.CpuAffinityService import GetCpuAffinityServiceInstance
-            AffinityService = GetCpuAffinityServiceInstance()
-            if AffinityService.CpuAffinityEnabled:
-                AffinityService.MigrateActiveJobsToTier("restore")
-        except Exception as MigrationError:
-            LoggingService.LogWarning(f"Failed to restore jobs to P-cores on resume: {MigrationError}",
-                                     "TranscodeJobController", "ResumeTranscoding")
-
-        success = db_manager.UpdateServiceStatus("TranscodeService", {
-            'Status': 'Running',
-            'IsProcessing': True
-        })
-
-        if success:
-            LoggingService.LogInfo("Transcoding resumed successfully",
-                                 "TranscodeJobController", "ResumeTranscoding")
-            return jsonify({
-                "Success": True,
-                "Message": "Transcoding resumed - queue processing will continue"
-            })
-        else:
-            return jsonify({
-                "Success": False,
-                "ErrorMessage": "Failed to resume transcoding"
-            }), 500
-
-    except Exception as e:
-        errorMsg = f"Exception resuming transcoding: {str(e)}"
-        LoggingService.LogException(errorMsg, e, "TranscodeJobController", "ResumeTranscoding")
-        return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
-
 
 @TranscodeJobBlueprint.route('/SetPreferredAttempt/<int:attempt_id>', methods=['POST'])
 def SetPreferredAttempt(attempt_id: int):
