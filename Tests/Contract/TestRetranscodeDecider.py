@@ -6,11 +6,11 @@ from Features.QualityTesting.Disposition.RetranscodeDecider import RetranscodeDe
 
 # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C6
 class TestRetranscodeDecider(unittest.TestCase):
-    """Verifies branch coverage of RetranscodeDecider.Decide and absence of BUG-0050 FilePath NameError."""
+    """Verifies branch coverage of RetranscodeDecider.Decide."""
 
     # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C6
     def test_first_attempt_returns_should_transcode(self):
-        """BUG-0050 regression -- no prior attempt -> (True, None). Previously NameError'd on FilePath."""
+        """no prior attempt -> (True, None). Previously NameError'd on FilePath."""
         Repo = MagicMock()
         Repo.GetLatestTranscodeAttemptWithVMAF.return_value = None
         Decider = RetranscodeDecider(Repo)

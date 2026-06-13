@@ -1,4 +1,4 @@
-# see marginal-savings-gate.C2b -- BUG-0054 Cartesian upscale-block coverage.
+# see marginal-savings-gate.C2b -- Cartesian upscale-block coverage.
 import unittest
 import sys
 from pathlib import Path
@@ -112,8 +112,8 @@ class TestUpscaleBlockEnforcement(unittest.TestCase):
             'Quality': 28,
         }
         ShouldBlock, Reason = self.Service.EvaluateQueueAdmission(Mf, Settings, Cfg)
-        self.assertTrue(ShouldBlock, "BUG-0054: 480p->720p with collapsed TargetResolution not blocked")
-        self.assertTrue(Reason.startswith('Upscale'), f"BUG-0054: not Upscale reason: {Reason}")
+        self.assertTrue(ShouldBlock, "upscale gate regression: 480p->720p with collapsed TargetResolution not blocked")
+        self.assertTrue(Reason.startswith('Upscale'), f"not Upscale reason: {Reason}")
 
 
 if __name__ == '__main__':

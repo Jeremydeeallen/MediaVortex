@@ -13,7 +13,7 @@ class RetranscodeDecider:
 
     # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C6
     def Decide(self, MediaFileId: int) -> Tuple[bool, Optional[Dict[str, Any]]]:
-        """Decide (ShouldRetranscode, PreviousAttempt) using MediaFileId only -- closes BUG-0050 by construction."""
+        """Decide (ShouldRetranscode, PreviousAttempt) using MediaFileId only by construction."""
         try:
             PreviousAttempt = self.AttemptRepository.GetLatestTranscodeAttemptWithVMAF(MediaFileId)
 

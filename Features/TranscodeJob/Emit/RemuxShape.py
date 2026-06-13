@@ -9,7 +9,7 @@ from Features.TranscodeJob.Emit.EncodeShape import EncodeShape
 
 # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
 class RemuxShape(EncodeShape):
-    """Builds ffmpeg argv for container-swap jobs; always emits -f mp4 + -movflags +faststart (closes BUG-0048)."""
+    """Builds ffmpeg argv for container-swap jobs; always emits -f mp4 + -movflags +faststart."""
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
     def __init__(self, OutputFilenameBuilder, AudioCodecArgsBuilder, AudioFilterBuilder, MediaProbeAdapter):

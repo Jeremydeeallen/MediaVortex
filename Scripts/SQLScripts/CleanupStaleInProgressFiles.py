@@ -4,7 +4,7 @@ Per `WorkerService/worker-lifecycle.feature.md` criteria 9 and 11, a
 `.inprogress` file is supposed to be deleted on encode failure (C9) or
 on the next worker startup via crash recovery (C11). Any `.inprogress`
 older than the longest reasonable encode window is unambiguously an
-orphan from one of the lifecycle holes (BUG-0015 / BUG-0018).
+orphan from one of the lifecycle holes (legacy lifecycle holes).
 
 Default age cutoff: 240 minutes (4 hours). Anything older is safe to
 delete -- no live worker is still writing to it.

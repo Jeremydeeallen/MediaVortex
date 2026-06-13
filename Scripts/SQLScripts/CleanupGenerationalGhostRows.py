@@ -1,6 +1,6 @@
 """Retire generational ghost MediaFile rows.
 
-When BUG-0018 left an `.inprogress -> -mv.mp4` rename half-done last
+When a legacy lifecycle hole left an `.inprogress -> -mv.mp4` rename half-done last
 week, a subsequent scan picked up the orphan `-mv.mp4` and created its
 own MediaFile row. Meanwhile the original MediaFile row eventually
 got re-processed into a `-mv-mv.mp4` canonical. Result: the same

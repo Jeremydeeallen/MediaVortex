@@ -2,7 +2,7 @@
 r"""
 CleanupOrphanMvPairs.py
 Restores the designed FileReplacement end-state for MediaFiles row pairs
-that BUG-0013 left in drift: one row pointing at a .mkv source and a
+that a legacy bug left in drift: one row pointing at a .mkv source and a
 second row pointing at the -mv.mp4 post-Quick-Fix output, both on disk.
 
 Per the design contract (FileReplacement.feature.md + worker-lifecycle):
@@ -28,10 +28,10 @@ Pairs where ALL four hold are classified RETIRE -- delete the source
 MediaFiles ROW (resolves UniqueViolation, lets Quick Fix run again).
 **File on disk is NEVER deleted** -- spot-checks on real candidates
 2026-05-25 showed 3 of 5 -mv.mp4 files had off-target audio from
-BUG-0013-era runs (Pokemon at -18 LUFS + clipping, Office at -32 LUFS).
+legacy-era runs (Pokemon at -18 LUFS + clipping, Office at -32 LUFS).
 The .mkv source is the only safe copy of correctly-mastered audio for
 those cases. A future LUFS-verified retire script can reclaim disk
-space once new (BUG-0013-fixed) Quick Fix runs produce correct
+space once new (post-fix) Quick Fix runs produce correct
 outputs; until then the source files stay.
 
 Pairs that fail ANY audit check are KEEP_BOTH -- preserve both as-is.

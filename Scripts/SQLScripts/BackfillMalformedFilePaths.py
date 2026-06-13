@@ -1,4 +1,4 @@
-"""Backfill malformed MediaFiles.FilePath values produced by the BUG-0012 scanner
+"""Backfill malformed MediaFiles.FilePath values produced by the legacy scanner
 defect (doubled separator after share root). Runs every row through
 Core.PathNormalize.NormalizeCanonical.
 

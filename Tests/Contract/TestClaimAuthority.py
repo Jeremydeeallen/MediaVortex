@@ -313,7 +313,7 @@ class TestRemuxClaimAuthority(unittest.TestCase):
         self.assertIsNone(Job, "RemuxEnabled=FALSE worker MUST NOT claim remux")
 
 
-# directive: worker-routing | # see worker-routing.C15 -- NVENC routing truth-table; closes BUG-0047 follow-up
+# directive: worker-routing | # see worker-routing.C15 -- NVENC routing truth-table
 
 NVENC_TEST_WORKER_CAPABLE = "_test-nvenc-routing-capable"
 NVENC_TEST_WORKER_NOT_CAPABLE = "_test-nvenc-routing-not-capable"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 AddOrphanCleanupAndUniqueProgress.py
-Migration: schema piece of BUG-0001 stuck-item cleanup gaps.
+Migration: schema piece of stuck-item cleanup gaps.
 
 Owns: Features/FileReplacement/post-transcode-pipeline.feature.md criterion 18.
 

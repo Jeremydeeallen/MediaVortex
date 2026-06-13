@@ -121,7 +121,7 @@ def _ResolveWorkerPython():
 def _SetUncResolutions():
     """Run SetWindowsWorkerUncPaths.py to ensure StorageRootResolutions + WorkerShareMappings
     for this host store UNC strings, not drive letters. Idempotent; safe to run every boot.
-    Fix for BUG-0008: drive-letter session unbinding on the Microsoft NFS client surfaced
+    NFS fix: drive-letter session unbinding on the Microsoft NFS client surfaced
     EINVAL on ffmpeg output-open. UNC paths route through MUP + NFS redirector and survive
     drive-letter flapping. See WorkerService/windows-unc-path-translation.feature.md."""
     Script = RootDirectory / "Scripts" / "SQLScripts" / "SetWindowsWorkerUncPaths.py"

@@ -74,7 +74,7 @@ class TestAudioFilterBuilder(unittest.TestCase):
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C7
     def test_ungainable_raises_typed_error(self):
-        """BUG-0049 closure: ungainable peak raises UngainablePeakError, not bare RuntimeError."""
+        """ungainable peak raises UngainablePeakError, not bare RuntimeError."""
         Db = _MakeMockDb()
         Builder = AudioFilterBuilder(Db)
         Mf = _MockMediaFile(Id=999002, SourceIntegratedLufs=-30.0, SourceLoudnessRangeLU=11.0, SourceTruePeakDbtp=-3.0, SourceIntegratedThresholdLufs=-40.0)

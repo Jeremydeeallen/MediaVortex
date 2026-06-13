@@ -13,10 +13,10 @@ REPORT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 REPORT_PATH = os.path.join(REPORT_DIR, "LegacyAudioDamagedMovies.csv")
 
 BUG_REFERENCE_HEADER = (
-    "# Legacy-audio-damage-accounting (BUG-0046): the movies in this report were normalized "
+    "# Legacy-audio-damage-accounting: the movies in this report were normalized "
     "under the deprecated acompressor+dynamic-loudnorm chain (active 2025-10-03 -> 2026-05-30). "
     "Damage is irreversible from encoded output. Operator-driven external re-acquisition is the "
-    "only path to recovery. See memory/KNOWN-ISSUES.md BUG-0046."
+    "only path to recovery. See memory/KNOWN-ISSUES.md."
 )
 
 

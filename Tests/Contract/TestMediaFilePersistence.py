@@ -4,7 +4,7 @@ Owns criterion 2 of `.claude/directive.md` (clean happy-path transcode): every
 MediaFiles column that FFprobe populates -- and AudioNormalizationMode, which
 is derived from the just-run FFmpeg command -- must round-trip through
 DatabaseManager.SaveMediaFile without silent column drops. Designed to catch
-the BUG-0017 / BUG-0019 / BUG-0021 failure class at test time rather than
+the legacy persistence failure class at test time rather than
 days later in a canary.
 
 Inserts a synthetic MediaFiles row with a unique test FilePath, mutates every

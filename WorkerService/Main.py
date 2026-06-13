@@ -450,7 +450,7 @@ class WorkerServiceApp:
 
     # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C16
     def _StartRemuxCapability(self):
-        """Initialize the remux processing capability via WorkerLoopService (replaces ProcessRemuxQueueService -- closes BUG-0051)."""
+        """Initialize the remux processing capability via WorkerLoopService (replaces ProcessRemuxQueueService)."""
         if self.RemuxService is not None:
             return
         try:
@@ -664,7 +664,7 @@ class WorkerServiceApp:
             # See stuck-job-detection.feature.md criterion 1.
             self._StartStuckJobDetection()
 
-            # Start recurring orphan cleanup sweep (BUG-0001 criteria 16-18).
+            # Start recurring orphan cleanup sweep (legacy stuck-item sweep).
             # See Features/ServiceControl/orphan-cleanup.flow.md.
             self._StartOrphanCleanup()
 
@@ -761,7 +761,7 @@ class WorkerServiceApp:
     def _ApplyCapabilities(self):
         """Start or stop capabilities based on current DB flags.
 
-        Master precondition (BUG-0004, capability-control-plane criterion 8):
+        Master precondition (capability-control-plane.C8):
         a non-Online Workers.Status blocks every capability uniformly. No
         capability may run while Status != 'Online' regardless of the
         per-capability *Enabled flag. Any running capability is signaled to
@@ -873,7 +873,7 @@ class WorkerServiceApp:
 
         Sibling to _StuckJobDetectionLoop, shares its interval setting
         (StuckJobDetectionIntervalSec, default 120). Owns the recurring
-        half of BUG-0001 criteria 16, 17, 18.
+        half of the legacy stuck-item sweep.
         """
         try:
             self.OrphanCleanupThread = threading.Thread(
@@ -1243,7 +1243,7 @@ def _VerifyRequiredPaths():
     When AbsolutePath is a UNC string (`\\\\host\\share\\...`), the check is reachability
     via os.path.exists on the UNC root -- the share is accessible regardless of whether
     any drive letter happens to be bound in this session. This decouples the worker from
-    drive-letter session-binding flakiness on the Microsoft NFS client (BUG-0008).
+    drive-letter session-binding flakiness on the Microsoft NFS client.
 
     Legacy fallback: if no StorageRootResolutions rows exist for this worker (pre-fix
     state), falls back to the original drive-letter prefix scan of MediaFiles.

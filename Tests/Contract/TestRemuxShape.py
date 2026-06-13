@@ -50,12 +50,12 @@ def _MakeShape():
 
 # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
 class TestRemuxShape:
-    """Contract: RemuxShape.Build emits -f mp4 + -movflags +faststart unconditionally (closes BUG-0048)."""
+    """Contract: RemuxShape.Build emits -f mp4 + -movflags +faststart unconditionally."""
 
     @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
     def test_emits_f_mp4_unconditionally(self, _Mock):
-        """BUG-0048 closure: -f mp4 appears in the command regardless of ProfileSettings."""
+        """-f mp4 appears in the command regardless of ProfileSettings."""
         Shape = _MakeShape()
         Spec = Shape.Build(_MakeMediaFile(), MagicMock(), _MakeContext())
         assert Spec is not None
@@ -64,7 +64,7 @@ class TestRemuxShape:
     @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
     def test_emits_movflags_faststart_unconditionally(self, _Mock):
-        """BUG-0048 closure: -movflags +faststart appears regardless of ProfileSettings."""
+        """-movflags +faststart appears regardless of ProfileSettings."""
         Shape = _MakeShape()
         Spec = Shape.Build(_MakeMediaFile(), MagicMock(), _MakeContext())
         assert Spec is not None

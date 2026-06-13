@@ -48,7 +48,7 @@ class AudioCompletionService:
     @staticmethod
     def DetectNormalizationMode(FFmpegCommand: Optional[str]) -> Optional[str]:
         """Return 'linear' | 'dynamic' | None for the loudnorm mode that
-        actually ran in this command (BUG-0019 / linear-loudnorm C14).
+        actually ran in this command (see linear-loudnorm.C14).
 
         - 'linear'  -> loudnorm filter present with `linear=true`
         - 'dynamic' -> loudnorm present without `linear=true`

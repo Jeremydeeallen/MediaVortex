@@ -2,7 +2,7 @@
 """
 OrphanCleanupService -- recurring sweep that catches operational-row leaks.
 
-Owns BUG-0001 criteria 16 (ActiveJobs orphans), 17 (QualityTestingQueue
+Owns the ActiveJobs / QualityTestingQueue / TemporaryFilePaths orphan sweeps (see KNOWN-ISSUES.md for the legacy stuck-item context)
 stale rows), and the recurring half of 18 (TranscodeProgress orphans). The
 TFP cleanup chokepoint at PostTranscodeDispositionService._CommitDisposition
 is the primary defense against leaks; this sweep is the safety net.
@@ -60,7 +60,7 @@ class OrphanCleanupService:
 
     # directive: bug-0020-worker-ownership
     def _SweepTemporaryFilePaths(self) -> int:
-        # 2026-05-25: TFP sweep disabled pending BUG-0018 redesign. The legacy
+        # 2026-05-25: TFP sweep disabled pending redesign of the liveness-based predicate. Legacy
         # `Success IS NOT NULL` predicate and the first-attempt tighter predicate
         # (Success=FALSE / FileReplaced=TRUE / Disposition IN terminal-no-replace)
         # both raced FileReplacement during the VMAF window and silently deleted
@@ -73,7 +73,7 @@ class OrphanCleanupService:
         # Small operator-cleanable accumulation is the accepted trade for not
         # racing the live pipeline.
         LoggingService.LogInfo(
-            "TFP sweep disabled pending BUG-0018 redesign (liveness-based predicate).",
+            "TFP sweep disabled pending redesign (liveness-based predicate).",
             "OrphanCleanupService", "_SweepTemporaryFilePaths",
         )
         return 0

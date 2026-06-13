@@ -1,4 +1,4 @@
-"""Set a Windows worker's path resolutions to UNC strings (BUG-0008 fix).
+"""Set a Windows worker's path resolutions to UNC strings.
 
 Bypasses the per-logon-session drive-letter binding on the Microsoft NFS client
 by storing UNC paths in StorageRootResolutions.AbsolutePath. ffmpeg then receives
