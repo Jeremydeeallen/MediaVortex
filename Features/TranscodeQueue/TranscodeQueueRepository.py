@@ -272,8 +272,11 @@ class TranscodeQueueRepository(BaseRepository):
         try:
             import psycopg2.extras
             from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate, BuildAllowedProfilesPredicate
+            # directive: failure-accounting | # see failure-accounting.C6
+            from Core.Database.FailureBudgetPredicate import BuildCapPredicate
             CapabilityFragment, CapabilityParams = BuildClaimPredicate(WorkerName, "TranscodeEnabled")
             AllowedProfilesFragment, AllowedProfilesParams = BuildAllowedProfilesPredicate(WorkerName)
+            CapPredicateFragment, _CapParams = BuildCapPredicate("tq.MediaFileId")
             NvencGate = (
                 "p.profilename IS NOT NULL "
                 "AND (p.usenvidiahardware = 0 "
@@ -301,6 +304,7 @@ class TranscodeQueueRepository(BaseRepository):
                         f"    AND {CapabilityFragment} "
                         f"    AND {NvencGate} "
                         f"    AND {AllowedProfilesFragment} "
+                        f"    AND {CapPredicateFragment} "
                         "  ORDER BY (CASE WHEN tq.Priority >= 195 THEN tq.Priority ELSE 0 END) DESC, tq.SizeMB DESC NULLS LAST, tq.DateAdded ASC "
                         "  LIMIT 1 "
                         "  FOR UPDATE OF tq SKIP LOCKED "
@@ -321,6 +325,7 @@ class TranscodeQueueRepository(BaseRepository):
                         f"    AND {CapabilityFragment} "
                         f"    AND {NvencGate} "
                         f"    AND {AllowedProfilesFragment} "
+                        f"    AND {CapPredicateFragment} "
                         "  ORDER BY (CASE WHEN tq.Priority >= 195 THEN tq.Priority ELSE 0 END) DESC, tq.SizeMB DESC NULLS LAST, tq.DateAdded ASC "
                         "  LIMIT 1 "
                         "  FOR UPDATE OF tq SKIP LOCKED "
@@ -369,7 +374,10 @@ class TranscodeQueueRepository(BaseRepository):
         try:
             import psycopg2.extras
             from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate
+            # directive: failure-accounting | # see failure-accounting.C6
+            from Core.Database.FailureBudgetPredicate import BuildCapPredicate
             CapabilityFragment, CapabilityParams = BuildClaimPredicate(WorkerName, "RemuxEnabled")
+            CapPredicateFragment, _CapParams = BuildCapPredicate("TranscodeQueue.MediaFileId")
             ReturningCols = (
                 "Id, StorageRootId, RelativePath, FileName, Directory, "
                 "SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, "
@@ -386,6 +394,7 @@ class TranscodeQueueRepository(BaseRepository):
                     "  WHERE Status = 'Pending' "
                     "    AND ProcessingMode IN ('Remux', 'Quick', 'AudioFix') "
                     f"   AND {CapabilityFragment} "
+                    f"   AND {CapPredicateFragment} "
                     "  ORDER BY (CASE WHEN Priority >= 195 THEN Priority ELSE 0 END) DESC, SizeMB DESC NULLS LAST, DateAdded ASC "
                     "  LIMIT 1 "
                     "  FOR UPDATE SKIP LOCKED "

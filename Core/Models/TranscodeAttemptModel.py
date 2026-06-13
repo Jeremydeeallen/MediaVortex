@@ -34,6 +34,7 @@ class TranscodeAttemptModel:
     StartTime: Optional[str] = None
     PreferredAttempt: bool = False
     WorkerName: Optional[str] = None
+    MediaFileId: Optional[int] = None
 
     # directive: path-schema-migration | # see path.S8
     def __post_init__(self):

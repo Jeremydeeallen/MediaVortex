@@ -305,13 +305,16 @@ class QueueManagementBusinessService:
             except (TypeError, ValueError):
                 Offset = 0
 
-            # directive: path-schema-migration | # see path.S8
+            # directive: failure-accounting | # see failure-accounting.C6
+            from Core.Database.FailureBudgetPredicate import BuildCapPredicate
+            CapPredicateFragment, _CapParams = BuildCapPredicate("m.Id")
             Params = []
             WhereSql = (
                 " WHERE m.TranscodedByMediaVortex IS NOT TRUE "
                 "AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL) "
                 "AND m.SizeMB > 0 "
-                "AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true)"
+                "AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true) "
+                "AND " + CapPredicateFragment
             )
 
             # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
@@ -460,12 +463,15 @@ class QueueManagementBusinessService:
                 Offset = 0
 
             Params: List[Any] = []
-            # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
+            # directive: failure-accounting | # see failure-accounting.C6
+            from Core.Database.FailureBudgetPredicate import BuildCapPredicate
+            CapPredicateFragment, _CapParams = BuildCapPredicate("m.Id")
             WhereSql = (
                 " WHERE m.WorkBucket = 'Transcode' "
                 "AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL) "
                 "AND m.SizeMB > 0 "
-                "AND m.HasExplicitEnglishAudio IS NOT FALSE"
+                "AND m.HasExplicitEnglishAudio IS NOT FALSE "
+                "AND " + CapPredicateFragment
             )
 
             if Drive:
@@ -604,7 +610,9 @@ class QueueManagementBusinessService:
                     (ProfileName, NormalizedIds, ProfileName)
                 )
 
-            # directive: path-schema-migration | # see path.S8
+            # directive: failure-accounting | # see failure-accounting.C6
+            from Core.Database.FailureBudgetPredicate import BuildCapPredicate
+            CapPredicateFragment, _CapParams = BuildCapPredicate("m.Id")
             InsertSql = (
                 "INSERT INTO TranscodeQueue "
                 "(StorageRootId, RelativePath, FileName, Directory, "
@@ -624,6 +632,7 @@ class QueueManagementBusinessService:
                 "FROM MediaFiles m "
                 "WHERE m.Id = ANY(%s) "
                 "AND m.SizeMB > 0 "
+                "AND " + CapPredicateFragment + " "
                 "AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.StorageRootId = m.StorageRootId AND tq.RelativePath = m.RelativePath)"
             )
 
@@ -665,11 +674,15 @@ class QueueManagementBusinessService:
             else:
                 BucketSql = "AND m.WorkBucket = %s "
                 Params.append(ModeToBucket[Mode])
+            # directive: failure-accounting | # see failure-accounting.C6
+            from Core.Database.FailureBudgetPredicate import BuildCapPredicate
+            CapPredicateFragment, _CapParams = BuildCapPredicate("m.Id")
             WhereSql = (
                 " WHERE m.TranscodedByMediaVortex IS NOT TRUE "
                 "AND m.SizeMB > 0 "
                 "AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true) "
                 + BucketSql +
+                "AND " + CapPredicateFragment + " "
                 "AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.StorageRootId = m.StorageRootId AND tq.RelativePath = m.RelativePath)"
             )
 

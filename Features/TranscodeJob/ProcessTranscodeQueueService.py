@@ -905,6 +905,11 @@ class ProcessTranscodeQueueService:
                 if ProfileRow:
                     QualityTestRequiredForProfile = bool(ProfileRow[0].get('QualityTestRequired'))
 
+            # directive: failure-accounting | # see failure-accounting.C5
+            JobMode = (getattr(Job, 'ProcessingMode', None) or 'Transcode').strip()
+            if JobMode in ('Remux', 'AudioFix', 'Quick', 'SubtitleFix') and not ProfileName:
+                ProfileName = JobMode
+
             Attempt = TranscodeAttemptModel(
                 StorageRootId=Job.StorageRootId,
                 RelativePath=Job.RelativePath,
@@ -925,7 +930,8 @@ class ProcessTranscodeQueueService:
                 QualityTestRequired=QualityTestRequiredForProfile,
                 QualityTestCompleted=False,
                 StartTime=TranscodingSettings.get('StartTime') if TranscodingSettings else None,
-                WorkerName=self.WorkerName
+                WorkerName=self.WorkerName,
+                MediaFileId=getattr(Job, 'MediaFileId', None),
             )
 
             return self.DatabaseManager.SaveTranscodeAttempt(Attempt)
@@ -1111,11 +1117,18 @@ class ProcessTranscodeQueueService:
                 # Update TranscodeFiles record for overall file status (failure)
                 self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, False, MediaFileId=Job.MediaFileId)
             else:
+                # directive: failure-accounting | # see failure-accounting.C5
+                JobMode = (getattr(Job, 'ProcessingMode', None) or 'Transcode').strip()
+                if JobMode in ('Remux', 'AudioFix', 'Quick', 'SubtitleFix'):
+                    ResolvedProfileName = JobMode
+                else:
+                    ResolvedProfileName = getattr(Job, 'AssignedProfile', None) or None
+
                 Attempt = TranscodeAttemptModel(
                     StorageRootId=Job.StorageRootId,
                     RelativePath=Job.RelativePath,
                     AttemptDate=datetime.now(timezone.utc),
-                    Quality=0,  # Will be set properly when we have profile info
+                    Quality=0,
                     OldSizeBytes=Job.SizeBytes,
                     NewSizeBytes=0,
                     Success=False,
@@ -1126,10 +1139,11 @@ class ProcessTranscodeQueueService:
                     FfpmpegCommand=None,
                     AudioBitrateKbps=None,
                     VideoBitrateKbps=None,
-                    ProfileName=None,  # Will be set when we have profile info
+                    ProfileName=ResolvedProfileName,
                     VMAF=None,
                     CompletedDate=datetime.now(timezone.utc),
-                    WorkerName=self.WorkerName
+                    WorkerName=self.WorkerName,
+                    MediaFileId=getattr(Job, 'MediaFileId', None),
                 )
                 AttemptId = self.DatabaseManager.SaveTranscodeAttempt(Attempt)
 

@@ -1,0 +1,184 @@
+{% extends "Base.html" %}
+
+{% block title %}Failed Jobs - MediaVortex{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center my-3">
+        <h2 class="mb-0">Failed Jobs</h2>
+        <div class="d-flex gap-2 align-items-center">
+            <input id="failedjobs-search" type="text" class="form-control form-control-sm" placeholder="Search filename..." style="width: 280px;" />
+            <select id="failedjobs-sort" class="form-select form-select-sm" style="width: 200px;">
+                <option value="LastAttemptDate-DESC">Newest failure first</option>
+                <option value="LastAttemptDate-ASC">Oldest failure first</option>
+                <option value="FailureCount-DESC">Most failures first</option>
+                <option value="FileName-ASC">Filename A-Z</option>
+            </select>
+            <button id="failedjobs-refresh" class="btn btn-sm btn-secondary">Refresh</button>
+        </div>
+    </div>
+
+    <div class="alert alert-light border" role="alert">
+        Files whose consecutive encode failures meet or exceed the cap
+        (<code>FailureBudgetConfig.MaxEncodeFailures</code>). These will not be
+        claimed, recomputed into the queue, or surfaced by Next-Batch until
+        Reset. Reset clears the cap for this file only; the audit row is
+        written to <code>FailureBudgetResets</code>.
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>Total capped: <span class="badge bg-danger" id="failedjobs-total">0</span></div>
+        <div class="text-muted small">Click a filename to see full attempt history.</div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>File</th>
+                    <th class="text-end">Failures</th>
+                    <th>Last error</th>
+                    <th>Last attempt</th>
+                    <th>Profile</th>
+                    <th>Last worker</th>
+                    <th class="text-end">Action</th>
+                </tr>
+            </thead>
+            <tbody id="failedjobs-rows">
+                <tr><td colspan="7" class="text-center text-muted">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <nav>
+        <ul class="pagination pagination-sm" id="failedjobs-pagination"></ul>
+    </nav>
+</div>
+
+<div class="modal fade" id="attempts-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Attempt history</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <table class="table table-sm">
+                    <thead>
+                        <tr><th>Date</th><th>Profile</th><th>Worker</th><th>Success</th><th>VMAF</th><th>Duration (s)</th><th>Old MB</th><th>New MB</th><th>Error</th></tr>
+                    </thead>
+                    <tbody id="attempts-rows"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const PAGE_SIZE = 100;
+    let offset = 0;
+    let total = 0;
+
+    function fmtDate(s) { if (!s) return '-'; const d = new Date(s); return isNaN(d) ? s : d.toLocaleString(); }
+    function fmtErr(s) { if (!s) return '-'; if (s.length > 120) return s.slice(0, 120) + '...'; return s; }
+    function esc(s) { return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+    function load() {
+        const search = document.getElementById('failedjobs-search').value.trim();
+        const [sortBy, sortDir] = document.getElementById('failedjobs-sort').value.split('-');
+        const params = new URLSearchParams({ limit: PAGE_SIZE, offset: offset, sortBy, sortDir });
+        if (search) params.set('search', search);
+        fetch('/api/FailedJobs?' + params.toString())
+            .then(r => r.json())
+            .then(d => {
+                if (!d.Success) { renderError(d.Message || 'Load failed'); return; }
+                total = d.Data.TotalCount || 0;
+                document.getElementById('failedjobs-total').textContent = total;
+                renderRows(d.Data.Items || []);
+                renderPagination();
+            })
+            .catch(e => renderError(e.toString()));
+    }
+    function renderError(msg) {
+        document.getElementById('failedjobs-rows').innerHTML =
+            '<tr><td colspan="7" class="text-danger">' + esc(msg) + '</td></tr>';
+    }
+    function renderRows(items) {
+        if (!items.length) {
+            document.getElementById('failedjobs-rows').innerHTML =
+                '<tr><td colspan="7" class="text-center text-muted">No capped files. The queue is healthy.</td></tr>';
+            return;
+        }
+        document.getElementById('failedjobs-rows').innerHTML = items.map(it => (
+            '<tr>' +
+            '<td><a href="#" data-mfid="' + it.MediaFileId + '" class="js-show-history">' + esc(it.FileName) + '</a><div class="small text-muted">' + esc(it.FilePath) + '</div></td>' +
+            '<td class="text-end"><span class="badge bg-danger">' + it.FailureCount + '</span></td>' +
+            '<td><span class="text-muted small">' + esc(fmtErr(it.LastErrorMessage)) + '</span></td>' +
+            '<td>' + esc(fmtDate(it.LastAttemptDate)) + '</td>' +
+            '<td>' + esc(it.AssignedProfile || '-') + '</td>' +
+            '<td>' + esc(it.LastWorkerName || '-') + '</td>' +
+            '<td class="text-end"><button class="btn btn-sm btn-outline-success js-reset" data-mfid="' + it.MediaFileId + '" data-name="' + esc(it.FileName) + '">Reset</button></td>' +
+            '</tr>'
+        )).join('');
+        document.querySelectorAll('.js-reset').forEach(b => b.addEventListener('click', onReset));
+        document.querySelectorAll('.js-show-history').forEach(a => a.addEventListener('click', onShowHistory));
+    }
+    function renderPagination() {
+        const ul = document.getElementById('failedjobs-pagination');
+        const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+        const cur = Math.floor(offset / PAGE_SIZE);
+        const items = [];
+        for (let i = 0; i < pages; i++) {
+            items.push('<li class="page-item ' + (i === cur ? 'active' : '') + '"><a class="page-link" href="#" data-pg="' + i + '">' + (i + 1) + '</a></li>');
+        }
+        ul.innerHTML = items.join('');
+        ul.querySelectorAll('a.page-link').forEach(a => a.addEventListener('click', e => {
+            e.preventDefault(); offset = parseInt(a.dataset.pg, 10) * PAGE_SIZE; load();
+        }));
+    }
+    function onReset(e) {
+        const btn = e.currentTarget;
+        const mfid = btn.dataset.mfid;
+        const name = btn.dataset.name;
+        if (!confirm('Reset failure budget for "' + name + '"?\n\nThis lets the file be claimed/recomputed again. An audit row is written to FailureBudgetResets.')) return;
+        btn.disabled = true; btn.textContent = 'Resetting...';
+        fetch('/api/FailedJobs/' + mfid + '/Reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ OperatorName: 'web-ui' }) })
+            .then(r => r.json())
+            .then(d => { if (!d.Success) alert('Reset failed: ' + (d.Message || 'unknown')); load(); })
+            .catch(e => { alert('Reset error: ' + e); btn.disabled = false; btn.textContent = 'Reset'; });
+    }
+    function onShowHistory(e) {
+        e.preventDefault();
+        const mfid = e.currentTarget.dataset.mfid;
+        fetch('/api/FailedJobs/' + mfid + '/Attempts')
+            .then(r => r.json())
+            .then(d => {
+                if (!d.Success) { alert('History failed: ' + (d.Message || 'unknown')); return; }
+                const rows = (d.Data.Attempts || []).map(a => (
+                    '<tr>' +
+                    '<td>' + esc(fmtDate(a.AttemptDate)) + '</td>' +
+                    '<td>' + esc(a.ProfileName || '-') + '</td>' +
+                    '<td>' + esc(a.WorkerName || '-') + '</td>' +
+                    '<td>' + (a.Success === true ? '<span class="badge bg-success">true</span>' : a.Success === false ? '<span class="badge bg-danger">false</span>' : '<span class="badge bg-secondary">null</span>') + '</td>' +
+                    '<td>' + (a.VMAF != null ? a.VMAF.toFixed(2) : '-') + '</td>' +
+                    '<td>' + (a.TranscodeDurationSeconds || 0).toFixed(1) + '</td>' +
+                    '<td>' + ((a.OldSizeBytes || 0) / 1048576).toFixed(1) + '</td>' +
+                    '<td>' + ((a.NewSizeBytes || 0) / 1048576).toFixed(1) + '</td>' +
+                    '<td><span class="text-muted small">' + esc(fmtErr(a.ErrorMessage)) + '</span></td>' +
+                    '</tr>'
+                )).join('');
+                document.getElementById('attempts-rows').innerHTML = rows || '<tr><td colspan="9" class="text-muted">No attempts recorded.</td></tr>';
+                const modal = new bootstrap.Modal(document.getElementById('attempts-modal'));
+                modal.show();
+            });
+    }
+
+    document.getElementById('failedjobs-refresh').addEventListener('click', load);
+    document.getElementById('failedjobs-sort').addEventListener('change', () => { offset = 0; load(); });
+    document.getElementById('failedjobs-search').addEventListener('keydown', e => { if (e.key === 'Enter') { offset = 0; load(); } });
+
+    load();
+})();
+</script>
+{% endblock %}

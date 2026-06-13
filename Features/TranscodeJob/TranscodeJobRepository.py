@@ -193,10 +193,26 @@ class TranscodeJobRepository(BaseRepository):
 
                 if Attempt.Id is None:
                     LoggingService.LogInfo("Inserting new transcoding attempt...", "TranscodeJobRepository", "SaveTranscodeAttempt")
-                    MediaFileId = self.DatabaseService.ExecuteScalar(
-                        "SELECT Id FROM MediaFiles WHERE StorageRootId = %s AND RelativePath = %s LIMIT 1",
-                        (Attempt.StorageRootId, Attempt.RelativePath)
-                    )
+                    # directive: failure-accounting | # see failure-accounting.C5
+                    MediaFileId = Attempt.MediaFileId
+                    if MediaFileId is None:
+                        MediaFileId = self.DatabaseService.ExecuteScalar(
+                            "SELECT Id FROM MediaFiles WHERE StorageRootId = %s AND RelativePath = %s LIMIT 1",
+                            (Attempt.StorageRootId, Attempt.RelativePath)
+                        )
+                    if MediaFileId is None:
+                        LoggingService.LogWarning(
+                            "BUG-0061: TranscodeAttempts INSERT could not resolve MediaFileId; using sentinel 0. Attempt(StorageRootId=" + str(Attempt.StorageRootId) + ", RelativePath=" + repr(Attempt.RelativePath) + ", ProfileName=" + repr(Attempt.ProfileName) + ", WorkerName=" + repr(Attempt.WorkerName) + ")",
+                            "TranscodeJobRepository", "SaveTranscodeAttempt"
+                        )
+                        MediaFileId = 0
+                    ProfileNameForInsert = Attempt.ProfileName
+                    if not ProfileNameForInsert:
+                        LoggingService.LogWarning(
+                            "BUG-0061: TranscodeAttempts INSERT could not resolve ProfileName; using sentinel __UNRESOLVED__. MediaFileId=" + str(MediaFileId) + " StorageRootId=" + str(Attempt.StorageRootId) + " RelativePath=" + repr(Attempt.RelativePath),
+                            "TranscodeJobRepository", "SaveTranscodeAttempt"
+                        )
+                        ProfileNameForInsert = '__UNRESOLVED__'
                     Sid = Attempt.StorageRootId
                     Rel = Attempt.RelativePath
                     query = (
@@ -216,7 +232,7 @@ class TranscodeJobRepository(BaseRepository):
                         Attempt.SizeReductionBytes, Attempt.SizeReductionPercent, Attempt.ErrorMessage,
                         Attempt.TranscodeDurationSeconds,
                         Attempt.FfpmpegCommand,
-                        Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF,
+                        Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, ProfileNameForInsert, Attempt.VMAF,
                         Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType, Attempt.StartTime,
                         Attempt.PreferredAttempt,
                         Attempt.WorkerName, MediaFileId

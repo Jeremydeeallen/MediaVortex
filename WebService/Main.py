@@ -445,6 +445,8 @@ class WebServiceApp:
         from Features.Activity.ActivityController import ActivityBlueprint
         from Features.TranscodeQueue.AudioFixPriorityHintsController import AudioFixPriorityHintsBlueprint
         from Features.Compliance.ComplianceController import ComplianceBlueprint
+        # directive: failure-accounting | # see failure-accounting.C8
+        from Features.FailureAccounting.FailedJobsController import FailedJobsBlueprint
 
         # Register all blueprints
         self.App.register_blueprint(ShowSettingsBlueprint)
@@ -467,6 +469,8 @@ class WebServiceApp:
         self.App.register_blueprint(MediaProbeBlueprint)
         self.App.register_blueprint(FailureTrackingBlueprint, url_prefix='/api/FailureTracking')
         self.App.register_blueprint(ComplianceBlueprint)
+        # directive: failure-accounting | # see failure-accounting.C8
+        self.App.register_blueprint(FailedJobsBlueprint)
     
     def PrivateStartServiceStatusTracking(self):
         """Start service status tracking thread."""

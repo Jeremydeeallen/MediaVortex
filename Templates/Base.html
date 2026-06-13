@@ -40,6 +40,14 @@
                         <span class="badge rounded-pill bg-success d-none" id="NavActiveJobsCount"
                               style="position: absolute; top: 2px; right: -6px; font-size: 0.65em; padding: 3px 6px; pointer-events: none;"></span>
                     </li>
+                    <li class="nav-item" style="position: relative;">
+                        <a class="nav-link {% if request.endpoint and 'FailedJobs' in request.endpoint %}active{% endif %}" href="/FailedJobs">
+                            <i class="fas fa-exclamation-triangle"></i> Failed Jobs
+                        </a>
+                        <span class="badge rounded-pill bg-danger d-none" id="NavFailedJobsCount"
+                              style="position: absolute; top: 2px; right: -6px; font-size: 0.65em; padding: 3px 6px; pointer-events: none;"
+                              title="Files at or above the FailureBudgetConfig cap"></span>
+                    </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint in ['status', 'sql_queries', 'optimization', 'settings'] %}active{% endif %}" href="/settings">
                             <i class="fas fa-tools"></i> Admin
@@ -194,6 +202,20 @@
     }
     updateNavActiveJobsCount();
     setInterval(updateNavActiveJobsCount, 10000);
+    // Failed Jobs nav badge
+    function updateNavFailedJobsCount() {
+        fetch('/api/FailedJobs/Count')
+            .then(r => r.json())
+            .then(d => {
+                const badge = document.getElementById('NavFailedJobsCount');
+                const count = (d && d.Data && d.Data.Count) || 0;
+                if (count > 0) { badge.textContent = count; badge.classList.remove('d-none'); }
+                else { badge.classList.add('d-none'); }
+            })
+            .catch(() => {});
+    }
+    updateNavFailedJobsCount();
+    setInterval(updateNavFailedJobsCount, 30000);
     // Global client-side error reporting
     (function() {
         var ErrorQueue = [];

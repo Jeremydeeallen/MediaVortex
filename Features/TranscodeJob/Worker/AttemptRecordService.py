@@ -38,6 +38,11 @@ class AttemptRecordService:
                 if ProfileRow:
                     QualityTestRequiredForProfile = bool(ProfileRow[0].get('QualityTestRequired'))
 
+            # directive: failure-accounting | # see failure-accounting.C5
+            JobMode = (getattr(Job, 'ProcessingMode', None) or 'Transcode').strip()
+            if JobMode in ('Remux', 'AudioFix', 'Quick', 'SubtitleFix') and not ProfileName:
+                ProfileName = JobMode
+
             Attempt = TranscodeAttemptModel(
                 StorageRootId=Job.StorageRootId,
                 RelativePath=Job.RelativePath,
@@ -58,7 +63,8 @@ class AttemptRecordService:
                 QualityTestRequired=QualityTestRequiredForProfile,
                 QualityTestCompleted=False,
                 StartTime=TranscodingSettings.get('StartTime') if TranscodingSettings else None,
-                WorkerName=self.WorkerName
+                WorkerName=self.WorkerName,
+                MediaFileId=getattr(Job, 'MediaFileId', None),
             )
 
             return self.DatabaseManager.SaveTranscodeAttempt(Attempt)

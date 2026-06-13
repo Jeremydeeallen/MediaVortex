@@ -896,17 +896,22 @@ class QualityTestRepository(BaseRepository):
         """
         try:
             from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate
+            # directive: failure-accounting | # see failure-accounting.C6
+            from Core.Database.FailureBudgetPredicate import BuildCapPredicate
             CapabilityFragment, CapabilityParams = BuildClaimPredicate(WorkerName, "QualityTestEnabled")
-            select_query = f"""
-                SELECT Id, TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath, DateAdded
-                FROM QualityTestingQueue
-                WHERE Status = 'Pending'
-                  AND ForceDisposition IS NULL
-                  AND DateStarted IS NULL
-                  AND {CapabilityFragment}
-                ORDER BY DateAdded ASC
-                LIMIT 1
-            """
+            CapPredicateFragment, _CapParams = BuildCapPredicate("ta.MediaFileId")
+            select_query = (
+                "SELECT qtq.Id, qtq.TranscodeAttemptId, qtq.OriginalFilePath, qtq.LocalSourcePath, "
+                "qtq.TranscodedFilePath, qtq.DateAdded "
+                "FROM QualityTestingQueue qtq "
+                "JOIN TranscodeAttempts ta ON ta.Id = qtq.TranscodeAttemptId "
+                "WHERE qtq.Status = 'Pending' "
+                "  AND qtq.ForceDisposition IS NULL "
+                "  AND qtq.DateStarted IS NULL "
+                "  AND " + CapabilityFragment + " "
+                "  AND " + CapPredicateFragment + " "
+                "ORDER BY qtq.DateAdded ASC LIMIT 1"
+            )
 
             jobs = self.DatabaseService.ExecuteQuery(select_query, CapabilityParams)
             if not jobs or len(jobs) == 0:
