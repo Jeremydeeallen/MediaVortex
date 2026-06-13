@@ -876,3 +876,45 @@ def SetWorkerStatus(WorkerName):
         ErrorMsg = f"Exception in SetWorkerStatus: {str(e)}"
         LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "SetWorkerStatus")
         return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
+
+@TeamStatusBlueprint.route('/Workers/BulkStatus', methods=['POST'])
+# directive: activity-dashboard-solid | # see activity-dashboard-solid.C9
+def BulkSetWorkerStatus():
+    """Set status on N workers in one round-trip. Body: {Status: 'Online'|'Paused', WorkerNames: [...]}. Response: {Results: [{WorkerName, Success, Message}], Summary: {OkCount, FailCount}}."""
+    try:
+        Data = request.get_json() or {}
+        NewStatus = str(Data.get('Status') or '').strip()
+        WorkerNames = Data.get('WorkerNames') or []
+        if NewStatus not in ('Online', 'Paused'):
+            return jsonify({'Success': False, 'Message': "Status must be Online or Paused"}), 400
+        if not isinstance(WorkerNames, list) or not WorkerNames:
+            return jsonify({'Success': False, 'Message': "WorkerNames must be a non-empty list"}), 400
+        Db = DatabaseManager().DatabaseService
+        Existing = {R['WorkerName'] for R in Db.ExecuteQuery(
+            "SELECT WorkerName FROM Workers WHERE WorkerName = ANY(%s)",
+            (list(WorkerNames),),
+        )}
+        Results = []
+        OkCount = 0
+        for Wn in WorkerNames:
+            if Wn not in Existing:
+                Results.append({'WorkerName': Wn, 'Success': False, 'Message': 'not found'})
+                continue
+            try:
+                Db.ExecuteNonQuery("UPDATE Workers SET Status = %s WHERE WorkerName = %s", (NewStatus, Wn))
+                Results.append({'WorkerName': Wn, 'Success': True, 'Message': 'OK'})
+                OkCount += 1
+            except Exception as Ex:
+                Results.append({'WorkerName': Wn, 'Success': False, 'Message': str(Ex)})
+        LoggingService.LogInfo("BulkSetWorkerStatus: status=" + NewStatus + " ok=" + str(OkCount) + " of " + str(len(WorkerNames)), "TeamStatusController", "BulkSetWorkerStatus")
+        return jsonify({
+            'Success': OkCount == len(WorkerNames),
+            'Data': {
+                'Results': Results,
+                'Summary': {'OkCount': OkCount, 'FailCount': len(WorkerNames) - OkCount},
+            },
+        })
+    except Exception as Ex:
+        LoggingService.LogException("BulkSetWorkerStatus failed", Ex, "TeamStatusController", "BulkSetWorkerStatus")
+        return jsonify({'Success': False, 'Message': str(Ex)}), 500

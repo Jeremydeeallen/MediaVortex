@@ -243,20 +243,27 @@ var ActivityPage = (function() {
         return Math.floor(Sec / 3600) + ' hr ago';
     }
 
+    // directive: activity-dashboard-solid -- C4 data-driven WorkerStatusRenderer.
+    // Single mapping table; unknown status renders raw value in neutral grey so
+    // future Status enum additions (e.g. 'Maintenance') display gracefully
+    // without code edits. Forward-compat slot for 'Draining' kept in case the
+    // 3-state model is ever re-introduced.
+    var WorkerStatusMap = {
+        'Online':   { Badge: 'bg-success',          Card: 'card h-100',                            Tooltip: 'Accepting work' },
+        'Paused':   { Badge: 'bg-secondary',        Card: 'card h-100 bg-light text-muted',        Tooltip: 'Not accepting new work' },
+        'Draining': { Badge: 'bg-warning text-dark',Card: 'card h-100 border-warning',             Tooltip: 'Finishing in-flight work' }
+    };
     function GetWorkerStatusBadge(Status) {
-        var Map = {
-            'Online': 'bg-success',
-            'Paused': 'bg-secondary'
-        };
-        return Map[Status] || 'bg-secondary';
+        var Cfg = WorkerStatusMap[Status];
+        return Cfg ? Cfg.Badge : 'bg-secondary';
     }
-
     function GetWorkerCardClass(Status) {
-        var Map = {
-            'Online': 'card h-100',
-            'Paused': 'card h-100 bg-light text-muted'
-        };
-        return Map[Status] || 'card h-100';
+        var Cfg = WorkerStatusMap[Status];
+        return Cfg ? Cfg.Card : 'card h-100';
+    }
+    function GetWorkerStatusTooltip(Status) {
+        var Cfg = WorkerStatusMap[Status];
+        return Cfg ? Cfg.Tooltip : Status;
     }
 
     function GetHeartbeatDotClass(AgeSec) {
@@ -279,18 +286,39 @@ var ActivityPage = (function() {
     function LoadOverview() {
         var OverviewP = fetch('/api/TeamStatus/Overview').then(function(R) { return R.json(); }).catch(function() { return null; });
         var VmafP = fetch('/api/QualityTesting/Progress').then(function(R) { return R.json(); }).catch(function() { return null; });
-        Promise.all([OverviewP, VmafP]).then(function(Both) {
-            var Overview = Both[0];
-            var VmafResp = Both[1];
+        // directive: activity-dashboard-solid -- C1 single-snapshot endpoint
+        // contributes SmoothedFPS / SmoothedSpeed / EtaSeconds per AttemptId
+        // (C2 ProgressSmoothingService) and Worker.HeartbeatAgeSec (C5).
+        var SnapshotP = fetch('/api/Activity/Snapshot').then(function(R) { return R.json(); }).catch(function() { return null; });
+        Promise.all([OverviewP, VmafP, SnapshotP]).then(function(All) {
+            var Overview = All[0];
+            var VmafResp = All[1];
+            var Snapshot = All[2];
             if (!Overview || !Overview.Success) return;
-            // Pass the FULL list of concurrent VMAF runs (one row per
-            // worker actively processing). Older shape returned only the
-            // first running job under .Progress / .CurrentJob.
             var VmafJobs = (VmafResp && VmafResp.Success && VmafResp.IsRunning && Array.isArray(VmafResp.Jobs))
                 ? VmafResp.Jobs
                 : ((VmafResp && VmafResp.Success && VmafResp.IsRunning)
                     ? [(VmafResp.Progress || VmafResp.CurrentJob)].filter(Boolean)
                     : []);
+            // directive: activity-dashboard-solid -- merge smoothed values keyed by AttemptId / QueueId.
+            if (Snapshot && Snapshot.Success && Snapshot.Data && Array.isArray(Snapshot.Data.ActiveJobs)) {
+                var SmoothByAttempt = {};
+                Snapshot.Data.ActiveJobs.forEach(function(SJ) { if (SJ && SJ.AttemptId !== undefined) SmoothByAttempt[SJ.AttemptId] = SJ; });
+                (Overview.Data.ActiveJobs || []).forEach(function(J) {
+                    var SJ = SmoothByAttempt[J.QueueId] || SmoothByAttempt[J.TranscodeAttemptId] || SmoothByAttempt[J.AttemptId];
+                    if (!SJ) return;
+                    if (SJ.SmoothedFPS != null) J.SmoothedFPS = SJ.SmoothedFPS;
+                    if (SJ.SmoothedSpeed != null) J.SmoothedSpeed = SJ.SmoothedSpeed;
+                    if (SJ.EtaSeconds != null) J.EtaSeconds = SJ.EtaSeconds;
+                    if (SJ.IsStale != null) J.SmoothingStale = SJ.IsStale;
+                });
+                // Stash badge state for the nav / panel header.
+                window.__ActivityBadgeState = Snapshot.Data.BadgeState || {};
+                window.__ActivityThresholds = {
+                    StaleProgressSec: Snapshot.Data.StaleProgressThresholdSec,
+                    HeartbeatStaleSec: Snapshot.Data.HeartbeatStaleThresholdSec
+                };
+            }
             RenderActiveJobs(Overview.Data, VmafJobs);
         });
     }
@@ -491,9 +519,10 @@ var ActivityPage = (function() {
                 '<td>' + (Job.ClaimedBy ? EscapeHtml(Job.ClaimedBy) : '<em class="text-muted">-</em>') + '</td>' +
                 '<td>' + (Job.SizeMB ? FormatSizeMB(Job.SizeMB) : '-') + '</td>' +
                 '<td>' + ProgressBar + '</td>' +
-                '<td>' + (IsStuck ? '-' : (Job.CurrentFPS ? parseFloat(Job.CurrentFPS).toFixed(1) : '-')) + '</td>' +
-                '<td>' + (IsStuck ? '-' : (Job.CurrentSpeed || '-')) + '</td>' +
-                '<td>' + (IsStuck ? '-' : (Job.ETA || '-')) + '</td>' +
+                // directive: activity-dashboard-solid -- C2: prefer smoothed FPS/Speed/ETA when fresh; render '--' when stale (vs '-' for "never sampled").
+                '<td>' + (IsStuck ? '-' : (Job.SmoothingStale ? '<span class="text-muted">--</span>' : (Job.SmoothedFPS != null ? parseFloat(Job.SmoothedFPS).toFixed(1) : (Job.CurrentFPS ? parseFloat(Job.CurrentFPS).toFixed(1) : '-')))) + '</td>' +
+                '<td>' + (IsStuck ? '-' : (Job.SmoothingStale ? '<span class="text-muted">--</span>' : (Job.SmoothedSpeed != null ? (Job.SmoothedSpeed.toFixed(2) + 'x') : (Job.CurrentSpeed || '-')))) + '</td>' +
+                '<td>' + (IsStuck ? '-' : (Job.SmoothingStale ? '<span class="text-muted">--:--:--</span>' : (Job.EtaSeconds != null ? FormatEtaSec(Job.EtaSeconds) : (Job.ETA || '-')))) + '</td>' +
                 '<td class="text-center">' + ResetBtn + '</td>' +
             '</tr>';
         });
