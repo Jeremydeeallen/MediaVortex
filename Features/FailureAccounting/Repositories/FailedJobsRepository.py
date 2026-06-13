@@ -18,6 +18,7 @@ class FailedJobsRepository(BaseRepository):
             'FailureCount': 'fail_count',
             'FileName': 'mf.FileName',
             'AssignedProfile': 'mf.AssignedProfile',
+            'SizeMB': 'mf.SizeMB',
         }
         SortCol = SafeSortCols.get(SortBy, 'last_attempt')
         SortOrder = 'ASC' if str(SortDir).upper() == 'ASC' else 'DESC'
@@ -47,7 +48,7 @@ class FailedJobsRepository(BaseRepository):
             ") "
             "SELECT mf.Id AS MediaFileId, mf.FileName, COALESCE(mf.RelativePath, '') AS FilePath, "
             "       r.fail_count, r.last_error, r.last_attempt, mf.AssignedProfile, r.last_worker, "
-            "       mf.LastFailureResetAt "
+            "       mf.SizeMB, mf.LastFailureResetAt "
             "  FROM ranked r "
             "  JOIN MediaFiles mf ON mf.Id = r.MediaFileId "
             " WHERE r.fail_count >= COALESCE((SELECT MaxEncodeFailures FROM FailureBudgetConfig WHERE Id = 1), 3) "
@@ -67,6 +68,7 @@ class FailedJobsRepository(BaseRepository):
                 LastAttemptDate=R.get('last_attempt'),
                 AssignedProfile=R.get('AssignedProfile'),
                 LastWorkerName=R.get('last_worker'),
+                SizeMB=float(R['SizeMB']) if R.get('SizeMB') is not None else None,
                 LastFailureResetAt=R.get('LastFailureResetAt'),
             )
             for R in Rows

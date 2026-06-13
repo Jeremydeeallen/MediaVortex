@@ -48,6 +48,7 @@ def ListCappedJobs():
                     'LastAttemptDate': R.LastAttemptDate.isoformat() if R.LastAttemptDate else None,
                     'AssignedProfile': R.AssignedProfile,
                     'LastWorkerName': R.LastWorkerName,
+                    'SizeMB': R.SizeMB,
                     'LastFailureResetAt': R.LastFailureResetAt.isoformat() if R.LastFailureResetAt else None,
                 }
                 for R in Rows

@@ -16,4 +16,5 @@ class FailedJobRow:
     LastAttemptDate: Optional[datetime]
     AssignedProfile: Optional[str]
     LastWorkerName: Optional[str]
+    SizeMB: Optional[float] = field(default=None)
     LastFailureResetAt: Optional[datetime] = field(default=None)

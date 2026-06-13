@@ -12,6 +12,8 @@
                 <option value="LastAttemptDate-DESC">Newest failure first</option>
                 <option value="LastAttemptDate-ASC">Oldest failure first</option>
                 <option value="FailureCount-DESC">Most failures first</option>
+                <option value="SizeMB-DESC">Largest first</option>
+                <option value="SizeMB-ASC">Smallest first</option>
                 <option value="FileName-ASC">Filename A-Z</option>
             </select>
             <button id="failedjobs-refresh" class="btn btn-sm btn-secondary">Refresh</button>
@@ -36,6 +38,7 @@
             <thead class="table-light">
                 <tr>
                     <th>File</th>
+                    <th class="text-end">Size (MB)</th>
                     <th class="text-end">Failures</th>
                     <th>Last error</th>
                     <th>Last attempt</th>
@@ -45,7 +48,7 @@
                 </tr>
             </thead>
             <tbody id="failedjobs-rows">
-                <tr><td colspan="7" class="text-center text-muted">Loading...</td></tr>
+                <tr><td colspan="8" class="text-center text-muted">Loading...</td></tr>
             </tbody>
         </table>
     </div>
@@ -102,17 +105,25 @@
     }
     function renderError(msg) {
         document.getElementById('failedjobs-rows').innerHTML =
-            '<tr><td colspan="7" class="text-danger">' + esc(msg) + '</td></tr>';
+            '<tr><td colspan="8" class="text-danger">' + esc(msg) + '</td></tr>';
+    }
+    function fmtSize(mb) {
+        if (mb == null) return '-';
+        const n = Number(mb);
+        if (!isFinite(n)) return '-';
+        if (n >= 1024) return (n / 1024).toFixed(2) + ' GB';
+        return n.toFixed(1);
     }
     function renderRows(items) {
         if (!items.length) {
             document.getElementById('failedjobs-rows').innerHTML =
-                '<tr><td colspan="7" class="text-center text-muted">No capped files. The queue is healthy.</td></tr>';
+                '<tr><td colspan="8" class="text-center text-muted">No capped files. The queue is healthy.</td></tr>';
             return;
         }
         document.getElementById('failedjobs-rows').innerHTML = items.map(it => (
             '<tr>' +
             '<td><a href="#" data-mfid="' + it.MediaFileId + '" class="js-show-history">' + esc(it.FileName) + '</a><div class="small text-muted">' + esc(it.FilePath) + '</div></td>' +
+            '<td class="text-end">' + esc(fmtSize(it.SizeMB)) + '</td>' +
             '<td class="text-end"><span class="badge bg-danger">' + it.FailureCount + '</span></td>' +
             '<td><span class="text-muted small">' + esc(fmtErr(it.LastErrorMessage)) + '</span></td>' +
             '<td>' + esc(fmtDate(it.LastAttemptDate)) + '</td>' +
