@@ -1,7 +1,7 @@
 # Failure Accounting -- FailureBudgetService + FailedJobs Surface + TranscodeAttempts NOT NULL
 
 **Set:** 2026-06-13
-**Status:** Active -- phase: DELIVERING
+**Status:** Closed
 **Slug:** failure-accounting
 **Bug:** BUG-0061 (CLUSTER -- subsumes BUG-0055 + BUG-0060 + BUG-0029)
 **Sequencing:** Cluster A of 3. B (compliance-writeback-invariant) closed 2026-06-13 at 5d4f81a. C (BUG-0063 activity-dashboard) is the third cluster.
@@ -217,9 +217,9 @@ WebService/Main.py                                                    -- EDIT: r
 
 | Source artifact in directive | Target file | Commit |
 |---|---|---|
-| AC1-AC2 architecture (FailureBudgetService + FailureBudgetConfig) | `Features/FailureAccounting/failure-accounting.feature.md` C1-C2 | pending |
-| AC3-AC4 orphan archival + NOT NULL | `Features/FailureAccounting/failure-accounting.feature.md` C3-C4 + Failure Modes | pending |
-| AC5 INSERT discipline (3 call sites + repo layer fallback) | `Features/FailureAccounting/failure-accounting.feature.md` C5 + ST1 + S6 + S7 | pending |
-| AC6 single SQL-fragment helper consumed by 7 surfaces | `Features/FailureAccounting/failure-accounting.feature.md` C6 + `failure-accounting.flow.md` ST3 + S3 | pending |
-| AC7-AC8 FailedJobs surface (page + API + repo + reset audit) | `Features/FailureAccounting/failure-accounting.feature.md` C7-C8 + W1-W3 + S4-S5 | pending |
-| AC9 CI invariant test (10 tests) | `Tests/Contract/TestFailureAccounting.py` (file is the artifact) | pending |
+| AC1-AC2 architecture (FailureBudgetService + FailureBudgetConfig) | `Features/FailureAccounting/failure-accounting.feature.md` C1-C2 | c1f0760 |
+| AC3-AC4 orphan archival + NOT NULL | `Features/FailureAccounting/failure-accounting.feature.md` C3-C4 + Failure Modes | c1f0760 |
+| AC5 INSERT discipline (3 call sites + repo layer fallback) | `Features/FailureAccounting/failure-accounting.feature.md` C5 + ST1 + S6 + S7 | c1f0760 |
+| AC6 single SQL-fragment helper consumed by 7 surfaces | `Features/FailureAccounting/failure-accounting.feature.md` C6 + `failure-accounting.flow.md` ST3 + S3 | c1f0760 |
+| AC7-AC8 FailedJobs surface (page + API + repo + reset audit) | `Features/FailureAccounting/failure-accounting.feature.md` C7-C8 + W1-W3 + S4-S5 | c1f0760 |
+| AC9 CI invariant test (10 tests) | `Tests/Contract/TestFailureAccounting.py` (file is the artifact) | c1f0760 |
