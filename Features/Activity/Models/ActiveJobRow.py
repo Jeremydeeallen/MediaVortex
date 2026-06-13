@@ -6,7 +6,7 @@ from typing import Optional
 @dataclass(frozen=True)
 # directive: activity-dashboard-solid | # see activity-dashboard-solid.C3
 class ActiveJobRow:
-    """One row in the Active Jobs panel. Sourced from ActiveJobs JOIN Workers (display name only) JOIN TranscodeAttempts on AttemptId. Worker.Status does NOT filter visibility (BUG-0059)."""
+    """One row in the Active Jobs panel. Sourced from ActiveJobs JOIN Workers (display name only) JOIN TranscodeAttempts on AttemptId. Worker.Status does NOT filter visibility. see activity-dashboard.ST4"""
     AttemptId: int
     MediaFileId: Optional[int]
     FileName: str

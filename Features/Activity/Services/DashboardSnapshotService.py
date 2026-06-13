@@ -50,7 +50,7 @@ class DashboardSnapshotService:
 
     # directive: activity-dashboard-solid | # see activity-dashboard-solid.C4
     def _BuildWorkers(self) -> List[WorkerTile]:
-        """All Workers, with HeartbeatAgeSec derived from LastHeartbeat. Status field is verbatim (BUG-0037 fix)."""
+        """All Workers, with HeartbeatAgeSec derived from LastHeartbeat. Status field is verbatim. see activity-dashboard-solid.C4"""
         Now = datetime.now(timezone.utc)
         Rows = self.Db.ExecuteQuery(
             "SELECT WorkerName, Status, LastHeartbeat, TranscodeEnabled, RemuxEnabled, QualityTestEnabled, "

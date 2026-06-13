@@ -861,7 +861,7 @@ class QueueManagementBusinessService:
                 LoggingService.LogWarning(f"No profile thresholds found for profile {profile.ProfileName}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
                 return []
 
-            # Step 1: profile-max-target -- # see marginal-savings-gate.C2b (BUG-0054)
+            # Step 1: profile-max-target -- # see marginal-savings-gate.C2b
             targetResolution = self.ProfileRepository.GetProfileMaxTarget(profile.ProfileName)
 
             if not targetResolution:
@@ -1745,7 +1745,7 @@ class QueueManagementBusinessService:
         if AdmissionConfig is None:
             AdmissionConfig = self.QueueAdmissionConfigRepo.Get()
 
-        # 1. Upscale block -- # see marginal-savings-gate.C2b (BUG-0054)
+        # 1. Upscale block -- # see marginal-savings-gate.C2b
         SourceResolution = getattr(MediaFile, 'Resolution', None) or ''
         UpscaleTarget = ProfileSettings.get('ProfileMaxTarget') or ProfileSettings.get('TargetResolution') or ''
         if SourceResolution and UpscaleTarget:
@@ -2023,7 +2023,7 @@ class QueueManagementBusinessService:
             Written, Refused = ComplianceWriteRepository().BulkWriteRecomputeResults(updates)
             if Refused:
                 LoggingService.LogWarning(
-                    "BUG-0062: ComplianceWriteRepository refused " + str(Refused) + " contradictory tuple(s) of " + str(len(updates)) + " submitted in RecomputeForFiles batch",
+                    "ComplianceWriteRepository refused " + str(Refused) + " contradictory tuple(s) of " + str(len(updates)) + " submitted in RecomputeForFiles batch. see compliance.C8",
                     "QueueManagementBusinessService", "RecomputeForFiles"
                 )
             return Written
@@ -2215,10 +2215,7 @@ class QueueManagementBusinessService:
             # Delete from database
             success = self.Repository.DeleteTranscodeQueueItem(ItemId)
 
-            # BUG-0001 criterion 16: any ActiveJobs row still pointing at this
-            # QueueId must go with it. _CancelRunningJob covers the Running
-            # path; this catches the non-Running residue (e.g. crashed worker
-            # left ActiveJobs behind, queue row sat in Failed, user removed it).
+            # ActiveJobs orphan sweep on delete -- catches non-Running residue.
             try:
                 self.Repository.DatabaseService.ExecuteNonQuery(
                     "DELETE FROM ActiveJobs WHERE ServiceName = %s AND QueueId = %s",

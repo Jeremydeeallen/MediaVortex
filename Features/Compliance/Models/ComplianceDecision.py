@@ -4,7 +4,7 @@ from typing import FrozenSet, List, Optional
 
 # directive: compliance-writeback-invariant | # see compliance.C7
 class ContradictoryDecisionError(ValueError):
-    """Grep-able typed signal that a ComplianceDecision violated the C3 bucket-precedence rule at construction (BUG-0062 / compliance.C7)."""
+    """Grep-able typed signal that a ComplianceDecision violated the C3 bucket-precedence rule at construction. see compliance.C7"""
 
 
 _LEGAL_OPERATIONS = frozenset({'Transcode', 'Remux', 'AudioFix', 'SubtitleFix'})

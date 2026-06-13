@@ -5,7 +5,7 @@ from Core.Logging.LoggingService import LoggingService
 
 # directive: compliance-writeback-invariant | # see compliance.C8
 class ComplianceWriteRepository(BaseRepository):
-    """Owns the bulk UPDATE that persists per-row recompute results to MediaFiles; Layer 2 of the BUG-0062 writeback invariant (compliance.C8 / ST9)."""
+    """Owns the bulk UPDATE that persists per-row recompute results to MediaFiles; Layer 2 of the writeback invariant (compliance.C8 / ST9)."""
 
     # directive: compliance-writeback-invariant | # see compliance.C8
     def BulkWriteRecomputeResults(self, Updates: List[Tuple]) -> Tuple[int, int]:
@@ -17,7 +17,7 @@ class ComplianceWriteRepository(BaseRepository):
         for Row in Updates:
             if not self._IsCompliantTuple(Row):
                 LoggingService.LogWarning(
-                    "BUG-0062 layer-2 refusal: contradictory ComplianceDecision tuple MediaFileId=" + str(Row[0]) + " tuple=" + repr(Row),
+                    "compliance.C8 layer-2 refusal: contradictory ComplianceDecision tuple MediaFileId=" + str(Row[0]) + " tuple=" + repr(Row),
                     "ComplianceWriteRepository", "BulkWriteRecomputeResults"
                 )
                 Refused += 1

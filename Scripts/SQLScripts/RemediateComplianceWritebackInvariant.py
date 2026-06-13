@@ -37,13 +37,13 @@ def CountContradictions(Db):
 
 # directive: compliance-writeback-invariant | # see compliance.C7
 def CountNarrowBug(Db):
-    """Return count of the specific BUG-0062 contradictory shape (IsCompliant=TRUE alongside non-null WorkBucket)."""
+    """Return count of the specific contradictory shape (IsCompliant=TRUE alongside non-null WorkBucket). see compliance.C9"""
     return int(Db.ExecuteQuery(NARROW_BUG_COUNT_SQL)[0]['n'])
 
 
 # directive: compliance-writeback-invariant | # see compliance.C7
 def Main():
-    """Idempotent BUG-0062 remediation: count contradictions, recompute every MediaFile in batches via the validated writeback path, verify post-count, report pre/post/status."""
+    """Idempotent compliance-writeback remediation: count contradictions, recompute every MediaFile in batches via the validated writeback path, verify post-count, report pre/post/status. see compliance.C7-C9"""
     Db = DatabaseService()
 
     PreNarrow = CountNarrowBug(Db)

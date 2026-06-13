@@ -202,14 +202,14 @@ class TranscodeJobRepository(BaseRepository):
                         )
                     if MediaFileId is None:
                         LoggingService.LogWarning(
-                            "BUG-0061: TranscodeAttempts INSERT could not resolve MediaFileId; using sentinel 0. Attempt(StorageRootId=" + str(Attempt.StorageRootId) + ", RelativePath=" + repr(Attempt.RelativePath) + ", ProfileName=" + repr(Attempt.ProfileName) + ", WorkerName=" + repr(Attempt.WorkerName) + ")",
+                            "TranscodeAttempts INSERT could not resolve MediaFileId; using sentinel 0. Attempt(StorageRootId=" + str(Attempt.StorageRootId) + ", RelativePath=" + repr(Attempt.RelativePath) + ", ProfileName=" + repr(Attempt.ProfileName) + ", WorkerName=" + repr(Attempt.WorkerName) + "). see failure-accounting.C5",
                             "TranscodeJobRepository", "SaveTranscodeAttempt"
                         )
                         MediaFileId = 0
                     ProfileNameForInsert = Attempt.ProfileName
                     if not ProfileNameForInsert:
                         LoggingService.LogWarning(
-                            "BUG-0061: TranscodeAttempts INSERT could not resolve ProfileName; using sentinel __UNRESOLVED__. MediaFileId=" + str(MediaFileId) + " StorageRootId=" + str(Attempt.StorageRootId) + " RelativePath=" + repr(Attempt.RelativePath),
+                            "TranscodeAttempts INSERT could not resolve ProfileName; using sentinel __UNRESOLVED__. MediaFileId=" + str(MediaFileId) + " StorageRootId=" + str(Attempt.StorageRootId) + " RelativePath=" + repr(Attempt.RelativePath) + ". see failure-accounting.C5",
                             "TranscodeJobRepository", "SaveTranscodeAttempt"
                         )
                         ProfileNameForInsert = '__UNRESOLVED__'

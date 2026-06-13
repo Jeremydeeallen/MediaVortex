@@ -527,12 +527,7 @@ var ActivityPage = (function() {
             '</tr>';
         });
 
-        // Render one row PER QualityTestService claim in ActiveJobs.
-        // BUG-0042 (activity-dashboard-improvements.C19): claims with no
-        // QualityTestProgress row are orphan/stale -- show a stale-claim
-        // badge and the claim age instead of a 0% progress bar so the
-        // operator can tell "VMAF is running" from "worker died holding
-        // a claim" without restarting workers.
+        // see activity-dashboard-improvements.C19 -- one row per QualityTestService claim; orphan claims render stale-claim badge instead of 0% bar.
         function FormatClaimAge(Sec) {
             if (Sec == null || Sec < 0) return '-';
             var S = Math.round(Sec);

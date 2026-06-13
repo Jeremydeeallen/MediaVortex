@@ -8,7 +8,7 @@ from Core.Database.DatabaseService import DatabaseService
 
 SEEDS = [
     ('StaleProgressThresholdSec', '15', 'int',
-     'Activity dashboard: TranscodeProgress samples older than this render FPS/Speed as `--` (BUG-0063 / activity-dashboard-solid C2).'),
+     'Activity dashboard: TranscodeProgress samples older than this render FPS/Speed as `--`. see activity-dashboard-solid.C2'),
     ('HeartbeatStaleThresholdSec', '300', 'int',
      'Activity dashboard: Worker connectivity dot turns red beyond this many seconds since LastHeartbeat (activity-dashboard-solid C5).'),
 ]

@@ -165,12 +165,12 @@ class TestLayer3SqlCheckConstraint(unittest.TestCase):
 
 # directive: compliance-writeback-invariant | # see compliance.C7
 class TestDbWideInvariant(unittest.TestCase):
-    """AC1: live DB count of contradictory MediaFiles rows is 0 (BUG-0062)."""
+    """AC1: live DB count of contradictory MediaFiles rows is 0. see compliance.C9"""
 
     # directive: compliance-writeback-invariant | # see compliance.C7
     def test_narrow_bug_count_is_zero(self):
         N = int(DatabaseService().ExecuteQuery(NARROW_BUG_COUNT_SQL)[0]['n'])
-        self.assertEqual(N, 0, "MediaFiles still contain " + str(N) + " IsCompliant=TRUE rows with non-null WorkBucket -- BUG-0062 not remediated")
+        self.assertEqual(N, 0, "MediaFiles still contain " + str(N) + " IsCompliant=TRUE rows with non-null WorkBucket -- compliance writeback invariant not remediated")
 
 
 if __name__ == '__main__':
