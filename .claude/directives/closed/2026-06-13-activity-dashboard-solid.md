@@ -1,7 +1,7 @@
 # Activity Dashboard SOLID Rewrite -- single snapshot, smoothing service, drain-visible jobs, data-driven worker status
 
 **Set:** 2026-06-13
-**Status:** Active -- phase: DELIVERING
+**Status:** Closed
 **Slug:** activity-dashboard-solid
 **Bug:** BUG-0063 (CLUSTER -- subsumes BUG-0057 + BUG-0058 + BUG-0059 + BUG-0040 + BUG-0037 + BUG-0025 + BUG-0007)
 **Sequencing:** Cluster C of 3. B (compliance-writeback-invariant) closed 2026-06-13 at 5d4f81a. A (failure-accounting) closed 2026-06-13 at c1f0760.
@@ -212,15 +212,15 @@ Features/Activity/activity-dashboard.flow.md              -- NEW at DELIVERING (
 
 | Source artifact in directive | Target file | Commit |
 |---|---|---|
-| AC1 single snapshot endpoint | `Features/Activity/activity-dashboard.flow.md` ST1-ST2 + S1 | pending |
-| AC2 ProgressSmoothingService + AC11 timestamp default | `Features/Activity/activity-dashboard.flow.md` ST5 + S2 | pending |
-| AC3 ActiveJobs decoupled from Worker.Status | `Features/Activity/activity-dashboard.flow.md` ST4 (BUG-0059 retag) | pending |
-| AC4 data-driven WorkerStatusRenderer | `Features/Activity/activity-dashboard.flow.md` Failure Modes (unknown-status row) | pending |
-| AC5 connectivity dot derived from HeartbeatAgeSec | `Features/Activity/activity-dashboard.flow.md` ST3 + S5 | pending |
-| AC6 ETA via smoothed FPS (countdown deferred) | `Features/Activity/activity-dashboard.flow.md` ST5 (ETA computation) | pending |
-| AC7 per-job progress isolation | `Features/Activity/activity-dashboard.flow.md` ST4 (join on AttemptId only) | pending |
+| AC1 single snapshot endpoint | `Features/Activity/activity-dashboard.flow.md` ST1-ST2 + S1 | caf94e8 |
+| AC2 ProgressSmoothingService + AC11 timestamp default | `Features/Activity/activity-dashboard.flow.md` ST5 + S2 | caf94e8 |
+| AC3 ActiveJobs decoupled from Worker.Status | `Features/Activity/activity-dashboard.flow.md` ST4 (BUG-0059 retag) | caf94e8 |
+| AC4 data-driven WorkerStatusRenderer | `Features/Activity/activity-dashboard.flow.md` Failure Modes (unknown-status row) | caf94e8 |
+| AC5 connectivity dot derived from HeartbeatAgeSec | `Features/Activity/activity-dashboard.flow.md` ST3 + S5 | caf94e8 |
+| AC6 ETA via smoothed FPS (countdown deferred) | `Features/Activity/activity-dashboard.flow.md` ST5 (ETA computation) | caf94e8 |
+| AC7 per-job progress isolation | `Features/Activity/activity-dashboard.flow.md` ST4 (join on AttemptId only) | caf94e8 |
 | AC8 WAIVED (drain terminal already done by worker-lifecycle) | (no promotion) | n/a |
-| AC9 bulk worker-status endpoint | `Features/Activity/activity-dashboard.flow.md` S6 | pending |
+| AC9 bulk worker-status endpoint | `Features/Activity/activity-dashboard.flow.md` S6 | caf94e8 |
 | AC10 capability inline re-render (DEFERRED) | (deferred to follow-up) | n/a |
-| AC12 CI test | `Tests/Contract/TestActivityDashboard.py` (file is the artifact) | pending |
-| AC13 idempotent SystemSettings seed | `Scripts/SQLScripts/AddActivityDashboardSettings.py` (file is the artifact) | pending |
+| AC12 CI test | `Tests/Contract/TestActivityDashboard.py` (file is the artifact) | caf94e8 |
+| AC13 idempotent SystemSettings seed | `Scripts/SQLScripts/AddActivityDashboardSettings.py` (file is the artifact) | caf94e8 |

@@ -47,6 +47,8 @@ Operator dogfood (2026-05-30). With TV and Movies on different drives, a single 
 
 11. EXPLAIN ANALYZE on the `NextTranscodeBatch` SQL (no Drive, no Search) shows an `Index Scan` or `Bitmap Index Scan` on `idx_mediafiles_next_transcode_batch` rather than `Seq Scan on mediafiles`. Verifiable: `py Scripts/SQLScripts/AddNextTranscodeBatchIndex.py` prints the post-create EXPLAIN.
 
+12. **[BUG-0061]** MediaFiles whose consecutive `TranscodeAttempts.Success=FALSE` count meets or exceeds the failure cap (`TranscodeQueue.feature.md` C10) are excluded from BOTH cards' results. The `NextTranscodeBatch` SQL adds a NOT EXISTS / subquery predicate that filters out capped MediaFiles. The same filter applies to every other "Next batch" surface on `/ShowSettings` (Quick Fix card, legacy Remux / AudioFix Next Batch cards served by `SmartPopulate`). Verifiable: insert N+1 consecutive `TranscodeAttempts(Success=FALSE, MediaFileId=X)` rows where N=cap, hit `/ShowSettings`, confirm MediaFile X appears in neither the TV/Movies Next Batch nor the Quick Fix card; reset the failure state and confirm X re-appears.
+
 ## Surface
 
 `/media#transcode` (`Templates/ShowSettings.html`) -- the Media page Transcode pane. Two stacked cards instead of one.

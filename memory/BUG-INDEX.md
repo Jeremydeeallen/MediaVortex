@@ -22,6 +22,9 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0040 | active | transcode-job | Second concurrent job shows first job's progress | 2026-05-05
 - BUG-0043 | active | transcode-queue | TranscodeQueue claim has no codec affinity; NVENC workers grab CPU-profile jobs and burn GPU compute; fix path = worker-routing.feature.md (DRAFTED) | 2026-06-03
 - BUG-0044 | active | worker-lifecycle | CpuAffinityService loses SystemSettingsRepository wiring on every worker startup; AttributeError caught, falls back to defaults, configured thermal knobs silently ignored | 2026-06-06
+- BUG-0061 | active | failure-accounting | CLUSTER -- TranscodeAttempts accountability + encode-failure budget + FailedJobs operator surface + ProfileName-on-failure + ShowSettings exclusion; SOLID rewrite via new Features/FailureAccounting vertical; subsumes BUG-0055 + BUG-0060 + BUG-0029 | 2026-06-12
+- BUG-0062 | active | compliance | CLUSTER -- Compliance writeback invariant enforcement; ComplianceDecision self-validates, ComplianceBucketResolver is sole (IsCompliant, WorkBucket) source, SQL CHECK + contract test; subsumes BUG-0056 | 2026-06-12
+- BUG-0063 | active | activity-page | CLUSTER -- Activity dashboard SOLID rewrite; ProgressSmoothingService + ActiveJobsViewModel + WorkerStatusRenderer + ETACountdownTimer + single GetDashboardSnapshot payload; adopts DRAFTED activity-dashboard-improvements C1-C22; subsumes BUG-0057 + BUG-0058 + BUG-0059 + BUG-0040 + BUG-0037 + BUG-0025 + BUG-0007 | 2026-06-12
 
 - BUG-0002 | active | file-replacement | Silent-output Remux MediaFiles purge | 2026-05-16
 - BUG-0007 | active | activity-page | Worker capability toggle no UI refresh | 2026-05-22
@@ -29,6 +32,12 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 
 ## Recently Resolved (last 10)
 
+- BUG-0055 | superseded | transcode-queue | TranscodeQueue has no encode-failure cap; folded into BUG-0061 (failure-accounting cluster) at filing time; evidence preserved in KNOWN-ISSUES | 2026-06-12 -> 2026-06-12
+- BUG-0056 | superseded | compliance | Compliance writes contradictory rows; folded into BUG-0062 (writeback-invariant cluster) at filing time | 2026-06-12 -> 2026-06-12
+- BUG-0057 | superseded | activity-page | FPS/Speed columns raw spot values; folded into BUG-0063 (activity-dashboard SOLID cluster) at filing time | 2026-06-12 -> 2026-06-12
+- BUG-0058 | superseded | activity-page | ETA recomputes erratically; folded into BUG-0063 at filing time | 2026-06-12 -> 2026-06-12
+- BUG-0059 | superseded | activity-page | Active Jobs hidden during drain; folded into BUG-0063 at filing time | 2026-06-12 -> 2026-06-12
+- BUG-0060 | superseded | transcode-job | 1455 orphan TranscodeAttempts; folded into BUG-0061 at filing time | 2026-06-12 -> 2026-06-12
 - BUG-0053 | resolved | tests | Tests/Contract/TestMediaProbeUsesPath.py SELECTs non-column m.FilePath; closed by prereq hotfix 42ed437 (SELECT rewritten to typed pair) | 2026-06-09 -> 2026-06-12
 - BUG-0052 | resolved | path-storage | Core/PathStorage.py importers migrated to Core.Path.LocalPath/PathFs; CLAUDE.md docs swept; closed by prereq hotfix 42ed437 | 2026-06-09 -> 2026-06-12
 - BUG-0051 | resolved | transcode-queue | ProcessRemuxQueueService AttributeError; closed structurally by perfect-solid-transcode-pipeline-phase3 commit 39d04a1 (file deleted, surface gone) | 2026-06-09 -> 2026-06-12

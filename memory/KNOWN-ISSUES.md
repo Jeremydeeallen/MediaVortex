@@ -8,6 +8,331 @@
 
 **SMB-on-Windows long-handle drops** (Microsoft SMB client EINVAL on long-duration handles under GPU-paced reads -- see memory `feedback_ms_nfs_client_unreliable.md` for the diagnostic pattern) are mitigated by **per-worker local staging** -- `Features/TranscodeJob/local-staging.feature.md`. Enable on Windows + SMB workers; leave OFF on Linux NFS workers.
 
+### [BUG-0063] CLUSTER -- Activity dashboard SOLID rewrite (FPS smoothing + ETA countdown + drain-visible jobs + worker-status decoupling)
+**Date:** 2026-06-12 | **Area:** activity-page | **Subsumes:** BUG-0057, BUG-0058, BUG-0059, BUG-0040, BUG-0037, BUG-0025, BUG-0007 | **Adopts:** `Features/Activity/activity-dashboard-improvements.feature.md` DRAFTED C1-C22
+
+**Why bundled:** Today's `/Activity` page is a god-template. `Templates/Activity.html` mixes (a) ad-hoc data fetching per panel, (b) zero progress smoothing -- raw spot FPS/Speed values from `TranscodeProgressModel` render verbatim and jitter wildly, (c) hard-coded worker-status interpretation that conflates "operational state" with "process reachable," (d) jQuery DOM manipulation per-panel with no shared model, (e) per-button click handlers that fire N serial requests where one bulk call would do. Six bugs file against this single template + its backing endpoints. The SRP fix is a layered ViewModel + Service decomposition, not point patches.
+
+**SOLID/SRP target architecture (full criteria live in feature/flow docs at directive open):**
+
+1. **Single dashboard payload.** `ActivityRepository.GetDashboardSnapshot()` returns `{Workers, ActiveJobs, QueueCounts, BadgeState}` in one round-trip. Frontend never fetches more than once per poll. Verifiable: DevTools Network tab shows exactly one XHR per 5s tick from the Activity page.
+
+2. **ProgressSmoothingService** (server-side, new `Features/Activity/Services/`). Owns the rolling-window arithmetic mean of `CurrentFPS` and `CurrentSpeed` per `TranscodeAttemptId`. Window: 10 samples or 30 seconds (whichever is smaller). Resets on `TranscodeAttemptId` change. Stale-sample threshold from `SystemSettings.StaleProgressThresholdSec` (default 15s); past threshold emits `NULL` (rendered as `--`). Constructor-injected: `(ProgressRepository, SystemSettingsRepository, Clock)`. DB-is-authority on threshold.
+
+3. **ActiveJobsViewModel + WorkersViewModel are decoupled.** `ActiveJobsViewModel` rows are sourced from `ActiveJobs WHERE TranscodeAttempts.Success IS NULL` joined to `Workers` for the display name only -- NEVER filtered by `Workers.Status`. `WorkersViewModel` reflects `Workers.Status` for tile badges. A job claimed by a `Draining` worker appears in both views; the worker tile shows `Draining`, the job row shows continuing progress. Defense against BUG-0059 family.
+
+4. **WorkerStatusRenderer is a data-driven mapping.** Single JS table `Status -> {Label, BadgeClass, Tooltip}`. Unknown values render with `bg-secondary` + the raw string. `Workers.Status` gains terminal `Stopped` via migration; `Offline` becomes a derived UI concept (heartbeat-staleness), not a column value. Migration: `RenameWorkerStatusOfflineToStopped.py` (idempotent). Subsumes BUG-0037 + BUG-0025.
+
+5. **Connectivity vs operational state.** Worker tile carries TWO indicators: badge (from `Workers.Status` -- operator-set) and connectivity dot (from `LastHeartbeat` age vs `SystemSettings.HeartbeatStaleThresholdSec`, default 300s). They are independent: a `Stopped` worker still heartbeating shows green dot + grey "Stopped" badge.
+
+6. **ETACountdownTimer** (client-side, new JS module). Maintains a per-job timer that decrements 1s per second between server polls. On each poll, compares server ETA to client running value: `|delta| <= 5s` -> client wins (smooth); `> 5s` -> client resets to server value (material change). Renders `--:--:--` when smoothed FPS is unavailable.
+
+7. **Per-job progress isolation.** `TranscodeProgress` rows are keyed and indexed by `TranscodeAttemptId`; rendering joins ActiveJobs to TranscodeProgress on that key. No worker-name fallback, no most-recent shortcut -- second concurrent job NEVER shows first job's progress. Subsumes BUG-0040.
+
+8. **Draining has a terminal state.** `_DrainAndStop()` writes `Status='Stopped'` when join completes. Drain waiter thread + 3-state model collapses to 2-state (Online / Paused) with `_StopAllCapabilities` covering remux + transcode + VMAF + scan. Subsumes BUG-0025.
+
+9. **Bulk worker-status endpoint.** `POST /api/TeamStatus/Workers/BulkStatus` replaces N serial fetches. Per-worker success/failure in one payload.
+
+10. **Capability toggle re-renders inline.** `POST /api/TeamStatus/Workers/<name>/<Capability>` Success refetches the snapshot and re-renders the affected tile/modal without operator close-and-reopen. Subsumes BUG-0007.
+
+11. **Failed Jobs panel adopted from BUG-0061.** Panel renders from `FailedJobsRepository` (owned by BUG-0061 cluster); this cluster supplies the operator surface only (route, template, click-through). Cross-cluster contract.
+
+12. **TranscodeProgress schema discipline.** `TranscodeProgress.LastProgressUpdate` becomes the smoothing service's freshness signal. INSERTs without `LastProgressUpdate` are refused at the model layer (`__post_init__` validation in `TranscodeProgressModel`).
+
+13. **All criteria in the existing DRAFTED `activity-dashboard-improvements.feature.md` C1-C22 stand.** This cluster ADOPTS that feature doc as its primary contract; the SOLID decomposition above is added to its `## Architecture` section at directive-open.
+
+**Feature/flow doc deliverables:**
+- `Features/Activity/activity-dashboard-improvements.feature.md` -- absorb the C20-C22 already added + new `## Architecture` block naming the ViewModels + Service layering
+- `Features/Activity/activity-dashboard.flow.md` -- NEW. Stages: ST1 Poll trigger -> ST2 GetDashboardSnapshot -> ST3 ProgressSmoothingService -> ST4 ViewModel build -> ST5 Render -> ST6 Action dispatch. Seams between each stage.
+
+**Sequencing:** Third (last) cluster -- benefits from BUG-0061's `FailedJobsRepository` already existing. Estimate 7-10 day directive.
+
+**Evidence preserved:** See SUPERSEDED entries for BUG-0057 / BUG-0058 / BUG-0059 below + existing entries for BUG-0040 / BUG-0037 / BUG-0025 / BUG-0007.
+
+---
+
+### [BUG-0062] CLUSTER -- Compliance writeback invariant enforcement
+**Date:** 2026-06-12 | **Area:** compliance | **Subsumes:** BUG-0056
+
+**Why bundled:** The new compliance engine (shipped 2026-06-09 via `compliance-solid-refactor`) materializes per-row decisions to `MediaFiles` via `BulkWriteRecomputeResults`. The decision-precedence contract in `compliance.feature.md` C3 says bucket assignment and `IsCompliant` are mutually-derived: empty `OperationsNeeded` -> bucket None + `IsCompliant=True`; any operation needed -> bucket assigned + `IsCompliant=False`. Live DB shows 5703 rows where `IsCompliant=TRUE` AND `WorkBucket IS NOT NULL` AND `OperationsNeededCsv != ''` -- the precedence is honored in the engine's `ComplianceDecision` data structure but NOT enforced at the write boundary, so some path lets contradictory tuples through. This is a single surgical fix, not a wide rewrite -- the engine's SOLID shape is already good; the invariant just needs a defensible enforcement layer.
+
+**SOLID/SRP target architecture:**
+
+1. **`ComplianceDecision` self-validates in `__post_init__`.** The frozen dataclass raises `ContradictoryDecisionError` if the C3 precedence is violated -- empty `OperationsNeeded` with non-None `WorkBucket`, any op present with `IsCompliant=True`, etc. Producers can never construct an invalid Decision.
+
+2. **`ComplianceBucketResolver` is the sole producer of the `(IsCompliant, WorkBucket)` tuple.** Refactor `ComplianceEvaluator.Evaluate` so that `IsCompliant` is NEVER set independently of `WorkBucket` -- both fall out of `Resolver.Resolve(OperationsNeeded)`. Eliminates the seam where the two fields can drift.
+
+3. **SQL-level enforcement.** `ALTER TABLE MediaFiles ADD CONSTRAINT chk_compliance_consistency CHECK ( (IsCompliant=TRUE AND WorkBucket IS NULL AND (OperationsNeededCsv IS NULL OR OperationsNeededCsv='')) OR (IsCompliant=FALSE AND WorkBucket IS NOT NULL AND OperationsNeededCsv IS NOT NULL AND OperationsNeededCsv!='') OR (IsCompliant IS NULL AND ComplianceGateBlocked IS NOT NULL) )`. Migration is idempotent. Constraint is added AFTER the one-shot remediation recompute.
+
+4. **`BulkWriteRecomputeResults` loud-fails on invariant violation BEFORE the SQL.** Loops the tuples, asserts C3 precedence per row, logs WARN with MediaFileId + decision fields for any violation, refuses to write that row, returns count of written + count of refused. Defense in depth even with SQL CHECK.
+
+5. **`Tests/Contract/TestComplianceWriteConsistency.py` asserts the invariant against the live DB after any full or partial recompute. Runs on every CI pass.** Greps for: `SELECT COUNT(*) FROM MediaFiles WHERE NOT (chk_compliance_consistency_predicate)` returns 0.
+
+6. **One-shot remediation script.** `Scripts/SQLScripts/RemediateComplianceWritebackInvariant.py` triggers full library recompute (`POST /api/Compliance/Recompute` with `All=true`) and verifies the contradictory-row count drops to 0 before exiting.
+
+7. **`Features/Compliance/compliance.feature.md` gets criterion 7-9** (the existing C6 stays; new criteria cover the Decision self-validation, the BucketResolver-as-sole-producer contract, and the SQL CHECK constraint).
+
+**Feature/flow doc deliverables:**
+- `Features/Compliance/compliance.feature.md` -- amend C6 to reference the SQL invariant + add C7-C9 for Decision self-validation, BucketResolver sole-producer, SQL CHECK
+- `Features/Compliance/compliance.flow.md` -- update stage where writeback happens to reflect the loud-fail seam
+
+**Sequencing:** First cluster (per /t recommendation -- foundation move). Estimated 1-2 day directive.
+
+**Evidence preserved:** See SUPERSEDED BUG-0056 entry below.
+
+---
+
+### [BUG-0061] CLUSTER -- Failure accounting (FailureBudgetService + FailedJobs surface + TranscodeAttempts accountability)
+**Date:** 2026-06-12 | **Area:** failure-accounting | **Subsumes:** BUG-0055, BUG-0060, BUG-0029
+
+**Why bundled:** Three current bugs share one root pathology: `TranscodeAttempts` rows are not held accountable for their identity, their owner, or their retry budget. (a) Failed encodes have NO cap analogous to `RetryBudgetService.MaxRequeueAttempts` for VMAF -- failing jobs re-queue indefinitely via the compliance recompute (15 fails on Mune Guardian; 1455 orphan-MediaFileId rows back to 2025-10-15). (b) The failure INSERT path can drop `MediaFileId` AND `ProfileName`, leaving rows that can't be diagnosed from the table alone. (c) There is no operator surface for "what's stuck" -- the operator has to grep DB logs to find files that ate the worker pool. The SOLID fix is a new `Features/FailureAccounting/` vertical with its own Repository + Service + Controller + ViewModel, mirroring the existing `Features/QualityTesting/Disposition/` SOLID shape that capped VMAF retries cleanly.
+
+**SOLID/SRP target architecture:**
+
+1. **`IFailurePolicy` + `FailureBudgetService` impl.** Sibling to `Features/QualityTesting/Disposition/RetryBudgetService`. Counts `TranscodeAttempts WHERE Success=FALSE AND MediaFileId=<id>` since the most recent `Success=TRUE` (or since `MediaFiles.CreatedAt` if no prior success). Returns `HasBudgetRemaining(MediaFileId) -> bool`. Constructor-injected: `(TranscodeAttemptsRepository, FailureBudgetConfigRepository, Clock)`. DB-fresh per call (db-is-authority -- no caching).
+
+2. **`FailureBudgetConfig` table.** Single-row config (mirrors `PostTranscodeGateConfig`). Columns: `MaxEncodeFailures INTEGER NOT NULL DEFAULT 3`, `ResetWindowDays INTEGER NULL` (NULL = no time-based reset, only operator-triggered or Success=TRUE). GUI surface on `/settings`.
+
+3. **`FailedJobsRepository`** owns the read of capped jobs: filename, failure count, last `ErrorMessage`, last `AttemptDate`, `AssignedProfile`, last `WorkerName`. Plus reset operation: `ResetFailureBudget(MediaFileId, OperatorName)` writes an audit row to new `FailureBudgetResets` table and bumps `MediaFiles.LastFailureResetAt` so the budget counter ignores prior failures.
+
+4. **`FailedJobsController`** at `/api/FailedJobs/`. Routes: `GET /` (paginated list), `GET /<MediaFileId>/Attempts` (full attempt history), `POST /<MediaFileId>/Reset` (operator reset).
+
+5. **`FailedJobsViewModel`** for the `/FailedJobs` page (new). Operator can see, sort, search, click-through to attempt log, and reset individual files. No bulk reset -- intentional friction so operator looks at the failures before re-allowing them.
+
+6. **`Templates/FailedJobs.html`** as the surface. Linked from `/Activity` page nav + a "Failed Jobs (N)" pill badge (consumed by BUG-0063 cluster).
+
+7. **Claim path consults FailureBudgetService.** `TranscodeQueueRepository.ClaimNextPendingTranscodeJob` adds `AND NOT EXISTS (capped predicate)` to its WHERE clause. Defense-in-depth -- if the recompute gate misses, the claim still skips. Same change to `ClaimNextPendingRemuxJob`, `ClaimQualityTestJob` (per `db-is-authority.md` -- one helper emits the SQL fragment).
+
+8. **Recompute path consults FailureBudgetService.** `QueueManagementBusinessService.RecomputeForFiles` does NOT `INSERT INTO TranscodeQueue` if `FailureBudgetService.HasBudgetRemaining(MediaFileId) == False`. Primary gate -- caps the queue at the source.
+
+9. **`/ShowSettings` Next-batch surfaces consult FailureBudgetService.** `NextTranscodeBatch`, `SmartPopulate` Quick Fix + Remux + AudioFix all add the cap predicate. Verifiable: insert N+1 consecutive failures on MediaFileId X, hit `/ShowSettings`, confirm X is absent from every Next-batch card; reset X via the FailedJobs surface, confirm X re-appears.
+
+10. **`TranscodeAttempts.MediaFileId` becomes `NOT NULL`.** Migration runs AFTER the one-shot cleanup. Migration is idempotent (NULL count = 0 precondition asserted).
+
+11. **`TranscodeAttempts` INSERT discipline.** Every INSERT path -- success AND failure, every ProcessingMode (Transcode, Remux, Quick, AudioFix, SubtitleFix, TestVariant) -- sets `MediaFileId` from the resolved Job row AND sets `ProfileName` (resolved transcode profile OR `'Remux'`/`'Quick'`/`'AudioFix'`/`'SubtitleFix'` literal for non-transcode). Loud-fails if either is unresolvable. Subsumes BUG-0029.
+
+12. **One-shot cleanup script** `Scripts/SQLScripts/CleanupOrphanFailedAttempts.py`. Triages the 1455 orphan rows: dedupes by `ErrorMessage + AttemptDate-rounded-to-minute + WorkerName`, best-effort backfills `MediaFileId` via TranscodeQueue.Id correlation where available, archives the rest to `Reports/OrphanFailedAttempts-2026-06-12.csv`, deletes archived rows from `TranscodeAttempts`. Idempotent.
+
+13. **`Tests/Contract/TestFailureAccounting.py` asserts:** (a) `MediaFileId IS NULL` count is 0; (b) `ProfileName IS NULL` count on failure rows is 0; (c) every Pending TranscodeQueue row has `FailureBudgetService.HasBudgetRemaining = True` for its MediaFileId; (d) FailedJobs API returns the expected set for a synthetic over-cap MediaFile.
+
+**Feature/flow doc deliverables:**
+- `Features/FailureAccounting/failure-accounting.feature.md` -- NEW. Outcome, Workflows (W1 Open /FailedJobs, W2 Click filename to see attempts, W3 Click Reset), Success Criteria 1-13 above, Seams.
+- `Features/FailureAccounting/failure-accounting.flow.md` -- NEW. Stages: ST1 Encode failure write -> ST2 FailureBudgetService eval -> ST3 Claim/Recompute/NextBatch consult -> ST4 FailedJobs surface render -> ST5 Operator reset write. Cross-stage seams.
+- `Features/TranscodeQueue/TranscodeQueue.feature.md` C10 (already added, retagged) confirms claim/recompute integration.
+- `Features/TranscodeQueue/next-batch-per-drive.feature.md` C12 (already added, retagged) confirms ShowSettings exclusion.
+- `Features/TranscodeJob/TranscodeJob.feature.md` `[BUG-0061]` bullet (already added, retagged) confirms INSERT-path discipline + cleanup script + NOT NULL.
+
+**Sequencing:** Second cluster (post-Cluster B which establishes compliance trustworthiness for the recompute gate). Estimated 3-5 day directive.
+
+**Evidence preserved:** See SUPERSEDED BUG-0055 + BUG-0060 entries below + existing BUG-0029.
+
+---
+
+### [BUG-0060] [SUPERSEDED BY BUG-0061 2026-06-12] TranscodeAttempts rows with MediaFileId=NULL -- 1455 orphan failure rows back to 2025-10-15
+**Date:** 2026-06-12 | **Area:** transcode-job | **Status:** Folded into BUG-0061 failure-accounting cluster; evidence preserved below.
+
+**What breaks:** `TranscodeAttempts` should be MediaFile-scoped: every failed/successful encode attempt belongs to a specific `MediaFiles.Id`. As of 2026-06-12 the production DB carries 1455 rows with `MediaFileId IS NULL`, all `Success=FALSE`, dating back to 2025-10-15. Without `MediaFileId`:
+- Operator can't join the failure back to the source file for diagnosis.
+- The per-MediaFile failure-cap predicate from BUG-0055 (`COUNT(*) FROM TranscodeAttempts WHERE Success=FALSE AND MediaFileId=<id>`) silently undercounts.
+- Every aggregate that filters `WHERE Success=FALSE` carries this noise floor of stale, unattributable failures.
+
+**Root-cause suspect:** `Features/TranscodeJob/ProcessTranscodeQueueService.HandleJobFailure` at line 1100 builds a fallback `TranscodeAttemptModel` (lines 1113-1133) without explicitly setting `MediaFileId` when the existing `TranscodeAttemptId` is missing. The pre-flight-failure path (source unreachable, profile resolution failure) likely enters this branch with `Job.MediaFileId` populated but the model constructor doesn't propagate it. Needs audit of every INSERT path -- Transcode, Remux, Quick, AudioFix, SubtitleFix, TestVariant -- before `/t` writes the fix.
+
+**Success criteria for the fix:**
+
+1. Every `TranscodeAttempts` INSERT path (success AND failure, every ProcessingMode) sets `MediaFileId` from the resolved Job row, or refuses the INSERT with a logged exception. Loud-fail on the contract violation.
+
+2. Migration: after cleanup of the 1455 existing rows, `TranscodeAttempts.MediaFileId` gains a `NOT NULL` constraint. Idempotent migration script per repo convention.
+
+3. One-shot cleanup script `Scripts/SQLScripts/CleanupOrphanFailedAttempts.py`: triages the 1455 rows -- dedupe by `ErrorMessage + AttemptDate-rounded-to-minute + WorkerName` (most are likely same-batch noise), best-effort backfill `MediaFileId` from `TranscodeQueue.Id <-> TranscodeAttempts.Id` correlation where the queue row was caught before deletion, archive the remainder to `Reports/OrphanFailedAttempts-YYYY-MM-DD.csv` and delete from `TranscodeAttempts`.
+
+4. Verifiable: post-fix `SELECT COUNT(*) FROM TranscodeAttempts WHERE MediaFileId IS NULL` returns 0. `\d TranscodeAttempts` shows `MediaFileId BIGINT NOT NULL`. Insert a forced-failure transcode (e.g. via a missing-source canary) and confirm the resulting row carries the correct MediaFileId.
+
+**Violates:** `Features/TranscodeJob/TranscodeJob.feature.md` `[BUG-0060]` criterion (added with this entry).
+
+**Look first:** `Features/TranscodeJob/ProcessTranscodeQueueService.HandleJobFailure` (line 1100-1164, lines 1113-1133 are the suspect fallback INSERT), `Core/Models/TranscodeAttemptModel.py` (model definition -- does MediaFileId have a sensible default?), every `SaveTranscodeAttempt` callsite (`grep -rn "SaveTranscodeAttempt\(" --include='*.py'`).
+
+**Related:** BUG-0055 (the failure-cap that needs this column to count correctly).
+
+**Fix with:** `/t BUG-0060`
+
+---
+
+### [BUG-0059] [SUPERSEDED BY BUG-0063 2026-06-12] Active Jobs panel hides jobs claimed by Draining workers
+**Date:** 2026-06-12 | **Area:** activity-page | **Status:** Folded into BUG-0063 activity-dashboard cluster; evidence preserved below.
+
+**What breaks:** When an operator flips a worker to `Status='Draining'`, the worker continues running its in-flight job(s) until they complete (per `graceful-drain.feature.md`). But the Active Jobs panel on `/Activity` removes those still-running jobs from view as soon as the worker enters Draining state. The operator loses visibility: ETA, FPS, progress -- all gone. The temptation is to kill the worker thinking it's hung, which orphans the claimed rows in `Running` state.
+
+**Likely cause (defer root-cause to `/t`):** the panel's source query joins `Workers` with an implicit `Workers.Status='Online'` filter, OR the frontend filters rendered rows by worker status. `GET /api/SQLQueries/GetActiveJobs` itself is unfiltered (`Features/SQLQueries/SQLQueriesController.py:121`), so the filter is elsewhere -- possibly in `Features/Activity/ActivityRepository.py` or in `Templates/Activity.html` JS.
+
+**Success criteria for the fix:**
+
+1. Active Jobs list includes every job where `TranscodeAttempts.Success IS NULL` AND a live `ActiveJobs` row exists, regardless of the owning `Workers.Status`. Worker tile state (Online/Draining/Stopped) is DECOUPLED from job visibility.
+
+2. Worker tile and Active Jobs panel are separately driven: a draining worker shows the `Draining` badge on its tile AND its still-running job appears in the Active Jobs list with the worker's name + a (subtle) Draining hint adjacent to the worker column.
+
+3. Verifiable: start a long encode on `larry-worker-1`, flip larry to Draining mid-encode, confirm the Active Jobs row for that encode remains visible with continuing progress until the encode completes naturally; confirm the worker tile badge shows `Draining`.
+
+**Violates:** `Features/Activity/activity-dashboard-improvements.feature.md` criterion 22 (added with this entry).
+
+**Look first:** `Features/Activity/ActivityRepository.py` (search for `Status` joins to Workers), `Templates/Activity.html` (search the JS render path for filter by `IsOnline` or `Status='Online'`), `Features/TeamStatus/TeamStatusController.py` (any per-worker job rollup that the panel might be reading instead of GetActiveJobs).
+
+**Related:** `Features/ServiceControl/graceful-drain.feature.md` (backend drain semantics; this bug is the UI-visibility complement).
+
+**Fix with:** `/t BUG-0059`
+
+---
+
+### [BUG-0058] [SUPERSEDED BY BUG-0063 2026-06-12] ETA on Active Jobs table doesn't count down smoothly
+**Date:** 2026-06-12 | **Area:** activity-page | **Status:** Folded into BUG-0063 activity-dashboard cluster; evidence preserved below.
+
+**What breaks:** The ETA cell on the Active Jobs table on `/Activity` is recomputed from scratch on every render poll (every 5s) using the latest spot `CurrentFPS` value. Because FFmpeg's per-second FPS sample is noisy (keyframe intervals, scene-change pauses), the ETA cell ticks erratically -- jumps from `00:14:23` to `00:08:11` to `00:17:55` purely from FFmpeg's per-second noise, never decrements smoothly. Operator can't tell whether the encode is making real progress or what to expect.
+
+**Success criteria for the fix:**
+
+1. Client maintains a per-job ETA timer that decrements 1 second per second between server polls (smooth countdown).
+
+2. On each poll, the server-computed ETA is compared to the client's running ETA. If `|delta| <= 5s`, the client's timer wins (no recompute -- preserves the smooth countdown). If `|delta| > 5s`, the client resets to the server value (material change, recompute justified).
+
+3. The server-computed ETA uses the smoothed FPS from BUG-0057 (`activity-dashboard-improvements.feature.md` C20), not the raw spot value, so the polled value itself is stable.
+
+4. ETA renders as `--:--:--` when smoothed FPS is unavailable or stale (per BUG-0057 stale-sample rule).
+
+5. Verifiable: open Active Jobs on a long encode, observe ETA decrements 1s per second between 5s polls; force a step-change in encode rate (e.g. toggle worker concurrency), observe ETA snaps to the new estimate on the next poll.
+
+**Violates:** `Features/Activity/activity-dashboard-improvements.feature.md` criterion 21 (added with this entry).
+
+**Depends on:** BUG-0057 (smoothed FPS is a precondition).
+
+**Look first:** `Templates/Activity.html` (Active Jobs render path -- the ETA cell rendering JS), `Features/Activity/ActivityRepository.py` or the endpoint that returns Active Jobs payload (the source of the server-side ETA).
+
+**Fix with:** `/t BUG-0058`
+
+---
+
+### [BUG-0057] [SUPERSEDED BY BUG-0063 2026-06-12] Active Jobs FPS and Speed columns fluctuate wildly / appear frozen at 0
+**Date:** 2026-06-12 | **Area:** activity-page | **Status:** Folded into BUG-0063 activity-dashboard cluster; evidence preserved below.
+
+**What breaks:** `TranscodeProgressModel.CurrentFPS` and `CurrentSpeed` (defined at `Features/TranscodeJob/Models/TranscodeProgressModel.py`) are raw spot values from the most recent FFmpeg progress line and render verbatim in the Active Jobs table. FFmpeg's per-second emit jumps between e.g. 100 / 5 / 95 / 0 / 80 during keyframe intervals and the UI fluctuates wildly. Conversely, if no progress sample has arrived for several seconds, the cells continue showing the stale last value -- looks frozen at e.g. `100 fps` while nothing is actually moving. Operator can't tell "encode is making real progress" from "worker is hung."
+
+**Success criteria for the fix:**
+
+1. Rendered FPS column shows a rolling 10-sample (or 30-second window, whichever is smaller) arithmetic mean of `CurrentFPS` samples for the same `TranscodeAttemptId`, not the raw last value.
+
+2. Rendered Speed column applies the same smoothing (10-sample / 30-second window).
+
+3. When no progress sample has arrived in the last `StaleProgressThresholdSec` (new `SystemSettings` row, default 15s), FPS/Speed cells render as `--` -- distinguishes "actually paused" from "just hasn't ticked yet."
+
+4. Smoothing window resets to the new value when a worker's claim transitions to a new `TranscodeAttemptId`, so a fresh job doesn't inherit the previous job's average.
+
+5. Verifiable: synthetic injection of progress samples `[100, 5, 95, 0, 80, 105, 8, 90, 0, 100]` renders as `58.3` (mean), not the trailing `100`; subsequent 20-second silence renders as `--`, not the stale `100`.
+
+**Violates:** `Features/Activity/activity-dashboard-improvements.feature.md` criterion 20 (added with this entry).
+
+**Look first:** `Features/TranscodeJob/Models/TranscodeProgressModel.py` (the source -- single-sample model, no smoothing primitive), `Features/TranscodeJob/Worker/EncodeExecutor.py` (where progress samples are written), `Templates/Activity.html` (where FPS / Speed cells are rendered), `Features/Activity/ActivityRepository.py` (if any server-side aggregation should happen there instead of the client).
+
+**Related:** BUG-0040 (Second concurrent job shows first job's progress) -- same family of progress-rendering issues; consider whether 0057's smoothing window addresses or compounds 0040.
+
+**Fix with:** `/t BUG-0057`
+
+---
+
+### [BUG-0056] [SUPERSEDED BY BUG-0062 2026-06-12] Compliance engine writes contradictory rows -- IsCompliant=TRUE alongside non-null WorkBucket / OperationsNeededCsv
+**Date:** 2026-06-12 | **Area:** compliance | **Status:** Folded into BUG-0062 compliance-writeback-invariant cluster; evidence preserved below.
+
+**What breaks:** The new compliance engine (shipped 2026-06-09 via `compliance-solid-refactor` directive) materializes per-row recompute results to `MediaFiles` via `ComplianceWriteRepository.BulkWriteRecomputeResults`. The decision contract in `compliance.feature.md` C3 says bucket precedence is mutually exclusive: empty `OperationsNeeded` -> bucket None / `IsCompliant=True`; any operation needed -> bucket assigned / `IsCompliant=False`. The written rows violate this -- 5703 rows currently hold `IsCompliant=TRUE` AND a non-null `WorkBucket` AND a non-empty `OperationsNeededCsv` simultaneously.
+
+**Live-DB evidence (2026-06-12):**
+
+| IsCompliant | rows | also has WorkBucket | also has OperationsNeededCsv |
+|---|---|---|---|
+| False | 24942 | 22268 | 22268 |
+| True | 21162 | **5703** | **5703** |
+| NULL | 4387 | 8 | 8 |
+
+Breakdown of the 5703 contradictory rows:
+
+| WorkBucket | OperationsNeededCsv | rows |
+|---|---|---|
+| Transcode | Transcode | 2305 |
+| Remux | Remux | 2239 |
+| Remux | AudioFix,Remux | 1097 |
+| Transcode | Remux,Transcode | 62 |
+
+**Sample rows (all `ComplianceEvaluatedAt = 2026-06-09 22:06:04`):** Eight `The Sandman` + `The Real Housewives of Rhode Island` `-mv.mp4` files, all `Codec='av1'` `ResolutionCategory='720p'` `AssignedProfile='NVENC AV1 P7 CANARY VBR -720p'` -- written by the post-engine-ship recompute pass as both compliant AND needing transcode.
+
+**Root cause hypotheses (defer to `/t`):**
+1. Tuple-building code that calls `BulkWriteRecomputeResults` computes `IsCompliant` from a source OTHER than `ComplianceDecision.IsCompliant` (the writeback unpacks tuple `(Id, AssignedProfile, PriorityScore, IsCompliant, DeferReason, WorkBucket, OperationsNeededCsv, ComplianceGateBlocked)` at `ComplianceWriteRepository.py:11-38` and SETs the row verbatim).
+2. `ComplianceDecision.IsCompliant` is itself set without consulting `OperationsNeeded`.
+3. `ComplianceBucketResolver.Resolve` or `ComplianceEvaluator.Evaluate` returns a Decision whose fields contradict each other.
+
+**Mitigating factor:** Zero of the 5703 contradictory rows are currently in `TranscodeQueue`. They are not blocking active work. But the operator-facing "compliant" count on `/Activity` is overstated by ~5700 files, the `/api/Compliance/Buckets` widget under-counts bucketed work, and any UI/code that reads `IsCompliant` to gate work makes wrong decisions on these rows.
+
+**Cross-link with BUG-0055:** Some frequently-failing MediaFiles also carry weird compliance flags -- e.g. `Id 13275 Drake & Josh S02E02` shows `IsCompliant=TRUE / WorkBucket=NULL / 9 failed TranscodeAttempts`. Same-symptom family: the engine's contract isn't being honored end-to-end.
+
+**Success criteria for the fix:**
+
+1. Audit the path from `ComplianceEvaluator.Evaluate -> ComplianceDecision -> RecomputeForFiles tuple build -> BulkWriteRecomputeResults` and identify which step lets the IsCompliant/Bucket contradiction through.
+
+2. Fix the root cause (engine, tuple build, or both) so a fresh recompute writes rows that satisfy the C6 SQL invariant: `(IsCompliant=TRUE AND WorkBucket IS NULL AND OperationsNeededCsv IS NULL/'') OR (IsCompliant=FALSE AND WorkBucket IS NOT NULL AND OperationsNeededCsv IS NOT NULL) OR (IsCompliant IS NULL AND ComplianceGateBlocked IS NOT NULL)`.
+
+3. Add `Tests/Contract/TestComplianceWriteConsistency.py` that runs the SQL invariant query against the live DB and asserts zero violating rows. Run on every CI pass.
+
+4. One-shot remediation: run a full library recompute (`POST /api/Compliance/Recompute` with `All=true`) after the fix lands. Verify the contradictory-row count drops to 0. The fix is incomplete if writeback consistency requires the recompute to be re-run.
+
+5. Add a single-row trace assertion in the bulk-write loop: log a WARN with `MediaFileId + Decision fields` whenever a row is about to be written that violates the invariant, before the write happens. Loud-failure principle (R6 / R12 spirit) -- silent contradictions are the original sin.
+
+**Violates:** `Features/Compliance/compliance.feature.md` criterion 6 (added with this entry). Functionally also violates criteria 2 (ComplianceDecision shape: `IsCompliant: Optional[bool]` + `OperationsNeeded: FrozenSet[str]` are coupled by C3 precedence) and 3 (BucketResolver precedence rules).
+
+**Look first:** `Features/Compliance/Services/ComplianceEvaluator.Evaluate` (does the Decision it returns satisfy the precedence?), `Features/Compliance/Services/ComplianceBucketResolver.Resolve` (is it called with the right OperationsNeeded set?), the `RecomputeForFiles` tuple-build site (search `BulkWriteRecomputeResults` callers in `Features/TranscodeQueue/QueueManagementBusinessService.py` line 1852 `RecomputeForFiles` body), `Features/Compliance/Services/ComplianceRecomputeService.Recompute` (the admin recompute path).
+
+**Fix with:** `/t BUG-0056`
+
+---
+
+### [BUG-0055] [SUPERSEDED BY BUG-0061 2026-06-12] TranscodeQueue has no encode-failure cap; failing jobs re-queue indefinitely via compliance recompute
+**Date:** 2026-06-12 | **Area:** transcode-queue | **Status:** Folded into BUG-0061 failure-accounting cluster; evidence preserved below.
+
+**What breaks:** A job that fails to encode (FFmpeg crash, FFprobe failure, FileReplacement failure, source unreachable) writes `TranscodeAttempts(Success=FALSE)` and the queue row is DELETEd. The next `QueueManagementBusinessService.RecomputeForFiles` re-evaluates compliance and INSERTs a fresh queue row -- the file is still non-compliant, the compliance engine doesn't consult prior failure history. Loop: fail -> delete -> recompute -> re-insert -> fail again.
+
+**Asymmetric retry policy:** VMAF-failed encodes are capped at `PostTranscodeGateConfig.MaxRequeueAttempts=3` via `Features/QualityTesting/Disposition/RetryBudgetService.HasBudgetRemaining`, which counts `TranscodeAttempts WHERE Success=TRUE AND VMAF<MinThreshold`. Encode-failed attempts (`Success=FALSE`) have NO analogous cap. The claim path filters only on `Status='Pending'` + capability + NVENC + AllowedProfiles -- no failure-count predicate. `grep -rn "FailureCount\|PriorFailures\|HasFailedAttempts" Features/Compliance/` returns zero matches.
+
+**Live-DB evidence (2026-06-12):**
+
+| MediaFileId | File | Failed attempts | Span |
+|---|---|---|---|
+| 619064 | Mune Guardian of the Moon (2015) Bluray-1080p.mkv | 15 | 2026-05-31 -> 2026-06-08 (8 days) |
+| 7072 | Survivor S36E01-E02 SDTV-720p-mv.mp4 | 13 | 17 hours |
+| 18691, 18695 | Celebrity Family Feud S04E05/E07 WEBDL-480p-mv.mp4 | 10 each | 14 hours |
+| 615238 | The Hunting Party S02E07 WEBDL-480p.mp4 | 10 | 2 days |
+| 614226 | -- | 8 | 21 days, last 2026-06-11 (still failing) |
+
+Plus 1455 orphan failures with `MediaFileId=NULL` going back to 2025-10-15 -- queue rows that never carried a MediaFileId; needs a separate cleanup script.
+
+**Success criteria for the fix:**
+
+1. A configurable per-MediaFile encode-failure cap (sibling to `MaxRequeueAttempts`, default 3) stops re-queueing after N consecutive `TranscodeAttempts.Success=FALSE` rows since the last `Success=TRUE` (or since file creation if no prior success). DB-fresh read per claim or per recompute (db-is-authority).
+
+2. The cap is consulted in BOTH the claim path (`ClaimNextPendingTranscodeJob` skips Pending rows whose MediaFile has exceeded cap -- defense in depth) AND the recompute path (`RecomputeForFiles` does not INSERT a new queue row for a MediaFile that has exceeded cap).
+
+3. Capped MediaFiles are visible to the operator in a troubleshooting surface. Operator sees filename, failure count, last `ErrorMessage`, last `AttemptDate`, `AssignedProfile`, last `WorkerName`. Operator can (a) reset (re-allow next claim), (b) view full attempt log for the file, (c) take no action. Reasonable home: `/Activity` page (new "Failed Jobs" panel) or new `/FailedJobs` page; defer placement decision to `/t`-time.
+
+4. Capped MediaFiles MUST NOT appear in any `/ShowSettings` "Next batch" table -- TV Next Batch, Movies Next Batch, Quick Fix, legacy Remux / AudioFix Next Batch. Verifiable: insert N+1 consecutive failures for MediaFileId X (where N=cap), confirm X is absent from every `/ShowSettings` Next-batch card; reset X and confirm it re-appears.
+
+5. The 1455 orphan failures (`TranscodeAttempts.MediaFileId IS NULL`) get a one-shot cleanup script. Decide at `/t`-time whether to dedupe by `ErrorMessage+AttemptDate` or just archive.
+
+6. Reset semantics: when operator clears a capped MediaFile, the next claim is allowed even though `TranscodeAttempts` history is unchanged. Implementation choice (timestamp on `MediaFiles`, separate `ResetFailureCountAt` column, audit table) is a `/t` decision.
+
+**Violates:** `Features/TranscodeQueue/TranscodeQueue.feature.md` criterion 10 (added with this entry), `Features/TranscodeQueue/next-batch-per-drive.feature.md` criterion 12 (added with this entry).
+
+**Not in scope:** Changing the FFmpeg pipeline. Changing what counts as a failure. Reworking compliance evaluation (BUG-0056 covers that). The VMAF retry budget (already exists and works).
+
+**Look first:** `Features/TranscodeQueue/TranscodeQueueRepository.ClaimNextPendingTranscodeJob` (lines 270-364, claim WHERE clause), `Features/TranscodeJob/ProcessTranscodeQueueService.HandleJobFailure` (line 1100, DELETE at 1144), `Features/TranscodeQueue/QueueManagementBusinessService.RecomputeForFiles` (re-INSERT at lines 609, 696), `Features/QualityTesting/Disposition/RetryBudgetService` (sibling pattern -- mirror its shape for encode failures), `Features/QualityTesting/PostTranscodeGateConfigRepository` (add `MaxEncodeFailures` column alongside `MaxRequeueAttempts`).
+
+**Fix with:** `/t BUG-0055`
+
+---
+
 ### [BUG-0046] Legacy acompressor+dynamic-loudnorm chain damaged 8,249 library files; population is closed but damage is permanent
 **Date:** 2026-06-08 | **Area:** audio-pipeline
 
