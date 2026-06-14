@@ -358,72 +358,62 @@ class FileScanningRepository(BaseRepository):
             LoggingService.LogException("Error getting MKV counts", e, "FileScanningRepository", "GetMkvCountsByRootFolder")
             return {}
 
-    # directive: path-schema-migration | # see path.S8
-    def GetMediaFilesPaginated(self, Page: int, PageSize: int, Search: str = '',
-                               RootFolderPath: str = '', SortBy: str = 'SizeMB',
-                               SortOrder: str = 'DESC') -> Dict[str, Any]:
-        """Paginated media files; root-folder filter uses typed pair; rows post-processed to attach synthesized FilePath."""
-        valid_sort_columns = {
-            'SizeMB': 'SizeMB', 'FileName': 'FileName',
-            'LastScannedDate': 'LastScannedDate', 'Codec': 'Codec',
-            'Resolution': 'Resolution', 'DurationMinutes': 'DurationMinutes'
-        }
-        sort_col = valid_sort_columns.get(SortBy, 'SizeMB')
-        order = 'DESC' if SortOrder.upper() == 'DESC' else 'ASC'
+    MediaFilesSortWhitelist = {
+        'SizeMB': 'SizeMB',
+        'FileName': 'FileName',
+        'LastScannedDate': 'LastScannedDate',
+        'Codec': 'Codec',
+        'Resolution': 'Resolution',
+        'DurationMinutes': 'DurationMinutes',
+    }
 
-        conditions = []
-        params = []
+    # directive: paged-query-core | # see paged-query.C11
+    def BuildMediaFileSearchFilter(self, Search: str):
+        """Translate operator search text into a LikeFilter / NotLikeFilter; ! prefix means exclude."""
+        from Core.Querying import LikeFilter, NotLikeFilter
+        if not Search:
+            return None
+        if Search.startswith('!'):
+            ExcludeTerm = Search[1:]
+            if not ExcludeTerm:
+                return None
+            return NotLikeFilter('FileName', ExcludeTerm, MatchMode='contains')
+        return LikeFilter('FileName', Search, MatchMode='contains')
 
-        # Root folder filter via typed pair.
-        if RootFolderPath:
-            Sid, RelRoot = LookupTypedPair(RootFolderPath)
-            if Sid is None:
-                return {'Rows': [], 'TotalCount': 0, 'TotalPages': 0}
-            RelPrefix = (RelRoot or '').rstrip('/') + '/' if RelRoot else ''
-            conditions.append("StorageRootId = %s")
-            params.append(Sid)
-            if RelPrefix:
-                conditions.append("LOWER(RelativePath) LIKE LOWER(%s) ESCAPE '!'")
-                params.append(f"{EscapeLikePattern(RelPrefix)}%")
+    # directive: paged-query-core | # see paged-query.C11
+    def BuildRootFolderScopeFilter(self, RootFolderPath: str):
+        """Translate a legacy root-folder path into a typed-pair filter; returns False sentinel if path cannot be resolved."""
+        from Core.Querying import EqualsFilter, LikeFilter, AndComposer
+        if not RootFolderPath:
+            return None
+        Sid, RelRoot = LookupTypedPair(RootFolderPath)
+        if Sid is None:
+            return False
+        RelPrefix = (RelRoot or '').rstrip('/') + '/' if RelRoot else ''
+        if RelPrefix:
+            return AndComposer([
+                EqualsFilter('StorageRootId', Sid),
+                LikeFilter('RelativePath', RelPrefix, MatchMode='prefix'),
+            ])
+        return EqualsFilter('StorageRootId', Sid)
 
-        # Search filter (supports negative filter with ! prefix)
-        if Search:
-            if Search.startswith('!'):
-                exclude_term = Search[1:]
-                if exclude_term:
-                    conditions.append("LOWER(FileName) NOT LIKE LOWER(%s)")
-                    params.append(f"%{exclude_term}%")
-            else:
-                conditions.append("LOWER(FileName) LIKE LOWER(%s)")
-                params.append(f"%{Search}%")
-
-        where_clause = ""
-        if conditions:
-            where_clause = "WHERE " + " AND ".join(conditions)
-
-        # Get total count
-        count_query = f"SELECT COUNT(*) as Count FROM MediaFiles {where_clause}"
-        count_rows = self.ExecuteQuery(count_query, tuple(params) if params else None)
-        total_count = count_rows[0]['Count'] if count_rows else 0
-
-        # Get paginated results - only select columns needed for display
-        offset = (Page - 1) * PageSize
-        display_cols = "Id, StorageRootId, RelativePath, FileName, SizeMB, LastScannedDate, Codec, Resolution, DurationMinutes, AssignedProfile"
-        data_query = (
-            f"SELECT {display_cols} "
-            f"FROM MediaFiles {where_clause} "
-            f"ORDER BY {sort_col} {order} NULLS LAST "
-            "LIMIT %s OFFSET %s"
+    # directive: paged-query-core | # see paged-query.C11
+    def GetMediaFilesPaginated(self, Query: "PagedQuery") -> "PagedQueryResult":
+        """Paginated media files via PagedQuery; rows post-processed with synthesized canonical FilePath."""
+        from Core.Querying import PagedQueryBuilder, CountStrategy
+        Builder = PagedQueryBuilder(self.DatabaseService)
+        Result = Builder.Execute(
+            RowsSelect=(
+                "SELECT Id, StorageRootId, RelativePath, FileName, SizeMB, LastScannedDate, "
+                "Codec, Resolution, DurationMinutes, AssignedProfile, "
+                "COUNT(*) OVER () AS __TotalCount "
+                "FROM MediaFiles"
+            ),
+            Query=Query,
+            CountStrategyChoice=CountStrategy.WINDOW,
         )
-        data_params = params + [PageSize, offset]
-        rows = self.ExecuteQuery(data_query, tuple(data_params))
-        SynthesizeFilePathInRows(rows)
-
-        return {
-            'Rows': rows,
-            'TotalCount': total_count,
-            'TotalPages': (total_count + PageSize - 1) // PageSize
-        }
+        SynthesizeFilePathInRows(Result.Rows)
+        return Result
 
     # ─── Media File Methods ────────────────────────────────────────────
 

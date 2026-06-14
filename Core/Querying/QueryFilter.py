@@ -72,6 +72,38 @@ class LikeFilter(IQueryFilter):
 
 
 # directive: paged-query-core | # see paged-query.C3
+class NotLikeFilter(IQueryFilter):
+    # directive: paged-query-core | # see paged-query.C3
+    def __init__(self, Column: str, Pattern: str, AllowedColumns: Iterable[str] = None, MatchMode: str = "contains", CaseInsensitive: bool = True):
+        _AssertSafeColumn(Column)
+        if AllowedColumns is not None and Column not in AllowedColumns:
+            raise InvalidColumnError(f"Filter column '{Column}' is not in the per-query filter whitelist")
+        if MatchMode not in ("contains", "prefix", "suffix", "exact"):
+            raise InvalidColumnError(f"NotLikeFilter MatchMode must be one of contains/prefix/suffix/exact, got: {MatchMode!r}")
+        self.Column = Column
+        self.RawPattern = Pattern or ""
+        self.MatchMode = MatchMode
+        self.CaseInsensitive = CaseInsensitive
+
+    # directive: paged-query-core | # see paged-query.C3
+    def ToClause(self) -> str:
+        if self.CaseInsensitive:
+            return f"LOWER({self.Column}) NOT LIKE LOWER(%s) ESCAPE '!'"
+        return f"{self.Column} NOT LIKE %s ESCAPE '!'"
+
+    # directive: paged-query-core | # see paged-query.C3
+    def Params(self) -> Tuple:
+        Escaped = EscapeLikePattern(self.RawPattern)
+        if self.MatchMode == "contains":
+            return (f"%{Escaped}%",)
+        if self.MatchMode == "prefix":
+            return (f"{Escaped}%",)
+        if self.MatchMode == "suffix":
+            return (f"%{Escaped}",)
+        return (Escaped,)
+
+
+# directive: paged-query-core | # see paged-query.C3
 class RangeFilter(IQueryFilter):
     # directive: paged-query-core | # see paged-query.C3
     def __init__(self, Column: str, Low: Any = None, High: Any = None, AllowedColumns: Iterable[str] = None):

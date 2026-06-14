@@ -5,6 +5,7 @@ from Core.Querying.QuerySort import QuerySort
 from Core.Querying.QueryFilter import (
     EqualsFilter,
     LikeFilter,
+    NotLikeFilter,
     RangeFilter,
     InListFilter,
     AndComposer,
@@ -22,6 +23,7 @@ __all__ = [
     "QuerySort",
     "EqualsFilter",
     "LikeFilter",
+    "NotLikeFilter",
     "RangeFilter",
     "InListFilter",
     "AndComposer",

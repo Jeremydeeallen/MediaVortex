@@ -388,17 +388,23 @@ class FileScanningViewModel:
             })
         return DisplayFiles
 
+    # directive: paged-query-core | # see paged-query.C11
     def GetMediaFilesPaginated(self, Page: int, PageSize: int, Search: str = '', RootFolderPath: str = '', SortBy: str = 'SizeMB', SortOrder: str = 'DESC') -> Dict[str, Any]:
-        """Get media files with SQL-level pagination, filtering, and sorting."""
+        """Build PagedQuery from request args + repo helpers; route through Repository.GetMediaFilesPaginated; format Rows for display."""
         try:
-            # SQL-level pagination, filtering, and sorting
-            result = self.BusinessService.Repository.GetMediaFilesPaginated(
-                Page, PageSize, Search, RootFolderPath, SortBy, SortOrder
-            )
+            from Core.Querying import PagedQuery, QuerySort
+            Repo = self.BusinessService.Repository
+            ScopeFilter = Repo.BuildRootFolderScopeFilter(RootFolderPath)
+            if ScopeFilter is False:
+                return {'MediaFiles': [], 'TotalCount': 0, 'TotalPages': 0}
+            SearchFilter = Repo.BuildMediaFileSearchFilter(Search)
+            Filters = [F for F in (ScopeFilter, SearchFilter) if F is not None]
+            Sort = QuerySort.Create(SortBy, SortOrder, Repo.MediaFilesSortWhitelist, DefaultColumn='SizeMB')
+            Query = PagedQuery(Page=Page, PageSize=PageSize, Sort=Sort, Filters=Filters)
+            result = Repo.GetMediaFilesPaginated(Query)
 
-            # Format rows for display
             DisplayFiles = []
-            for row in result['Rows']:
+            for row in result.Rows:
                 FilePath = row['FilePath'] or ''
                 Directory = ntpath.dirname(FilePath) if FilePath else ''
                 SizeMB = row['SizeMB']
@@ -420,8 +426,8 @@ class FileScanningViewModel:
 
             return {
                 'MediaFiles': DisplayFiles,
-                'TotalCount': result['TotalCount'],
-                'TotalPages': result['TotalPages']
+                'TotalCount': result.TotalCount,
+                'TotalPages': result.TotalPages()
             }
 
         except Exception as e:
