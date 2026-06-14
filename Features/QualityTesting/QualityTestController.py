@@ -130,30 +130,26 @@ class QualityTestController:
             self.LoggingService.LogError(f"Error retrying quality test: {str(e)}")
             return {"Success": False, "Message": str(e)}
 
+    # directive: paged-query-core | # see paged-query.C11
     def GetQualityTestHistory(self, Page: int = 1, Limit: int = 10) -> dict:
-        """Get recent quality test results from QualityTestResults table with pagination"""
+        """Get recent quality test results via PagedQuery; single window-count query covers rows + count."""
         try:
-            # Calculate offset for pagination
-            Offset = (Page - 1) * Limit
-
-            # Get results with pagination
-            Results = self.DatabaseManager.GetQualityTestResults(Limit, Offset)
-
-            # Get total count for pagination info
-            TotalCount = self.DatabaseManager.GetQualityTestResultsCount()
-
-            # Calculate pagination info
-            TotalPages = (TotalCount + Limit - 1) // Limit  # Ceiling division
+            from Core.Querying import PagedQuery, QuerySort
+            from Features.QualityTesting.QualityTestRepository import QualityTestRepository
+            Sort = QuerySort("DateTested", "DESC", QualityTestRepository.QualityTestResultsSortWhitelist)
+            Query = PagedQuery(Page=Page, PageSize=Limit, Sort=Sort)
+            Result = self.DatabaseManager.GetQualityTestResults(Query)
+            TotalPages = Result.TotalPages()
             HasNextPage = Page < TotalPages
             HasPreviousPage = Page > 1
 
             return {
                 "Success": True,
-                "QualityTestingResults": Results,
+                "QualityTestingResults": Result.Rows,
                 "Pagination": {
-                    "CurrentPage": Page,
-                    "PageSize": Limit,
-                    "TotalCount": TotalCount,
+                    "CurrentPage": Result.Page,
+                    "PageSize": Result.PageSize,
+                    "TotalCount": Result.TotalCount,
                     "TotalPages": TotalPages,
                     "HasNextPage": HasNextPage,
                     "HasPreviousPage": HasPreviousPage

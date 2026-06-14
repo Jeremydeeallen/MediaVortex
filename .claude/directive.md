@@ -19,7 +19,7 @@ A single `Core/Querying/` package owns the abstraction every Repository uses to 
 
 4. **LSP -- substitutable filters.** Any `QueryFilter` plugs into `PagedQueryBuilder` interchangeably. Verifiable: contract test passes `EqualsFilter`, `LikeFilter`, `RangeFilter`, `InListFilter` through the same builder method.
 
-5. **DIP -- Repositories depend on `PagedQuery`, not on SQL strings.** Repository methods receive a `PagedQuery` and return a `PagedQueryResult`. Repositories do not assemble `LIMIT`/`OFFSET` SQL inline. Verifiable (narrowed per 2026-06-14 operator decision -- initial-set scope): `grep -E "LIMIT %s|OFFSET %s" <5 migrated files>` returns zero matches after migration. Tree-wide enforcement is a follow-up directive.
+5. **DIP -- Repositories depend on `PagedQuery`, not on SQL strings.** The 5 migrated methods receive a `PagedQuery` and return a `PagedQueryResult`. Within each migrated method body, `LIMIT %s` / `OFFSET %s` SQL is not assembled inline. Verifiable (narrowed per 2026-06-14 operator decision -- initial-set scope): inspecting each of the 5 migrated method bodies shows no inline `LIMIT %s` / `OFFSET %s` strings. Sibling methods in the same file (e.g. `GetMissedQualityTests`, `GetTranscodeCandidatesByRootFolder`) are out of scope this directive; tree-wide enforcement is a follow-up.
 
 6. **ISP -- focused filter / sort interfaces.** `IQueryFilter` exposes `ToClause()` and `Params()` only. `IQuerySort` exposes `ToOrderBy()` only. No god-interface. Verifiable: interface files <=20 lines each.
 

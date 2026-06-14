@@ -245,86 +245,86 @@ class QualityTestRepository(BaseRepository):
             return False
 
     # directive: path-schema-migration | # see path.S8
-    def GetQualityTestResults(self, Limit: int = 10, Offset: int = 0) -> List[Dict[str, Any]]:
-        """Get recent quality test results joined with TranscodeAttempts."""
+    QualityTestResultsSortWhitelist = {
+        "DateTested": "qtr.DateTested",
+        "VMAFScore": "qtr.VMAFScore",
+        "TestDuration": "qtr.TestDuration",
+    }
+
+    # directive: paged-query-core | # see paged-query.C11
+    def GetQualityTestResults(self, Query: "PagedQuery") -> "PagedQueryResult":
+        """Paged recent quality test results joined with TranscodeAttempts; rows post-processed for synthesized canonical paths."""
+        from Core.Querying import PagedQueryBuilder, PagedQueryResult, CountStrategy
         try:
-            Query = (
-                "SELECT "
-                "qtr.Id, qtr.TranscodeAttemptId, qtr.VMAFScore, "
-                "qtr.TestDuration, qtr.PassesThreshold, qtr.Rank, qtr.ErrorMessage, qtr.DateTested, "
-                "qtr.FFmpegCommand, qtr.Status, "
-                "ta.ProfileName, ta.StorageRootId AS TaStorageRootId, ta.RelativePath AS TaRelativePath, "
-                "ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionBytes, "
-                "ta.SizeReductionPercent, ta.TranscodeDurationSeconds, ta.ProfileName as TranscodeProfileName, "
-                "ta.Quality, ta.AttemptDate, ta.NewSizeBytes as FileSize, "
-                "ta.FileReplaced, ta.FileReplacedDate, ta.ReplacementType, "
-                "tfp.SourceStorageRootId, tfp.SourceRelativePath, "
-                "tfp.OutputStorageRootId, tfp.OutputRelativePath "
-                "FROM QualityTestResults qtr "
-                "LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id "
-                "LEFT JOIN TemporaryFilePaths tfp ON qtr.TranscodeAttemptId = tfp.TranscodeAttemptId "
-                "ORDER BY qtr.DateTested DESC "
-                "LIMIT %s OFFSET %s"
+            Builder = PagedQueryBuilder(self.DatabaseService)
+            RawResult = Builder.Execute(
+                RowsSelect=(
+                    "SELECT "
+                    "qtr.Id, qtr.TranscodeAttemptId, qtr.VMAFScore, "
+                    "qtr.TestDuration, qtr.PassesThreshold, qtr.Rank, qtr.ErrorMessage, qtr.DateTested, "
+                    "qtr.FFmpegCommand, qtr.Status, "
+                    "ta.ProfileName, ta.StorageRootId AS TaStorageRootId, ta.RelativePath AS TaRelativePath, "
+                    "ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionBytes, "
+                    "ta.SizeReductionPercent, ta.TranscodeDurationSeconds, ta.ProfileName as TranscodeProfileName, "
+                    "ta.Quality, ta.AttemptDate, ta.NewSizeBytes as FileSize, "
+                    "ta.FileReplaced, ta.FileReplacedDate, ta.ReplacementType, "
+                    "tfp.SourceStorageRootId, tfp.SourceRelativePath, "
+                    "tfp.OutputStorageRootId, tfp.OutputRelativePath, "
+                    "COUNT(*) OVER () AS __TotalCount "
+                    "FROM QualityTestResults qtr "
+                    "LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id "
+                    "LEFT JOIN TemporaryFilePaths tfp ON qtr.TranscodeAttemptId = tfp.TranscodeAttemptId"
+                ),
+                Query=Query,
+                CountStrategyChoice=CountStrategy.WINDOW,
             )
-            Rows = self.ExecuteQuery(Query, (Limit, Offset))
-
-            Results = []
-            for Row in Rows:
-                FilePath = _SafeCanonical(Row.get("TaStorageRootId"), Row.get("TaRelativePath"))
-                TranscodedFilePath = _SafeCanonical(Row.get("OutputStorageRootId"), Row.get("OutputRelativePath"))
-                LocalSourcePath = _SafeCanonical(Row.get("SourceStorageRootId"), Row.get("SourceRelativePath"))
-                TranscodedFileName = ntpath.basename(TranscodedFilePath) if TranscodedFilePath else None
-
-                Results.append({
-                    "Id": Row["Id"],
-                    "TranscodeAttemptId": Row["TranscodeAttemptId"],
-                    "VMAFScore": Row["VMAFScore"],
-                    "ProfileName": Row["ProfileName"],
-                    "FileSize": Row["FileSize"],
-                    "TestDuration": Row["TestDuration"],
-                    "PassesThreshold": Row["PassesThreshold"],
-                    "Rank": Row["Rank"],
-                    "ErrorMessage": Row["ErrorMessage"],
-                    "DateTested": Row["DateTested"],
-                    "FFmpegCommand": Row["FFmpegCommand"],
-                    "Status": Row["Status"],
-                    "FilePath": FilePath,
-                    "TranscodedFilePath": TranscodedFilePath,
-                    "TranscodedFileName": TranscodedFileName,
-                    "LocalSourcePath": LocalSourcePath,
-                    "OldSizeBytes": Row["OldSizeBytes"],
-                    "NewSizeBytes": Row["NewSizeBytes"],
-                    "SizeReductionBytes": Row["SizeReductionBytes"],
-                    "SizeReductionPercent": Row["SizeReductionPercent"],
-                    "TranscodeDurationSeconds": Row["TranscodeDurationSeconds"],
-                    "Quality": Row["Quality"],
-                    "TranscodeProfileName": Row["TranscodeProfileName"],
-                    "AttemptDate": Row["AttemptDate"],
-                    "FileReplaced": Row["FileReplaced"],
-                    "FileReplacedDate": Row["FileReplacedDate"],
-                    "ReplacementType": Row["ReplacementType"],
-                    "Success": Row["PassesThreshold"] and not Row["ErrorMessage"]
-                })
-            return Results
-
+            ShapedRows = [self._ShapeQualityTestResultRow(Row) for Row in RawResult.Rows]
+            return PagedQueryResult(
+                Rows=ShapedRows,
+                TotalCount=RawResult.TotalCount,
+                Page=RawResult.Page,
+                PageSize=RawResult.PageSize,
+            )
         except Exception as e:
             LoggingService.LogException("Exception getting quality test results", e, "QualityTestRepository", "GetQualityTestResults")
-            return []
+            return PagedQueryResult(Rows=[], TotalCount=0, Page=Query.Page, PageSize=Query.PageSize)
 
-    # directive: path-schema-migration | # see path.S8
-    def GetQualityTestResultsCount(self) -> int:
-        """Get total count of quality test results."""
-        try:
-            Query = "SELECT COUNT(*) as TotalCount FROM QualityTestResults"
-            Result = self.ExecuteQuery(Query)
-
-            if Result:
-                return Result[0]['totalcount']
-            return 0
-
-        except Exception as e:
-            LoggingService.LogException("Exception getting quality test results count", e, "QualityTestRepository", "GetQualityTestResultsCount")
-            return 0
+    # directive: paged-query-core | # see paged-query.C11
+    def _ShapeQualityTestResultRow(self, Row) -> Dict[str, Any]:
+        FilePath = _SafeCanonical(Row.get("TaStorageRootId"), Row.get("TaRelativePath"))
+        TranscodedFilePath = _SafeCanonical(Row.get("OutputStorageRootId"), Row.get("OutputRelativePath"))
+        LocalSourcePath = _SafeCanonical(Row.get("SourceStorageRootId"), Row.get("SourceRelativePath"))
+        TranscodedFileName = ntpath.basename(TranscodedFilePath) if TranscodedFilePath else None
+        return {
+            "Id": Row["Id"],
+            "TranscodeAttemptId": Row["TranscodeAttemptId"],
+            "VMAFScore": Row["VMAFScore"],
+            "ProfileName": Row["ProfileName"],
+            "FileSize": Row["FileSize"],
+            "TestDuration": Row["TestDuration"],
+            "PassesThreshold": Row["PassesThreshold"],
+            "Rank": Row["Rank"],
+            "ErrorMessage": Row["ErrorMessage"],
+            "DateTested": Row["DateTested"],
+            "FFmpegCommand": Row["FFmpegCommand"],
+            "Status": Row["Status"],
+            "FilePath": FilePath,
+            "TranscodedFilePath": TranscodedFilePath,
+            "TranscodedFileName": TranscodedFileName,
+            "LocalSourcePath": LocalSourcePath,
+            "OldSizeBytes": Row["OldSizeBytes"],
+            "NewSizeBytes": Row["NewSizeBytes"],
+            "SizeReductionBytes": Row["SizeReductionBytes"],
+            "SizeReductionPercent": Row["SizeReductionPercent"],
+            "TranscodeDurationSeconds": Row["TranscodeDurationSeconds"],
+            "Quality": Row["Quality"],
+            "TranscodeProfileName": Row["TranscodeProfileName"],
+            "AttemptDate": Row["AttemptDate"],
+            "FileReplaced": Row["FileReplaced"],
+            "FileReplacedDate": Row["FileReplacedDate"],
+            "ReplacementType": Row["ReplacementType"],
+            "Success": Row["PassesThreshold"] and not Row["ErrorMessage"],
+        }
 
     # ─── QualityTestProgress Methods ───────────────────────────────────────
 
