@@ -32,8 +32,17 @@ class TranscodeQueueViewModel:
             # Use database-level pagination
             from Repositories.DatabaseManager import DatabaseManager
             from Core.Database.DatabaseService import DatabaseService
+            from Core.Querying import PagedQuery, QuerySort, EqualsFilter
+            from Features.TranscodeQueue.TranscodeQueueRepository import TranscodeQueueRepository
             db = DatabaseManager()
-            pageItems, totalItems = db.GetTranscodeQueueItemsPaginated(Page, PageSize, SortBy, SortOrder, Mode)
+            Sort = QuerySort.Create(SortBy, SortOrder, TranscodeQueueRepository.QueueItemsSortWhitelist, DefaultColumn='Priority')
+            Filters = []
+            if Mode in TranscodeQueueRepository.QueueItemsModeWhitelist:
+                Filters.append(EqualsFilter('ProcessingMode', Mode))
+            QueryObj = PagedQuery(Page=Page, PageSize=PageSize, Sort=Sort, Filters=Filters)
+            Result = db.GetTranscodeQueueItemsPaginated(QueryObj)
+            pageItems = Result.Rows
+            totalItems = Result.TotalCount
             self.QueueItems = pageItems
 
             # Per-mode counts -- one cheap GROUP BY, drives the tab badges

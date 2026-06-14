@@ -431,36 +431,44 @@ class TranscodeQueueRepository(BaseRepository):
             LoggingService.LogException("Exception in ClaimNextPendingRemuxJob", e, "TranscodeQueueRepository", "ClaimNextPendingRemuxJob")
             return None
 
-    # directive: path-schema-migration | # see path.S8
-    def GetTranscodeQueueItemsPaginated(self, Page: int = 1, PageSize: int = 25, SortBy: str = "Priority", SortOrder: str = "DESC", Mode: str = None):
-        """Get paginated transcoding queue items with SQL-level sorting + optional ProcessingMode filter."""
-        sort_columns = {
-            'SizeMB': 'SizeMB',
-            'Priority': '(CASE WHEN Priority >= 195 THEN Priority ELSE 0 END), SizeMB',
-            'DateAdded': 'DateAdded',
-            'FileName': 'FileName'
-        }
-        sort_col = sort_columns.get(SortBy, '(CASE WHEN Priority >= 195 THEN Priority ELSE 0 END), SizeMB')
-        order = 'DESC' if SortOrder == 'DESC' else 'ASC'
+    QueueItemsSortWhitelist = {
+        'SizeMB': 'SizeMB',
+        'Priority': '(CASE WHEN Priority >= 195 THEN Priority ELSE 0 END), SizeMB',
+        'DateAdded': 'DateAdded',
+        'FileName': 'FileName',
+    }
+    QueueItemsModeWhitelist = {'Transcode', 'Quick', 'Remux', 'AudioFix'}
 
-        ModeFilter = Mode if Mode in ('Transcode', 'Quick', 'Remux', 'AudioFix') else None
-        WhereClause = "WHERE ProcessingMode = %s" if ModeFilter else ""
-        FilterParams = (ModeFilter,) if ModeFilter else ()
+    # directive: paged-query-core | # see paged-query.C11
+    def GetTranscodeQueueItemsPaginated(self, Query: "PagedQuery"):
+        """Paginated transcode queue items via PagedQuery; preserves the `(SortExpr) <order> NULLS LAST, DateAdded ASC` tiebreaker contract from queue-priority.feature.md C1 for the operator list view."""
+        from Core.Querying import PagedQueryBuilder, CountStrategy
+        from Core.Querying.Exceptions import InvalidColumnError
+        Sort = Query.Sort
+        if Sort is None:
+            raise InvalidColumnError("GetTranscodeQueueItemsPaginated requires a QuerySort in PagedQuery")
+        if Sort.Column not in self.QueueItemsSortWhitelist:
+            raise InvalidColumnError(f"Sort column '{Sort.Column}' not in QueueItemsSortWhitelist")
+        OrderBy = f"ORDER BY {Sort.SqlExpr} {Sort.Direction} NULLS LAST, DateAdded ASC"
 
-        count_query = f"SELECT COUNT(*) as Count FROM TranscodeQueue {WhereClause}"
-        count_rows = self.ExecuteQuery(count_query, FilterParams if ModeFilter else ())
-        total_items = count_rows[0]['Count'] if count_rows else 0
-
-        offset = (Page - 1) * PageSize
-        query = (
-            f"SELECT {self._QUEUE_SELECT_COLS} "
-            "FROM TranscodeQueue "
-            f"{WhereClause} "
-            f"ORDER BY {sort_col} {order} NULLS LAST, DateAdded ASC "
-            "LIMIT %s OFFSET %s"
+        DroppedSortQuery = type(Query)(Page=Query.Page, PageSize=Query.PageSize, Sort=None, Filters=Query.Filters)
+        Builder = PagedQueryBuilder(self.DatabaseService)
+        Result = Builder.Execute(
+            RowsSelect=(
+                f"SELECT {self._QUEUE_SELECT_COLS}, COUNT(*) OVER () AS __TotalCount FROM TranscodeQueue"
+            ),
+            Query=DroppedSortQuery,
+            OrderByOverride=OrderBy,
+            CountStrategyChoice=CountStrategy.WINDOW,
         )
-        rows = self.ExecuteQuery(query, FilterParams + (PageSize, offset))
-        return [self._MapRowToQueueItem(row) for row in rows], total_items
+        Items = [self._MapRowToQueueItem(Row) for Row in Result.Rows]
+        from Core.Querying import PagedQueryResult
+        return PagedQueryResult(
+            Rows=Items,
+            TotalCount=Result.TotalCount,
+            Page=Result.Page,
+            PageSize=Result.PageSize,
+        )
 
     # directive: path-schema-migration | # see path.S8
     def ClearAllTranscodeQueueItems(self) -> int:
