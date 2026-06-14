@@ -2249,7 +2249,9 @@ class QueueManagementBusinessService:
         """Kill the FFmpeg process and clean up database records for a running job."""
         try:
             # 1. Kill FFmpeg process via ActiveJobs PID
-            activeJobs = self.Repository.GetActiveJobsByService("TranscodeService")
+            from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
+            _ajrepo = _AJR(self.Repository.DatabaseService)
+            activeJobs = _ajrepo.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("TranscodeService"))
             for activeJob in activeJobs:
                 if activeJob.get('QueueId') == JobId:
                     processId = activeJob.get('ProcessId')

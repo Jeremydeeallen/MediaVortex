@@ -21,7 +21,8 @@ try:
         db = DatabaseManager()
         
         # Get active quality test jobs
-        activeJobs = db.GetActiveJobsByService("QualityTest")
+        from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
+        activeJobs = db.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTest"))
         print(f"Found {len(activeJobs)} active quality test jobs:")
         
         for job in activeJobs:

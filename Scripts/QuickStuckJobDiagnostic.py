@@ -43,7 +43,8 @@ try:
         print("\n2. Running Jobs from Database:")
         transcodeJobs = databaseManager.GetTranscodeQueueItemsByStatus("Running")
         qualityTestQueue = databaseManager.GetQualityTestQueue()
-        activeQualityJobs = databaseManager.GetActiveJobsByService("QualityTest")
+        from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
+        activeQualityJobs = databaseManager.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTest"))
         
         print(f"   Transcode Jobs: {len(transcodeJobs)}")
         for job in transcodeJobs:

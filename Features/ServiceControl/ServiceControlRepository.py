@@ -302,24 +302,6 @@ class ServiceControlRepository(BaseRepository):
             LoggingService.LogException("Exception getting active job by queue ID", e, "ServiceControlRepository", "GetActiveJobByQueueId")
             return None
 
-    def GetActiveJobsByService(self, ServiceName: str) -> List[Dict[str, Any]]:
-        """Get all active jobs for a specific service."""
-        try:
-            query = """
-                SELECT Id, ServiceName, JobType, QueueId, ProcessId, ThreadId,
-                       StartedAt, Status, CreatedAt, UpdatedAt
-                FROM ActiveJobs
-                WHERE ServiceName = %s AND Status = 'Running'
-                ORDER BY StartedAt ASC
-            """
-
-            rows = self.ExecuteQuery(query, (ServiceName,))
-            return list(rows)
-
-        except Exception as e:
-            LoggingService.LogException("Exception getting active jobs by service", e, "ServiceControlRepository", "GetActiveJobsByService")
-            return []
-
     def GetAllActiveJobs(self) -> List[Dict[str, Any]]:
         """Get all active jobs across all services."""
         try:

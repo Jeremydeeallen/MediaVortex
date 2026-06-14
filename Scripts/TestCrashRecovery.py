@@ -92,10 +92,11 @@ def TestDatabaseManagerMethods():
         database_manager = DatabaseManager()
         
         # Test 1: Get active jobs by service
-        active_jobs = database_manager.GetActiveJobsByService("TranscodeService")
+        from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
+        active_jobs = database_manager.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("TranscodeService"))
         print(f"✓ Active TranscodeService jobs: {len(active_jobs)}")
-        
-        active_jobs = database_manager.GetActiveJobsByService("QualityTestingService")
+
+        active_jobs = database_manager.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTestingService"))
         print(f"✓ Active QualityTestingService jobs: {len(active_jobs)}")
         
         # Test 2: Get all active jobs

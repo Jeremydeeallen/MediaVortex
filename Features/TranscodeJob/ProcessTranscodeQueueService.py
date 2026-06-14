@@ -1695,8 +1695,9 @@ class ProcessTranscodeQueueService:
 
             # 1. Kill FFmpeg process via ActiveJobs PID
             from Services.ProcessManagementService import ProcessManagementService
+            from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
             process_mgmt = ProcessManagementService()
-            active_jobs = self.ActiveJobRepository.GetActiveJobsByService("TranscodeService")
+            active_jobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("TranscodeService"))
             for active_job in active_jobs:
                 if active_job.get('QueueId') == job_id:
                     pid = active_job.get('ProcessId')

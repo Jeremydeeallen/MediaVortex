@@ -197,34 +197,45 @@ class ActiveJobRepository:
             LoggingService.LogException("Exception getting active job details", e, "DatabaseManager", "GetActiveJobDetails")
             return None
 
-    def GetActiveJobsByService(self, ServiceName: str, WorkerName: str = None, RunningOnly: bool = True) -> List[Dict[str, Any]]:
-        """Get active jobs for a service, optionally filtered by worker.
-        RunningOnly=True (default) returns only Status='Running'. Set False for crash recovery."""
+    ActiveJobsSortWhitelist = {
+        "StartedAt": "StartedAt",
+        "ServiceName": "ServiceName",
+        "WorkerName": "WorkerName",
+    }
+
+    @staticmethod
+    # directive: paged-query-core | # see paged-query.C11
+    def BuildActiveJobsQuery(ServiceName: str, WorkerName: str = None, RunningOnly: bool = True, Page: int = 1, PageSize: int = 10000):
+        """Compose a PagedQuery from the legacy (ServiceName + WorkerName + RunningOnly) args; default sort StartedAt ASC."""
+        from Core.Querying import PagedQuery, QuerySort, EqualsFilter
+        Filters = [EqualsFilter("ServiceName", ServiceName)]
+        if RunningOnly:
+            Filters.append(EqualsFilter("Status", "Running"))
+        if WorkerName:
+            Filters.append(EqualsFilter("WorkerName", WorkerName))
+        Sort = QuerySort("StartedAt", "ASC", ActiveJobRepository.ActiveJobsSortWhitelist, NullsLast=False)
+        return PagedQuery(Page=Page, PageSize=PageSize, Sort=Sort, Filters=Filters)
+
+    # directive: paged-query-core | # see paged-query.C11
+    def GetActiveJobsByService(self, Query: "PagedQuery") -> "PagedQueryResult":
+        """Paged active jobs via PagedQuery; window-count strategy; ActiveJobs columns preserved verbatim (Id, ServiceName, JobType, QueueId, ProcessId, FFmpegPid, ThreadId, StartedAt, Status, CreatedAt, UpdatedAt, WorkerName)."""
+        from Core.Querying import PagedQueryBuilder, PagedQueryResult, PagedQueryConfig, CountStrategy
         try:
-            conditions = ["ServiceName = %s"]
-            params = [ServiceName]
-
-            if RunningOnly:
-                conditions.append("Status = 'Running'")
-
-            if WorkerName:
-                conditions.append("WorkerName = %s")
-                params.append(WorkerName)
-
-            query = """
-                SELECT Id, ServiceName, JobType, QueueId, ProcessId, FFmpegPid, ThreadId,
-                       StartedAt, Status, CreatedAt, UpdatedAt, WorkerName
-                FROM ActiveJobs
-                WHERE {}
-                ORDER BY StartedAt ASC
-            """.format(" AND ".join(conditions))
-
-            rows = self.DatabaseService.ExecuteQuery(query, params)
-            return list(rows)
-
+            UnboundedConfig = PagedQueryConfig(DefaultPageSize=10000, MaxPageSize=10000)
+            Builder = PagedQueryBuilder(self.DatabaseService, UnboundedConfig)
+            return Builder.Execute(
+                RowsSelect=(
+                    "SELECT Id, ServiceName, JobType, QueueId, ProcessId, FFmpegPid, ThreadId, "
+                    "StartedAt, Status, CreatedAt, UpdatedAt, WorkerName, "
+                    "COUNT(*) OVER () AS __TotalCount "
+                    "FROM ActiveJobs"
+                ),
+                Query=Query,
+                CountStrategyChoice=CountStrategy.WINDOW,
+            )
         except Exception as e:
-            LoggingService.LogException("Exception getting active jobs by service", e, "DatabaseManager", "GetActiveJobsByService")
-            return []
+            LoggingService.LogException("Exception getting active jobs by service", e, "ActiveJobRepository", "GetActiveJobsByService")
+            return PagedQueryResult(Rows=[], TotalCount=0, Page=Query.Page, PageSize=Query.PageSize)
 
     def GetAllActiveJobProcessIds(self) -> List[int]:
         """Get all ProcessIds from active jobs for orphaned process detection."""

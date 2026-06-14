@@ -17,6 +17,14 @@ class PagedQueryResult:
         return (self.TotalCount + self.PageSize - 1) // self.PageSize
 
     # directive: paged-query-core | # see paged-query.C1
+    def __iter__(self):
+        return iter(self.Rows)
+
+    # directive: paged-query-core | # see paged-query.C1
+    def __len__(self):
+        return len(self.Rows)
+
+    # directive: paged-query-core | # see paged-query.C1
     def ToDict(self) -> dict:
         return {
             "Rows": self.Rows,

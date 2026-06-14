@@ -34,7 +34,9 @@ class CrashRecoveryService:
             LoggingService.LogInfo(f"Starting crash recovery for service: {ServiceName}, worker: {self.WorkerName or 'all'}", "CrashRecoveryService", "RecoverServiceJobs")
 
             # Get active jobs scoped to this worker (all statuses for recovery)
-            active_jobs = self.ActiveJobRepository.GetActiveJobsByService(ServiceName, WorkerName=self.WorkerName, RunningOnly=False)
+            from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
+            Query = ActiveJobRepository.BuildActiveJobsQuery(ServiceName, WorkerName=self.WorkerName, RunningOnly=False)
+            active_jobs = list(self.ActiveJobRepository.GetActiveJobsByService(Query))
 
             if not active_jobs:
                 LoggingService.LogInfo(f"No active jobs found for service {ServiceName}", "CrashRecoveryService", "RecoverServiceJobs")
@@ -556,9 +558,9 @@ class CrashRecoveryService:
     def GetRecoveryStatistics(self, ServiceName: str) -> Dict:
         """Get statistics about recent recovery operations."""
         try:
-            # This could be enhanced to query the Logs table for recovery statistics
-            # For now, return basic info
-            active_jobs = self.ActiveJobRepository.GetActiveJobsByService(ServiceName)
+            from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
+            Query = ActiveJobRepository.BuildActiveJobsQuery(ServiceName)
+            active_jobs = self.ActiveJobRepository.GetActiveJobsByService(Query)
 
             return {
                 "ServiceName": ServiceName,

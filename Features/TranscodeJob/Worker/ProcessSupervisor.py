@@ -56,10 +56,10 @@ class ProcessSupervisor:
                                    "ProcessSupervisor", "CancelActive")
 
             from Services.ProcessManagementService import ProcessManagementService
-            from Repositories.ActiveJobRepository import ActiveJobRepository
+            from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
             ProcessMgmt = ProcessManagementService()
             ActiveJobRepo = ActiveJobRepository()
-            ActiveJobsFromRepo = ActiveJobRepo.GetActiveJobsByService("TranscodeService")
+            ActiveJobsFromRepo = ActiveJobRepo.GetActiveJobsByService(ActiveJobRepository.BuildActiveJobsQuery("TranscodeService"))
             for ActiveJob in ActiveJobsFromRepo:
                 if ActiveJob.get('QueueId') == JobId:
                     Pid = ActiveJob.get('ProcessId')

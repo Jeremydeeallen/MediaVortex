@@ -160,7 +160,8 @@ class StuckJobDetectionService:
             import socket
 
             # Get active job record for this transcode job
-            activeJobs = self.ActiveJobRepository.GetActiveJobsByService("TranscodeService")
+            from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
+            activeJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("TranscodeService"))
 
             # Find the active job for this queue item
             relevantActiveJob = None
@@ -380,7 +381,8 @@ class StuckJobDetectionService:
             try:
                 import socket as _socket
                 LocalHostname = _socket.gethostname()
-                activeJobs = self.ActiveJobRepository.GetActiveJobsByService("TranscodeService")
+                from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
+                activeJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("TranscodeService"))
                 for activeJob in activeJobs:
                     if activeJob.get('QueueId') != QueueId:
                         continue
@@ -652,7 +654,8 @@ class StuckJobDetectionService:
             # Get all running quality test jobs
             # For quality test jobs, we need to get them differently since there's no status filter method
             qualityTestQueue = self.DatabaseManager.GetQualityTestQueue()
-            activeQualityJobs = self.ActiveJobRepository.GetActiveJobsByService("QualityTest")
+            from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
+            activeQualityJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTest"))
 
             # Filter quality test jobs that are actually running (have active jobs)
             runningJobs = []
@@ -747,8 +750,8 @@ class StuckJobDetectionService:
     def IsQualityTestJobStuck(self, Job) -> tuple[bool, str]:
         """Check if a specific quality test job is stuck by verifying if the FFmpeg process is still alive."""
         try:
-            # Get active job record for this quality test job
-            activeJobs = self.ActiveJobRepository.GetActiveJobsByService("QualityTest")
+            from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
+            activeJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTest"))
 
             # Find the active job for this queue item
             relevantActiveJob = None
@@ -1174,7 +1177,8 @@ class StuckJobDetectionService:
             runningTranscodeJobs = self.DatabaseManager.GetTranscodeQueueItemsByStatus("Running")
             # For quality test jobs, we need to get them differently since there's no status filter method
             qualityTestQueue = self.DatabaseManager.GetQualityTestQueue()
-            activeQualityJobs = self.ActiveJobRepository.GetActiveJobsByService("QualityTest")
+            from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
+            activeQualityJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTest"))
 
             # Filter quality test jobs that are actually running (have active jobs)
             runningQualityJobs = []

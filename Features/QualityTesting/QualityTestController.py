@@ -83,8 +83,9 @@ class QualityTestController:
     def GetQualityTestServiceStatus(self) -> dict:
         """Get overall quality test service status"""
         try:
-            # Check if there are any active quality test jobs
-            ActiveJobs = self.ActiveJobRepository.GetActiveJobsByService("QualityTest")
+            from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
+            Query = ActiveJobRepository.BuildActiveJobsQuery("QualityTest")
+            ActiveJobs = self.ActiveJobRepository.GetActiveJobsByService(Query)
             IsRunning = len(ActiveJobs) > 0
 
             return {"Success": True, "IsRunning": IsRunning, "ActiveJobs": len(ActiveJobs)}
