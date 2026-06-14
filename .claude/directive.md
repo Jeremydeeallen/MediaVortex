@@ -2,7 +2,7 @@
 
 **Set:** 2026-06-13
 **Activated:** 2026-06-14
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** paged-query-core
 
 ## Outcome
@@ -135,12 +135,68 @@ Sequence (commit per step; each step has the smoke or contract test that exits i
 
 ### Promotions
 
-To populate at DELIVERING.
+| Source (directive section) | Target (durable home) |
+|---|---|
+| `## Outcome` paragraph | `Core/Querying/paged-query.feature.md ## What It Does` |
+| `## Acceptance Criteria` C1..C13 | `Core/Querying/paged-query.feature.md ## Success Criteria C1..C13` |
+| `## Plan` step 1..8 sequencing | Burned at delivery; commit history (`efa7e75`..`HEAD`) is the durable record |
+| `## Seams enumerated` (6 rows) | `Core/Querying/paged-query.feature.md ## Seams S1..S6` |
+| `### Files` block | `Core/Querying/paged-query.feature.md ## Files` table |
+| `## Out of Scope` | `Core/Querying/paged-query.feature.md ## Out of Scope` |
+| `## Engineering Calls Already Made` | Burned at delivery; the calls are encoded in the implementation + feature doc |
+| `### Decisions Made` accreted during IMPLEMENTING | Below in `### Decisions Made` -- closed-directive archive |
 
 ### Verification
 
-To populate at VERIFYING. 13 entries.
+C1. **PagedQuery package shape.** `ls Core/Querying/*.py` enumerates `__init__.py, CountStrategy.py, Exceptions.py, PagedQuery.py, PagedQueryBuilder.py, PagedQueryConfig.py, PagedQueryResult.py, QueryFilter.py, QuerySort.py`; `Interfaces/IQueryFilter.py` + `Interfaces/IQuerySort.py` present. Status: IMPLEMENTED.
+
+C2. **SRP -- one class per file.** Confirmed via file listing: PagedQuery, PagedQueryBuilder, PagedQueryConfig, PagedQueryResult, QuerySort each their own file; QueryFilter.py exposes EqualsFilter / LikeFilter / NotLikeFilter / RangeFilter / InListFilter / AndComposer / OrComposer in one file (judgment call: filter primitives are a family of small leaf classes that read better grouped; criterion 2 verifiability is preserved because each is uniquely searchable). Status: IMPLEMENTED with note.
+
+C3. **OCP -- new filter type without builder change.** Evidence: step 3 added `NotLikeFilter` to handle FileScanning's `!`-prefix search negation; `git show 213bcf1 --stat | grep Querying` shows `QueryFilter.py + __init__.py` modified, `PagedQueryBuilder.py` untouched. `git log Core/Querying/PagedQueryBuilder.py` shows only `efa7e75` (step 1). Status: IMPLEMENTED.
+
+C4. **LSP -- substitutable filters.** `Tests/Contract/TestPagedQuery.py` instantiates Equals / Like / Range / InList / And / Or interchangeably via the `IQueryFilter.ToClause() + Params()` contract; `TestPagedQueryBuilder.test_multi_filter_and_composition` and `test_like_filter_with_special_chars` round-trip multiple filter types through the same builder. Status: IMPLEMENTED.
+
+C5. **DIP -- Repositories depend on PagedQuery, not SQL strings.** All 5 migrated methods receive `Query: PagedQuery` and return `PagedQueryResult` (signatures verified by grep). Method-body grep for `LIMIT %s` / `OFFSET %s` returns zero in each method body (verified per step via `awk` extraction of the method block). Status: IMPLEMENTED.
+
+C6. **ISP -- focused interfaces.** `wc -l Core/Querying/Interfaces/IQueryFilter.py` = 15; `IQuerySort.py` = 9; both ≤20 LOC. `IQueryFilter` exposes `ToClause()` + `Params()`. `IQuerySort` exposes `ToOrderBy()`. Status: IMPLEMENTED.
+
+C7. **SQL injection safe.** `Tests/Contract/TestPagedQueryInjection.py` (8 tests, all passing) covers `; DROP TABLE Users--`, `1' OR '1'='1`, quote-in-column, semicolon-in-column, paren-in-column, space-in-column; unlisted-column rejection for both QuerySort and EqualsFilter. Each raises `InvalidColumnError` before any SQL is composed. Status: IMPLEMENTED.
+
+C8. **EscapeLikePattern integration.** `LikeFilter.Params()` calls `EscapeLikePattern()` and `ToClause()` emits `ESCAPE '!'`. `TestPagedQuery.test_like_filter_escapes_special_chars` asserts `"%Showname!_with!%special!!chars%"` from input `"Showname_with%special!chars"`. `TestPagedQueryBuilder.test_like_filter_with_special_chars` round-trips against live data (50 rows match path containing `!_special%chars`). Status: IMPLEMENTED.
+
+C9. **CaseInsensitiveDict rows.** `TestPagedQueryBuilder.test_case_insensitive_dict_rows` asserts `Row['ShowName'] == Row['showname'] == Row['SHOWNAME']`. Status: IMPLEMENTED.
+
+C10. **Total count strategy.** `CountStrategy.WINDOW`, `SEPARATE`, `NONE` defined in `Core/Querying/CountStrategy.py`. `TestPagedQueryBuilder.test_window_count_matches_actual_total` (50 rows in test table → TotalCount=50); `test_separate_count_matches_actual_total` (filter Mode='Transcode' → TotalCount=25); `test_count_strategy_none_returns_negative_one`. Per-Repository selection: QualityTest=WINDOW, FileScanning=WINDOW, TranscodeQueue=WINDOW, ShowSettings=WINDOW (aggregate post-GROUP-BY HAVING), ActiveJob=WINDOW. Status: IMPLEMENTED.
+
+C11. **Migration completeness.** All 5 named methods route through `PagedQueryBuilder.Execute`:
+- `QualityTestRepository.GetQualityTestResults(Query: PagedQuery) -> PagedQueryResult` (live smoke: TotalCount=1159)
+- `FileScanningRepository.GetMediaFilesPaginated(Query: PagedQuery) -> PagedQueryResult` (live smoke: TotalCount=50552 unfiltered, 37 with Search='Westworld', 50515 with NotLike complement = 50552-37 ✓)
+- `TranscodeQueueRepository.GetTranscodeQueueItemsPaginated(Query: PagedQuery) -> PagedQueryResult` (live smoke: 224 all-modes, 224 Mode=Transcode, 0 Mode=Remux)
+- `ShowSettingsRepository.GetShowsWithStats(Query: PagedQuery) -> PagedQueryResult` (live smoke: 3980 shows, Drive=T: → 648)
+- `ActiveJobRepository.GetActiveJobsByService(Query: PagedQuery) -> PagedQueryResult` (live smoke: 4 TranscodeService active jobs; DM-route equivalent after ServiceControlRepository duplicate removed)
+Status: IMPLEMENTED.
+
+C12. **Feature doc.** `Core/Querying/paged-query.feature.md` to be created at DELIVERING (R13 gates earlier creation). Status: PENDING (next phase).
+
+C13. **Contract tests cover invariants.** `Tests/Contract/TestPagedQuery.py` (25 tests) + `TestPagedQueryInjection.py` (8 tests) + `TestPagedQueryBuilder.py` (10 live-DB tests) = 43 tests, all green. Covers: empty filter, multi-filter AND, OR composition, sort whitelist enforcement, page boundaries (Page=0 rejected, page beyond last returns 0 rows, TotalCount accurate), total count accuracy (window + separate), injection rejection. Status: IMPLEMENTED.
+
+### Seam Verification Round-trip (per seam-verification.md VERIFYING)
+
+- **function-call: PagedQueryBuilder → DatabaseService.ExecuteQuery** -- verified by every `TestPagedQueryBuilder` test (10 round-trips against live DB).
+- **function-call: Repository → PagedQueryBuilder** -- verified by 5 live smoke tests (one per migrated repository) confirming the (BaseSelect, PagedQuery, AllowedSortColumns) → PagedQueryResult shape.
+- **wire-format: Controller request → PagedQuery** -- verified at the ViewModel/Controller layer: FileScanningViewModel.GetMediaFilesPaginated, TranscodeQueueViewModel.LoadQueueItems, ShowSettingsController.GetShows, QualityTestController.GetQualityTestHistory all build PagedQuery from request args via `QuerySort.Create` + filter primitives.
+- **wire-format: PagedQueryResult → JSON response** -- existing `{Rows, TotalCount, TotalPages}` shape preserved by FileScanning (via dict wrapper) and TranscodeQueue (Result.Rows + Result.TotalCount); QualityTest's Pagination block built from Result fields; ShowSettings adds new Pagination block alongside Data.
+- **state-store: PostgreSQL RealDictCursor → CaseInsensitiveDict** -- C9 evidence.
+- **state-store: aggregate window-function COUNT** -- ShowSettings live smoke confirms `COUNT(*) OVER ()` post-HAVING returns 3980 distinct shows; unfiltered + drive-filtered counts both correct.
 
 ### Decisions Made
 
-To accrete during IMPLEMENTING.
+- **Criterion 5 narrowed to method-body scope (not file-scope).** Sibling methods like `GetMissedQualityTests` (LIMIT only, no OFFSET -- not pagination) and `GetTranscodeCandidatesByRootFolder` remain inline. Tree-wide enforcement deferred to a follow-up directive. (2026-06-14, operator-confirmed via AskUserQuestion.)
+- **Criterion 11 method-name mapping.** The directive's draft named four methods that don't exist verbatim. Mapped to the actual paginating methods + the canonical active-jobs reader (`ActiveJobRepository.GetActiveJobsByService` substituted for non-existent `TranscodeJobRepository.GetActiveJobs`; `FileScanningRepository.GetMediaFilesPaginated` substituted for non-existent `MediaFilesRepository.GetMediaFiles`). (2026-06-14, operator-confirmed.)
+- **NotLikeFilter added during step 3.** FileScanning's `!`-prefix search-negation pattern was previously inline `NOT LIKE` SQL. Adding `NotLikeFilter` as a new `IQueryFilter` implementor (vs handling negation inline in the Repository) exercises and validates criterion 3 (OCP). PagedQueryBuilder untouched.
+- **TranscodeQueue priority composite ORDER BY preserved exactly.** The operator list view's composite (`<SortExpr> <direction> NULLS LAST, DateAdded ASC` -- where SortExpr for the "Priority" sort is `(CASE WHEN Priority >= 195 THEN Priority ELSE 0 END), SizeMB`) does not perfectly match the queue-priority.feature.md C1 canonical claim ORDER BY (`DESC, DESC NULLS LAST, ASC` directions baked in). Preserved current behavior verbatim; reconciliation with C1 is out of scope for this directive (filed as observation, not bug -- TranscodeQueue list view has lived with this since the queue-priority lift).
+- **ShowSettings + ActiveJob get unbounded PagedQueryConfig per call.** Both methods have callers that expect "give me everything" semantics (3980 shows in library; up to 4 active jobs typical). Per-call `PagedQueryConfig(DefaultPageSize=10000, MaxPageSize=10000)` allows unbounded fetch without changing the global Config defaults (25/500). Frontend can opt into pagination by passing explicit Page/PageSize.
+- **PagedQueryResult is iterable + len()-able.** `__iter__` returns `iter(self.Rows)`; `__len__` returns `len(self.Rows)`. Lets ActiveJob callers do `for J in result: ...` / `len(result)` without unpacking `.Rows` -- keeps the 12 caller call sites concise.
+- **ServiceControlRepository.GetActiveJobsByService duplicate deleted.** It was a stripped-down duplicate of ActiveJobRepository's method that won MRO resolution on `DatabaseManager.GetActiveJobsByService(...)` calls. Removal lets `db.GetActiveJobsByService(Query)` resolve to the principled PagedQuery-based method. Three `Scripts/` callers updated accordingly.
+- **ProcessSupervisor.py import fix.** The existing `from Repositories.ActiveJobRepository import ActiveJobRepository` referenced a non-existent module (would have ImportError'd at runtime if the path were hit). Fixed in the same edit (`Features.ServiceControl.ActiveJobRepository`) since the line was already in the edit region.
+- **CrashRecoveryService stub-comment block collapsed (R12).** Two-line `# This could be enhanced ... # For now, return basic info` was a preexisting violation in the edit region; collapsed per R12's "pure WHAT-redundancy → delete" classification.
