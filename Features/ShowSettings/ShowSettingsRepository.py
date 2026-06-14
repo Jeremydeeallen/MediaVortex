@@ -188,49 +188,65 @@ class ShowSettingsRepository(BaseRepository):
             return None
 
     # directive: path-schema-migration | # see path.S8
-    def GetShowsWithStats(self, RootDrive: str = None) -> List[Dict[str, Any]]:
-        """Get all unique shows from MediaFiles via typed-pair grouping; synthesizes ShowFolder display string."""
-        try:
-            DriveFilter = ""
-            Params = ()
-            if RootDrive:
-                StorageRootId = self._ResolveRootDriveToStorageRootId(RootDrive)
-                if StorageRootId is not None:
-                    DriveFilter = "WHERE mf.StorageRootId = %s"
-                    Params = (StorageRootId,)
+    ShowsWithStatsSortWhitelist = {
+        "TotalGB": "SUM(mf.SizeMB)",
+        "FileCount": "COUNT(*)",
+        "ShowName": "split_part(mf.RelativePath, '/', 1)",
+    }
 
-            query = (
-                "SELECT "
-                "    mf.StorageRootId as StorageRootId, "
-                "    split_part(mf.RelativePath, '/', 1) as RelativePath, "
-                "    split_part(mf.RelativePath, '/', 1) as ShowName, "
-                "    COUNT(*) as FileCount, "
-                "    ROUND(SUM(mf.SizeMB)::numeric / 1024, 1) as TotalGB, "
-                "    MODE() WITHIN GROUP (ORDER BY mf.ResolutionCategory) as CommonResolution, "
-                "    MODE() WITHIN GROUP (ORDER BY mf.Codec) as CommonCodec, "
-                "    ss.TargetResolution as TargetResolution, "
-                "    ss.AssignedProfile as AssignedProfile, "
-                "    SUM(CASE WHEN mf.TranscodedByMediaVortex = true THEN 1 ELSE 0 END) as TranscodedCount "
-                "FROM MediaFiles mf "
-                "LEFT JOIN ShowSettings ss "
-                "    ON ss.StorageRootId = mf.StorageRootId "
-                "   AND ss.RelativePath = split_part(mf.RelativePath, '/', 1) "
-                f"{DriveFilter} "
-                "GROUP BY mf.StorageRootId, split_part(mf.RelativePath, '/', 1), ss.TargetResolution, ss.AssignedProfile "
-                "HAVING COUNT(*) > 0 "
-                "ORDER BY SUM(mf.SizeMB) DESC"
+    # directive: paged-query-core | # see paged-query.C11
+    def BuildShowsRootDriveFilter(self, RootDrive: str):
+        """Translate a drive prefix (T:\\, M:\\, Z:\\) into a typed-pair EqualsFilter on mf.StorageRootId; returns False if drive unresolvable."""
+        from Core.Querying import EqualsFilter
+        if not RootDrive:
+            return None
+        StorageRootId = self._ResolveRootDriveToStorageRootId(RootDrive)
+        if StorageRootId is None:
+            return False
+        return EqualsFilter("mf.StorageRootId", StorageRootId)
+
+    # directive: paged-query-core | # see paged-query.C11
+    def GetShowsWithStats(self, Query: "PagedQuery") -> "PagedQueryResult":
+        """Paginated grouped show stats via PagedQuery; aggregate query (GROUP BY + HAVING + window-count) preserves per-show roll-up; rows synthesized for canonical ShowFolder."""
+        from Core.Querying import (
+            PagedQueryBuilder, PagedQueryResult, PagedQueryConfig, CountStrategy,
+        )
+        try:
+            UnboundedConfig = PagedQueryConfig(DefaultPageSize=10000, MaxPageSize=10000)
+            Builder = PagedQueryBuilder(self.DatabaseService, UnboundedConfig)
+            Result = Builder.Execute(
+                RowsSelect=(
+                    "SELECT "
+                    "    mf.StorageRootId as StorageRootId, "
+                    "    split_part(mf.RelativePath, '/', 1) as RelativePath, "
+                    "    split_part(mf.RelativePath, '/', 1) as ShowName, "
+                    "    COUNT(*) as FileCount, "
+                    "    ROUND(SUM(mf.SizeMB)::numeric / 1024, 1) as TotalGB, "
+                    "    MODE() WITHIN GROUP (ORDER BY mf.ResolutionCategory) as CommonResolution, "
+                    "    MODE() WITHIN GROUP (ORDER BY mf.Codec) as CommonCodec, "
+                    "    ss.TargetResolution as TargetResolution, "
+                    "    ss.AssignedProfile as AssignedProfile, "
+                    "    SUM(CASE WHEN mf.TranscodedByMediaVortex = true THEN 1 ELSE 0 END) as TranscodedCount, "
+                    "    COUNT(*) OVER () AS __TotalCount "
+                    "FROM MediaFiles mf "
+                    "LEFT JOIN ShowSettings ss "
+                    "    ON ss.StorageRootId = mf.StorageRootId "
+                    "   AND ss.RelativePath = split_part(mf.RelativePath, '/', 1)"
+                ),
+                Query=Query,
+                GroupBy="GROUP BY mf.StorageRootId, split_part(mf.RelativePath, '/', 1), ss.TargetResolution, ss.AssignedProfile",
+                Having="HAVING COUNT(*) > 0",
+                CountStrategyChoice=CountStrategy.WINDOW,
             )
-            Rows = self.ExecuteQuery(query, Params)
-            for R in Rows:
-                Sid = R.get("storagerootid") if "storagerootid" in R else R.get("StorageRootId")
-                Rel = R.get("relativepath") if "relativepath" in R else R.get("RelativePath")
+            for R in Result.Rows:
+                Sid = R.get("StorageRootId")
+                Rel = R.get("RelativePath")
                 Display = _SafeCanonical(Sid, Rel)
                 R["ShowFolder"] = Display
-                R["showfolder"] = Display
-            return Rows
+            return Result
         except Exception as Ex:
             LoggingService.LogException("Exception getting shows with stats", Ex, "ShowSettingsRepository", "GetShowsWithStats")
-            return []
+            return PagedQueryResult(Rows=[], TotalCount=0, Page=Query.Page, PageSize=Query.PageSize)
 
     # directive: path-schema-migration | # see path.S8
     def _ResolveRootDriveToStorageRootId(self, RootDrive: str) -> Optional[int]:

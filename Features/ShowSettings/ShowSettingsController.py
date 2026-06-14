@@ -10,12 +10,34 @@ Repository = ShowSettingsRepository()
 
 
 @ShowSettingsBlueprint.route('/Shows', methods=['GET'])
+# directive: paged-query-core | # see paged-query.C11
 def GetShows():
-    """Get all shows with stats and current settings."""
+    """Get shows with stats + current settings; route through PagedQuery (unbounded by default for current frontend; Page/PageSize override available)."""
     try:
+        from Core.Querying import PagedQuery, QuerySort
         Drive = request.args.get('Drive', None)
-        Shows = Repository.GetShowsWithStats(Drive)
-        return jsonify({'Success': True, 'Data': Shows})
+        Page = int(request.args.get('Page', 1))
+        PageSize = int(request.args.get('PageSize', 10000))
+        SortBy = request.args.get('SortBy', 'TotalGB')
+        SortOrder = request.args.get('SortOrder', 'DESC')
+
+        DriveFilter = Repository.BuildShowsRootDriveFilter(Drive)
+        if DriveFilter is False:
+            return jsonify({'Success': True, 'Data': [], 'Pagination': {'TotalCount': 0, 'Page': Page, 'PageSize': PageSize, 'TotalPages': 0}})
+        Filters = [DriveFilter] if DriveFilter is not None else []
+        Sort = QuerySort.Create(SortBy, SortOrder, Repository.ShowsWithStatsSortWhitelist, DefaultColumn='TotalGB')
+        Query = PagedQuery(Page=Page, PageSize=PageSize, Sort=Sort, Filters=Filters)
+        Result = Repository.GetShowsWithStats(Query)
+        return jsonify({
+            'Success': True,
+            'Data': Result.Rows,
+            'Pagination': {
+                'TotalCount': Result.TotalCount,
+                'Page': Result.Page,
+                'PageSize': Result.PageSize,
+                'TotalPages': Result.TotalPages(),
+            },
+        })
     except Exception as Ex:
         LoggingService.LogException("Exception getting shows", Ex, "ShowSettingsController", "GetShows")
         return jsonify({'Success': False, 'Message': str(Ex)}), 500
