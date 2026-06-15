@@ -231,12 +231,7 @@ class StuckJobDetectionService:
                 return False, "No worker record (legacy job)"
 
             LastHeartbeat = WorkerConfig.get('LastHeartbeat') or WorkerConfig.get('lastheartbeat')
-            WorkerStatus = WorkerConfig.get('Status') or WorkerConfig.get('status')
-
-            # If worker explicitly marked Paused, it won't pick up new jobs
-            if WorkerStatus and WorkerStatus.lower() == 'paused':
-                return True, "Worker status is Paused"
-
+            # directive: pause-not-stale -- Paused means "stop claiming new", NOT "this worker is dead." Liveness = heartbeat only; see pause-not-stale.C1.
             if not LastHeartbeat:
                 return False, "No heartbeat recorded yet"
 
