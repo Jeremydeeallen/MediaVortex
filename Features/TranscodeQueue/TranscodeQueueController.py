@@ -12,19 +12,35 @@ TranscodeQueueBlueprint = Blueprint('TranscodeQueue', __name__, url_prefix='/api
 
 
 @TranscodeQueueBlueprint.route('/GetQueue', methods=['GET'])
+# directive: table-renderer-service | # see shared-table-renderer.S9
 def GetQueue():
-    """Get current transcoding queue status with pagination and sorting."""
+    """Get current transcoding queue with pagination and sorting; accepts BOTH PascalCase (page/pageSize/sortBy/sortOrder) and TableRenderer (page zero-based/pageSize/sort=Key:Dir) param conventions."""
     try:
         LoggingService.LogFunctionEntry("GetQueue", "TranscodeQueueController")
 
-        # Get query parameters
-        page = int(request.args.get('page', 1))
-        pageSize = int(request.args.get('pageSize', 25))
-        sortBy = request.args.get('sortBy', 'Priority')
-        sortOrder = request.args.get('sortOrder', 'DESC')
-        mode = request.args.get('mode', '').strip() or None
+        ZeroBasedPageRaw = request.args.get('page')
+        if ZeroBasedPageRaw is not None:
+            try:
+                page = max(1, int(ZeroBasedPageRaw) + 1)
+            except (TypeError, ValueError):
+                page = 1
+        else:
+            page = int(request.args.get('Page', 1))
 
-        # Validate parameters
+        try:
+            pageSize = int(request.args.get('pageSize') or request.args.get('PageSize') or 25)
+        except (TypeError, ValueError):
+            pageSize = 25
+
+        SortRaw = request.args.get('sort')
+        if SortRaw and ':' in SortRaw:
+            sortBy, _, sortOrder = SortRaw.partition(':')
+        else:
+            sortBy = request.args.get('sortBy', 'Priority')
+            sortOrder = request.args.get('sortOrder', 'DESC')
+
+        mode = (request.args.get('filter.Mode') or request.args.get('mode') or '').strip() or None
+
         if page < 1:
             page = 1
         if pageSize < 1 or pageSize > 100:
@@ -36,14 +52,14 @@ def GetQueue():
         if mode is not None and mode not in ('Transcode', 'Quick', 'Remux', 'AudioFix'):
             mode = None  # ignore unknown values
 
-        # Create ViewModel instance
         viewModel = TranscodeQueueViewModel()
 
-        # Load queue items with pagination + optional ProcessingMode filter
         result = viewModel.LoadQueueItems(page, pageSize, sortBy, sortOrder, mode)
 
         if result.get("Success", False):
-            # Reduced logging verbosity for routine queue retrieval
+            # Mirror TableRenderer-expected keys (Rows/TotalCount) alongside legacy (QueueItems/TotalItems).
+            result['Rows'] = result.get('QueueItems', [])
+            result['TotalCount'] = result.get('TotalItems', 0)
             return jsonify(result)
         else:
             LoggingService.LogError(f"Failed to get queue: {result.get('ErrorMessage', 'Unknown error')}", "TranscodeQueueController", "GetQueue")
