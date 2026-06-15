@@ -2,7 +2,7 @@ from Core.Querying.Exceptions import InvalidColumnError, InvalidPageError
 from Core.Querying.PagedQueryConfig import PagedQueryConfig
 from Core.Querying.CountStrategy import CountStrategy
 from Core.Querying.QuerySort import QuerySort
-from Core.Querying.QueryFilter import (
+from Core.Querying.Filters import (
     EqualsFilter,
     LikeFilter,
     NotLikeFilter,

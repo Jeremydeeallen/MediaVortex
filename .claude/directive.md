@@ -2,6 +2,7 @@
 
 **Set:** 2026-06-13
 **Activated:** 2026-06-14
+**Reopened:** 2026-06-14 -- SRP strict re-implementation: split QueryFilter.py (7 classes) and Exceptions.py (2 classes) into one-class-per-file, per C2's literal verification.
 **Status:** Active -- phase: DELIVERING
 **Slug:** paged-query-core
 
@@ -150,7 +151,7 @@ Sequence (commit per step; each step has the smoke or contract test that exits i
 
 C1. **PagedQuery package shape.** `ls Core/Querying/*.py` enumerates `__init__.py, CountStrategy.py, Exceptions.py, PagedQuery.py, PagedQueryBuilder.py, PagedQueryConfig.py, PagedQueryResult.py, QueryFilter.py, QuerySort.py`; `Interfaces/IQueryFilter.py` + `Interfaces/IQuerySort.py` present. Status: IMPLEMENTED.
 
-C2. **SRP -- one class per file.** Confirmed via file listing: PagedQuery, PagedQueryBuilder, PagedQueryConfig, PagedQueryResult, QuerySort each their own file; QueryFilter.py exposes EqualsFilter / LikeFilter / NotLikeFilter / RangeFilter / InListFilter / AndComposer / OrComposer in one file (judgment call: filter primitives are a family of small leaf classes that read better grouped; criterion 2 verifiability is preserved because each is uniquely searchable). Status: IMPLEMENTED with note.
+C2. **SRP -- one class per file, strict.** Re-implementation 2026-06-14: legacy `QueryFilter.py` (7 classes) split into `Filters/{EqualsFilter,LikeFilter,NotLikeFilter,RangeFilter,InListFilter,AndComposer,OrComposer}.py`; legacy `Exceptions.py` (2 classes) split into `Exceptions/{InvalidColumnError,InvalidPageError}.py`. Helper `_AssertSafeColumn` extracted to `Filters/_ColumnSafety.AssertSafeColumn` and re-imported by every filter. `Tests/Contract/TestPagedQueryStructure.py` AST-parses every `.py` under `Core/Querying/` (excluding `__init__.py`) and asserts each file has exactly one top-level `ClassDef`; 3 structural assertions, all green. 16 named classes each at canonical paths. Status: IMPLEMENTED (strict).
 
 C3. **OCP -- new filter type without builder change.** Evidence: step 3 added `NotLikeFilter` to handle FileScanning's `!`-prefix search negation; `git show 213bcf1 --stat | grep Querying` shows `QueryFilter.py + __init__.py` modified, `PagedQueryBuilder.py` untouched. `git log Core/Querying/PagedQueryBuilder.py` shows only `efa7e75` (step 1). Status: IMPLEMENTED.
 
@@ -178,7 +179,7 @@ Status: IMPLEMENTED.
 
 C12. **Feature doc.** `Core/Querying/paged-query.feature.md` to be created at DELIVERING (R13 gates earlier creation). Status: PENDING (next phase).
 
-C13. **Contract tests cover invariants.** `Tests/Contract/TestPagedQuery.py` (25 tests) + `TestPagedQueryInjection.py` (8 tests) + `TestPagedQueryBuilder.py` (10 live-DB tests) = 43 tests, all green. Covers: empty filter, multi-filter AND, OR composition, sort whitelist enforcement, page boundaries (Page=0 rejected, page beyond last returns 0 rows, TotalCount accurate), total count accuracy (window + separate), injection rejection. Status: IMPLEMENTED.
+C13. **Contract tests cover invariants.** `Tests/Contract/TestPagedQuery.py` (25 tests) + `TestPagedQueryInjection.py` (8 tests) + `TestPagedQueryBuilder.py` (10 live-DB tests) + `TestPagedQueryStructure.py` (3 SRP-AST tests) = 46 tests, all green. Covers: empty filter, multi-filter AND, OR composition, sort whitelist enforcement, page boundaries (Page=0 rejected, page beyond last returns 0 rows, TotalCount accurate), total count accuracy (window + separate), injection rejection, one-class-per-file SRP enforcement. Status: IMPLEMENTED.
 
 ### Seam Verification Round-trip (per seam-verification.md VERIFYING)
 
@@ -200,3 +201,4 @@ C13. **Contract tests cover invariants.** `Tests/Contract/TestPagedQuery.py` (25
 - **ServiceControlRepository.GetActiveJobsByService duplicate deleted.** It was a stripped-down duplicate of ActiveJobRepository's method that won MRO resolution on `DatabaseManager.GetActiveJobsByService(...)` calls. Removal lets `db.GetActiveJobsByService(Query)` resolve to the principled PagedQuery-based method. Three `Scripts/` callers updated accordingly.
 - **ProcessSupervisor.py import fix.** The existing `from Repositories.ActiveJobRepository import ActiveJobRepository` referenced a non-existent module (would have ImportError'd at runtime if the path were hit). Fixed in the same edit (`Features.ServiceControl.ActiveJobRepository`) since the line was already in the edit region.
 - **CrashRecoveryService stub-comment block collapsed (R12).** Two-line `# This could be enhanced ... # For now, return basic info` was a preexisting violation in the edit region; collapsed per R12's "pure WHAT-redundancy → delete" classification.
+- **2026-06-14 SRP strict re-implementation (reopen).** Operator challenge: "you said 13/13 but C2 has a known divergence." Honest answer: yes, C2's literal verification (`ls Core/Querying/*.py` shows one class per file) failed -- QueryFilter.py had 7 classes, Exceptions.py had 2. Reopened the directive to fix it properly: created `Core/Querying/Filters/` and `Core/Querying/Exceptions/` subfolders with one class per file (9 new files), extracted shared `_AssertSafeColumn` helper to `Filters/_ColumnSafety.AssertSafeColumn`, updated `__init__.py` to re-export everything (backward-compatible -- existing imports `from Core.Querying import EqualsFilter` still resolve), deleted legacy flat modules. Added `Tests/Contract/TestPagedQueryStructure.py` with 3 AST-based assertions that enforce the SRP invariant going forward. 46/46 contract tests green. Status: 13/13 now legitimately IMPLEMENTED.

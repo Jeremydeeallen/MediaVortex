@@ -24,7 +24,7 @@ Backend serves the data contract `table-renderer-service` (sequence position 5 i
 
 C1. **Package shape.** `Core/Querying/` exists with `PagedQuery` (value object: Page, PageSize, Sort, Filters), `QueryFilter` family + composers, `QuerySort` (whitelist + direction validation), `PagedQueryResult` (Rows + TotalCount + Page + PageSize + TotalPages + iterable), `PagedQueryBuilder` (composes base SELECT + WHERE + GROUP BY + HAVING + ORDER BY + LIMIT/OFFSET against `DatabaseService`), `PagedQueryConfig` (PageSize clamp defaults), `CountStrategy` enum (WINDOW / SEPARATE / NONE), `Exceptions` (InvalidColumnError, InvalidPageError).
 
-C2. **SRP -- one responsibility per class.** PagedQuery, PagedQueryBuilder, PagedQueryConfig, PagedQueryResult, QuerySort each in their own file. QueryFilter primitives (Equals / Like / NotLike / Range / InList / AndComposer / OrComposer) co-locate as a leaf-class family in `QueryFilter.py` -- each remains uniquely searchable.
+C2. **SRP -- one class per file, strict.** Every class in `Core/Querying/` lives in its own file. Verifiable: `Tests/Contract/TestPagedQueryStructure.py` parses every `.py` under `Core/Querying/` (excluding `__init__.py`) via AST and asserts each file has exactly one top-level `ClassDef`. The 16 named classes (PagedQuery, PagedQueryBuilder, PagedQueryConfig, PagedQueryResult, QuerySort, EqualsFilter, LikeFilter, NotLikeFilter, RangeFilter, InListFilter, AndComposer, OrComposer, InvalidColumnError, InvalidPageError, IQueryFilter, IQuerySort) each have a dedicated file at their canonical path.
 
 C3. **OCP -- new filter type without builder change.** Adding a new `IQueryFilter` implementor (e.g. `NotLikeFilter`) creates one new class. `PagedQueryBuilder.py` is not edited.
 
@@ -69,14 +69,26 @@ C13. **Contract tests cover invariants.** `Tests/Contract/TestPagedQuery.py` + `
 | `Core/Querying/PagedQueryConfig.py` | Default + max page-size clamp |
 | `Core/Querying/PagedQueryResult.py` | Rows + TotalCount + Page + PageSize; iterable + len()-able |
 | `Core/Querying/QuerySort.py` | Whitelist-validated sort column + direction + NULLS LAST |
-| `Core/Querying/QueryFilter.py` | EqualsFilter, LikeFilter, NotLikeFilter, RangeFilter, InListFilter, AndComposer, OrComposer |
 | `Core/Querying/CountStrategy.py` | WINDOW / SEPARATE / NONE enum |
-| `Core/Querying/Exceptions.py` | InvalidColumnError, InvalidPageError |
-| `Core/Querying/Interfaces/IQueryFilter.py` | ToClause() + Params() ABC |
-| `Core/Querying/Interfaces/IQuerySort.py` | ToOrderBy() ABC |
+| `Core/Querying/Filters/__init__.py` | Filter package exports |
+| `Core/Querying/Filters/_ColumnSafety.py` | `AssertSafeColumn` -- identifier-charset + whitelist guard shared by every filter |
+| `Core/Querying/Filters/EqualsFilter.py` | `Column = %s` / `Column IS NULL` |
+| `Core/Querying/Filters/LikeFilter.py` | `LOWER(Column) LIKE LOWER(%s) ESCAPE '!'` with auto EscapeLikePattern |
+| `Core/Querying/Filters/NotLikeFilter.py` | `LOWER(Column) NOT LIKE LOWER(%s) ESCAPE '!'` |
+| `Core/Querying/Filters/RangeFilter.py` | `Column >= %s [AND Column <= %s]` |
+| `Core/Querying/Filters/InListFilter.py` | `Column IN (%s, %s, ...)` |
+| `Core/Querying/Filters/AndComposer.py` | `(F1 AND F2 AND ...)` |
+| `Core/Querying/Filters/OrComposer.py` | `(F1 OR F2 OR ...)` |
+| `Core/Querying/Exceptions/__init__.py` | Exception package exports |
+| `Core/Querying/Exceptions/InvalidColumnError.py` | Raised on injection / whitelist miss |
+| `Core/Querying/Exceptions/InvalidPageError.py` | Raised on Page < 1 / PageSize < 1 |
+| `Core/Querying/Interfaces/__init__.py` | Interface package exports |
+| `Core/Querying/Interfaces/IQueryFilter.py` | `ToClause()` + `Params()` ABC |
+| `Core/Querying/Interfaces/IQuerySort.py` | `ToOrderBy()` ABC |
 | `Tests/Contract/TestPagedQuery.py` | Value-object + filter + sort + config + result contract tests |
 | `Tests/Contract/TestPagedQueryInjection.py` | SQL-injection rejection tests |
 | `Tests/Contract/TestPagedQueryBuilder.py` | Live-DB builder round-trip tests |
+| `Tests/Contract/TestPagedQueryStructure.py` | SRP one-class-per-file AST assertion (C2) |
 
 ## Out of Scope
 
