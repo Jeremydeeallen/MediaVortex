@@ -214,12 +214,11 @@
                         </div>
                         <p class="mt-2">Executing query...</p>
                     </div>
-                    <div id="ResultsContainer">
-                        <div class="text-muted text-center py-4">
-                            <i class="fas fa-database fa-3x mb-3"></i>
-                            <p>No results to display. Use the buttons above or enter a custom query.</p>
-                        </div>
+                    <div id="ResultsEmptyState" class="text-muted text-center py-4">
+                        <i class="fas fa-database fa-3x mb-3"></i>
+                        <p>No results to display. Use the buttons above or enter a custom query.</p>
                     </div>
+                    <div id="ResultsTableMount"></div>
                 </div>
             </div>
         </div>
@@ -251,12 +250,13 @@ class SQLQueriesManager {
 
     ShowLoading() {
         document.getElementById('LoadingSpinner').style.display = 'block';
-        document.getElementById('ResultsContainer').style.display = 'none';
+        document.getElementById('ResultsEmptyState').style.display = 'none';
+        document.getElementById('ResultsTableMount').style.display = 'none';
     }
 
     HideLoading() {
         document.getElementById('LoadingSpinner').style.display = 'none';
-        document.getElementById('ResultsContainer').style.display = 'block';
+        document.getElementById('ResultsTableMount').style.display = 'block';
     }
 
     RefreshPage() {
@@ -269,101 +269,28 @@ class SQLQueriesManager {
 
     DisplayResults(data, title = 'Query Results') {
         this.HideLoading();
-
-        const container = document.getElementById('ResultsContainer');
+        const Empty = document.getElementById('ResultsEmptyState');
         const countElement = document.getElementById('ResultCount');
-
-        if (!data || data.length === 0) {
-            container.innerHTML = `
-                <div class="text-muted text-center py-4">
-                    <i class="fas fa-info-circle fa-2x mb-3"></i>
-                    <p>No results found.</p>
-                </div>
-            `;
-            countElement.textContent = '0 rows';
+        const Rows = Array.isArray(data) ? data : [];
+        countElement.textContent = `${Rows.length} rows`;
+        if (Rows.length === 0) {
+            if (window.SqlQueriesTables) window.SqlQueriesTables.DestroyResults();
+            document.getElementById('ResultsTableMount').style.display = 'none';
+            Empty.style.display = '';
+            Empty.innerHTML = '<i class="fas fa-info-circle fa-2x mb-3"></i><p>No results found.</p>';
             return;
         }
-
-        const table = document.createElement('table');
-        table.className = 'table table-striped table-hover';
-
-        const thead = document.createElement('thead');
-        thead.className = 'table-header-dark';
-        const headerRow = document.createElement('tr');
-        const columns = Object.keys(data[0]);
-
-        columns.forEach(column => {
-            const th = document.createElement('th');
-            th.className = 'fw-bold';
-            th.textContent = column;
-            th.style.cursor = 'pointer';
-            th.onclick = () => this.SortTable(table, Array.from(thead.children[0].children).indexOf(th));
-            headerRow.appendChild(th);
-        });
-
-        thead.appendChild(headerRow);
-        table.appendChild(thead);
-
-        const tbody = document.createElement('tbody');
-        data.forEach(row => {
-            const tr = document.createElement('tr');
-            columns.forEach(column => {
-                const td = document.createElement('td');
-                const value = row[column];
-                if (value === null || value === undefined) {
-                    td.textContent = '';
-                    td.className = 'text-muted';
-                } else if (typeof value === 'boolean') {
-                    td.innerHTML = value ? '<span class="badge bg-success">True</span>' : '<span class="badge bg-secondary">False</span>';
-                } else if (typeof value === 'string' && value.length > 100) {
-                    td.innerHTML = `<span title="${value}">${value.substring(0, 100)}...</span>`;
-                } else {
-                    td.textContent = value;
-                }
-                tr.appendChild(td);
-            });
-            tbody.appendChild(tr);
-        });
-
-        table.appendChild(tbody);
-
-        container.innerHTML = '';
-        const tableWrapper = document.createElement('div');
-        tableWrapper.className = 'table-responsive';
-        tableWrapper.appendChild(table);
-        container.appendChild(tableWrapper);
-
-        countElement.textContent = `${data.length} rows`;
-    }
-
-    SortTable(table, columnIndex) {
-        const tbody = table.querySelector('tbody');
-        const rows = Array.from(tbody.querySelectorAll('tr'));
-
-        rows.sort((a, b) => {
-            const aVal = a.children[columnIndex].textContent.trim();
-            const bVal = b.children[columnIndex].textContent.trim();
-
-            const aNum = parseFloat(aVal);
-            const bNum = parseFloat(bVal);
-
-            if (!isNaN(aNum) && !isNaN(bNum)) {
-                return aNum - bNum;
-            }
-
-            return aVal.localeCompare(bVal);
-        });
-
-        rows.forEach(row => tbody.appendChild(row));
+        Empty.style.display = 'none';
+        document.getElementById('ResultsTableMount').style.display = 'block';
+        if (window.SqlQueriesTables) window.SqlQueriesTables.RenderResults(Rows);
     }
 
     ClearResults() {
-        document.getElementById('ResultsContainer').innerHTML = `
-            <div class="text-muted text-center py-4">
-                <i class="fas fa-database fa-3x mb-3"></i>
-                <p>No results to display. Use the buttons above or enter a custom query.</p>
-            </div>
-        `;
+        if (window.SqlQueriesTables) window.SqlQueriesTables.DestroyResults();
+        const Empty = document.getElementById('ResultsEmptyState');
+        document.getElementById('ResultsTableMount').style.display = 'none';
+        Empty.style.display = '';
+        Empty.innerHTML = '<i class="fas fa-database fa-3x mb-3"></i><p>No results to display. Use the buttons above or enter a custom query.</p>';
         document.getElementById('ResultCount').textContent = '0 rows';
     }
 
@@ -767,6 +694,82 @@ class SQLQueriesManager {
 let sqlQueriesManager;
 document.addEventListener('DOMContentLoaded', function() {
     sqlQueriesManager = new SQLQueriesManager();
+    window.sqlQueriesManager = sqlQueriesManager;
 });
+</script>
+
+<script type="module">
+import { TableRenderer } from "/static/js/TableRenderer/TableRenderer.js";
+import { TableRendererConfig } from "/static/js/TableRenderer/TableRendererConfig.js";
+import { EventBus } from "/static/js/TableRenderer/EventBus.js";
+import { ClientArrayDataSource } from "/static/js/TableRenderer/DataSources/ClientArrayDataSource.js";
+import { SortController } from "/static/js/TableRenderer/SortController.js";
+import { Virtualizer } from "/static/js/TableRenderer/Virtualizer.js";
+import { ColumnDefinition } from "/static/js/TableRenderer/ColumnDefinition.js";
+import { ICellRenderer } from "/static/js/TableRenderer/Interfaces/ICellRenderer.js";
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _GenericValueRenderer extends ICellRenderer {
+    Render(Value) {
+        if (Value === null || Value === undefined) {
+            const Span = document.createElement('span');
+            Span.className = 'text-muted';
+            return Span;
+        }
+        if (typeof Value === 'boolean') {
+            const Span = document.createElement('span');
+            Span.className = 'badge bg-' + (Value ? 'success' : 'secondary');
+            Span.textContent = Value ? 'True' : 'False';
+            return Span;
+        }
+        if (typeof Value === 'string' && Value.length > 100) {
+            const Span = document.createElement('span');
+            Span.title = Value;
+            Span.textContent = Value.substring(0, 100) + '...';
+            return Span;
+        }
+        const Span = document.createElement('span');
+        Span.textContent = String(Value);
+        return Span;
+    }
+}
+
+let ResultsTable = null;
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderResults = (Rows) => {
+    const Mount = document.getElementById('ResultsTableMount');
+    if (ResultsTable) { ResultsTable.Table.Destroy(); ResultsTable = null; }
+    if (!Rows.length) { Mount.innerHTML = ''; return; }
+    const Keys = Object.keys(Rows[0]);
+    const Cfg = new TableRendererConfig({ DefaultPageSize: Rows.length, RowHeightPx: 32, BufferRows: 10 });
+    const Bus = new EventBus();
+    const Src = new ClientArrayDataSource(Rows);
+    const Sort = new SortController(Src, Bus, Cfg);
+    const Virt = Rows.length > 500 ? new Virtualizer(Cfg) : null;
+    const Cols = Keys.map(K => new ColumnDefinition({ Key: K, Header: K, Sortable: true, CellRendererName: 'SqlGeneric' }));
+    const T = new TableRenderer({
+        Container: Mount,
+        DataSource: Src,
+        Columns: Cols,
+        Config: Cfg,
+        Bus,
+        Capabilities: { Sortable: true, Virtualized: !!Virt },
+        SortController: Sort,
+        Virtualizer: Virt
+    });
+    T._CellRegistry.Register('SqlGeneric', _GenericValueRenderer);
+    ResultsTable = { Table: T, Source: Src, Bus };
+    T.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const DestroyResults = () => {
+    if (ResultsTable) { ResultsTable.Table.Destroy(); ResultsTable = null; }
+    const Mount = document.getElementById('ResultsTableMount');
+    if (Mount) Mount.innerHTML = '';
+};
+
+window.SqlQueriesTables = { RenderResults, DestroyResults };
 </script>
 {% endblock %}

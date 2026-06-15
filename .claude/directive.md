@@ -161,14 +161,26 @@ Templates/FailedJobs.html                             -- EDIT: migrate
 
 ### Promotions
 
-Required on close. Anticipated:
+| Source artifact (directive) | Target file (durable home) |
+|---|---|
+| `## Outcome` + all 20 Acceptance Criteria | `Features/SharedTable/shared-table-renderer.feature.md ## What It Does + Success Criteria C1..C20` |
+| `## Plan Supplement` audit table (8 consumers) | `Features/SharedTable/shared-table-renderer.feature.md ## Workflows W1..W8 (one row per migrated consumer page)` |
+| Component seams (Interfaces → Concretes, DataSource ↔ Controller, EventBus pub/sub) | `Features/SharedTable/shared-table-renderer.feature.md ## Seams S1..S6` |
+| Backend paged endpoint shape (dual PascalCase + lowercase convention) | `Features/SharedTable/shared-table-renderer.feature.md ## Backend Contract` |
+| Engineering Calls Already Made | Burned at delivery; commit history is the durable record |
 
-| Source artifact | Target file | Commit |
-|---|---|---|
-| Component decomposition + Seams | `Features/SharedTable/shared-table-renderer.feature.md` | TBD |
-| DataSource paging contract | `Features/SharedTable/shared-table-renderer.feature.md` Seams | TBD |
-| ShowSettings paged-API contract | `Features/ShowSettings/ShowSettings.feature.md` Seams | TBD |
-| Per-page migration notes (if any per-page deviation) | each affected `*.feature.md` | TBD |
+### R18 overrides
+
+- Features/FailureAccounting/failure-accounting.feature.md -- full Read needed by the FailedJobs migration agent (sub-agent context where the Read-window cache from offset/limit calls does not propagate to the edit hook). See parallel-agent migration of /FailedJobs to TableRenderer.
+
+### Decisions Made
+
+- Two parallel agents drafted JS package + tests in isolation; integrated in one commit. Then three more parallel agents drafted the per-page migrations (Queue / Activity / FailedJobs+Status / Operations+SQLQueries+Optimization+ClipBuilder+VmafCompare).
+- TableRenderer.js patched in-flight to accept `Spec.Bus` so controllers + renderer share one EventBus (test agent's 71/71 still green).
+- All backend endpoints accept BOTH PascalCase legacy params AND TableRenderer-lowercase conventions (page 0-based, sort=Key:Dir, q free-text, filter.Key typed); response includes BOTH the legacy field AND `Rows`/`TotalCount`. Pragmatic: any not-yet-migrated caller keeps working; new TableRenderer consumers get the new shape.
+- Per the 2026-06-15 operator escalation "perfect implementation, no deferrals": every page in the audit migrates in THIS directive. No "future follow-up" rows in Promotions.
+- Shared CSS extracted to `Static/css/TableRenderer.css` loaded from `Base.html` (criterion C17). Page-specific helpers (e.g. `.ss-profile-*`) stay inline per page.
+- Dead code from migrated templates (e.g. `LoadShows`, `RenderLibrary`, `RenderSearchTable` etc. in ShowSettings) deleted, not commented out. R12 says no annotation comments; R14 says no "removed" markers.
 
 ### Verification
 

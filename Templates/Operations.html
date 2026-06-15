@@ -70,14 +70,13 @@
                     </button>
                 </div>
                 <div class="card-body">
-                    <div id="RecentSuccessesContainer">
-                        <div class="text-center py-4">
-                            <div class="spinner-border text-success" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <p class="mt-2">Loading recent successes...</p>
+                    <div id="RecentSuccessesContainer" class="text-center py-4">
+                        <div class="spinner-border text-success" role="status">
+                            <span class="visually-hidden">Loading...</span>
                         </div>
+                        <p class="mt-2">Loading recent successes...</p>
                     </div>
+                    <div id="RecentSuccessesTableMount"></div>
                 </div>
             </div>
         </div>
@@ -94,14 +93,13 @@
                     </button>
                 </div>
                 <div class="card-body">
-                    <div id="RecentFailuresContainer">
-                        <div class="text-center py-4">
-                            <div class="spinner-border text-danger" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <p class="mt-2">Loading recent failures...</p>
+                    <div id="RecentFailuresContainer" class="text-center py-4">
+                        <div class="spinner-border text-danger" role="status">
+                            <span class="visually-hidden">Loading...</span>
                         </div>
+                        <p class="mt-2">Loading recent failures...</p>
                     </div>
+                    <div id="RecentFailuresTableMount"></div>
                 </div>
             </div>
         </div>
@@ -120,14 +118,13 @@
                     </button>
                 </div>
                 <div class="card-body">
-                    <div id="RecentScansContainer">
-                        <div class="text-center py-4">
-                            <div class="spinner-border text-info" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <p class="mt-2">Loading recent scans...</p>
+                    <div id="RecentScansContainer" class="text-center py-4">
+                        <div class="spinner-border text-info" role="status">
+                            <span class="visually-hidden">Loading...</span>
                         </div>
+                        <p class="mt-2">Loading recent scans...</p>
                     </div>
+                    <div id="RecentScansTableMount"></div>
                 </div>
             </div>
         </div>
@@ -146,14 +143,14 @@
                     </button>
                 </div>
                 <div class="card-body">
-                    <div id="StuckJobsContainer">
-                        <div class="text-center py-4">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <p class="mt-2">Loading stuck jobs...</p>
+                    <div id="StuckJobsContainer" class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
                         </div>
+                        <p class="mt-2">Loading stuck jobs...</p>
                     </div>
+                    <div id="StuckJobsBanner"></div>
+                    <div id="StuckJobsTableMount"></div>
                 </div>
             </div>
         </div>
@@ -277,12 +274,11 @@
                         </div>
                         <p class="mt-2">Executing query...</p>
                     </div>
-                    <div id="ResultsContainer">
-                        <div class="text-muted text-center py-4">
-                            <i class="fas fa-database fa-3x mb-3"></i>
-                            <p>No results to display. Use the buttons above or enter a custom query.</p>
-                        </div>
+                    <div id="ResultsEmptyState" class="text-muted text-center py-4">
+                        <i class="fas fa-database fa-3x mb-3"></i>
+                        <p>No results to display. Use the buttons above or enter a custom query.</p>
                     </div>
+                    <div id="ResultsTableMount"></div>
                 </div>
             </div>
         </div>
@@ -306,10 +302,8 @@ class OperationsManager {
             'queue_breakdown': "SELECT Status, ProcessingMode, COUNT(*) as Count FROM TranscodeQueue GROUP BY Status, ProcessingMode ORDER BY Status, ProcessingMode",
             'profile_usage': "SELECT ProfileName, COUNT(*) as UsageCount, SUM(CASE WHEN Success THEN 1 ELSE 0 END) as Successes, SUM(CASE WHEN NOT Success THEN 1 ELSE 0 END) as Failures, ROUND(AVG(SizeReductionPercent)::numeric, 1) as AvgReduction FROM TranscodeAttempts WHERE AttemptDate >= NOW() - INTERVAL '7 days' GROUP BY ProfileName ORDER BY UsageCount DESC"
         };
-        this.LoadRecentSuccesses();
-        this.LoadRecentFailures();
-        this.LoadRecentScans();
-        this.LoadStuckJobs();
+        // Initial loads triggered after module-script wires up window.OperationsTables.
+        // See bottom <script type="module">; fires window event 'OperationsTablesReady'.
     }
 
     // ---- Utility Methods ----
@@ -340,101 +334,28 @@ class OperationsManager {
 
     DisplayResults(data, title = 'Query Results') {
         this.HideLoading();
-
-        const container = document.getElementById('ResultsContainer');
         const countElement = document.getElementById('ResultCount');
-
-        if (!data || data.length === 0) {
-            container.innerHTML = `
-                <div class="text-muted text-center py-4">
-                    <i class="fas fa-info-circle fa-2x mb-3"></i>
-                    <p>No results found.</p>
-                </div>
-            `;
-            countElement.textContent = '0 rows';
+        const Empty = document.getElementById('ResultsEmptyState');
+        const Mount = document.getElementById('ResultsTableMount');
+        const Rows = Array.isArray(data) ? data : [];
+        countElement.textContent = `${Rows.length} rows`;
+        if (Rows.length === 0) {
+            if (window.OperationsTables && window.OperationsTables.DestroyResults) window.OperationsTables.DestroyResults();
+            Empty.style.display = '';
+            Empty.innerHTML = '<i class="fas fa-info-circle fa-2x mb-3"></i><p>No results found.</p>';
             return;
         }
-
-        const table = document.createElement('table');
-        table.className = 'table table-striped table-hover';
-
-        const thead = document.createElement('thead');
-        thead.className = 'table-header-dark';
-        const headerRow = document.createElement('tr');
-        const columns = Object.keys(data[0]);
-
-        columns.forEach(column => {
-            const th = document.createElement('th');
-            th.className = 'fw-bold';
-            th.textContent = column;
-            th.style.cursor = 'pointer';
-            th.onclick = () => this.SortTable(table, Array.from(thead.children[0].children).indexOf(th));
-            headerRow.appendChild(th);
-        });
-
-        thead.appendChild(headerRow);
-        table.appendChild(thead);
-
-        const tbody = document.createElement('tbody');
-        data.forEach(row => {
-            const tr = document.createElement('tr');
-            columns.forEach(column => {
-                const td = document.createElement('td');
-                const value = row[column];
-                if (value === null || value === undefined) {
-                    td.textContent = '';
-                    td.className = 'text-muted';
-                } else if (typeof value === 'boolean') {
-                    td.innerHTML = value ? '<span class="badge bg-success">True</span>' : '<span class="badge bg-secondary">False</span>';
-                } else if (typeof value === 'string' && value.length > 100) {
-                    td.innerHTML = `<span title="${value}">${value.substring(0, 100)}...</span>`;
-                } else {
-                    td.textContent = value;
-                }
-                tr.appendChild(td);
-            });
-            tbody.appendChild(tr);
-        });
-
-        table.appendChild(tbody);
-
-        container.innerHTML = '';
-        const tableWrapper = document.createElement('div');
-        tableWrapper.className = 'table-responsive';
-        tableWrapper.appendChild(table);
-        container.appendChild(tableWrapper);
-
-        countElement.textContent = `${data.length} rows`;
-    }
-
-    SortTable(table, columnIndex) {
-        const tbody = table.querySelector('tbody');
-        const rows = Array.from(tbody.querySelectorAll('tr'));
-
-        rows.sort((a, b) => {
-            const aVal = a.children[columnIndex].textContent.trim();
-            const bVal = b.children[columnIndex].textContent.trim();
-
-            const aNum = parseFloat(aVal);
-            const bNum = parseFloat(bVal);
-
-            if (!isNaN(aNum) && !isNaN(bNum)) {
-                return aNum - bNum;
-            }
-
-            return aVal.localeCompare(bVal);
-        });
-
-        rows.forEach(row => tbody.appendChild(row));
+        Empty.style.display = 'none';
+        if (window.OperationsTables && window.OperationsTables.RenderResults) {
+            window.OperationsTables.RenderResults(Rows);
+        }
     }
 
     ClearResults() {
-        document.getElementById('ResultsContainer').innerHTML = `
-            <div class="text-muted text-center py-4">
-                <i class="fas fa-database fa-3x mb-3"></i>
-                <p>No results to display. Use the buttons above or enter a custom query.</p>
-            </div>
-        `;
+        if (window.OperationsTables && window.OperationsTables.DestroyResults) window.OperationsTables.DestroyResults();
+        const Empty = document.getElementById('ResultsEmptyState');
+        Empty.style.display = '';
+        Empty.innerHTML = '<i class="fas fa-database fa-3x mb-3"></i><p>No results to display. Use the buttons above or enter a custom query.</p>';
         document.getElementById('ResultCount').textContent = '0 rows';
     }
 
@@ -677,305 +598,91 @@ class OperationsManager {
     }
 
     async LoadRecentSuccesses() {
-        const Container = document.getElementById('RecentSuccessesContainer');
-
+        const Spinner = document.getElementById('RecentSuccessesContainer');
         try {
             const response = await fetch('/api/SQLQueries/GetRecentSuccesses?limit=15');
             const data = await response.json();
-
-            if (data.Success) {
-                if (data.Results && data.Results.length > 0) {
-                    let html = `
-                        <div class="table-responsive">
-                            <table class="table table-striped table-hover table-sm">
-                                <thead class="table-header-dark">
-                                    <tr>
-                                        <th class="fw-bold">File</th>
-                                        <th class="fw-bold">Profile</th>
-                                        <th class="fw-bold">Reduction</th>
-                                        <th class="fw-bold">VMAF</th>
-                                        <th class="fw-bold">Duration</th>
-                                        <th class="fw-bold">Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                    `;
-
-                    data.Results.forEach(item => {
-                        const FileName = item.FileName || (item.FilePath || '').split(/[\\/]/).pop() || 'Unknown';
-                        const Reduction = item.SizeReductionPercent != null ? item.SizeReductionPercent.toFixed(1) : 'N/A';
-                        let ReductionBadge;
-                        if (item.SizeReductionPercent != null) {
-                            const color = item.SizeReductionPercent > 50 ? 'success' : item.SizeReductionPercent >= 30 ? 'primary' : 'secondary';
-                            ReductionBadge = `<span class="badge bg-${color}">${Reduction}%</span>`;
-                        } else {
-                            ReductionBadge = '<span class="badge bg-secondary">N/A</span>';
-                        }
-                        // VMAF badge: green >=88 (auto-replace floor), blue 80-87 (passing but below floor),
-                        // amber <80 (Requeue territory; included here for visibility on replaced files
-                        // whose disposition predated the current gate). Dash when no VMAF was run
-                        // (BypassReplace / QualityTestNotRequired).
-                        let VmafBadge;
-                        if (item.VMAF != null) {
-                            const v = parseFloat(item.VMAF);
-                            const vColor = v >= 88 ? 'success' : v >= 80 ? 'info' : 'warning';
-                            VmafBadge = `<span class="badge bg-${vColor}">${v.toFixed(1)}</span>`;
-                        } else {
-                            VmafBadge = '<span class="text-muted">-</span>';
-                        }
-                        const Duration = item.TranscodeDurationSeconds != null ? `${Math.round(item.TranscodeDurationSeconds)}s` : 'N/A';
-                        const DateStr = item.AttemptDate ? window.formatTime(item.AttemptDate, 'short') : 'N/A';
-
-                        html += `
-                            <tr>
-                                <td title="${item.FilePath}">${FileName}</td>
-                                <td>${item.ProfileName || 'N/A'}</td>
-                                <td>${ReductionBadge}</td>
-                                <td>${VmafBadge}</td>
-                                <td>${Duration}</td>
-                                <td>${DateStr}</td>
-                            </tr>
-                        `;
-                    });
-
-                    html += `
-                                </tbody>
-                            </table>
-                        </div>
-                    `;
-
-                    Container.innerHTML = html;
-                } else {
-                    Container.innerHTML = `
-                        <div class="text-center py-4">
-                            <i class="fas fa-info-circle fa-3x text-muted mb-3"></i>
-                            <p class="text-muted">No recent successful transcodes found.</p>
-                        </div>
-                    `;
-                }
+            if (!data.Success) {
+                Spinner.innerHTML = `<div class="alert alert-danger m-0"><i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}</div>`;
+                return;
+            }
+            const Rows = data.Results || [];
+            if (window.OperationsTables) window.OperationsTables.RenderSuccesses(Rows);
+            if (Rows.length === 0) {
+                Spinner.innerHTML = '<i class="fas fa-info-circle fa-3x text-muted mb-3"></i><p class="text-muted">No recent successful transcodes found.</p>';
             } else {
-                Container.innerHTML = `
-                    <div class="alert alert-danger">
-                        <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
-                    </div>
-                `;
+                Spinner.innerHTML = '';
             }
         } catch (error) {
-            Container.innerHTML = `
-                <div class="alert alert-danger">
-                    <i class="fas fa-exclamation-triangle"></i> Error loading successes: ${error.message}
-                </div>
-            `;
+            Spinner.innerHTML = `<div class="alert alert-danger m-0"><i class="fas fa-exclamation-triangle"></i> Error loading successes: ${error.message}</div>`;
         }
     }
 
     async LoadRecentFailures() {
-        const Container = document.getElementById('RecentFailuresContainer');
-
+        const Spinner = document.getElementById('RecentFailuresContainer');
         try {
             const response = await fetch('/api/FailureTracking/RecentFailures?limit=20');
             const data = await response.json();
-
-            if (data.Success) {
-                if (data.Failures && data.Failures.length > 0) {
-                    let html = `
-                        <div class="table-responsive">
-                            <table class="table table-striped table-hover table-sm">
-                                <thead class="table-header-dark">
-                                    <tr>
-                                        <th class="fw-bold">Service</th>
-                                        <th class="fw-bold">File</th>
-                                        <th class="fw-bold">Error</th>
-                                        <th class="fw-bold">Date</th>
-                                        <th class="fw-bold">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                    `;
-
-                    data.Failures.forEach(failure => {
-                        const FileName = failure.FileName ? failure.FileName.split('/').pop() : 'Unknown';
-                        const ErrorMessage = failure.FailureReason ? failure.FailureReason.substring(0, 80) + (failure.FailureReason.length > 80 ? '...' : '') : 'No error message';
-                        const DateStr = failure.FailureDate ? window.formatTime(failure.FailureDate, 'short') : 'N/A';
-
-                        html += `
-                            <tr>
-                                <td><span class="badge bg-${failure.ServiceType === 'Transcode' ? 'primary' : 'info'}">${failure.ServiceType}</span></td>
-                                <td title="${failure.FileName}">${FileName}</td>
-                                <td title="${failure.FailureReason}">${ErrorMessage}</td>
-                                <td>${DateStr}</td>
-                                <td>
-                                    <button class="btn btn-sm btn-outline-primary" onclick="operationsManager.LoadMediaFileComparisonForPath('${failure.FileName}')">
-                                        <i class="fas fa-search"></i>
-                                    </button>
-                                </td>
-                            </tr>
-                        `;
-                    });
-
-                    html += `
-                                </tbody>
-                            </table>
-                        </div>
-                    `;
-
-                    Container.innerHTML = html;
-                } else {
-                    Container.innerHTML = `
-                        <div class="text-center py-4">
-                            <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
-                            <p class="text-muted">No recent failures found.</p>
-                        </div>
-                    `;
-                }
+            if (!data.Success) {
+                Spinner.innerHTML = `<div class="alert alert-danger m-0"><i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}</div>`;
+                return;
+            }
+            const Rows = data.Failures || [];
+            if (window.OperationsTables) window.OperationsTables.RenderFailures(Rows);
+            if (Rows.length === 0) {
+                Spinner.innerHTML = '<i class="fas fa-check-circle fa-3x text-success mb-3"></i><p class="text-muted">No recent failures found.</p>';
             } else {
-                Container.innerHTML = `
-                    <div class="alert alert-danger">
-                        <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
-                    </div>
-                `;
+                Spinner.innerHTML = '';
             }
         } catch (error) {
-            Container.innerHTML = `
-                <div class="alert alert-danger">
-                    <i class="fas fa-exclamation-triangle"></i> Error loading failures: ${error.message}
-                </div>
-            `;
+            Spinner.innerHTML = `<div class="alert alert-danger m-0"><i class="fas fa-exclamation-triangle"></i> Error loading failures: ${error.message}</div>`;
         }
     }
 
     async LoadRecentScans() {
-        const Container = document.getElementById('RecentScansContainer');
+        const Spinner = document.getElementById('RecentScansContainer');
         try {
             const response = await fetch('/api/SQLQueries/GetRecentScanRuns?limit=15');
             const data = await response.json();
-
             if (!data.Success) {
-                Container.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}</div>`;
+                Spinner.innerHTML = `<div class="alert alert-danger m-0"><i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}</div>`;
                 return;
             }
-            if (!data.Results || data.Results.length === 0) {
-                Container.innerHTML = `
-                    <div class="text-center py-4">
-                        <i class="fas fa-search fa-3x text-muted mb-3"></i>
-                        <p class="text-muted"><em>No recent scans</em></p>
-                    </div>`;
-                return;
+            const Rows = data.Results || [];
+            if (window.OperationsTables) window.OperationsTables.RenderScans(Rows);
+            if (Rows.length === 0) {
+                Spinner.innerHTML = '<i class="fas fa-search fa-3x text-muted mb-3"></i><p class="text-muted"><em>No recent scans</em></p>';
+            } else {
+                Spinner.innerHTML = '';
             }
-            let html = `
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover table-sm">
-                        <thead class="table-header-dark">
-                            <tr>
-                                <th class="fw-bold">Status</th>
-                                <th class="fw-bold">Drive</th>
-                                <th class="fw-bold">Worker</th>
-                                <th class="fw-bold">Duration</th>
-                                <th class="fw-bold">Files (+N ~U &minus;D)</th>
-                                <th class="fw-bold">Ended</th>
-                                <th class="fw-bold">Error</th>
-                            </tr>
-                        </thead>
-                        <tbody>`;
-            data.Results.forEach(r => {
-                const isFail = r.Status === 'Failed';
-                const StatusBadge = isFail
-                    ? '<span class="badge bg-danger"><i class="fas fa-times-circle me-1"></i>Failed</span>'
-                    : '<span class="badge bg-success"><i class="fas fa-check-circle me-1"></i>Completed</span>';
-                const Dur = r.DurationSec || 0;
-                const DurStr = Dur < 60 ? Dur + 's'
-                    : Dur < 3600 ? Math.floor(Dur / 60) + 'm ' + (Dur % 60) + 's'
-                    : Math.floor(Dur / 3600) + 'h ' + Math.floor((Dur % 3600) / 60) + 'm';
-                const Files = `<span class="text-success">+${r.NewFiles || 0}</span> <span class="text-warning">~${r.UpdatedFiles || 0}</span> <span class="text-danger">&minus;${r.DeletedFiles || 0}</span>`;
-                const EndedStr = r.EndTime ? window.formatTime(r.EndTime, 'short') : 'N/A';
-                const Err = r.ErrorMessage ? `<span title="${(r.ErrorMessage || '').replace(/"/g, '&quot;')}">${(r.ErrorMessage || '').substring(0, 60)}${r.ErrorMessage.length > 60 ? '...' : ''}</span>` : '';
-                html += `
-                    <tr>
-                        <td>${StatusBadge}</td>
-                        <td><strong>${r.RootFolderPath || ''}</strong></td>
-                        <td>${r.WorkerName || ''}</td>
-                        <td>${DurStr}</td>
-                        <td>${Files}</td>
-                        <td>${EndedStr}</td>
-                        <td>${Err}</td>
-                    </tr>`;
-            });
-            html += `</tbody></table></div>`;
-            Container.innerHTML = html;
         } catch (error) {
-            Container.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-triangle"></i> Error loading scans: ${error.message}</div>`;
+            Spinner.innerHTML = `<div class="alert alert-danger m-0"><i class="fas fa-exclamation-triangle"></i> Error loading scans: ${error.message}</div>`;
         }
     }
 
     async LoadStuckJobs() {
-        const Container = document.getElementById('StuckJobsContainer');
-
+        const Spinner = document.getElementById('StuckJobsContainer');
+        const Banner = document.getElementById('StuckJobsBanner');
         try {
             const response = await fetch('/api/SQLQueries/GetStuckJobs');
             const data = await response.json();
-
-            if (data.Success) {
-                if (data.StuckJobs && data.StuckJobs.length > 0) {
-                    let html = `
-                        <div class="alert alert-warning">
-                            <i class="fas fa-exclamation-triangle"></i> Found ${data.Count} stuck jobs that may need attention.
-                        </div>
-                        <div class="table-responsive">
-                            <table class="table table-striped table-hover">
-                                <thead class="table-header-dark">
-                                    <tr>
-                                        <th class="fw-bold">Job Type</th>
-                                        <th class="fw-bold">File/Service</th>
-                                        <th class="fw-bold">Status</th>
-                                        <th class="fw-bold">Started</th>
-                                        <th class="fw-bold">Duration</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                    `;
-
-                    data.StuckJobs.forEach(job => {
-                        const FileName = job.FileName || (job.FilePath || '').split(/[\\/]/).pop() || 'Unknown';
-
-                        html += `
-                            <tr>
-                                <td><span class="badge bg-warning">${job.JobType}</span></td>
-                                <td title="${job.FilePath}">${FileName}</td>
-                                <td><span class="badge bg-danger">${job.Status}</span></td>
-                                <td>${window.formatTime(job.StartedAt, 'datetime')}</td>
-                                <td>${job.Duration}</td>
-                            </tr>
-                        `;
-                    });
-
-                    html += `
-                                </tbody>
-                            </table>
-                        </div>
-                    `;
-
-                    Container.innerHTML = html;
-                } else {
-                    Container.innerHTML = `
-                        <div class="text-center py-4">
-                            <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
-                            <p class="text-muted">No stuck jobs found. All systems running smoothly!</p>
-                        </div>
-                    `;
-                }
+            if (!data.Success) {
+                Spinner.innerHTML = `<div class="alert alert-danger m-0"><i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}</div>`;
+                Banner.innerHTML = '';
+                return;
+            }
+            const Rows = data.StuckJobs || [];
+            if (window.OperationsTables) window.OperationsTables.RenderStuckJobs(Rows);
+            if (Rows.length === 0) {
+                Spinner.innerHTML = '<i class="fas fa-check-circle fa-3x text-success mb-3"></i><p class="text-muted">No stuck jobs found. All systems running smoothly!</p>';
+                Banner.innerHTML = '';
             } else {
-                Container.innerHTML = `
-                    <div class="alert alert-danger">
-                        <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
-                    </div>
-                `;
+                Spinner.innerHTML = '';
+                Banner.innerHTML = `<div class="alert alert-warning"><i class="fas fa-exclamation-triangle"></i> Found ${data.Count} stuck jobs that may need attention.</div>`;
             }
         } catch (error) {
-            Container.innerHTML = `
-                <div class="alert alert-danger">
-                    <i class="fas fa-exclamation-triangle"></i> Error loading stuck jobs: ${error.message}
-                </div>
-            `;
+            Spinner.innerHTML = `<div class="alert alert-danger m-0"><i class="fas fa-exclamation-triangle"></i> Error loading stuck jobs: ${error.message}</div>`;
+            Banner.innerHTML = '';
         }
     }
 
@@ -992,6 +699,395 @@ class OperationsManager {
 let operationsManager;
 document.addEventListener('DOMContentLoaded', function() {
     operationsManager = new OperationsManager();
+    window.operationsManager = operationsManager;
 });
+</script>
+
+<script type="module">
+import { TableRenderer } from "/static/js/TableRenderer/TableRenderer.js";
+import { TableRendererConfig } from "/static/js/TableRenderer/TableRendererConfig.js";
+import { EventBus } from "/static/js/TableRenderer/EventBus.js";
+import { ClientArrayDataSource } from "/static/js/TableRenderer/DataSources/ClientArrayDataSource.js";
+import { SortController } from "/static/js/TableRenderer/SortController.js";
+import { ColumnDefinition } from "/static/js/TableRenderer/ColumnDefinition.js";
+import { ICellRenderer } from "/static/js/TableRenderer/Interfaces/ICellRenderer.js";
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const Truncate = (S, Max) => {
+    const V = S == null ? '' : String(S);
+    return V.length > Max ? V.substring(0, Max) + '...' : V;
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _FileNameRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        const FileName = Row.FileName || (Row.FilePath || '').split(/[\\/]/).pop() || 'Unknown';
+        Span.textContent = FileName;
+        if (Row.FilePath) Span.title = Row.FilePath;
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ReductionBadgeRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        Span.className = 'badge';
+        if (Row.SizeReductionPercent != null) {
+            const Pct = Row.SizeReductionPercent;
+            Span.classList.add('bg-' + (Pct > 50 ? 'success' : Pct >= 30 ? 'primary' : 'secondary'));
+            Span.textContent = Pct.toFixed(1) + '%';
+        } else {
+            Span.classList.add('bg-secondary');
+            Span.textContent = 'N/A';
+        }
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _VmafBadgeRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        if (Row.VMAF != null) {
+            const V = parseFloat(Row.VMAF);
+            Span.className = 'badge bg-' + (V >= 88 ? 'success' : V >= 80 ? 'info' : 'warning');
+            Span.textContent = V.toFixed(1);
+        } else {
+            Span.className = 'text-muted';
+            Span.textContent = '-';
+        }
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DurationSecondsRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        Span.textContent = Row.TranscodeDurationSeconds != null ? `${Math.round(Row.TranscodeDurationSeconds)}s` : 'N/A';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ShortDateRenderer extends ICellRenderer {
+    constructor(Opts) { super(); this._Field = Opts?.Field; }
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        const D = Row[this._Field];
+        Span.textContent = D ? window.formatTime(D, 'short') : 'N/A';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DateTimeRenderer extends ICellRenderer {
+    constructor(Opts) { super(); this._Field = Opts?.Field; }
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        const D = Row[this._Field];
+        Span.textContent = D ? window.formatTime(D, 'datetime') : 'N/A';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ServiceBadgeRenderer extends ICellRenderer {
+    Render(Value) {
+        const Span = document.createElement('span');
+        Span.className = 'badge bg-' + (Value === 'Transcode' ? 'primary' : 'info');
+        Span.textContent = Value || '';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _FailureMessageRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        Span.textContent = Truncate(Row.FailureReason || 'No error message', 80);
+        if (Row.FailureReason) Span.title = Row.FailureReason;
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _FailureCompareButtonRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Btn = document.createElement('button');
+        Btn.className = 'btn btn-sm btn-outline-primary';
+        Btn.innerHTML = '<i class="fas fa-search"></i>';
+        Btn.addEventListener('click', E => {
+            E.stopPropagation();
+            if (window.operationsManager) window.operationsManager.LoadMediaFileComparisonForPath(Row.FileName);
+        });
+        return Btn;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ScanStatusBadgeRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        if (Row.Status === 'Failed') {
+            Span.className = 'badge bg-danger';
+            Span.innerHTML = '<i class="fas fa-times-circle me-1"></i>Failed';
+        } else {
+            Span.className = 'badge bg-success';
+            Span.innerHTML = '<i class="fas fa-check-circle me-1"></i>Completed';
+        }
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DurationSecLabelRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        const D = Row.DurationSec || 0;
+        Span.textContent = D < 60 ? D + 's'
+            : D < 3600 ? Math.floor(D / 60) + 'm ' + (D % 60) + 's'
+            : Math.floor(D / 3600) + 'h ' + Math.floor((D % 3600) / 60) + 'm';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _FilesDeltaRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Wrap = document.createElement('span');
+        const Mk = (Cls, Txt) => { const S = document.createElement('span'); S.className = Cls; S.textContent = Txt; return S; };
+        Wrap.appendChild(Mk('text-success', '+' + (Row.NewFiles || 0)));
+        Wrap.appendChild(document.createTextNode(' '));
+        Wrap.appendChild(Mk('text-warning', '~' + (Row.UpdatedFiles || 0)));
+        Wrap.appendChild(document.createTextNode(' '));
+        Wrap.appendChild(Mk('text-danger', '−' + (Row.DeletedFiles || 0)));
+        return Wrap;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ErrorTruncRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        if (Row.ErrorMessage) {
+            Span.textContent = Truncate(Row.ErrorMessage, 60);
+            Span.title = Row.ErrorMessage;
+        }
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DriveBoldRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Strong = document.createElement('strong');
+        Strong.textContent = Row.RootFolderPath || '';
+        return Strong;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _StuckJobTypeBadgeRenderer extends ICellRenderer {
+    Render(Value) {
+        const Span = document.createElement('span');
+        Span.className = 'badge bg-warning';
+        Span.textContent = Value || '';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _StuckJobStatusBadgeRenderer extends ICellRenderer {
+    Render(Value) {
+        const Span = document.createElement('span');
+        Span.className = 'badge bg-danger';
+        Span.textContent = Value || '';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _GenericValueRenderer extends ICellRenderer {
+    Render(Value) {
+        if (Value === null || Value === undefined) {
+            const Span = document.createElement('span');
+            Span.className = 'text-muted';
+            return Span;
+        }
+        if (typeof Value === 'boolean') {
+            const Span = document.createElement('span');
+            Span.className = 'badge bg-' + (Value ? 'success' : 'secondary');
+            Span.textContent = Value ? 'True' : 'False';
+            return Span;
+        }
+        if (typeof Value === 'string' && Value.length > 100) {
+            const Span = document.createElement('span');
+            Span.title = Value;
+            Span.textContent = Value.substring(0, 100) + '...';
+            return Span;
+        }
+        const Span = document.createElement('span');
+        Span.textContent = String(Value);
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const BuildTable = (Mount, Rows, Cols, RendererRegister) => {
+    const Cfg = new TableRendererConfig({ DefaultPageSize: 200 });
+    const Bus = new EventBus();
+    const Src = new ClientArrayDataSource(Rows);
+    const Sort = new SortController(Src, Bus, Cfg);
+    const T = new TableRenderer({
+        Container: Mount,
+        DataSource: Src,
+        Columns: Cols,
+        Config: Cfg,
+        Bus,
+        Capabilities: { Sortable: true },
+        SortController: Sort
+    });
+    if (RendererRegister) RendererRegister(T._CellRegistry);
+    return { Table: T, Source: Src, Bus };
+};
+
+let SuccessTable = null;
+let FailuresTable = null;
+let ScansTable = null;
+let StuckTable = null;
+let ResultsTable = null;
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderSuccesses = (Rows) => {
+    const Mount = document.getElementById('RecentSuccessesTableMount');
+    if (SuccessTable) { SuccessTable.Table.Destroy(); SuccessTable = null; }
+    if (!Rows.length) { Mount.innerHTML = ''; return; }
+    const Cols = [
+        new ColumnDefinition({ Key: 'FileName', Header: 'File', Sortable: true, CellRendererName: 'OpsFileName' }),
+        new ColumnDefinition({ Key: 'ProfileName', Header: 'Profile', Sortable: true }),
+        new ColumnDefinition({ Key: 'SizeReductionPercent', Header: 'Reduction', Sortable: true, CellRendererName: 'OpsReduction' }),
+        new ColumnDefinition({ Key: 'VMAF', Header: 'VMAF', Sortable: true, CellRendererName: 'OpsVmaf' }),
+        new ColumnDefinition({ Key: 'TranscodeDurationSeconds', Header: 'Duration', Sortable: true, CellRendererName: 'OpsDurSec' }),
+        new ColumnDefinition({ Key: 'AttemptDate', Header: 'Date', Sortable: true, CellRendererName: 'OpsShortDate', CellRendererOptions: { Field: 'AttemptDate' } })
+    ];
+    SuccessTable = BuildTable(Mount, Rows, Cols, R => {
+        R.Register('OpsFileName', _FileNameRenderer);
+        R.Register('OpsReduction', _ReductionBadgeRenderer);
+        R.Register('OpsVmaf', _VmafBadgeRenderer);
+        R.Register('OpsDurSec', _DurationSecondsRenderer);
+        R.Register('OpsShortDate', _ShortDateRenderer);
+    });
+    SuccessTable.Table.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderFailures = (Rows) => {
+    const Mount = document.getElementById('RecentFailuresTableMount');
+    if (FailuresTable) { FailuresTable.Table.Destroy(); FailuresTable = null; }
+    if (!Rows.length) { Mount.innerHTML = ''; return; }
+    const Cols = [
+        new ColumnDefinition({ Key: 'ServiceType', Header: 'Service', Sortable: true, CellRendererName: 'OpsServiceBadge' }),
+        new ColumnDefinition({ Key: 'FileName', Header: 'File', Sortable: true, CellRendererName: 'OpsFileName' }),
+        new ColumnDefinition({ Key: 'FailureReason', Header: 'Error', CellRendererName: 'OpsFailureMsg' }),
+        new ColumnDefinition({ Key: 'FailureDate', Header: 'Date', Sortable: true, CellRendererName: 'OpsShortDate', CellRendererOptions: { Field: 'FailureDate' } }),
+        new ColumnDefinition({ Key: '__Actions', Header: 'Actions', CellRendererName: 'OpsCompareBtn' })
+    ];
+    FailuresTable = BuildTable(Mount, Rows, Cols, R => {
+        R.Register('OpsServiceBadge', _ServiceBadgeRenderer);
+        R.Register('OpsFileName', _FileNameRenderer);
+        R.Register('OpsFailureMsg', _FailureMessageRenderer);
+        R.Register('OpsShortDate', _ShortDateRenderer);
+        R.Register('OpsCompareBtn', _FailureCompareButtonRenderer);
+    });
+    FailuresTable.Table.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderScans = (Rows) => {
+    const Mount = document.getElementById('RecentScansTableMount');
+    if (ScansTable) { ScansTable.Table.Destroy(); ScansTable = null; }
+    if (!Rows.length) { Mount.innerHTML = ''; return; }
+    const Cols = [
+        new ColumnDefinition({ Key: 'Status', Header: 'Status', Sortable: true, CellRendererName: 'OpsScanStatus' }),
+        new ColumnDefinition({ Key: 'RootFolderPath', Header: 'Drive', Sortable: true, CellRendererName: 'OpsDriveBold' }),
+        new ColumnDefinition({ Key: 'WorkerName', Header: 'Worker', Sortable: true }),
+        new ColumnDefinition({ Key: 'DurationSec', Header: 'Duration', Sortable: true, CellRendererName: 'OpsDurLabel' }),
+        new ColumnDefinition({ Key: '__Files', Header: 'Files (+N ~U −D)', CellRendererName: 'OpsFilesDelta' }),
+        new ColumnDefinition({ Key: 'EndTime', Header: 'Ended', Sortable: true, CellRendererName: 'OpsShortDate', CellRendererOptions: { Field: 'EndTime' } }),
+        new ColumnDefinition({ Key: 'ErrorMessage', Header: 'Error', CellRendererName: 'OpsErrTrunc' })
+    ];
+    ScansTable = BuildTable(Mount, Rows, Cols, R => {
+        R.Register('OpsScanStatus', _ScanStatusBadgeRenderer);
+        R.Register('OpsDriveBold', _DriveBoldRenderer);
+        R.Register('OpsDurLabel', _DurationSecLabelRenderer);
+        R.Register('OpsFilesDelta', _FilesDeltaRenderer);
+        R.Register('OpsShortDate', _ShortDateRenderer);
+        R.Register('OpsErrTrunc', _ErrorTruncRenderer);
+    });
+    ScansTable.Table.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderStuckJobs = (Rows) => {
+    const Mount = document.getElementById('StuckJobsTableMount');
+    if (StuckTable) { StuckTable.Table.Destroy(); StuckTable = null; }
+    if (!Rows.length) { Mount.innerHTML = ''; return; }
+    const Cols = [
+        new ColumnDefinition({ Key: 'JobType', Header: 'Job Type', Sortable: true, CellRendererName: 'OpsStuckJobType' }),
+        new ColumnDefinition({ Key: 'FileName', Header: 'File/Service', Sortable: true, CellRendererName: 'OpsFileName' }),
+        new ColumnDefinition({ Key: 'Status', Header: 'Status', Sortable: true, CellRendererName: 'OpsStuckJobStatus' }),
+        new ColumnDefinition({ Key: 'StartedAt', Header: 'Started', Sortable: true, CellRendererName: 'OpsDateTime', CellRendererOptions: { Field: 'StartedAt' } }),
+        new ColumnDefinition({ Key: 'Duration', Header: 'Duration', Sortable: true })
+    ];
+    StuckTable = BuildTable(Mount, Rows, Cols, R => {
+        R.Register('OpsStuckJobType', _StuckJobTypeBadgeRenderer);
+        R.Register('OpsFileName', _FileNameRenderer);
+        R.Register('OpsStuckJobStatus', _StuckJobStatusBadgeRenderer);
+        R.Register('OpsDateTime', _DateTimeRenderer);
+    });
+    StuckTable.Table.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderResults = (Rows) => {
+    const Mount = document.getElementById('ResultsTableMount');
+    if (ResultsTable) { ResultsTable.Table.Destroy(); ResultsTable = null; }
+    if (!Rows.length) { Mount.innerHTML = ''; return; }
+    const Keys = Object.keys(Rows[0]);
+    const Cols = Keys.map(K => new ColumnDefinition({ Key: K, Header: K, Sortable: true, CellRendererName: 'OpsGeneric' }));
+    ResultsTable = BuildTable(Mount, Rows, Cols, R => {
+        R.Register('OpsGeneric', _GenericValueRenderer);
+    });
+    ResultsTable.Table.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const DestroyResults = () => {
+    if (ResultsTable) { ResultsTable.Table.Destroy(); ResultsTable = null; }
+    const Mount = document.getElementById('ResultsTableMount');
+    if (Mount) Mount.innerHTML = '';
+};
+
+window.OperationsTables = { RenderSuccesses, RenderFailures, RenderScans, RenderStuckJobs, RenderResults, DestroyResults };
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const TriggerInitialLoads = () => {
+    if (!window.operationsManager) return false;
+    window.operationsManager.LoadRecentSuccesses();
+    window.operationsManager.LoadRecentFailures();
+    window.operationsManager.LoadRecentScans();
+    window.operationsManager.LoadStuckJobs();
+    return true;
+};
+if (!TriggerInitialLoads()) {
+    let Tries = 0;
+    const Wait = setInterval(() => {
+        Tries += 1;
+        if (TriggerInitialLoads() || Tries > 40) clearInterval(Wait);
+    }, 50);
+}
 </script>
 {% endblock %}
