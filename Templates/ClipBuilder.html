@@ -185,20 +185,7 @@
                 </button>
             </div>
             <div class="card-body p-0">
-                <table class="table table-sm mb-0">
-                    <thead>
-                        <tr>
-                            <th style="width: 20px;"></th>
-                            <th style="width: 25px;">#</th>
-                            <th style="width: 70px;">Frame</th>
-                            <th>Start</th>
-                            <th>End</th>
-                            <th style="width: 90px;">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody id="ClipTableBody">
-                    </tbody>
-                </table>
+                <div id="ClipTableMount"></div>
             </div>
         </div>
 
@@ -228,22 +215,7 @@
                 </button>
             </div>
             <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-sm table-hover mb-0">
-                        <thead>
-                            <tr>
-                                <th>File</th>
-                                <th>Primary Output</th>
-                                <th>Half Output</th>
-                                <th>Duration</th>
-                                <th>Exported</th>
-                            </tr>
-                        </thead>
-                        <tbody id="ExportHistoryBody">
-                            <tr><td colspan="5" class="text-muted text-center py-3">Loading...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
+                <div id="ExportHistoryMount"></div>
             </div>
         </div>
     </div>
@@ -278,8 +250,7 @@
                         </button>
                     </div>
                 </div>
-                <div id="BrowseList" style="max-height: 400px; overflow-y: auto;">
-                </div>
+                <div id="BrowseListMount" style="max-height: 400px; overflow-y: auto;"></div>
             </div>
         </div>
     </div>
@@ -505,8 +476,16 @@ class ClipBuilderManager {
                 const Item = document.createElement('a');
                 Item.href = '#';
                 Item.className = 'list-group-item list-group-item-action py-1 px-2';
-                Item.innerHTML = `<div class="fw-bold text-truncate" style="font-size: 0.85em;">${this.EscapeHtml(File.FileName)}</div>
-                    <small class="text-muted text-truncate d-block" style="font-size: 0.75em;">${this.EscapeHtml(File.Directory || '')}</small>`;
+                const NameDiv = document.createElement('div');
+                NameDiv.className = 'fw-bold text-truncate';
+                NameDiv.style.fontSize = '0.85em';
+                NameDiv.textContent = File.FileName;
+                const DirSmall = document.createElement('small');
+                DirSmall.className = 'text-muted text-truncate d-block';
+                DirSmall.style.fontSize = '0.75em';
+                DirSmall.textContent = File.Directory || '';
+                Item.appendChild(NameDiv);
+                Item.appendChild(DirSmall);
                 Item.addEventListener('click', (e) => {
                     e.preventDefault();
                     this.LoadFile(File.Id, File.FileName, File.FilePath);
@@ -555,7 +534,7 @@ class ClipBuilderManager {
         if (Id) Url += `FileId=${Id}`;
         else Url += `FilePath=${encodeURIComponent(Path)}`;
 
-        // Load in background — set as timeline background when ready
+        // Load in background, set as timeline background when ready
         const Img = new Image();
         Img.onload = () => { Timeline.style.backgroundImage = `url('${Url}')`; };
         Img.src = Url;
@@ -654,116 +633,9 @@ class ClipBuilderManager {
 
     // --- Clip Table ---
     RenderClipTable() {
-        const Body = document.getElementById('ClipTableBody');
-        Body.innerHTML = '';
-
-        for (let I = 0; I < this.ClipCount; I++) {
-            const StartSeconds = this.StartTimes[I] !== undefined ? this.StartTimes[I] : null;
-            const StartStr = StartSeconds !== null ? this.FormatTimeMs(StartSeconds) : '--:--.---';
-            const EndStr = StartSeconds !== null ? this.FormatTimeMs(StartSeconds + this.ClipDuration) : '--:--.---';
-
-            const Tr = document.createElement('tr');
-            Tr.draggable = true;
-            Tr.dataset.index = I;
-            const ThumbHtml = StartSeconds !== null ? `<img src="${this.GetThumbnailUrl(StartSeconds)}" style="width:60px;height:auto;border-radius:3px;" alt="frame">` : '<span class="text-muted" style="font-size:0.7em;">--</span>';
-
-            Tr.innerHTML = `
-                <td class="drag-handle" style="cursor: grab; color: #999; text-align: center;"><i class="fas fa-grip-vertical"></i></td>
-                <td>${I + 1}</td>
-                <td class="clip-thumb text-center py-1">${ThumbHtml}</td>
-                <td class="clip-start" data-index="${I}" style="font-family: monospace; font-size: 0.85em; cursor: text;" title="Click to edit">${StartStr}</td>
-                <td class="clip-end" style="font-family: monospace; font-size: 0.85em;">${EndStr}</td>
-                <td>
-                    <button class="btn btn-sm btn-primary btn-set-start" data-index="${I}" title="Set start to current time">
-                        <i class="fas fa-map-marker-alt"></i> Set
-                    </button>
-                    ${StartSeconds !== null ? `<button class="btn btn-sm btn-outline-danger btn-clear-clip ms-1" data-index="${I}" title="Clear"><i class="fas fa-times"></i></button>` : ''}
-                </td>`;
-            Body.appendChild(Tr);
+        if (window.ClipBuilderTables && window.ClipBuilderTables.RefreshClipTable) {
+            window.ClipBuilderTables.RefreshClipTable();
         }
-
-        // Bind buttons
-        Body.querySelectorAll('.btn-set-start').forEach(Btn => {
-            Btn.addEventListener('click', () => this.SetStartTime(parseInt(Btn.dataset.index)));
-        });
-        Body.querySelectorAll('.btn-clear-clip').forEach(Btn => {
-            Btn.addEventListener('click', () => {
-                this.StartTimes[parseInt(Btn.dataset.index)] = null;
-                this.RenderClipTable();
-                this.RenderTimelineMarkers();
-                this.UpdateExportButton();
-            });
-        });
-
-        // Drag-to-reorder
-        let DragIndex = null;
-        Body.querySelectorAll('tr[draggable]').forEach(Row => {
-            Row.addEventListener('dragstart', (e) => {
-                DragIndex = parseInt(Row.dataset.index);
-                Row.style.opacity = '0.4';
-                e.dataTransfer.effectAllowed = 'move';
-            });
-            Row.addEventListener('dragend', () => { Row.style.opacity = '1'; });
-            Row.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                Row.style.borderTop = '2px solid #0d6efd';
-            });
-            Row.addEventListener('dragleave', () => { Row.style.borderTop = ''; });
-            Row.addEventListener('drop', (e) => {
-                e.preventDefault();
-                Row.style.borderTop = '';
-                const DropIndex = parseInt(Row.dataset.index);
-                if (DragIndex !== null && DragIndex !== DropIndex) {
-                    this.SwapClips(DragIndex, DropIndex);
-                }
-                DragIndex = null;
-            });
-        });
-
-        // Click-to-edit start times
-        Body.querySelectorAll('.clip-start').forEach(Td => {
-            Td.addEventListener('click', () => this.EditStartTime(Td));
-        });
-    }
-
-    EditStartTime(Td) {
-        if (Td.querySelector('input')) return; // already editing
-        const Idx = parseInt(Td.dataset.index);
-        const CurrentSeconds = this.StartTimes[Idx] !== undefined ? this.StartTimes[Idx] : null;
-        const CurrentStr = CurrentSeconds !== null ? this.FormatTimeMs(CurrentSeconds) : '';
-
-        const Input = document.createElement('input');
-        Input.type = 'text';
-        Input.className = 'form-control form-control-sm';
-        Input.style.cssText = 'font-family: monospace; font-size: 0.85em; width: 110px; padding: 1px 4px;';
-        Input.value = CurrentStr;
-        Input.placeholder = 'M:SS.ms';
-        Td.textContent = '';
-        Td.appendChild(Input);
-        Input.focus();
-        Input.select();
-
-        const Commit = () => {
-            const Val = Input.value.trim();
-            if (Val === '') {
-                this.StartTimes[Idx] = null;
-            } else {
-                const Parsed = this.ParseTimeInput(Val);
-                if (Parsed !== null) {
-                    this.StartTimes[Idx] = Parsed;
-                }
-            }
-            this.RenderClipTable();
-            this.RenderTimelineMarkers();
-            this.UpdateExportButton();
-        };
-
-        Input.addEventListener('blur', Commit);
-        Input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); Commit(); }
-            if (e.key === 'Escape') { this.RenderClipTable(); }
-        });
     }
 
     GetThumbnailUrl(Seconds) {
@@ -779,13 +651,10 @@ class ClipBuilderManager {
         let Seconds = 0;
 
         if (Parts.length === 3) {
-            // H:M:S or H:M:S.ms
             Seconds = parseFloat(Parts[0]) * 3600 + parseFloat(Parts[1]) * 60 + parseFloat(Parts[2]);
         } else if (Parts.length === 2) {
-            // M:S or M:S.ms
             Seconds = parseFloat(Parts[0]) * 60 + parseFloat(Parts[1]);
         } else if (Parts.length === 1) {
-            // Just seconds or seconds.ms
             Seconds = parseFloat(Parts[0]);
         }
 
@@ -810,6 +679,26 @@ class ClipBuilderManager {
             return;
         }
         this.StartTimes[Index] = this.Player.currentTime;
+        this.RenderClipTable();
+        this.RenderTimelineMarkers();
+        this.UpdateExportButton();
+    }
+
+    ClearStartTime(Index) {
+        this.StartTimes[Index] = null;
+        this.RenderClipTable();
+        this.RenderTimelineMarkers();
+        this.UpdateExportButton();
+    }
+
+    CommitStartTimeFromText(Index, Text) {
+        const Val = (Text || '').trim();
+        if (Val === '') {
+            this.StartTimes[Index] = null;
+        } else {
+            const Parsed = this.ParseTimeInput(Val);
+            if (Parsed !== null) this.StartTimes[Index] = Parsed;
+        }
         this.RenderClipTable();
         this.RenderTimelineMarkers();
         this.UpdateExportButton();
@@ -875,8 +764,24 @@ class ClipBuilderManager {
                 ProgressBar.classList.remove('progress-bar-animated');
                 ProgressBar.classList.add('bg-success');
                 StatusEl.textContent = 'Complete!';
-                const PathsList = (Json.OutputPaths || []).map(P => `<li><code>${this.EscapeHtml(P)}</code></li>`).join('');
-                ResultDiv.innerHTML = `<div class="alert alert-success mt-2"><i class="fas fa-check-circle"></i> Exported:<ul class="mb-0 mt-1">${PathsList}</ul></div>`;
+                ResultDiv.innerHTML = '';
+                const Wrap = document.createElement('div');
+                Wrap.className = 'alert alert-success mt-2';
+                const Icon = document.createElement('i');
+                Icon.className = 'fas fa-check-circle';
+                Wrap.appendChild(Icon);
+                Wrap.appendChild(document.createTextNode(' Exported:'));
+                const Ul = document.createElement('ul');
+                Ul.className = 'mb-0 mt-1';
+                (Json.OutputPaths || []).forEach(P => {
+                    const Li = document.createElement('li');
+                    const Code = document.createElement('code');
+                    Code.textContent = P;
+                    Li.appendChild(Code);
+                    Ul.appendChild(Li);
+                });
+                Wrap.appendChild(Ul);
+                ResultDiv.appendChild(Wrap);
                 ResultDiv.classList.remove('d-none');
                 this.LoadExportHistory();
             } else {
@@ -1050,7 +955,12 @@ class ClipBuilderManager {
         this.PreviewActive = true;
         this.PreviewClipIndex = 0;
         document.getElementById('PreviewPlayIcon').className = 'fas fa-stop';
-        document.getElementById('BtnPreviewPlay').innerHTML = '<i class="fas fa-stop"></i> Stop Preview';
+        const Btn = document.getElementById('BtnPreviewPlay');
+        Btn.innerHTML = '';
+        const I1 = document.createElement('i');
+        I1.className = 'fas fa-stop';
+        Btn.appendChild(I1);
+        Btn.appendChild(document.createTextNode(' Stop Preview'));
         this.PreviewPlayClip(0);
     }
 
@@ -1058,7 +968,12 @@ class ClipBuilderManager {
         this.PreviewActive = false;
         if (this.PreviewTimerRef) { clearInterval(this.PreviewTimerRef); this.PreviewTimerRef = null; }
         this.Player.pause();
-        document.getElementById('BtnPreviewPlay').innerHTML = '<i class="fas fa-play"></i> Preview Clips';
+        const Btn = document.getElementById('BtnPreviewPlay');
+        Btn.innerHTML = '';
+        const I1 = document.createElement('i');
+        I1.className = 'fas fa-play';
+        Btn.appendChild(I1);
+        Btn.appendChild(document.createTextNode(' Preview Clips'));
         document.getElementById('PreviewStatus').textContent = '';
     }
 
@@ -1093,19 +1008,21 @@ class ClipBuilderManager {
         if (Clips.length === 0) return;
 
         if (!this.PreviewActive) {
-            // Just jump to first clip
             this.PreviewActive = true;
             this.PreviewClipIndex = 0;
-            document.getElementById('BtnPreviewPlay').innerHTML = '<i class="fas fa-stop"></i> Stop Preview';
+            const Btn = document.getElementById('BtnPreviewPlay');
+            Btn.innerHTML = '';
+            const I1 = document.createElement('i');
+            I1.className = 'fas fa-stop';
+            Btn.appendChild(I1);
+            Btn.appendChild(document.createTextNode(' Stop Preview'));
             this.PreviewPlayClip(0);
         } else {
-            // Jump to next clip
             this.PreviewPlayClip(this.PreviewClipIndex + 1);
         }
     }
 
     GetSetClips() {
-        // Returns array of {Num, Start} for clips that have a start time set, in order
         const Result = [];
         for (let I = 0; I < this.ClipCount; I++) {
             if (this.StartTimes[I] !== null && this.StartTimes[I] !== undefined) {
@@ -1116,27 +1033,9 @@ class ClipBuilderManager {
     }
 
     // --- Export History ---
-    async LoadExportHistory() {
-        const Body = document.getElementById('ExportHistoryBody');
-        try {
-            const Resp = await fetch('/api/ClipBuilder/ExportHistory');
-            const Json = await Resp.json();
-            if (!Json.Success) { Body.innerHTML = '<tr><td colspan="5" class="text-danger">Failed to load</td></tr>'; return; }
-            if (Json.Exports.length === 0) { Body.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-3">No exports yet</td></tr>'; return; }
-
-            Body.innerHTML = '';
-            Json.Exports.forEach(E => {
-                const Tr = document.createElement('tr');
-                Tr.innerHTML = `
-                    <td title="${this.EscapeHtml(E.SourcePath)}">${this.EscapeHtml(E.FileName)}</td>
-                    <td><small class="text-truncate d-block" style="max-width:250px;" title="${this.EscapeHtml(E.OutputPathPrimary || '')}">${this.EscapeHtml(E.OutputPathPrimary || '-')}</small></td>
-                    <td><small class="text-truncate d-block" style="max-width:250px;" title="${this.EscapeHtml(E.OutputPathHalf || '')}">${this.EscapeHtml(E.OutputPathHalf || '-')}</small></td>
-                    <td>${E.ClipDuration || '-'}s</td>
-                    <td><small>${E.ExportedDate || '-'}</small></td>`;
-                Body.appendChild(Tr);
-            });
-        } catch (Ex) {
-            Body.innerHTML = '<tr><td colspan="5" class="text-danger">Error loading history</td></tr>';
+    LoadExportHistory() {
+        if (window.ClipBuilderTables && window.ClipBuilderTables.LoadExportHistory) {
+            window.ClipBuilderTables.LoadExportHistory();
         }
     }
 
@@ -1149,9 +1048,11 @@ class ClipBuilderManager {
 
     async BrowseTo(Path, Scan = false) {
         document.getElementById('BrowsePath').value = Path;
-        const List = document.getElementById('BrowseList');
         const Filter = document.getElementById('BrowseFilter').value.trim();
-        List.innerHTML = `<div class="p-3 text-muted">${Scan ? 'Scanning subfolders...' : 'Loading...'}</div>`;
+
+        if (window.ClipBuilderTables && window.ClipBuilderTables.SetBrowseStatus) {
+            window.ClipBuilderTables.SetBrowseStatus(Scan ? 'Scanning subfolders...' : 'Loading...');
+        }
 
         try {
             let Url = `/api/ClipBuilder/Browse?Path=${encodeURIComponent(Path)}`;
@@ -1161,7 +1062,9 @@ class ClipBuilderManager {
             const Resp = await fetch(Url);
             const Json = await Resp.json();
             if (!Json.Success) {
-                List.innerHTML = `<div class="p-3 text-danger">${this.EscapeHtml(Json.ErrorMessage)}</div>`;
+                if (window.ClipBuilderTables && window.ClipBuilderTables.SetBrowseStatus) {
+                    window.ClipBuilderTables.SetBrowseStatus(Json.ErrorMessage || 'Browse failed', true);
+                }
                 return;
             }
 
@@ -1174,42 +1077,16 @@ class ClipBuilderManager {
             this.BrowseParent = Json.Parent || '';
             this.RenderBrowseItems(Json.Items);
         } catch (Ex) {
-            List.innerHTML = `<div class="p-3 text-danger">Browse failed: ${this.EscapeHtml(Ex.message)}</div>`;
+            if (window.ClipBuilderTables && window.ClipBuilderTables.SetBrowseStatus) {
+                window.ClipBuilderTables.SetBrowseStatus('Browse failed: ' + Ex.message, true);
+            }
         }
     }
 
     RenderBrowseItems(Items) {
-        const List = document.getElementById('BrowseList');
-        List.innerHTML = '';
-
-        if (!Items.length) {
-            List.innerHTML = '<div class="p-3 text-muted">No matching folders or video files</div>';
-            return;
+        if (window.ClipBuilderTables && window.ClipBuilderTables.RenderBrowse) {
+            window.ClipBuilderTables.RenderBrowse(Items || []);
         }
-
-        Items.forEach(Item => {
-            const Row = document.createElement('a');
-            Row.href = '#';
-            Row.className = 'list-group-item list-group-item-action py-2 px-3 d-flex align-items-center';
-
-            if (Item.Type === 'folder') {
-                Row.innerHTML = `<i class="fas fa-folder text-warning me-2"></i><span class="text-truncate">${this.EscapeHtml(Item.Name)}</span>`;
-                Row.addEventListener('click', (e) => { e.preventDefault(); this.BrowseTo(Item.Path); });
-            } else {
-                const DirInfo = Item.Directory ? `<small class="text-muted ms-2 text-truncate" style="font-size:0.75em; max-width:250px;">${this.EscapeHtml(Item.Directory)}</small>` : '';
-                Row.innerHTML = `<i class="fas fa-film text-info me-2"></i>
-                    <span class="text-truncate flex-grow-1">${this.EscapeHtml(Item.Name)}</span>
-                    ${DirInfo}
-                    <span class="badge bg-secondary ms-2 flex-shrink-0">${Item.SizeMB} MB</span>`;
-                Row.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    this.LoadFile(null, Item.Name, Item.Path);
-                    document.getElementById('SearchInput').value = Item.Name;
-                    bootstrap.Modal.getInstance(document.getElementById('BrowseModal')).hide();
-                });
-            }
-            List.appendChild(Row);
-        });
     }
 
     UpdateBackToScanButton() {
@@ -1235,6 +1112,12 @@ class ClipBuilderManager {
             return;
         }
         this.BrowseTo(Path, true);
+    }
+
+    LoadFileFromBrowse(Name, Path) {
+        this.LoadFile(null, Name, Path);
+        document.getElementById('SearchInput').value = Name;
+        bootstrap.Modal.getInstance(document.getElementById('BrowseModal')).hide();
     }
 
     // --- Helpers ---
@@ -1272,5 +1155,515 @@ class ClipBuilderManager {
 document.addEventListener('DOMContentLoaded', () => {
     window.ClipBuilder = new ClipBuilderManager();
 });
+</script>
+
+<script type="module">
+import { TableRenderer } from "/static/js/TableRenderer/TableRenderer.js";
+import { TableRendererConfig } from "/static/js/TableRenderer/TableRendererConfig.js";
+import { EventBus } from "/static/js/TableRenderer/EventBus.js";
+import { ClientArrayDataSource } from "/static/js/TableRenderer/DataSources/ClientArrayDataSource.js";
+import { ColumnDefinition } from "/static/js/TableRenderer/ColumnDefinition.js";
+import { ICellRenderer } from "/static/js/TableRenderer/Interfaces/ICellRenderer.js";
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const FormatTimeMs = (Seconds) => {
+    if (Seconds === null || Seconds === undefined || isNaN(Seconds)) return '--:--.---';
+    const M = Math.floor(Seconds / 60);
+    const S = Math.floor(Seconds % 60);
+    const Ms = Math.floor((Seconds % 1) * 1000);
+    return `${M}:${S.toString().padStart(2, '0')}.${Ms.toString().padStart(3, '0')}`;
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const Truncate = (S, Max) => {
+    const V = S == null ? '' : String(S);
+    return V.length > Max ? V.substring(0, Max) + '...' : V;
+};
+
+// ===== Clip Table =====
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DragHandleRenderer extends ICellRenderer {
+    Render() {
+        const Span = document.createElement('span');
+        Span.className = 'drag-handle';
+        Span.style.cssText = 'cursor: grab; color: #999;';
+        const I = document.createElement('i');
+        I.className = 'fas fa-grip-vertical';
+        Span.appendChild(I);
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ClipNumberRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        Span.textContent = String(Row.ClipNum);
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ClipThumbRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        if (Row.StartSeconds == null) {
+            const Span = document.createElement('span');
+            Span.className = 'text-muted';
+            Span.style.fontSize = '0.7em';
+            Span.textContent = '--';
+            return Span;
+        }
+        const Img = document.createElement('img');
+        Img.style.cssText = 'width:60px;height:auto;border-radius:3px;';
+        Img.alt = 'frame';
+        if (window.ClipBuilder) Img.src = window.ClipBuilder.GetThumbnailUrl(Row.StartSeconds);
+        return Img;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ClipStartRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        Span.style.cssText = 'font-family: monospace; font-size: 0.85em; cursor: text;';
+        Span.title = 'Click to edit';
+        Span.textContent = Row.StartSeconds != null ? FormatTimeMs(Row.StartSeconds) : '--:--.---';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ClipEndRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        Span.style.cssText = 'font-family: monospace; font-size: 0.85em;';
+        Span.textContent = Row.StartSeconds != null && Row.ClipDuration != null
+            ? FormatTimeMs(Row.StartSeconds + Row.ClipDuration)
+            : '--:--.---';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ClipActionRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Wrap = document.createElement('span');
+        const SetBtn = document.createElement('button');
+        SetBtn.className = 'btn btn-sm btn-primary btn-set-start';
+        SetBtn.title = 'Set start to current time';
+        const SetI = document.createElement('i');
+        SetI.className = 'fas fa-map-marker-alt';
+        SetBtn.appendChild(SetI);
+        SetBtn.appendChild(document.createTextNode(' Set'));
+        SetBtn.addEventListener('click', (E) => {
+            E.stopPropagation();
+            if (window.ClipBuilder) window.ClipBuilder.SetStartTime(Row.Index);
+        });
+        Wrap.appendChild(SetBtn);
+        if (Row.StartSeconds != null) {
+            const ClearBtn = document.createElement('button');
+            ClearBtn.className = 'btn btn-sm btn-outline-danger ms-1';
+            ClearBtn.title = 'Clear';
+            const ClearI = document.createElement('i');
+            ClearI.className = 'fas fa-times';
+            ClearBtn.appendChild(ClearI);
+            ClearBtn.addEventListener('click', (E) => {
+                E.stopPropagation();
+                if (window.ClipBuilder) window.ClipBuilder.ClearStartTime(Row.Index);
+            });
+            Wrap.appendChild(ClearBtn);
+        }
+        return Wrap;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const BuildClipRows = () => {
+    const CB = window.ClipBuilder;
+    if (!CB) return [];
+    const Rows = [];
+    for (let I = 0; I < CB.ClipCount; I += 1) {
+        const Start = CB.StartTimes[I] !== undefined ? CB.StartTimes[I] : null;
+        Rows.push({
+            Index: I,
+            ClipNum: I + 1,
+            StartSeconds: Start,
+            ClipDuration: CB.ClipDuration
+        });
+    }
+    return Rows;
+};
+
+let ClipTable = null;
+let ClipSource = null;
+let ClipBus = null;
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const InitClipTable = () => {
+    const Mount = document.getElementById('ClipTableMount');
+    const Cfg = new TableRendererConfig({ DefaultPageSize: 0 });
+    ClipBus = new EventBus();
+    ClipSource = new ClientArrayDataSource(BuildClipRows());
+    const Cols = [
+        new ColumnDefinition({ Key: '__Drag', Header: '', Width: '20px', CellRendererName: 'ClipDrag', Align: 'center' }),
+        new ColumnDefinition({ Key: 'ClipNum', Header: '#', Width: '25px', CellRendererName: 'ClipNumber' }),
+        new ColumnDefinition({ Key: '__Thumb', Header: 'Frame', Width: '70px', CellRendererName: 'ClipThumb', Align: 'center' }),
+        new ColumnDefinition({
+            Key: 'StartSeconds', Header: 'Start',
+            CellRendererName: 'ClipStart',
+            Editable: true, EditorName: 'Text'
+        }),
+        new ColumnDefinition({ Key: '__End', Header: 'End', CellRendererName: 'ClipEnd' }),
+        new ColumnDefinition({ Key: '__Action', Header: 'Action', Width: '90px', CellRendererName: 'ClipAction' })
+    ];
+    ClipTable = new TableRenderer({
+        Container: Mount,
+        DataSource: ClipSource,
+        Columns: Cols,
+        Config: Cfg,
+        Bus: ClipBus,
+        Capabilities: { Editable: true }
+    });
+    ClipTable._CellRegistry.Register('ClipDrag', _DragHandleRenderer);
+    ClipTable._CellRegistry.Register('ClipNumber', _ClipNumberRenderer);
+    ClipTable._CellRegistry.Register('ClipThumb', _ClipThumbRenderer);
+    ClipTable._CellRegistry.Register('ClipStart', _ClipStartRenderer);
+    ClipTable._CellRegistry.Register('ClipEnd', _ClipEndRenderer);
+    ClipTable._CellRegistry.Register('ClipAction', _ClipActionRenderer);
+
+    ClipBus.Subscribe(EventBus.EventNames.CellEdited, (E) => {
+        if (E.Key === 'StartSeconds' && window.ClipBuilder) {
+            window.ClipBuilder.CommitStartTimeFromText(E.Row.Index, E.NewValue);
+        }
+    });
+
+    // Single-click on start cell opens the inline editor (re-fires dblclick the renderer listens for).
+    Mount.addEventListener('click', (E) => {
+        const Cell = E.target.closest('.tr-cell[data-key="StartSeconds"]');
+        if (!Cell) return;
+        if (Cell.querySelector('input')) return;
+        const Evt = new MouseEvent('dblclick', { bubbles: true, cancelable: true });
+        Cell.dispatchEvent(Evt);
+    });
+
+    // HTML5 drag-to-reorder, delegated on the mount. CellRenderers re-fire per Refresh,
+    // and rows carry data-index from TableRenderer._BuildRow.
+    let DragFrom = null;
+    Mount.addEventListener('dragstart', (E) => {
+        const Tr = E.target.closest('tr.tr-row');
+        if (!Tr) return;
+        DragFrom = parseInt(Tr.dataset.index, 10);
+        Tr.style.opacity = '0.4';
+        if (E.dataTransfer) E.dataTransfer.effectAllowed = 'move';
+    });
+    Mount.addEventListener('dragend', (E) => {
+        const Tr = E.target.closest('tr.tr-row');
+        if (Tr) Tr.style.opacity = '1';
+    });
+    Mount.addEventListener('dragover', (E) => {
+        const Tr = E.target.closest('tr.tr-row');
+        if (!Tr) return;
+        E.preventDefault();
+        if (E.dataTransfer) E.dataTransfer.dropEffect = 'move';
+        Tr.style.borderTop = '2px solid #0d6efd';
+    });
+    Mount.addEventListener('dragleave', (E) => {
+        const Tr = E.target.closest('tr.tr-row');
+        if (Tr) Tr.style.borderTop = '';
+    });
+    Mount.addEventListener('drop', (E) => {
+        const Tr = E.target.closest('tr.tr-row');
+        if (!Tr) return;
+        E.preventDefault();
+        Tr.style.borderTop = '';
+        const To = parseInt(Tr.dataset.index, 10);
+        if (DragFrom != null && DragFrom !== To && window.ClipBuilder) {
+            window.ClipBuilder.SwapClips(DragFrom, To);
+        }
+        DragFrom = null;
+    });
+
+    return ClipTable.Render().then(() => DecorateDraggable());
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const DecorateDraggable = () => {
+    const Mount = document.getElementById('ClipTableMount');
+    if (!Mount) return;
+    Mount.querySelectorAll('tr.tr-row').forEach(Tr => { Tr.draggable = true; });
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RefreshClipTable = () => {
+    if (!ClipTable || !ClipSource) return;
+    ClipSource.SetRows(BuildClipRows());
+    ClipTable.Refresh().then(() => DecorateDraggable());
+};
+
+// ===== Export History Table =====
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _HistFileRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        Span.title = Row.SourcePath || '';
+        Span.textContent = Row.FileName || '';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _HistPathRenderer extends ICellRenderer {
+    constructor(Opts) { super(); this._Field = Opts?.Field; }
+    Render(_V, Row) {
+        const Val = Row[this._Field] || '';
+        const Small = document.createElement('small');
+        Small.className = 'text-truncate d-block';
+        Small.style.maxWidth = '250px';
+        Small.title = Val;
+        Small.textContent = Val || '-';
+        return Small;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _HistDurationRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        Span.textContent = `${Row.ClipDuration != null ? Row.ClipDuration : '-'}s`;
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _HistDateRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Small = document.createElement('small');
+        Small.textContent = Row.ExportedDate || '-';
+        return Small;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _HistEmptyRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        Span.className = Row.__Empty === 'error' ? 'text-danger' : 'text-muted';
+        Span.textContent = Row.Message || '';
+        return Span;
+    }
+}
+
+let HistoryTable = null;
+let HistorySource = null;
+let HistoryBus = null;
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const InitHistoryTable = () => {
+    const Mount = document.getElementById('ExportHistoryMount');
+    const Cfg = new TableRendererConfig({ DefaultPageSize: 0 });
+    HistoryBus = new EventBus();
+    HistorySource = new ClientArrayDataSource([]);
+    const Cols = [
+        new ColumnDefinition({ Key: 'FileName', Header: 'File', CellRendererName: 'HistFile' }),
+        new ColumnDefinition({ Key: 'OutputPathPrimary', Header: 'Primary Output', CellRendererName: 'HistPath', CellRendererOptions: { Field: 'OutputPathPrimary' } }),
+        new ColumnDefinition({ Key: 'OutputPathHalf', Header: 'Half Output', CellRendererName: 'HistPath', CellRendererOptions: { Field: 'OutputPathHalf' } }),
+        new ColumnDefinition({ Key: 'ClipDuration', Header: 'Duration', CellRendererName: 'HistDuration' }),
+        new ColumnDefinition({ Key: 'ExportedDate', Header: 'Exported', CellRendererName: 'HistDate' })
+    ];
+    HistoryTable = new TableRenderer({
+        Container: Mount,
+        DataSource: HistorySource,
+        Columns: Cols,
+        Config: Cfg,
+        Bus: HistoryBus,
+        Capabilities: {}
+    });
+    HistoryTable._CellRegistry.Register('HistFile', _HistFileRenderer);
+    HistoryTable._CellRegistry.Register('HistPath', _HistPathRenderer);
+    HistoryTable._CellRegistry.Register('HistDuration', _HistDurationRenderer);
+    HistoryTable._CellRegistry.Register('HistDate', _HistDateRenderer);
+    return HistoryTable.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const LoadExportHistory = async () => {
+    if (!HistoryTable || !HistorySource) return;
+    const Mount = document.getElementById('ExportHistoryMount');
+    try {
+        const Resp = await fetch('/api/ClipBuilder/ExportHistory');
+        const Json = await Resp.json();
+        if (!Json.Success) {
+            SetHistoryStatus('Failed to load', true);
+            return;
+        }
+        if (!Json.Exports || Json.Exports.length === 0) {
+            SetHistoryStatus('No exports yet', false);
+            return;
+        }
+        Mount.dataset.empty = '0';
+        HistorySource.SetRows(Json.Exports);
+        await HistoryTable.Refresh();
+    } catch (Ex) {
+        SetHistoryStatus('Error loading history', true);
+    }
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const SetHistoryStatus = (Msg, IsError) => {
+    if (!HistoryTable || !HistorySource) return;
+    HistorySource.SetRows([]);
+    HistoryTable.Refresh().then(() => {
+        const Mount = document.getElementById('ExportHistoryMount');
+        const Existing = Mount.querySelector('.tr-empty-msg');
+        if (Existing) Existing.remove();
+        const P = document.createElement('p');
+        P.className = 'tr-empty-msg text-center py-3 mb-0 ' + (IsError ? 'text-danger' : 'text-muted');
+        P.textContent = Msg;
+        Mount.appendChild(P);
+    });
+};
+
+// ===== Browse Table =====
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _BrowseRowRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Wrap = document.createElement('a');
+        Wrap.href = '#';
+        Wrap.className = 'browse-row d-flex align-items-center w-100';
+        Wrap.style.textDecoration = 'none';
+        Wrap.style.color = 'inherit';
+        if (Row.Type === 'folder') {
+            const I = document.createElement('i');
+            I.className = 'fas fa-folder text-warning me-2';
+            Wrap.appendChild(I);
+            const Span = document.createElement('span');
+            Span.className = 'text-truncate';
+            Span.textContent = Row.Name || '';
+            Wrap.appendChild(Span);
+            Wrap.addEventListener('click', (E) => {
+                E.preventDefault();
+                if (window.ClipBuilder) window.ClipBuilder.BrowseTo(Row.Path);
+            });
+        } else {
+            const I = document.createElement('i');
+            I.className = 'fas fa-film text-info me-2';
+            Wrap.appendChild(I);
+            const Name = document.createElement('span');
+            Name.className = 'text-truncate flex-grow-1';
+            Name.textContent = Row.Name || '';
+            Wrap.appendChild(Name);
+            if (Row.Directory) {
+                const Dir = document.createElement('small');
+                Dir.className = 'text-muted ms-2 text-truncate';
+                Dir.style.cssText = 'font-size:0.75em; max-width:250px;';
+                Dir.textContent = Row.Directory;
+                Wrap.appendChild(Dir);
+            }
+            const Badge = document.createElement('span');
+            Badge.className = 'badge bg-secondary ms-2 flex-shrink-0';
+            Badge.textContent = `${Row.SizeMB} MB`;
+            Wrap.appendChild(Badge);
+            Wrap.addEventListener('click', (E) => {
+                E.preventDefault();
+                if (window.ClipBuilder) window.ClipBuilder.LoadFileFromBrowse(Row.Name, Row.Path);
+            });
+        }
+        return Wrap;
+    }
+}
+
+let BrowseTable = null;
+let BrowseSource = null;
+let BrowseBus = null;
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const InitBrowseTable = () => {
+    const Mount = document.getElementById('BrowseListMount');
+    const Cfg = new TableRendererConfig({ DefaultPageSize: 0 });
+    BrowseBus = new EventBus();
+    BrowseSource = new ClientArrayDataSource([]);
+    const Cols = [
+        new ColumnDefinition({ Key: '__Row', Header: '', CellRendererName: 'BrowseRow' })
+    ];
+    BrowseTable = new TableRenderer({
+        Container: Mount,
+        DataSource: BrowseSource,
+        Columns: Cols,
+        Config: Cfg,
+        Bus: BrowseBus,
+        Capabilities: {}
+    });
+    BrowseTable._CellRegistry.Register('BrowseRow', _BrowseRowRenderer);
+    return BrowseTable.Render().then(() => HideBrowseHeader());
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const HideBrowseHeader = () => {
+    const Mount = document.getElementById('BrowseListMount');
+    if (!Mount) return;
+    const Thead = Mount.querySelector('thead');
+    if (Thead) Thead.style.display = 'none';
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderBrowse = async (Items) => {
+    if (!BrowseTable || !BrowseSource) return;
+    const Mount = document.getElementById('BrowseListMount');
+    const Existing = Mount.querySelector('.tr-empty-msg');
+    if (Existing) Existing.remove();
+    if (!Items || !Items.length) {
+        BrowseSource.SetRows([]);
+        await BrowseTable.Refresh();
+        const P = document.createElement('p');
+        P.className = 'tr-empty-msg p-3 text-muted mb-0';
+        P.textContent = 'No matching folders or video files';
+        Mount.appendChild(P);
+        return;
+    }
+    BrowseSource.SetRows(Items);
+    await BrowseTable.Refresh();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const SetBrowseStatus = (Msg, IsError) => {
+    if (!BrowseTable || !BrowseSource) return;
+    BrowseSource.SetRows([]);
+    BrowseTable.Refresh().then(() => {
+        const Mount = document.getElementById('BrowseListMount');
+        const Existing = Mount.querySelector('.tr-empty-msg');
+        if (Existing) Existing.remove();
+        const P = document.createElement('p');
+        P.className = 'tr-empty-msg p-3 mb-0 ' + (IsError ? 'text-danger' : 'text-muted');
+        P.textContent = Msg;
+        Mount.appendChild(P);
+    });
+};
+
+window.ClipBuilderTables = {
+    RefreshClipTable,
+    LoadExportHistory,
+    RenderBrowse,
+    SetBrowseStatus
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const InitAll = async () => {
+    await InitClipTable();
+    await InitHistoryTable();
+    await InitBrowseTable();
+    if (window.ClipBuilder) {
+        window.ClipBuilder.RenderClipTable();
+        window.ClipBuilder.LoadExportHistory();
+    }
+};
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { InitAll(); });
+} else {
+    InitAll();
+}
 </script>
 {% endblock %}

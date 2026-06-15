@@ -6,6 +6,23 @@ from Core.Logging.LoggingService import LoggingService
 from Features.FailureAccounting.Models.FailedJobRow import FailedJobRow
 
 
+# directive: table-renderer-service | # see shared-table-renderer.S9
+class _FailedJobsSearchFilter:
+    """IQueryFilter that ILIKEs FileName + RelativePath in the outer SELECT."""
+
+    # directive: table-renderer-service | # see shared-table-renderer.S9
+    def __init__(self, EscapedPattern):
+        self.Pattern = "%" + EscapedPattern + "%"
+
+    # directive: table-renderer-service | # see shared-table-renderer.S9
+    def ToClause(self):
+        return "(LOWER(mf.FileName) LIKE LOWER(%s) ESCAPE '!' OR LOWER(COALESCE(mf.RelativePath,'')) LIKE LOWER(%s) ESCAPE '!')"
+
+    # directive: table-renderer-service | # see shared-table-renderer.S9
+    def Params(self):
+        return (self.Pattern, self.Pattern)
+
+
 # directive: failure-accounting | # see failure-accounting.C7
 class FailedJobsRepository(BaseRepository):
     """SOT for the /FailedJobs surface. Reads capped jobs + writes the operator-Reset audit row."""
@@ -129,3 +146,66 @@ class FailedJobsRepository(BaseRepository):
             "FROM TranscodeAttempts WHERE MediaFileId = %s ORDER BY AttemptDate DESC LIMIT 100",
             (int(MediaFileId),),
         )
+
+    # directive: table-renderer-service | # see shared-table-renderer.S9
+    FailedJobsSortWhitelist = {
+        "LastAttemptDate": "r.last_attempt",
+        "FailureCount": "r.fail_count",
+        "FileName": "mf.FileName",
+        "AssignedProfile": "mf.AssignedProfile",
+        "SizeMB": "mf.SizeMB",
+    }
+
+    # directive: table-renderer-service | # see shared-table-renderer.S9
+    def BuildFailedJobsSearchFilter(self, SearchTerm):
+        """Return an IQueryFilter that ILIKEs FileName + RelativePath; returns None when empty."""
+        if not SearchTerm:
+            return None
+        return _FailedJobsSearchFilter(EscapeLikePattern(SearchTerm))
+
+    # directive: table-renderer-service | # see shared-table-renderer.S9
+    def GetFailedJobsPaged(self, Query):
+        """Paged capped-jobs query routed through PagedQueryBuilder with window-count strategy."""
+        from Core.Querying import PagedQueryBuilder, PagedQueryResult, PagedQueryConfig, CountStrategy
+        try:
+            Cfg = PagedQueryConfig(DefaultPageSize=100, MaxPageSize=500)
+            Builder = PagedQueryBuilder(self.DatabaseService, Cfg)
+            RowsSelect = (
+                "WITH ranked AS ("
+                "  SELECT ta.MediaFileId, "
+                "         COUNT(*) AS fail_count, "
+                "         MAX(ta.AttemptDate) AS last_attempt, "
+                "         (ARRAY_AGG(ta.ErrorMessage ORDER BY ta.AttemptDate DESC))[1] AS last_error, "
+                "         (ARRAY_AGG(ta.WorkerName ORDER BY ta.AttemptDate DESC))[1] AS last_worker "
+                "    FROM TranscodeAttempts ta "
+                "    JOIN MediaFiles mf ON mf.Id = ta.MediaFileId "
+                "   WHERE ta.Success = FALSE "
+                "     AND ta.AttemptDate > GREATEST("
+                "       COALESCE((SELECT MAX(AttemptDate) FROM TranscodeAttempts WHERE MediaFileId = ta.MediaFileId AND Success = TRUE), 'epoch'::timestamp), "
+                "       COALESCE(mf.LastFailureResetAt, 'epoch'::timestamp)"
+                "     ) "
+                "   GROUP BY ta.MediaFileId"
+                ") "
+                "SELECT mf.Id AS MediaFileId, mf.FileName, COALESCE(mf.RelativePath, '') AS FilePath, "
+                "       r.fail_count AS FailureCount, r.last_error AS LastErrorMessage, "
+                "       r.last_attempt AS LastAttemptDate, mf.AssignedProfile, "
+                "       r.last_worker AS LastWorkerName, mf.SizeMB, mf.LastFailureResetAt, "
+                "       COUNT(*) OVER () AS __TotalCount "
+                "  FROM ranked r "
+                "  JOIN MediaFiles mf ON mf.Id = r.MediaFileId"
+            )
+            StaticWhere = (
+                "r.fail_count >= COALESCE((SELECT MaxEncodeFailures FROM FailureBudgetConfig WHERE Id = 1), 3)",
+                (),
+            )
+            Result = Builder.Execute(
+                RowsSelect=RowsSelect,
+                Query=Query,
+                StaticWhere=StaticWhere,
+                CountStrategyChoice=CountStrategy.WINDOW,
+            )
+            return Result
+        except Exception as Ex:
+            LoggingService.LogException("Exception getting paged failed jobs", Ex, "FailedJobsRepository", "GetFailedJobsPaged")
+            from Core.Querying import PagedQueryResult as _PQR
+            return _PQR(Rows=[], TotalCount=0, Page=Query.Page, PageSize=Query.PageSize)

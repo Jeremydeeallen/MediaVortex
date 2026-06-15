@@ -7,16 +7,16 @@
     <div class="d-flex justify-content-between align-items-center my-3">
         <h2 class="mb-0">Failed Jobs</h2>
         <div class="d-flex gap-2 align-items-center">
-            <input id="failedjobs-search" type="text" class="form-control form-control-sm" placeholder="Search filename..." style="width: 280px;" />
-            <select id="failedjobs-sort" class="form-select form-select-sm" style="width: 200px;">
-                <option value="LastAttemptDate-DESC">Newest failure first</option>
-                <option value="LastAttemptDate-ASC">Oldest failure first</option>
-                <option value="FailureCount-DESC">Most failures first</option>
-                <option value="SizeMB-DESC">Largest first</option>
-                <option value="SizeMB-ASC">Smallest first</option>
-                <option value="FileName-ASC">Filename A-Z</option>
+            <input id="FailedJobsSearch" type="text" class="form-control form-control-sm" placeholder="Search filename..." style="width: 280px;" />
+            <select id="FailedJobsSort" class="form-select form-select-sm" style="width: 200px;">
+                <option value="LastAttemptDate:DESC">Newest failure first</option>
+                <option value="LastAttemptDate:ASC">Oldest failure first</option>
+                <option value="FailureCount:DESC">Most failures first</option>
+                <option value="SizeMB:DESC">Largest first</option>
+                <option value="SizeMB:ASC">Smallest first</option>
+                <option value="FileName:ASC">Filename A-Z</option>
             </select>
-            <button id="failedjobs-refresh" class="btn btn-sm btn-secondary">Refresh</button>
+            <button id="FailedJobsRefresh" class="btn btn-sm btn-secondary">Refresh</button>
         </div>
     </div>
 
@@ -29,36 +29,22 @@
     </div>
 
     <div class="d-flex justify-content-between align-items-center mb-2">
-        <div>Total capped: <span class="badge bg-danger" id="failedjobs-total">0</span></div>
+        <div>Total capped: <span class="badge bg-danger" id="FailedJobsTotal">0</span></div>
         <div class="text-muted small">Click a filename to see full attempt history.</div>
     </div>
 
-    <div class="table-responsive">
-        <table class="table table-sm table-hover align-middle">
-            <thead class="table-light">
-                <tr>
-                    <th>File</th>
-                    <th class="text-end">Size (MB)</th>
-                    <th class="text-end">Failures</th>
-                    <th>Last error</th>
-                    <th>Last attempt</th>
-                    <th>Profile</th>
-                    <th>Last worker</th>
-                    <th class="text-end">Action</th>
-                </tr>
-            </thead>
-            <tbody id="failedjobs-rows">
-                <tr><td colspan="8" class="text-center text-muted">Loading...</td></tr>
-            </tbody>
-        </table>
-    </div>
+    <div id="FailedJobsTableMount"></div>
 
-    <nav>
-        <ul class="pagination pagination-sm" id="failedjobs-pagination"></ul>
-    </nav>
+    <div class="d-flex justify-content-between align-items-center mt-2">
+        <div class="text-muted small" id="FailedJobsPaginationInfo">-</div>
+        <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary" id="FailedJobsPrevBtn" disabled>Prev</button>
+            <button class="btn btn-outline-secondary" id="FailedJobsNextBtn" disabled>Next</button>
+        </div>
+    </div>
 </div>
 
-<div class="modal fade" id="attempts-modal" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="AttemptsModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
@@ -66,130 +52,320 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <table class="table table-sm">
-                    <thead>
-                        <tr><th>Date</th><th>Profile</th><th>Worker</th><th>Success</th><th>VMAF</th><th>Duration (s)</th><th>Old MB</th><th>New MB</th><th>Error</th></tr>
-                    </thead>
-                    <tbody id="attempts-rows"></tbody>
-                </table>
+                <div id="AttemptsTableMount"></div>
             </div>
         </div>
     </div>
 </div>
 
-<script>
-(function () {
-    const PAGE_SIZE = 100;
-    let offset = 0;
-    let total = 0;
+<style>
+    #FailedJobsTableMount .tr-table, #AttemptsTableMount .tr-table {
+        width: 100%; border-collapse: collapse; font-size: 0.875rem;
+    }
+    #FailedJobsTableMount .tr-th, #AttemptsTableMount .tr-th {
+        background: #f8f9fa; padding: 0.5rem; text-align: left; border-bottom: 2px solid #dee2e6;
+    }
+    #FailedJobsTableMount .tr-th-sortable, #AttemptsTableMount .tr-th-sortable { cursor: pointer; user-select: none; }
+    #FailedJobsTableMount .tr-row, #AttemptsTableMount .tr-row { border-bottom: 1px solid #f0f0f0; }
+    #FailedJobsTableMount .tr-row:hover, #AttemptsTableMount .tr-row:hover { background: #f8f9fa; }
+    #FailedJobsTableMount .tr-cell, #AttemptsTableMount .tr-cell { padding: 0.4rem 0.5rem; vertical-align: middle; }
+    #FailedJobsTableMount .tr-live, #AttemptsTableMount .tr-live { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+    #FailedJobsTableMount .tr-scroll, #AttemptsTableMount .tr-scroll { max-height: 60vh; }
+</style>
 
-    function fmtDate(s) { if (!s) return '-'; const d = new Date(s); return isNaN(d) ? s : d.toLocaleString(); }
-    function fmtErr(s) { if (!s) return '-'; if (s.length > 120) return s.slice(0, 120) + '...'; return s; }
-    function esc(s) { return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+<script type="module">
+import { TableRenderer } from "/static/js/TableRenderer/TableRenderer.js";
+import { TableRendererConfig } from "/static/js/TableRenderer/TableRendererConfig.js";
+import { EventBus } from "/static/js/TableRenderer/EventBus.js";
+import { IDataSource } from "/static/js/TableRenderer/Interfaces/IDataSource.js";
+import { ClientArrayDataSource } from "/static/js/TableRenderer/DataSources/ClientArrayDataSource.js";
+import { SortController } from "/static/js/TableRenderer/SortController.js";
+import { PaginationController } from "/static/js/TableRenderer/PaginationController.js";
+import { FilterController } from "/static/js/TableRenderer/FilterController.js";
+import { ColumnDefinition } from "/static/js/TableRenderer/ColumnDefinition.js";
+import { ICellRenderer } from "/static/js/TableRenderer/Interfaces/ICellRenderer.js";
 
-    function load() {
-        const search = document.getElementById('failedjobs-search').value.trim();
-        const [sortBy, sortDir] = document.getElementById('failedjobs-sort').value.split('-');
-        const params = new URLSearchParams({ limit: PAGE_SIZE, offset: offset, sortBy, sortDir });
-        if (search) params.set('search', search);
-        fetch('/api/FailedJobs?' + params.toString())
-            .then(r => r.json())
-            .then(d => {
-                if (!d.Success) { renderError(d.Message || 'Load failed'); return; }
-                total = d.Data.TotalCount || 0;
-                document.getElementById('failedjobs-total').textContent = total;
-                renderRows(d.Data.Items || []);
-                renderPagination();
-            })
-            .catch(e => renderError(e.toString()));
-    }
-    function renderError(msg) {
-        document.getElementById('failedjobs-rows').innerHTML =
-            '<tr><td colspan="8" class="text-danger">' + esc(msg) + '</td></tr>';
-    }
-    function fmtSize(mb) {
-        if (mb == null) return '-';
-        const n = Number(mb);
-        if (!isFinite(n)) return '-';
-        if (n >= 1024) return (n / 1024).toFixed(2) + ' GB';
-        return n.toFixed(1);
-    }
-    function renderRows(items) {
-        if (!items.length) {
-            document.getElementById('failedjobs-rows').innerHTML =
-                '<tr><td colspan="8" class="text-center text-muted">No capped files. The queue is healthy.</td></tr>';
-            return;
-        }
-        document.getElementById('failedjobs-rows').innerHTML = items.map(it => (
-            '<tr>' +
-            '<td><a href="#" data-mfid="' + it.MediaFileId + '" class="js-show-history">' + esc(it.FileName) + '</a><div class="small text-muted">' + esc(it.FilePath) + '</div></td>' +
-            '<td class="text-end">' + esc(fmtSize(it.SizeMB)) + '</td>' +
-            '<td class="text-end"><span class="badge bg-danger">' + it.FailureCount + '</span></td>' +
-            '<td><span class="text-muted small">' + esc(fmtErr(it.LastErrorMessage)) + '</span></td>' +
-            '<td>' + esc(fmtDate(it.LastAttemptDate)) + '</td>' +
-            '<td>' + esc(it.AssignedProfile || '-') + '</td>' +
-            '<td>' + esc(it.LastWorkerName || '-') + '</td>' +
-            '<td class="text-end"><button class="btn btn-sm btn-outline-success js-reset" data-mfid="' + it.MediaFileId + '" data-name="' + esc(it.FileName) + '">Reset</button></td>' +
-            '</tr>'
-        )).join('');
-        document.querySelectorAll('.js-reset').forEach(b => b.addEventListener('click', onReset));
-        document.querySelectorAll('.js-show-history').forEach(a => a.addEventListener('click', onShowHistory));
-    }
-    function renderPagination() {
-        const ul = document.getElementById('failedjobs-pagination');
-        const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-        const cur = Math.floor(offset / PAGE_SIZE);
-        const items = [];
-        for (let i = 0; i < pages; i++) {
-            items.push('<li class="page-item ' + (i === cur ? 'active' : '') + '"><a class="page-link" href="#" data-pg="' + i + '">' + (i + 1) + '</a></li>');
-        }
-        ul.innerHTML = items.join('');
-        ul.querySelectorAll('a.page-link').forEach(a => a.addEventListener('click', e => {
-            e.preventDefault(); offset = parseInt(a.dataset.pg, 10) * PAGE_SIZE; load();
-        }));
-    }
-    function onReset(e) {
-        const btn = e.currentTarget;
-        const mfid = btn.dataset.mfid;
-        const name = btn.dataset.name;
-        if (!confirm('Reset failure budget for "' + name + '"?\n\nThis lets the file be claimed/recomputed again. An audit row is written to FailureBudgetResets.')) return;
-        btn.disabled = true; btn.textContent = 'Resetting...';
-        fetch('/api/FailedJobs/' + mfid + '/Reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ OperatorName: 'web-ui' }) })
-            .then(r => r.json())
-            .then(d => { if (!d.Success) alert('Reset failed: ' + (d.Message || 'unknown')); load(); })
-            .catch(e => { alert('Reset error: ' + e); btn.disabled = false; btn.textContent = 'Reset'; });
-    }
-    function onShowHistory(e) {
-        e.preventDefault();
-        const mfid = e.currentTarget.dataset.mfid;
-        fetch('/api/FailedJobs/' + mfid + '/Attempts')
-            .then(r => r.json())
-            .then(d => {
-                if (!d.Success) { alert('History failed: ' + (d.Message || 'unknown')); return; }
-                const rows = (d.Data.Attempts || []).map(a => (
-                    '<tr>' +
-                    '<td>' + esc(fmtDate(a.AttemptDate)) + '</td>' +
-                    '<td>' + esc(a.ProfileName || '-') + '</td>' +
-                    '<td>' + esc(a.WorkerName || '-') + '</td>' +
-                    '<td>' + (a.Success === true ? '<span class="badge bg-success">true</span>' : a.Success === false ? '<span class="badge bg-danger">false</span>' : '<span class="badge bg-secondary">null</span>') + '</td>' +
-                    '<td>' + (a.VMAF != null ? a.VMAF.toFixed(2) : '-') + '</td>' +
-                    '<td>' + (a.TranscodeDurationSeconds || 0).toFixed(1) + '</td>' +
-                    '<td>' + ((a.OldSizeBytes || 0) / 1048576).toFixed(1) + '</td>' +
-                    '<td>' + ((a.NewSizeBytes || 0) / 1048576).toFixed(1) + '</td>' +
-                    '<td><span class="text-muted small">' + esc(fmtErr(a.ErrorMessage)) + '</span></td>' +
-                    '</tr>'
-                )).join('');
-                document.getElementById('attempts-rows').innerHTML = rows || '<tr><td colspan="9" class="text-muted">No attempts recorded.</td></tr>';
-                const modal = new bootstrap.Modal(document.getElementById('attempts-modal'));
-                modal.show();
-            });
-    }
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const Esc = T => { const D = document.createElement('div'); D.appendChild(document.createTextNode(T == null ? '' : String(T))); return D.innerHTML; };
 
-    document.getElementById('failedjobs-refresh').addEventListener('click', load);
-    document.getElementById('failedjobs-sort').addEventListener('change', () => { offset = 0; load(); });
-    document.getElementById('failedjobs-search').addEventListener('keydown', e => { if (e.key === 'Enter') { offset = 0; load(); } });
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const FmtDate = S => { if (!S) return '-'; const D = new Date(S); return isNaN(D) ? S : D.toLocaleString(); };
 
-    load();
-})();
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const FmtErr = S => { if (!S) return '-'; if (S.length > 120) return S.slice(0, 120) + '...'; return S; };
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const FmtSize = MB => { if (MB == null) return '-'; const N = Number(MB); if (!isFinite(N)) return '-'; if (N >= 1024) return (N / 1024).toFixed(2) + ' GB'; return N.toFixed(1); };
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _FailedJobsDataSource extends IDataSource {
+    // directive: table-renderer-service | // see shared-table-renderer.S1
+    constructor() { super(); this._Cache = new Map(); }
+
+    // directive: table-renderer-service | // see shared-table-renderer.S1
+    async GetRows(Query) { const R = await this._Fetch(Query); return R.Items || []; }
+
+    // directive: table-renderer-service | // see shared-table-renderer.S1
+    async GetTotalCount(Query) { const R = await this._Fetch(Query); return R.TotalCount || 0; }
+
+    // directive: table-renderer-service | // see shared-table-renderer.S1
+    async _Fetch(Query) {
+        const Key = JSON.stringify(Query || {});
+        if (this._Cache.has(Key)) return this._Cache.get(Key);
+        const Page = Query?.Page ?? 0;
+        const PageSize = Query?.PageSize ?? 100;
+        const SortKey = Query?.Sort?.Key || 'LastAttemptDate';
+        const SortDir = (Query?.Sort?.Direction || 'DESC').toUpperCase();
+        const Q = (Query?.Filters?._q ?? Query?.Filters?.q ?? '').toString().trim();
+        const Params = new URLSearchParams();
+        Params.set('limit', String(PageSize));
+        Params.set('offset', String(Page * PageSize));
+        Params.set('sortBy', SortKey);
+        Params.set('sortDir', SortDir);
+        if (Q) Params.set('search', Q);
+        const Resp = await fetch('/api/FailedJobs?' + Params.toString(), { method: 'GET', headers: { 'Accept': 'application/json' } });
+        if (!Resp.ok) throw new Error('HTTP ' + Resp.status);
+        const Json = await Resp.json();
+        if (!Json.Success) throw new Error(Json.Message || 'Load failed');
+        const Payload = { Items: Json.Data?.Items || Json.Rows || [], TotalCount: Json.Data?.TotalCount ?? Json.TotalCount ?? 0 };
+        this._Cache.clear();
+        this._Cache.set(Key, Payload);
+        return Payload;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _FileNameCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(_V, Row) {
+        const Wrap = document.createElement('span');
+        const Link = document.createElement('a');
+        Link.href = '#';
+        Link.dataset.mfid = Row.MediaFileId;
+        Link.className = 'js-show-history';
+        Link.textContent = Row.FileName || '';
+        Wrap.appendChild(Link);
+        const Sub = document.createElement('div');
+        Sub.className = 'small text-muted';
+        Sub.textContent = Row.FilePath || '';
+        Wrap.appendChild(Sub);
+        return Wrap;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _SizeCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(V) { const S = document.createElement('span'); S.className = 'text-end d-block'; S.textContent = FmtSize(V); return S; }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _FailureCountCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(V) { const B = document.createElement('span'); B.className = 'badge bg-danger'; B.textContent = String(V ?? 0); return B; }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ErrorCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(V) { const S = document.createElement('span'); S.className = 'text-muted small'; S.textContent = FmtErr(V); return S; }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DateCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(V) { const S = document.createElement('span'); S.textContent = FmtDate(V); return S; }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ResetButtonCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(_V, Row) {
+        const Btn = document.createElement('button');
+        Btn.className = 'btn btn-sm btn-outline-success js-reset';
+        Btn.textContent = 'Reset';
+        Btn.dataset.mfid = Row.MediaFileId;
+        Btn.dataset.name = Row.FileName || '';
+        return Btn;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _BoolBadgeCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(V) {
+        const B = document.createElement('span');
+        if (V === true) { B.className = 'badge bg-success'; B.textContent = 'true'; }
+        else if (V === false) { B.className = 'badge bg-danger'; B.textContent = 'false'; }
+        else { B.className = 'badge bg-secondary'; B.textContent = 'null'; }
+        return B;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _VMAFCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(V) { const S = document.createElement('span'); S.textContent = V != null ? Number(V).toFixed(2) : '-'; return S; }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _SecondsCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(V) { const S = document.createElement('span'); S.textContent = Number(V || 0).toFixed(1); return S; }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _MBFromBytesCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(V) { const S = document.createElement('span'); S.textContent = (Number(V || 0) / 1048576).toFixed(1); return S; }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const InitFailedJobsTable = () => {
+    const Cfg = new TableRendererConfig({ DefaultPageSize: 100, DefaultSortDirection: 'DESC' });
+    const Bus = new EventBus();
+    const Src = new _FailedJobsDataSource();
+    const Sort = new SortController(Src, Bus, Cfg);
+    const Pag = new PaginationController(Src, Bus, Cfg);
+    const Filt = new FilterController(Src, Bus, Cfg);
+    Sort.SetSort('LastAttemptDate', 'DESC');
+
+    const Cols = [
+        new ColumnDefinition({ Key: 'FileName', Header: 'File', Sortable: true, CellRendererName: 'FailedFileName' }),
+        new ColumnDefinition({ Key: 'SizeMB', Header: 'Size (MB)', Sortable: true, CellRendererName: 'FailedSize', Align: 'right', Width: '110px' }),
+        new ColumnDefinition({ Key: 'FailureCount', Header: 'Failures', Sortable: true, CellRendererName: 'FailedCount', Align: 'right', Width: '90px' }),
+        new ColumnDefinition({ Key: 'LastErrorMessage', Header: 'Last error', CellRendererName: 'FailedError' }),
+        new ColumnDefinition({ Key: 'LastAttemptDate', Header: 'Last attempt', Sortable: true, CellRendererName: 'FailedDate', Width: '160px' }),
+        new ColumnDefinition({ Key: 'AssignedProfile', Header: 'Profile', Sortable: true, Width: '140px' }),
+        new ColumnDefinition({ Key: 'LastWorkerName', Header: 'Last worker', Width: '140px' }),
+        new ColumnDefinition({ Key: '__Reset', Header: 'Action', CellRendererName: 'FailedReset', Align: 'right', Width: '90px' }),
+    ];
+
+    const Mount = document.getElementById('FailedJobsTableMount');
+    const T = new TableRenderer({
+        Container: Mount,
+        DataSource: Src,
+        Columns: Cols,
+        Config: Cfg,
+        Bus,
+        Capabilities: { Sortable: true, Paginatable: true, Filterable: true, Virtualized: false },
+        SortController: Sort,
+        PaginationController: Pag,
+        FilterController: Filt,
+    });
+    T._CellRegistry.Register('FailedFileName', _FileNameCellRenderer);
+    T._CellRegistry.Register('FailedSize', _SizeCellRenderer);
+    T._CellRegistry.Register('FailedCount', _FailureCountCellRenderer);
+    T._CellRegistry.Register('FailedError', _ErrorCellRenderer);
+    T._CellRegistry.Register('FailedDate', _DateCellRenderer);
+    T._CellRegistry.Register('FailedReset', _ResetButtonCellRenderer);
+
+    const InfoEl = document.getElementById('FailedJobsPaginationInfo');
+    const PrevBtn = document.getElementById('FailedJobsPrevBtn');
+    const NextBtn = document.getElementById('FailedJobsNextBtn');
+    const TotalEl = document.getElementById('FailedJobsTotal');
+    const SyncPagination = () => {
+        const P = Pag.GetPage();
+        const S = Pag.GetPageSize();
+        const Tot = Pag._TotalCount;
+        const Start = Tot === 0 ? 0 : (P * S) + 1;
+        const End = Math.min((P + 1) * S, Tot);
+        InfoEl.textContent = Tot === 0 ? 'No capped files.' : (Start + '-' + End + ' of ' + Tot.toLocaleString());
+        PrevBtn.disabled = P <= 0;
+        NextBtn.disabled = (P + 1) * S >= Tot;
+        TotalEl.textContent = Tot.toLocaleString();
+    };
+    PrevBtn.addEventListener('click', () => Pag.PrevPage());
+    NextBtn.addEventListener('click', () => Pag.NextPage());
+    Bus.Subscribe('PageChanged', SyncPagination);
+    Bus.Subscribe('SortChanged', () => Pag.GoTo(0));
+    Bus.Subscribe('FilterChanged', () => Pag.GoTo(0));
+
+    const SearchEl = document.getElementById('FailedJobsSearch');
+    SearchEl.addEventListener('input', () => Filt.SetFilter('q', SearchEl.value.trim()));
+    SearchEl.addEventListener('keydown', E => { if (E.key === 'Enter') Filt.SetFilter('q', SearchEl.value.trim()); });
+
+    const SortSel = document.getElementById('FailedJobsSort');
+    SortSel.addEventListener('change', () => {
+        const Val = SortSel.value || 'LastAttemptDate:DESC';
+        const [K, D] = Val.split(':');
+        Sort.SetSort(K, D || 'DESC');
+    });
+
+    document.getElementById('FailedJobsRefresh').addEventListener('click', () => { Src._Cache.clear(); T.Refresh().then(SyncPagination); });
+
+    Mount.addEventListener('click', Evt => {
+        const Btn = Evt.target.closest('.js-reset');
+        if (Btn) { Evt.preventDefault(); OnReset(Btn, T, Src, SyncPagination); return; }
+        const Link = Evt.target.closest('.js-show-history');
+        if (Link) { Evt.preventDefault(); OnShowHistory(Link.dataset.mfid); }
+    });
+
+    T.Render().then(SyncPagination);
+    window.FailedJobsTable = T;
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const OnReset = (Btn, T, Src, Sync) => {
+    const Mfid = Btn.dataset.mfid;
+    const Name = Btn.dataset.name;
+    if (!confirm('Reset failure budget for "' + Name + '"?\n\nThis lets the file be claimed/recomputed again. An audit row is written to FailureBudgetResets.')) return;
+    Btn.disabled = true; Btn.textContent = 'Resetting...';
+    fetch('/api/FailedJobs/' + Mfid + '/Reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ OperatorName: 'web-ui' }) })
+        .then(R => R.json())
+        .then(D => { if (!D.Success) alert('Reset failed: ' + (D.Message || 'unknown')); Src._Cache.clear(); T.Refresh().then(Sync); })
+        .catch(E => { alert('Reset error: ' + E); Btn.disabled = false; Btn.textContent = 'Reset'; });
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const OnShowHistory = (Mfid) => {
+    fetch('/api/FailedJobs/' + Mfid + '/Attempts')
+        .then(R => R.json())
+        .then(D => {
+            if (!D.Success) { alert('History failed: ' + (D.Message || 'unknown')); return; }
+            RenderAttemptsTable(D.Data?.Attempts || []);
+            const Mod = new bootstrap.Modal(document.getElementById('AttemptsModal'));
+            Mod.show();
+        });
+};
+
+let _AttemptsTable = null;
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderAttemptsTable = (Attempts) => {
+    const Mount = document.getElementById('AttemptsTableMount');
+    if (_AttemptsTable) { _AttemptsTable.Destroy(); _AttemptsTable = null; }
+    const Cfg = new TableRendererConfig({ DefaultPageSize: 100 });
+    const Bus = new EventBus();
+    const Src = new ClientArrayDataSource(Attempts);
+    const Cols = [
+        new ColumnDefinition({ Key: 'AttemptDate', Header: 'Date', CellRendererName: 'FailedDate', Width: '170px' }),
+        new ColumnDefinition({ Key: 'ProfileName', Header: 'Profile', Width: '140px' }),
+        new ColumnDefinition({ Key: 'WorkerName', Header: 'Worker', Width: '120px' }),
+        new ColumnDefinition({ Key: 'Success', Header: 'Success', CellRendererName: 'BoolBadge', Width: '90px' }),
+        new ColumnDefinition({ Key: 'VMAF', Header: 'VMAF', CellRendererName: 'VMAFCell', Width: '80px' }),
+        new ColumnDefinition({ Key: 'TranscodeDurationSeconds', Header: 'Duration (s)', CellRendererName: 'SecondsCell', Width: '110px' }),
+        new ColumnDefinition({ Key: 'OldSizeBytes', Header: 'Old MB', CellRendererName: 'MBFromBytes', Width: '90px' }),
+        new ColumnDefinition({ Key: 'NewSizeBytes', Header: 'New MB', CellRendererName: 'MBFromBytes', Width: '90px' }),
+        new ColumnDefinition({ Key: 'ErrorMessage', Header: 'Error', CellRendererName: 'FailedError' }),
+    ];
+    _AttemptsTable = new TableRenderer({
+        Container: Mount,
+        DataSource: Src,
+        Columns: Cols,
+        Config: Cfg,
+        Bus,
+        Capabilities: { Sortable: false, Paginatable: false, Filterable: false, Virtualized: false },
+    });
+    _AttemptsTable._CellRegistry.Register('FailedDate', _DateCellRenderer);
+    _AttemptsTable._CellRegistry.Register('FailedError', _ErrorCellRenderer);
+    _AttemptsTable._CellRegistry.Register('BoolBadge', _BoolBadgeCellRenderer);
+    _AttemptsTable._CellRegistry.Register('VMAFCell', _VMAFCellRenderer);
+    _AttemptsTable._CellRegistry.Register('SecondsCell', _SecondsCellRenderer);
+    _AttemptsTable._CellRegistry.Register('MBFromBytes', _MBFromBytesCellRenderer);
+    _AttemptsTable.Render();
+};
+
+window.addEventListener('DOMContentLoaded', InitFailedJobsTable);
 </script>
 {% endblock %}

@@ -108,14 +108,27 @@
                         </div>
                     </div>
                     <!-- Operation Details (expandable) -->
-                    <div id="operationDetails" class="mt-3" style="display:none"></div>
+                    <div id="operationDetails" class="mt-3" style="display:none">
+                        <div id="operationDetailsHeader"></div>
+                        <div id="operationDetailsTabs"></div>
+                        <div class="tab-content border border-top-0 rounded-bottom p-2" id="operationDetailsContent">
+                            <div class="tab-pane fade show active" id="opTab-active" role="tabpanel">
+                                <div id="opActiveTableMount"></div>
+                                <div id="opActiveEmpty" class="text-muted text-center py-2" style="display:none">No files</div>
+                            </div>
+                            <div class="tab-pane fade" id="opTab-archived" role="tabpanel">
+                                <div id="opArchivedTableMount"></div>
+                                <div id="opArchivedEmpty" class="text-muted text-center py-3" style="display:none">No resolved files yet</div>
+                            </div>
+                        </div>
+                    </div>
                     <div id="transcodeReasonsSection" class="mt-3" style="display:none">
                         <h6>Transcode Reasons</h6>
                         <div id="transcodeReasonsList"></div>
                     </div>
                     <div id="destFormatsSection" class="mt-3" style="display:none">
                         <h6>Transcode Destination Formats <small class="text-muted">(what Jellyfin transcodes TO)</small></h6>
-                        <div id="destFormatsList"></div>
+                        <div id="destFormatsTableMount"></div>
                     </div>
                 </div>
             </div>
@@ -132,6 +145,24 @@
         </div>
         <div class="card-body" id="deviceAnalysisBody">
             <p class="text-muted small mb-0">Click "Analyze Devices" to discover what devices connect to Jellyfin and what data is available for per-device compatibility analysis.</p>
+            <div id="deviceAnalysisAlerts"></div>
+            <div id="devicesSection" style="display:none">
+                <h6><i class="fas fa-mobile-alt"></i> Registered Devices</h6>
+                <div id="devicesTableMount"></div>
+            </div>
+            <div id="activitiesSection" style="display:none">
+                <h6 class="mt-3"><i class="fas fa-history"></i> Playback Activity (from Jellyfin DB)</h6>
+                <div id="activitiesTableMount"></div>
+            </div>
+            <div id="deviceTablesNote" class="small text-muted mb-2" style="display:none"></div>
+            <div id="deviceRecordsSection" style="display:none">
+                <h6 class="mt-3"><i class="fas fa-database"></i> Device Records (from Jellyfin DB)</h6>
+                <div id="deviceRecordsTableMount"></div>
+            </div>
+            <div id="logFieldsSection" style="display:none">
+                <h6 class="mt-3"><i class="fas fa-file-code"></i> FFmpeg Log JSON Fields <small class="text-muted" id="logFieldsSampleName"></small></h6>
+                <div id="logFieldsTableMount" style="max-height:200px;overflow-y:auto"></div>
+            </div>
         </div>
     </div>
 
@@ -173,31 +204,19 @@
             <div class="col-md-4">
                 <div class="card">
                     <div class="card-header"><i class="fas fa-box"></i> Containers</div>
-                    <div class="card-body p-0">
-                        <table class="table table-sm table-hover mb-0" id="containerTable">
-                            <tbody></tbody>
-                        </table>
-                    </div>
+                    <div class="card-body p-0" id="containerTableMount"></div>
                 </div>
             </div>
             <div class="col-md-4">
                 <div class="card">
                     <div class="card-header"><i class="fas fa-film"></i> Video Codecs</div>
-                    <div class="card-body p-0">
-                        <table class="table table-sm table-hover mb-0" id="videoCodecTable">
-                            <tbody></tbody>
-                        </table>
-                    </div>
+                    <div class="card-body p-0" id="videoCodecTableMount"></div>
                 </div>
             </div>
             <div class="col-md-4">
                 <div class="card">
                     <div class="card-header"><i class="fas fa-volume-up"></i> Audio Codecs</div>
-                    <div class="card-body p-0">
-                        <table class="table table-sm table-hover mb-0" id="audioCodecTable">
-                            <tbody></tbody>
-                        </table>
-                    </div>
+                    <div class="card-body p-0" id="audioCodecTableMount"></div>
                 </div>
             </div>
         </div>
@@ -210,21 +229,26 @@
 const API_BASE = '/api/Optimization';
 const IMPACT_COLORS = { HIGH: 'danger', MEDIUM: 'warning', LOW: 'info' };
 const SECTION_KEYS = { 'Legacy Format Files': 'legacy', 'Audio Incompatibility': 'audio', 'Subtitle Issues': 'subtitle' };
-const REASON_LABELS = {
-    legacy_codec: '<span class="badge bg-danger">Legacy Codec</span>',
-    hevc_incompatible: '<span class="badge bg-warning text-dark">HEVC Incompatible</span>',
-    container_incompatible: '<span class="badge bg-warning text-dark">MKV Container</span>',
-    subtitle_transcode: '<span class="badge bg-info">Subtitle Burn-in</span>',
-    video_transcode: '<span class="badge bg-warning text-dark">Video Transcode</span>',
-    audio_transcode: '<span class="badge bg-secondary">Audio Transcode</span>',
-    other: '<span class="badge bg-dark">Other</span>'
+const REASON_LABEL_MAP = {
+    legacy_codec: { Text: 'Legacy Codec', Cls: 'bg-danger' },
+    hevc_incompatible: { Text: 'HEVC Incompatible', Cls: 'bg-warning text-dark' },
+    container_incompatible: { Text: 'MKV Container', Cls: 'bg-warning text-dark' },
+    subtitle_transcode: { Text: 'Subtitle Burn-in', Cls: 'bg-info' },
+    video_transcode: { Text: 'Video Transcode', Cls: 'bg-warning text-dark' },
+    audio_transcode: { Text: 'Audio Transcode', Cls: 'bg-secondary' },
+    other: { Text: 'Other', Cls: 'bg-dark' }
 };
-const MITIGATION_BADGES = {
-    mitigated: '<span class="badge bg-success">Mitigated</span>',
-    pending: '<span class="badge bg-secondary">Pending</span>',
-    not_found: '<span class="badge bg-warning text-dark">Not Found</span>',
-    ok: '<span class="badge bg-success">OK</span>',
-    unknown: '<span class="badge bg-light text-dark">?</span>'
+const MITIGATION_LABEL_MAP = {
+    mitigated: { Text: 'Mitigated', Cls: 'bg-success' },
+    pending: { Text: 'Pending', Cls: 'bg-secondary' },
+    not_found: { Text: 'Not Found', Cls: 'bg-warning text-dark' },
+    ok: { Text: 'OK', Cls: 'bg-success' },
+    unknown: { Text: '?', Cls: 'bg-light text-dark' }
+};
+const REASON_PLAIN = {
+    legacy_codec: 'Legacy Codec', hevc_incompatible: 'HEVC Incompatible',
+    container_incompatible: 'MKV Container', subtitle_transcode: 'Subtitle Burn-in',
+    video_transcode: 'Video Transcode', audio_transcode: 'Audio Transcode', other: 'Other'
 };
 
 let allProfiles = [];
@@ -242,71 +266,12 @@ async function loadProfiles() {
         const data = await response.json();
         if (data.success) {
             allProfiles = data.profiles;
+            window.AllProfiles = allProfiles;
         }
     } catch (e) {
         console.error('Failed to load profiles', e);
         showPersistentError('Failed to load profiles: ' + e.message);
     }
-}
-
-// Sortable table columns
-function makeSortable(table) {
-    const headers = table.querySelectorAll('th');
-    headers.forEach((th, colIdx) => {
-        th.style.cursor = 'pointer';
-        th.style.userSelect = 'none';
-        th.addEventListener('click', () => sortTable(table, colIdx, th));
-    });
-}
-
-function sortTable(table, colIdx, th) {
-    const tbody = table.querySelector('tbody');
-    const rows = Array.from(tbody.querySelectorAll('tr'));
-    const headers = table.querySelectorAll('th');
-
-    // Determine current direction
-    const curDir = th.dataset.sortDir || '';
-    // Reset all headers
-    headers.forEach(h => { delete h.dataset.sortDir; h.querySelectorAll('.sort-arrow').forEach(a => a.remove()); });
-
-    const newDir = curDir === 'asc' ? 'desc' : 'asc';
-    th.dataset.sortDir = newDir;
-
-    // Add arrow indicator
-    const arrow = document.createElement('span');
-    arrow.className = 'sort-arrow ms-1';
-    arrow.textContent = newDir === 'asc' ? '\u25B2' : '\u25BC';
-    arrow.style.fontSize = '0.6em';
-    th.appendChild(arrow);
-
-    rows.sort((a, b) => {
-        const cellA = a.children[colIdx];
-        const cellB = b.children[colIdx];
-        if (!cellA || !cellB) return 0;
-
-        const sortA = cellA.dataset.sortValue;
-        const sortB = cellB.dataset.sortValue;
-
-        // Use data-sort-value if present (for dates, numbers)
-        if (sortA !== undefined && sortB !== undefined) {
-            const numA = parseFloat(sortA), numB = parseFloat(sortB);
-            if (!isNaN(numA) && !isNaN(numB)) {
-                return newDir === 'asc' ? numA - numB : numB - numA;
-            }
-            return newDir === 'asc' ? sortA.localeCompare(sortB) : sortB.localeCompare(sortA);
-        }
-
-        // Fall back to text content
-        const txtA = (cellA.textContent || '').trim();
-        const txtB = (cellB.textContent || '').trim();
-        const nA = parseFloat(txtA), nB = parseFloat(txtB);
-        if (!isNaN(nA) && !isNaN(nB)) {
-            return newDir === 'asc' ? nA - nB : nB - nA;
-        }
-        return newDir === 'asc' ? txtA.localeCompare(txtB) : txtB.localeCompare(txtA);
-    });
-
-    rows.forEach(r => tbody.appendChild(r));
 }
 
 // Connection Settings
@@ -341,24 +306,46 @@ function saveConnectionSettings() {
     .then(r => r.json())
     .then(data => {
         const el = document.getElementById('connectionStatus');
-        el.innerHTML = data.Success
-            ? '<span class="text-success"><i class="fas fa-check"></i> Saved</span>'
-            : `<span class="text-danger">${data.ErrorMessage}</span>`;
-        setTimeout(() => el.innerHTML = '', 3000);
+        if (data.Success) {
+            el.textContent = '';
+            const ok = document.createElement('span');
+            ok.className = 'text-success';
+            ok.innerHTML = '<i class="fas fa-check"></i> Saved';
+            el.appendChild(ok);
+        } else {
+            el.textContent = '';
+            const err = document.createElement('span');
+            err.className = 'text-danger';
+            err.textContent = data.ErrorMessage || 'Save failed';
+            el.appendChild(err);
+        }
+        setTimeout(() => { el.textContent = ''; }, 3000);
     });
 }
 
 function testConnection() {
     const el = document.getElementById('connectionStatus');
-    el.innerHTML = '<span class="text-info"><i class="fas fa-spinner fa-spin"></i> Testing...</span>';
+    el.textContent = '';
+    const spin = document.createElement('span');
+    spin.className = 'text-info';
+    spin.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+    el.appendChild(spin);
     fetch(`${API_BASE}/TestConnection`, { method: 'POST' })
         .then(r => r.json())
         .then(data => {
-            el.innerHTML = data.Success
-                ? `<span class="text-success"><i class="fas fa-check-circle"></i> ${data.Message}</span>`
-                : `<span class="text-danger"><i class="fas fa-times-circle"></i> ${data.ErrorMessage}</span>`;
+            el.textContent = '';
+            const s = document.createElement('span');
+            s.className = data.Success ? 'text-success' : 'text-danger';
+            s.textContent = data.Success ? (data.Message || 'Connected') : (data.ErrorMessage || 'Failed');
+            el.appendChild(s);
         })
-        .catch(() => el.innerHTML = '<span class="text-danger">Connection failed</span>');
+        .catch(() => {
+            el.textContent = '';
+            const s = document.createElement('span');
+            s.className = 'text-danger';
+            s.textContent = 'Connection failed';
+            el.appendChild(s);
+        });
 }
 
 // Local Analysis
@@ -371,52 +358,95 @@ function loadLocalAnalysis() {
         .then(data => {
             document.getElementById('analysisLoading').style.display = 'none';
             if (!data.Success) {
-                document.getElementById('analysisSummary').innerHTML = `<div class="alert alert-danger">${data.ErrorMessage}</div>`;
-                document.getElementById('analysisSummary').style.display = '';
+                const sum = document.getElementById('analysisSummary');
+                sum.textContent = '';
+                const alert = document.createElement('div');
+                alert.className = 'alert alert-danger';
+                alert.textContent = data.ErrorMessage || 'Analysis failed';
+                sum.appendChild(alert);
+                sum.style.display = '';
                 return;
             }
             document.getElementById('analysisSummary').style.display = '';
             document.getElementById('totalFileCount').textContent = data.TotalFiles.toLocaleString();
             renderSections(data.Sections, data.TotalFiles);
-            renderBreakdownTable('containerTable', data.ContainerCounts, 'Format', data.TotalFiles);
-            renderBreakdownTable('videoCodecTable', data.VideoCodecCounts, 'Codec', data.TotalFiles);
-            renderBreakdownTable('audioCodecTable', data.AudioCodecCounts, 'Codec', data.TotalFiles);
+            if (window.OptimizationTables) {
+                window.OptimizationTables.RenderBreakdown('Container', data.ContainerCounts || [], data.TotalFiles);
+                window.OptimizationTables.RenderBreakdown('VideoCodec', data.VideoCodecCounts || [], data.TotalFiles);
+                window.OptimizationTables.RenderBreakdown('AudioCodec', data.AudioCodecCounts || [], data.TotalFiles);
+            }
         })
         .catch(err => {
             document.getElementById('analysisLoading').style.display = 'none';
-            document.getElementById('analysisSummary').innerHTML = `<div class="alert alert-danger">Error loading analysis: ${err}</div>`;
-            document.getElementById('analysisSummary').style.display = '';
+            const sum = document.getElementById('analysisSummary');
+            sum.textContent = '';
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-danger';
+            alert.textContent = 'Error loading analysis: ' + err;
+            sum.appendChild(alert);
+            sum.style.display = '';
         });
 }
 
 function renderSections(sections, totalFiles) {
     const container = document.getElementById('optimizationSections');
-    container.innerHTML = '';
+    container.textContent = '';
     sections.forEach(section => {
         const color = IMPACT_COLORS[section.Impact] || 'secondary';
         const sectionKey = SECTION_KEYS[section.Title] || '';
-        const detailBtn = sectionKey
-            ? `<button class="btn btn-outline-${color} btn-sm" onclick="toggleDetails('${sectionKey}', this)">
-                 <i class="fas fa-list"></i> Show Files
-               </button>`
-            : '';
 
-        container.innerHTML += `
-            <div class="card mb-2 border-${color}">
-                <div class="card-body py-2">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <span class="badge bg-${color} me-2">${section.Impact}</span>
-                            <strong>${section.Title}</strong>
-                            <span class="text-muted ms-2">${section.Count.toLocaleString()} files (${section.Percentage}%)</span>
-                        </div>
-                        <div>${detailBtn}</div>
-                    </div>
-                    <div class="small text-muted mt-1">${section.Description}</div>
-                    <div class="small mt-1"><i class="fas fa-arrow-right"></i> ${section.Action}</div>
-                    <div id="details-${sectionKey}" class="mt-2" style="display:none"></div>
-                </div>
-            </div>`;
+        const card = document.createElement('div');
+        card.className = `card mb-2 border-${color}`;
+        const cardBody = document.createElement('div');
+        cardBody.className = 'card-body py-2';
+        card.appendChild(cardBody);
+
+        const headerRow = document.createElement('div');
+        headerRow.className = 'd-flex justify-content-between align-items-center';
+        cardBody.appendChild(headerRow);
+
+        const left = document.createElement('div');
+        const badge = document.createElement('span');
+        badge.className = `badge bg-${color} me-2`;
+        badge.textContent = section.Impact;
+        left.appendChild(badge);
+        const title = document.createElement('strong');
+        title.textContent = section.Title;
+        left.appendChild(title);
+        const count = document.createElement('span');
+        count.className = 'text-muted ms-2';
+        count.textContent = `${section.Count.toLocaleString()} files (${section.Percentage}%)`;
+        left.appendChild(count);
+        headerRow.appendChild(left);
+
+        const right = document.createElement('div');
+        if (sectionKey) {
+            const btn = document.createElement('button');
+            btn.className = `btn btn-outline-${color} btn-sm`;
+            btn.innerHTML = '<i class="fas fa-list"></i> Show Files';
+            btn.addEventListener('click', () => toggleDetails(sectionKey, btn));
+            right.appendChild(btn);
+        }
+        headerRow.appendChild(right);
+
+        const desc = document.createElement('div');
+        desc.className = 'small text-muted mt-1';
+        desc.textContent = section.Description;
+        cardBody.appendChild(desc);
+
+        const action = document.createElement('div');
+        action.className = 'small mt-1';
+        action.innerHTML = '<i class="fas fa-arrow-right"></i> ';
+        action.appendChild(document.createTextNode(section.Action));
+        cardBody.appendChild(action);
+
+        const detailMount = document.createElement('div');
+        detailMount.id = `details-${sectionKey}`;
+        detailMount.className = 'mt-2';
+        detailMount.style.display = 'none';
+        cardBody.appendChild(detailMount);
+
+        container.appendChild(card);
     });
 }
 
@@ -427,48 +457,38 @@ function toggleDetails(sectionKey, btn) {
         btn.innerHTML = '<i class="fas fa-list"></i> Show Files';
         return;
     }
-    detailDiv.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+    detailDiv.textContent = '';
+    const loading = document.createElement('div');
+    loading.className = 'text-center';
+    loading.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
+    detailDiv.appendChild(loading);
     detailDiv.style.display = '';
     btn.innerHTML = '<i class="fas fa-list"></i> Hide Files';
 
     fetch(`${API_BASE}/LocalAnalysisDetails?section=${sectionKey}&limit=50`)
         .then(r => r.json())
         .then(data => {
+            detailDiv.textContent = '';
             if (!data.Success) {
-                detailDiv.innerHTML = `<div class="text-danger">${data.ErrorMessage}</div>`;
+                const err = document.createElement('div');
+                err.className = 'text-danger';
+                err.textContent = data.ErrorMessage || 'Failed';
+                detailDiv.appendChild(err);
                 return;
             }
-            if (data.Files.length === 0) {
-                detailDiv.innerHTML = '<div class="text-muted">No files found</div>';
+            if (!data.Files || data.Files.length === 0) {
+                const none = document.createElement('div');
+                none.className = 'text-muted';
+                none.textContent = 'No files found';
+                detailDiv.appendChild(none);
                 return;
             }
-            let html = '<table class="table table-sm table-striped"><thead><tr><th>File</th><th>Info</th><th>Resolution</th><th>Size</th><th style="width:200px">Profile</th><th style="width:80px">Queue</th></tr></thead><tbody>';
-            data.Files.forEach(f => {
-                const info = f.Codec || f.AudioCodec || f.SubtitleFormats || '';
-                const profileOptions = allProfiles.map(p => `<option value="${p.Id}">${p.ProfileName}</option>`).join('');
-                html += `<tr>
-                    <td class="text-truncate" style="max-width:350px" title="${f.FilePath}">${f.FileName}</td>
-                    <td><code>${info}</code></td>
-                    <td>${f.Resolution || '-'}</td>
-                    <td>${f.SizeMB ? (f.SizeMB / 1024).toFixed(1) + ' GB' : '-'}</td>
-                    <td><select class="form-select form-select-sm" id="optProfile_${f.Id}"><option value="">Select Profile...</option>${profileOptions}</select></td>
-                    <td><button class="btn btn-outline-primary btn-sm" onclick="addOptFileToQueue(${f.Id}, this)" title="Add to Queue"><i class="fas fa-plus"></i></button></td>
-                </tr>`;
-            });
-            html += '</tbody></table>';
-            detailDiv.innerHTML = html;
+            const mount = document.createElement('div');
+            detailDiv.appendChild(mount);
+            if (window.OptimizationTables) {
+                window.OptimizationTables.RenderLocalFiles(mount, data.Files);
+            }
         });
-}
-
-function renderBreakdownTable(tableId, items, keyField, total) {
-    const tbody = document.querySelector(`#${tableId} tbody`);
-    tbody.innerHTML = '';
-    (items || []).slice(0, 10).forEach(item => {
-        const name = item[keyField] || 'unknown';
-        const pct = total > 0 ? (item.Count / total * 100).toFixed(1) : 0;
-        tbody.innerHTML += `<tr><td>${name}</td><td class="text-end">${item.Count.toLocaleString()}</td>
-                            <td class="text-end text-muted" style="width:60px">${pct}%</td></tr>`;
-    });
 }
 
 // Jellyfin Analysis (reads from local DB)
@@ -477,7 +497,6 @@ function loadJellyfinAnalysis() {
         .then(r => r.json())
         .then(data => {
             if (!data.Success) {
-                // No data yet — show the import prompt
                 document.getElementById('serverOverviewCard').style.display = 'none';
                 document.getElementById('noJellyfinDataCard').style.display = '';
                 return;
@@ -509,55 +528,56 @@ function loadJellyfinAnalysis() {
 
             const serverInfo = data.ServerInfo;
             if (serverInfo && serverInfo.Success) {
-                document.getElementById('serverInfoCol').innerHTML = `
-                    <p class="mb-1"><strong>${serverInfo.ServerName}</strong></p>
-                    <p class="mb-1 text-muted small">Version: ${serverInfo.Version}</p>
-                    <p class="mb-0 text-muted small">OS: ${serverInfo.OperatingSystem}</p>`;
+                const col = document.getElementById('serverInfoCol');
+                col.textContent = '';
+                const p1 = document.createElement('p');
+                p1.className = 'mb-1';
+                const s1 = document.createElement('strong');
+                s1.textContent = serverInfo.ServerName || '';
+                p1.appendChild(s1);
+                col.appendChild(p1);
+                const p2 = document.createElement('p');
+                p2.className = 'mb-1 text-muted small';
+                p2.textContent = 'Version: ' + (serverInfo.Version || '');
+                col.appendChild(p2);
+                const p3 = document.createElement('p');
+                p3.className = 'mb-0 text-muted small';
+                p3.textContent = 'OS: ' + (serverInfo.OperatingSystem || '');
+                col.appendChild(p3);
             }
 
             const reasons = data.TranscodeReasons;
             if (reasons && reasons.Success && Object.keys(reasons.Reasons).length > 0) {
                 document.getElementById('transcodeReasonsSection').style.display = '';
                 const list = document.getElementById('transcodeReasonsList');
-                list.innerHTML = '';
-                const labels = {
-                    legacy_codec: 'Legacy Codec', hevc_incompatible: 'HEVC Incompatible',
-                    container_incompatible: 'MKV Container', subtitle_transcode: 'Subtitle Burn-in',
-                    video_transcode: 'Video Transcode', audio_transcode: 'Audio Transcode', other: 'Other'
-                };
+                list.textContent = '';
                 for (const [reason, count] of Object.entries(reasons.Reasons)) {
                     if (count > 0) {
-                        list.innerHTML += `<span class="badge bg-secondary me-2">${labels[reason] || reason}: ${count}</span>`;
+                        const badge = document.createElement('span');
+                        badge.className = 'badge bg-secondary me-2';
+                        badge.textContent = `${REASON_PLAIN[reason] || reason}: ${count}`;
+                        list.appendChild(badge);
                     }
                 }
             }
 
-            // Destination format summary
             const destFmts = data.DestinationFormats;
             if (destFmts && destFmts.Success && destFmts.Formats && destFmts.Formats.length > 0) {
                 document.getElementById('destFormatsSection').style.display = '';
-                const destList = document.getElementById('destFormatsList');
                 const total = destFmts.TotalWithDestInfo || 1;
-                let html = '<table class="table table-sm table-striped mb-0"><thead><tr>';
-                html += '<th>Resolution</th><th>Profile</th><th>Level</th><th>Pixel Format</th><th>Container</th><th class="text-end">Count</th><th class="text-end">%</th></tr></thead><tbody>';
-                destFmts.Formats.forEach(f => {
-                    const pct = (f.Count / total * 100).toFixed(1);
-                    html += `<tr>
-                        <td>${f.DestResolution || '-'}</td>
-                        <td>${f.DestProfile || '-'}</td>
-                        <td>${f.DestLevel || '-'}</td>
-                        <td><code>${f.DestPixelFormat || '-'}</code></td>
-                        <td>${f.DestFormat || '-'}</td>
-                        <td class="text-end">${f.Count}</td>
-                        <td class="text-end text-muted">${pct}%</td>
-                    </tr>`;
-                });
-                html += '</tbody></table>';
-                destList.innerHTML = html;
+                const rows = destFmts.Formats.map(f => ({
+                    DestResolution: f.DestResolution || '-',
+                    DestProfile: f.DestProfile || '-',
+                    DestLevel: f.DestLevel || '-',
+                    DestPixelFormat: f.DestPixelFormat || '-',
+                    DestFormat: f.DestFormat || '-',
+                    Count: f.Count,
+                    Percentage: (f.Count / total * 100).toFixed(1)
+                }));
+                if (window.OptimizationTables) window.OptimizationTables.RenderDestFormats(rows);
             }
         })
         .catch(() => {
-            // Show import prompt on error
             document.getElementById('serverOverviewCard').style.display = 'none';
             document.getElementById('noJellyfinDataCard').style.display = '';
         });
@@ -568,105 +588,40 @@ function syncJellyfinData() {
     const syncBtn = document.getElementById('syncBtn');
     const statusEls = [document.getElementById('syncStatus'), document.getElementById('syncStatusInitial')];
     const origHtml = syncBtn ? syncBtn.innerHTML : '';
+    const setStatus = (cls, text) => {
+        statusEls.forEach(el => {
+            if (!el) return;
+            el.textContent = '';
+            const span = document.createElement('span');
+            span.className = cls;
+            span.textContent = text;
+            el.appendChild(span);
+        });
+    };
 
     if (syncBtn) syncBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Syncing...';
-    statusEls.forEach(el => { if (el) el.innerHTML = '<span class="text-info"><i class="fas fa-spinner fa-spin"></i> Importing logs...</span>'; });
+    setStatus('text-info', 'Importing logs...');
 
     fetch(`${API_BASE}/RefreshJellyfin`, { method: 'POST' })
         .then(r => r.json())
         .then(data => {
             if (syncBtn) syncBtn.innerHTML = origHtml;
-            const msg = data.Success
-                ? `<span class="text-success"><i class="fas fa-check"></i> ${data.NewCount} new logs imported (${data.TotalInDB} total)</span>`
-                : `<span class="text-danger"><i class="fas fa-times"></i> ${data.ErrorMessage}</span>`;
-            statusEls.forEach(el => { if (el) el.innerHTML = msg; });
-            setTimeout(() => statusEls.forEach(el => { if (el) el.innerHTML = ''; }), 5000);
-
             if (data.Success) {
+                setStatus('text-success', `${data.NewCount} new logs imported (${data.TotalInDB} total)`);
                 loadJellyfinAnalysis();
+            } else {
+                setStatus('text-danger', data.ErrorMessage || 'Sync failed');
             }
+            setTimeout(() => statusEls.forEach(el => { if (el) el.textContent = ''; }), 5000);
         })
         .catch(err => {
             if (syncBtn) syncBtn.innerHTML = origHtml;
-            statusEls.forEach(el => { if (el) el.innerHTML = `<span class="text-danger">Error: ${err}</span>`; });
+            setStatus('text-danger', 'Error: ' + err);
         });
 }
 
 // Operation Details (clickable cards)
 let currentOpType = null;
-
-function renderFileTable(files, opType, isArchived) {
-    if (files.length === 0) return '<div class="text-muted text-center py-2">No files</div>';
-
-    const showMitigation = opType !== 'DirectStream';
-    let html = '<table class="table table-sm table-striped mb-0" style="table-layout:fixed"><thead><tr>';
-    html += '<th style="width:28%">File</th><th style="width:7%">Video</th><th style="width:7%">Audio</th><th style="width:7%">Container</th>';
-    if (opType === 'Transcode') html += '<th style="width:9%">Reason</th><th style="width:13%">Actions</th>';
-    if (isArchived) {
-        html += '<th style="width:10%">Was</th>';
-    } else if (showMitigation) {
-        html += '<th style="width:10%">Status</th>';
-    }
-    html += '<th style="width:12%">Last Seen</th>';
-    html += '<th class="text-end" style="width:5%">Plays</th></tr></thead><tbody>';
-
-    files.forEach(f => {
-        const idx = f._origIdx;
-        const m = f.Mitigation || {};
-        const rowId = `op-row-${idx}`;
-        const safeFileName = (f.FileName || '').replace(/'/g, "\\'");
-        const safeFilePath = (f.FilePath || '').replace(/'/g, "\\'");
-        const safeReason = (f.Reason || '').replace(/'/g, "\\'");
-
-        const curCodec = m.CurrentCodec || f.VideoCodec || '-';
-        const curAudio = m.CurrentAudioCodec || f.AudioCodec || '-';
-        const curContainer = m.CurrentContainer || f.Container || '-';
-
-        const codecTitle = (m.CurrentCodec && m.CurrentCodec !== f.VideoCodec) ? ` title="Was: ${f.VideoCodec}"` : '';
-        const audioTitle = (m.CurrentAudioCodec && m.CurrentAudioCodec !== f.AudioCodec) ? ` title="Was: ${f.AudioCodec}"` : '';
-        const containerTitle = (m.CurrentContainer && m.CurrentContainer !== f.Container) ? ` title="Was: ${f.Container}"` : '';
-
-        const diskName = m.CurrentFileName || '';
-        const displayName = diskName && diskName !== f.FileName ? diskName : f.FileName;
-        const nameTooltip = diskName && diskName !== f.FileName ? ` title="Jellyfin: ${f.FileName}"` : (f.FilePath ? ` title="${f.FilePath}"` : '');
-
-        html += `<tr id="${rowId}">`;
-        html += `<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"${nameTooltip}>${displayName}</td>`;
-        html += `<td${codecTitle}><code>${curCodec}</code></td>`;
-        html += `<td${audioTitle}><code>${curAudio}</code></td>`;
-        html += `<td${containerTitle}>${curContainer}</td>`;
-        if (opType === 'Transcode') {
-            const reasonLabel = REASON_LABELS[f.Reason] || f.Reason || '-';
-            html += `<td>${reasonLabel}</td>`;
-            html += `<td><small><code>${f.TranscodeActions || '-'}</code></small></td>`;
-        }
-        if (isArchived) {
-            // Show what it was before (original Jellyfin log values) for troubleshooting
-            const origCodec = f.VideoCodec || '-';
-            const origAudio = f.AudioCodec || '-';
-            const origContainer = f.Container || '-';
-            html += `<td><small class="text-muted">${origCodec} / ${origAudio} / ${origContainer}</small></td>`;
-        } else if (showMitigation) {
-            html += `<td id="status-${idx}">`;
-            html += MITIGATION_BADGES[m.Status] || MITIGATION_BADGES.unknown;
-            html += ` <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="recheckFile('${safeFileName}', '${safeFilePath}', '${opType}', '${safeReason}', ${idx})" title="Re-analyze with ffprobe">`;
-            html += '<i class="fas fa-redo-alt" style="font-size:0.7em"></i></button>';
-            if (f.Reason === 'subtitle_transcode' && m.Status === 'pending' && m.MediaFileId) {
-                html += ` <button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="queueSubtitleFix([${m.MediaFileId}], this)" title="Fix subtitle burn-in">`;
-                html += '<i class="fas fa-closed-captioning" style="font-size:0.7em"></i></button>';
-            }
-            html += '</td>';
-        }
-        const dtVal = f.LastSeen ? new Date(f.LastSeen).getTime() : 0;
-        const dtStr = f.LastSeen ? window.formatTime(f.LastSeen, 'datetime') : '-';
-        html += `<td data-sort-value="${dtVal}"><small>${dtStr}</small></td>`;
-        html += `<td class="text-end" data-sort-value="${f.Count}">${f.Count}</td>`;
-        html += '</tr>';
-    });
-
-    html += '</tbody></table>';
-    return html;
-}
 
 function toggleOperationDetails(opType) {
     const detailDiv = document.getElementById('operationDetails');
@@ -677,103 +632,128 @@ function toggleOperationDetails(opType) {
     }
     currentOpType = opType;
     detailDiv.style.display = '';
-    detailDiv.innerHTML = '<div class="text-center py-3"><i class="fas fa-spinner fa-spin"></i> Loading details...</div>';
+
+    const header = document.getElementById('operationDetailsHeader');
+    header.textContent = '';
+    const loading = document.createElement('div');
+    loading.className = 'text-center py-3';
+    loading.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading details...';
+    header.appendChild(loading);
+    document.getElementById('operationDetailsTabs').textContent = '';
 
     fetch(`${API_BASE}/OperationDetails?type=${opType}&limit=100`)
         .then(r => r.json())
         .then(data => {
+            header.textContent = '';
             if (!data.Success) {
-                detailDiv.innerHTML = `<div class="alert alert-danger">${data.ErrorMessage}</div>`;
+                const alert = document.createElement('div');
+                alert.className = 'alert alert-danger';
+                alert.textContent = data.ErrorMessage || 'Failed';
+                header.appendChild(alert);
                 return;
             }
-            if (data.Files.length === 0) {
-                detailDiv.innerHTML = '<div class="text-muted">No log files found</div>';
+            if (!data.Files || data.Files.length === 0) {
+                const none = document.createElement('div');
+                none.className = 'text-muted';
+                none.textContent = 'No log files found';
+                header.appendChild(none);
                 return;
             }
 
-            // Separate files into active (pending/not_found/unknown) vs archived (mitigated/ok)
             const activeFiles = [];
             const archivedFiles = [];
             data.Files.forEach((f, idx) => {
-                f._origIdx = idx;  // preserve original index for status cell IDs
+                f._origIdx = idx;
                 const status = (f.Mitigation || {}).Status || 'unknown';
-                if (status === 'mitigated' || status === 'ok') {
-                    archivedFiles.push(f);
-                } else {
-                    activeFiles.push(f);
-                }
+                if (status === 'mitigated' || status === 'ok') archivedFiles.push(f);
+                else activeFiles.push(f);
             });
 
-            // Summary header
-            let html = `<div class="d-flex justify-content-between align-items-center mb-2">
-                <h6 class="mb-0">${opType} Details — ${data.Count} unique files (${data.TotalLogs} total logs)</h6>
-                <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('operationDetails').style.display='none'; currentOpType=null;">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>`;
+            // Header (count + close)
+            const headerRow = document.createElement('div');
+            headerRow.className = 'd-flex justify-content-between align-items-center mb-2';
+            const h6 = document.createElement('h6');
+            h6.className = 'mb-0';
+            h6.textContent = `${opType} Details — ${data.Count} unique files (${data.TotalLogs} total logs)`;
+            headerRow.appendChild(h6);
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'btn btn-sm btn-outline-secondary';
+            closeBtn.innerHTML = '<i class="fas fa-times"></i>';
+            closeBtn.addEventListener('click', () => {
+                detailDiv.style.display = 'none';
+                currentOpType = null;
+            });
+            headerRow.appendChild(closeBtn);
+            header.appendChild(headerRow);
 
             // Reason summary for Transcode
             if (opType === 'Transcode' && data.Reasons && Object.keys(data.Reasons).length > 0) {
-                html += '<div class="mb-2">';
+                const reasonDiv = document.createElement('div');
+                reasonDiv.className = 'mb-2';
                 for (const [reason, count] of Object.entries(data.Reasons)) {
                     if (count > 0) {
-                        html += `${REASON_LABELS[reason] || `<span class="badge bg-dark">${reason}</span>`} <small class="me-3">${count}</small>`;
+                        const r = REASON_LABEL_MAP[reason] || { Text: reason, Cls: 'bg-dark' };
+                        const badge = document.createElement('span');
+                        badge.className = 'badge ' + r.Cls;
+                        badge.textContent = r.Text;
+                        reasonDiv.appendChild(badge);
+                        const cnt = document.createElement('small');
+                        cnt.className = 'me-3 ms-1';
+                        cnt.textContent = String(count);
+                        reasonDiv.appendChild(cnt);
                     }
                 }
                 if (data.Reasons.subtitle_transcode > 0) {
-                    html += ` <button class="btn btn-outline-warning btn-sm ms-2" onclick="queueSubtitleFixAll()" title="Queue all subtitle burn-in files for fix"><i class="fas fa-closed-captioning"></i> Fix All Subtitle Burn-in</button>`;
+                    const fixBtn = document.createElement('button');
+                    fixBtn.className = 'btn btn-outline-warning btn-sm ms-2';
+                    fixBtn.title = 'Queue all subtitle burn-in files for fix';
+                    fixBtn.innerHTML = '<i class="fas fa-closed-captioning"></i> Fix All Subtitle Burn-in';
+                    fixBtn.addEventListener('click', () => queueSubtitleFixAll(fixBtn));
+                    reasonDiv.appendChild(fixBtn);
                 }
-                html += '</div>';
+                header.appendChild(reasonDiv);
             }
 
-            // Tabs: Active Issues | Archived/Fixed
-            const activeId = `opTab-active-${opType}`;
-            const archivedId = `opTab-archived-${opType}`;
-            html += `<ul class="nav nav-tabs nav-tabs-sm mb-0" role="tablist">
-                <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#${activeId}" role="tab">
-                    <i class="fas fa-exclamation-circle"></i> Active Issues <span class="badge bg-danger">${activeFiles.length}</span></a></li>
-                <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#${archivedId}" role="tab">
-                    <i class="fas fa-check-circle"></i> Archived / Fixed <span class="badge bg-success">${archivedFiles.length}</span></a></li>
-            </ul>`;
-            html += '<div class="tab-content border border-top-0 rounded-bottom p-2">';
+            // Tabs
+            const tabsUl = document.createElement('ul');
+            tabsUl.className = 'nav nav-tabs nav-tabs-sm mb-0';
+            tabsUl.setAttribute('role', 'tablist');
+            const activeLi = document.createElement('li');
+            activeLi.className = 'nav-item';
+            activeLi.innerHTML = `<a class="nav-link active" data-bs-toggle="tab" href="#opTab-active" role="tab"><i class="fas fa-exclamation-circle"></i> Active Issues <span class="badge bg-danger">${activeFiles.length}</span></a>`;
+            const archivedLi = document.createElement('li');
+            archivedLi.className = 'nav-item';
+            archivedLi.innerHTML = `<a class="nav-link" data-bs-toggle="tab" href="#opTab-archived" role="tab"><i class="fas fa-check-circle"></i> Archived / Fixed <span class="badge bg-success">${archivedFiles.length}</span></a>`;
+            tabsUl.appendChild(activeLi);
+            tabsUl.appendChild(archivedLi);
+            document.getElementById('operationDetailsTabs').textContent = '';
+            document.getElementById('operationDetailsTabs').appendChild(tabsUl);
 
-            // Active tab
-            html += `<div class="tab-pane fade show active" id="${activeId}" role="tabpanel">`;
-            html += renderFileTable(activeFiles, opType, false);
-            html += '</div>';
+            document.getElementById('opActiveEmpty').style.display = activeFiles.length === 0 ? '' : 'none';
+            document.getElementById('opArchivedEmpty').style.display = archivedFiles.length === 0 ? '' : 'none';
 
-            // Archived tab
-            html += `<div class="tab-pane fade" id="${archivedId}" role="tabpanel">`;
-            if (archivedFiles.length === 0) {
-                html += '<div class="text-muted text-center py-3">No resolved files yet</div>';
-            } else {
-                html += renderFileTable(archivedFiles, opType, true);
+            if (window.OptimizationTables) {
+                window.OptimizationTables.RenderOperationFiles('Active', activeFiles, opType, false);
+                window.OptimizationTables.RenderOperationFiles('Archived', archivedFiles, opType, true);
             }
-            html += '</div>';
-
-            html += '</div>'; // tab-content
-            detailDiv.innerHTML = html;
-            detailDiv.querySelectorAll('table').forEach(tbl => {
-                makeSortable(tbl);
-                // Auto-sort by Plays (last column) descending
-                const headers = tbl.querySelectorAll('th');
-                const playsHeader = headers[headers.length - 1];
-                if (playsHeader && playsHeader.textContent.trim() === 'Plays') {
-                    playsHeader.dataset.sortDir = 'asc';  // pre-set so toggle lands on desc
-                    sortTable(tbl, headers.length - 1, playsHeader);
-                }
-            });
         })
         .catch(err => {
-            detailDiv.innerHTML = `<div class="alert alert-danger">Error: ${err}</div>`;
+            header.textContent = '';
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-danger';
+            alert.textContent = 'Error: ' + err;
+            header.appendChild(alert);
         });
 }
 
-// Recheck individual file
-function recheckFile(fileName, filePath, opType, reason, rowIdx) {
-    const statusCell = document.getElementById(`status-${rowIdx}`);
-    if (!statusCell) return;
-    statusCell.innerHTML = '<i class="fas fa-spinner fa-spin text-primary"></i>';
+// Recheck individual file -- fetches new state, mutates row in DataSource, calls Refresh.
+function recheckFile(row, opType, tableKind) {
+    const fileName = row.FileName || '';
+    const filePath = row.FilePath || '';
+    const reason = row.Reason || '';
+    // Mark cell-state to show spinner on next refresh
+    row._Rechecking = true;
+    if (window.OptimizationTables) window.OptimizationTables.RefreshOperationTable(tableKind);
 
     fetch(`${API_BASE}/RecheckFile`, {
         method: 'POST',
@@ -782,35 +762,23 @@ function recheckFile(fileName, filePath, opType, reason, rowIdx) {
     })
     .then(r => r.json())
     .then(data => {
+        row._Rechecking = false;
         if (!data.Success) {
-            statusCell.innerHTML = `<span class="text-danger" title="${data.ErrorMessage}"><i class="fas fa-exclamation-triangle"></i></span>`;
-            return;
+            row._RecheckError = data.ErrorMessage || 'Failed';
+        } else {
+            row._RecheckError = null;
+            const m = data.Mitigation || {};
+            row.Mitigation = m;
+            if (m.CurrentCodec) row._OverrideVideo = m.CurrentCodec;
+            if (m.CurrentAudioCodec) row._OverrideAudio = m.CurrentAudioCodec;
+            if (m.CurrentContainer) row._OverrideContainer = m.CurrentContainer;
         }
-        const m = data.Mitigation || {};
-        let badge = MITIGATION_BADGES[m.Status] || MITIGATION_BADGES.unknown;
-
-        // Update the row's video/audio/container cells with current values
-        const cur = data.Mitigation || data;
-        const row = document.getElementById(`op-row-${rowIdx}`);
-        if (row) {
-            const cells = row.querySelectorAll('td');
-            const codec = cur.CurrentCodec || data.CurrentCodec;
-            const audio = cur.CurrentAudioCodec || data.CurrentAudioCodec;
-            const container = cur.CurrentContainer || data.CurrentContainer;
-            if (codec) cells[1].innerHTML = `<code>${codec}</code>`;
-            if (audio) cells[2].innerHTML = `<code>${audio}</code>`;
-            if (container) cells[3].textContent = container;
-        }
-
-        const safeFileName = fileName.replace(/'/g, "\\'");
-        const safeFilePath = filePath.replace(/'/g, "\\'");
-        const safeReason = reason.replace(/'/g, "\\'");
-        statusCell.innerHTML = badge +
-            ` <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="recheckFile('${safeFileName}', '${safeFilePath}', '${opType}', '${safeReason}', ${rowIdx})" title="Re-analyze with ffprobe">` +
-            '<i class="fas fa-redo-alt" style="font-size:0.7em"></i></button>';
+        if (window.OptimizationTables) window.OptimizationTables.RefreshOperationTable(tableKind);
     })
     .catch(err => {
-        statusCell.innerHTML = `<span class="text-danger" title="${err}"><i class="fas fa-exclamation-triangle"></i></span>`;
+        row._Rechecking = false;
+        row._RecheckError = String(err);
+        if (window.OptimizationTables) window.OptimizationTables.RefreshOperationTable(tableKind);
     });
 }
 
@@ -851,14 +819,13 @@ function queueSubtitleFix(fileIds, btn) {
     });
 }
 
-function queueSubtitleFixAll() {
+function queueSubtitleFixAll(btn) {
     if (!confirm('Queue ALL files with subtitle burn-in for automatic fix?')) return;
-    queueSubtitleFix(null, event.target.closest('button'));
+    queueSubtitleFix(null, btn);
 }
 
-async function addOptFileToQueue(fileId, btn, forceAdd = false) {
-    const profileSelect = document.getElementById(`optProfile_${fileId}`);
-    const profileId = profileSelect ? parseInt(profileSelect.value) : null;
+async function addOptFileToQueue(row, btn, forceAdd = false) {
+    const profileId = row._SelectedProfileId ? parseInt(row._SelectedProfileId) : null;
     if (!profileId) {
         showPersistentError('Please select a profile first.');
         return;
@@ -869,7 +836,7 @@ async function addOptFileToQueue(fileId, btn, forceAdd = false) {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
     try {
-        const body = { MediaFileId: fileId, ProfileId: profileId };
+        const body = { MediaFileId: row.Id, ProfileId: profileId };
         if (forceAdd) body.ForceAdd = true;
 
         const response = await fetch('/api/TranscodeQueue/AddJob', {
@@ -886,7 +853,7 @@ async function addOptFileToQueue(fileId, btn, forceAdd = false) {
             btn.disabled = false;
             btn.innerHTML = origHtml;
             if (confirm(`${data.ErrorMessage}\n\nWould you like to override this check and add the file anyway?`)) {
-                await addOptFileToQueue(fileId, btn, true);
+                await addOptFileToQueue(row, btn, true);
             }
         } else {
             btn.disabled = false;
@@ -903,121 +870,104 @@ async function addOptFileToQueue(fileId, btn, forceAdd = false) {
 // Device Analysis
 async function loadDeviceAnalysis() {
     const btn = document.getElementById('deviceAnalysisBtn');
-    const body = document.getElementById('deviceAnalysisBody');
+    const alerts = document.getElementById('deviceAnalysisAlerts');
     const origHtml = btn.innerHTML;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
     btn.disabled = true;
+    alerts.textContent = '';
+
+    const hideAll = () => {
+        ['devicesSection','activitiesSection','deviceTablesNote','deviceRecordsSection','logFieldsSection']
+            .forEach(id => document.getElementById(id).style.display = 'none');
+    };
 
     try {
         const response = await fetch(`${API_BASE}/DeviceAnalysis`);
         const data = await response.json();
 
         if (!data.Success) {
-            body.innerHTML = `<div class="alert alert-danger">${data.ErrorMessage}</div>`;
+            hideAll();
+            const a = document.createElement('div');
+            a.className = 'alert alert-danger';
+            a.textContent = data.ErrorMessage || 'Failed';
+            alerts.appendChild(a);
             btn.innerHTML = origHtml;
             btn.disabled = false;
             return;
         }
 
-        let html = '';
+        hideAll();
+        const T = window.OptimizationTables;
 
-        // Registered Devices
         const devices = data.Devices || [];
-        if (devices.length > 0) {
-            html += '<h6><i class="fas fa-mobile-alt"></i> Registered Devices</h6>';
-            html += '<table class="table table-sm table-striped mb-3"><thead><tr>';
-            html += '<th>Device</th><th>App</th><th>Version</th><th>User</th><th>Last Active</th>';
-            html += '</tr></thead><tbody>';
-            devices.forEach(d => {
-                const lastActive = d.DateLastActivity
-                    ? window.formatTime(d.DateLastActivity, 'datetime')
-                    : '-';
-                html += `<tr>
-                    <td><strong>${d.Name || '-'}</strong></td>
-                    <td>${d.AppName || '-'}</td>
-                    <td><small>${d.AppVersion || '-'}</small></td>
-                    <td>${d.LastUserName || '-'}</td>
-                    <td><small>${lastActive}</small></td>
-                </tr>`;
-            });
-            html += '</tbody></table>';
+        if (devices.length > 0 && T) {
+            document.getElementById('devicesSection').style.display = '';
+            T.RenderDevices(devices);
         } else if (data.DevicesError) {
-            html += `<div class="alert alert-warning"><i class="fas fa-exclamation-triangle"></i> Devices API: ${data.DevicesError}</div>`;
+            const a = document.createElement('div');
+            a.className = 'alert alert-warning';
+            a.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Devices API: ' + data.DevicesError;
+            alerts.appendChild(a);
         }
 
-        // Playback Activities from DB
-        const activities = data.PlaybackActivities || [];
-        if (activities.length > 0) {
-            html += '<h6><i class="fas fa-history"></i> Playback Activity (from Jellyfin DB)</h6>';
-            html += '<table class="table table-sm table-striped mb-3"><thead><tr>';
-            html += '<th>Activity</th><th>Details</th><th>Type</th><th class="text-end">Count</th>';
-            html += '</tr></thead><tbody>';
-            activities.slice(0, 30).forEach(a => {
-                html += `<tr>
-                    <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.Name || ''}">${a.Name || '-'}</td>
-                    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.ShortOverview || ''}">${a.ShortOverview || '-'}</td>
-                    <td><code>${a.Type || '-'}</code></td>
-                    <td class="text-end">${a.Count || 0}</td>
-                </tr>`;
-            });
-            html += '</tbody></table>';
+        const activities = (data.PlaybackActivities || []).slice(0, 30);
+        if (activities.length > 0 && T) {
+            document.getElementById('activitiesSection').style.display = '';
+            T.RenderActivities(activities);
         } else if (data.PlaybackError) {
-            html += `<div class="alert alert-info"><i class="fas fa-info-circle"></i> DB query: ${data.PlaybackError}</div>`;
+            const a = document.createElement('div');
+            a.className = 'alert alert-info';
+            a.innerHTML = '<i class="fas fa-info-circle"></i> DB query: ' + data.PlaybackError;
+            alerts.appendChild(a);
         }
 
-        // Device tables found
         const deviceTables = data.DeviceTables || [];
         if (deviceTables.length > 0) {
-            html += `<div class="small text-muted mb-2">Device-related tables found in Jellyfin DB: <code>${deviceTables.join(', ')}</code></div>`;
+            const note = document.getElementById('deviceTablesNote');
+            note.style.display = '';
+            note.textContent = '';
+            note.appendChild(document.createTextNode('Device-related tables found in Jellyfin DB: '));
+            const code = document.createElement('code');
+            code.textContent = deviceTables.join(', ');
+            note.appendChild(code);
         }
 
-        // Device records from DB
         const deviceRecords = data.DeviceRecords || [];
-        if (deviceRecords.length > 0) {
-            html += '<h6><i class="fas fa-database"></i> Device Records (from Jellyfin DB)</h6>';
-            const cols = Object.keys(deviceRecords[0]);
-            html += '<table class="table table-sm table-striped mb-3"><thead><tr>';
-            cols.forEach(c => { html += `<th>${c}</th>`; });
-            html += '</tr></thead><tbody>';
-            deviceRecords.forEach(r => {
-                html += '<tr>';
-                cols.forEach(c => {
-                    const val = r[c] || '-';
-                    const display = String(val).length > 50 ? String(val).substring(0, 50) + '...' : val;
-                    html += `<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${val}">${display}</td>`;
-                });
-                html += '</tr>';
-            });
-            html += '</tbody></table>';
+        if (deviceRecords.length > 0 && T) {
+            document.getElementById('deviceRecordsSection').style.display = '';
+            T.RenderDeviceRecords(deviceRecords);
         }
 
-        // Log JSON fields (discovery)
         const fields = data.LogJsonFields || {};
         const fieldKeys = Object.keys(fields);
-        if (fieldKeys.length > 0) {
-            html += '<h6><i class="fas fa-file-code"></i> FFmpeg Log JSON Fields';
-            if (data.SampleLogFile) html += ` <small class="text-muted">(from ${data.SampleLogFile})</small>`;
-            html += '</h6>';
-            html += '<div class="small" style="max-height:200px;overflow-y:auto"><table class="table table-sm mb-0"><tbody>';
-            fieldKeys.forEach(k => {
-                const val = fields[k];
-                const display = typeof val === 'string' && val.length > 80 ? val.substring(0, 80) + '...' : val;
-                html += `<tr><td><code>${k}</code></td><td>${display}</td></tr>`;
-            });
-            html += '</tbody></table></div>';
+        if (fieldKeys.length > 0 && T) {
+            document.getElementById('logFieldsSection').style.display = '';
+            const sampleLabel = document.getElementById('logFieldsSampleName');
+            sampleLabel.textContent = data.SampleLogFile ? `(from ${data.SampleLogFile})` : '';
+            const rows = fieldKeys.map(k => ({ Field: k, Value: fields[k] }));
+            T.RenderLogFields(rows);
         } else if (data.LogJsonError) {
-            html += `<div class="alert alert-info small"><i class="fas fa-info-circle"></i> Log inspection: ${data.LogJsonError}</div>`;
+            const a = document.createElement('div');
+            a.className = 'alert alert-info small';
+            a.innerHTML = '<i class="fas fa-info-circle"></i> Log inspection: ' + data.LogJsonError;
+            alerts.appendChild(a);
         }
 
-        if (!html) {
-            html = '<div class="text-muted">No device data available. Ensure Jellyfin API key is configured.</div>';
+        if (devices.length === 0 && activities.length === 0 && deviceRecords.length === 0 && fieldKeys.length === 0) {
+            const a = document.createElement('div');
+            a.className = 'text-muted';
+            a.textContent = 'No device data available. Ensure Jellyfin API key is configured.';
+            alerts.appendChild(a);
         }
 
-        body.innerHTML = html;
         btn.innerHTML = '<i class="fas fa-check"></i> Done';
         btn.disabled = false;
     } catch (err) {
-        body.innerHTML = `<div class="alert alert-danger">Error: ${err}</div>`;
+        hideAll();
+        const a = document.createElement('div');
+        a.className = 'alert alert-danger';
+        a.textContent = 'Error: ' + err;
+        alerts.appendChild(a);
         btn.innerHTML = origHtml;
         btn.disabled = false;
     }
@@ -1037,5 +987,683 @@ function copyAllAnalysis() {
             }
         });
 }
+</script>
+
+<script type="module">
+import { TableRenderer } from "/static/js/TableRenderer/TableRenderer.js";
+import { TableRendererConfig } from "/static/js/TableRenderer/TableRendererConfig.js";
+import { EventBus } from "/static/js/TableRenderer/EventBus.js";
+import { ClientArrayDataSource } from "/static/js/TableRenderer/DataSources/ClientArrayDataSource.js";
+import { SortController } from "/static/js/TableRenderer/SortController.js";
+import { ColumnDefinition } from "/static/js/TableRenderer/ColumnDefinition.js";
+import { ICellRenderer } from "/static/js/TableRenderer/Interfaces/ICellRenderer.js";
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const MakeBadge = (Cls, Text) => {
+    const Span = document.createElement('span');
+    Span.className = 'badge ' + (Cls || 'bg-secondary');
+    Span.textContent = Text == null ? '' : String(Text);
+    return Span;
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const MakeText = (Text, Cls) => {
+    const Span = document.createElement('span');
+    if (Cls) Span.className = Cls;
+    Span.textContent = Text == null ? '' : String(Text);
+    return Span;
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const MakeCode = (Text) => {
+    const Code = document.createElement('code');
+    Code.textContent = Text == null ? '' : String(Text);
+    return Code;
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const Truncate = (S, Max) => {
+    const V = S == null ? '' : String(S);
+    return V.length > Max ? V.substring(0, Max) + '...' : V;
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _BreakdownNameRenderer extends ICellRenderer {
+    Render(Value) { return MakeText(Value || 'unknown'); }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _BreakdownCountRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        Span.textContent = (Row.Count || 0).toLocaleString();
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _BreakdownPctRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        Span.className = 'text-muted';
+        Span.textContent = (Row.Percentage || '0') + '%';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _LocalFileNameRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Div = document.createElement('div');
+        Div.className = 'text-truncate';
+        Div.style.maxWidth = '350px';
+        Div.title = Row.FilePath || '';
+        Div.textContent = Row.FileName || '';
+        return Div;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _LocalInfoRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Info = Row.Codec || Row.AudioCodec || Row.SubtitleFormats || '';
+        return MakeCode(Info);
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _LocalResolutionRenderer extends ICellRenderer {
+    Render(_V, Row) { return MakeText(Row.Resolution || '-'); }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _LocalSizeRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        Span.textContent = Row.SizeMB ? (Row.SizeMB / 1024).toFixed(1) + ' GB' : '-';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _LocalProfileRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        const Sel = (window.AllProfiles || []).find(P => String(P.Id) === String(Row._SelectedProfileId));
+        Span.textContent = Sel ? Sel.ProfileName : '(double-click to select)';
+        Span.className = Sel ? 'text-primary' : 'text-muted fst-italic';
+        Span.title = 'Double-click to edit';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _LocalQueueButtonRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Btn = document.createElement('button');
+        Btn.className = 'btn btn-outline-primary btn-sm';
+        Btn.title = 'Add to Queue';
+        Btn.innerHTML = '<i class="fas fa-plus"></i>';
+        Btn.addEventListener('click', E => {
+            E.stopPropagation();
+            if (typeof window.addOptFileToQueue === 'function') window.addOptFileToQueue(Row, Btn);
+        });
+        return Btn;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DestResolutionRenderer extends ICellRenderer {
+    Render(_V, Row) { return MakeText(Row.DestResolution || '-'); }
+}
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DestProfileRenderer extends ICellRenderer {
+    Render(_V, Row) { return MakeText(Row.DestProfile || '-'); }
+}
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DestLevelRenderer extends ICellRenderer {
+    Render(_V, Row) { return MakeText(Row.DestLevel || '-'); }
+}
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DestPixelRenderer extends ICellRenderer {
+    Render(_V, Row) { return MakeCode(Row.DestPixelFormat || '-'); }
+}
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DestFormatRenderer extends ICellRenderer {
+    Render(_V, Row) { return MakeText(Row.DestFormat || '-'); }
+}
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DestCountRenderer extends ICellRenderer {
+    Render(_V, Row) { return MakeText(Row.Count); }
+}
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DestPctRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Span = document.createElement('span');
+        Span.className = 'text-muted';
+        Span.textContent = Row.Percentage + '%';
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _OpFileNameRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const M = Row.Mitigation || {};
+        const Disk = M.CurrentFileName || '';
+        const Display = Disk && Disk !== Row.FileName ? Disk : Row.FileName;
+        const Div = document.createElement('div');
+        Div.style.overflow = 'hidden';
+        Div.style.textOverflow = 'ellipsis';
+        Div.style.whiteSpace = 'nowrap';
+        if (Disk && Disk !== Row.FileName) Div.title = 'Jellyfin: ' + Row.FileName;
+        else if (Row.FilePath) Div.title = Row.FilePath;
+        Div.textContent = Display || '';
+        return Div;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _OpVideoRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const M = Row.Mitigation || {};
+        const Cur = Row._OverrideVideo || M.CurrentCodec || Row.VideoCodec || '-';
+        const Td = MakeCode(Cur);
+        const Wrap = document.createElement('span');
+        if (M.CurrentCodec && M.CurrentCodec !== Row.VideoCodec) Wrap.title = 'Was: ' + Row.VideoCodec;
+        Wrap.appendChild(Td);
+        return Wrap;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _OpAudioRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const M = Row.Mitigation || {};
+        const Cur = Row._OverrideAudio || M.CurrentAudioCodec || Row.AudioCodec || '-';
+        const Td = MakeCode(Cur);
+        const Wrap = document.createElement('span');
+        if (M.CurrentAudioCodec && M.CurrentAudioCodec !== Row.AudioCodec) Wrap.title = 'Was: ' + Row.AudioCodec;
+        Wrap.appendChild(Td);
+        return Wrap;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _OpContainerRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const M = Row.Mitigation || {};
+        const Cur = Row._OverrideContainer || M.CurrentContainer || Row.Container || '-';
+        const Wrap = MakeText(Cur);
+        if (M.CurrentContainer && M.CurrentContainer !== Row.Container) Wrap.title = 'Was: ' + Row.Container;
+        return Wrap;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _OpReasonRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Map = window.REASON_LABEL_MAP || {};
+        const R = Map[Row.Reason];
+        if (!R) return MakeText(Row.Reason || '-');
+        return MakeBadge(R.Cls, R.Text);
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _OpActionsRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Small = document.createElement('small');
+        Small.appendChild(MakeCode(Row.TranscodeActions || '-'));
+        return Small;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _OpArchivedWasRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Small = document.createElement('small');
+        Small.className = 'text-muted';
+        Small.textContent = `${Row.VideoCodec || '-'} / ${Row.AudioCodec || '-'} / ${Row.Container || '-'}`;
+        return Small;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _OpStatusRenderer extends ICellRenderer {
+    constructor(Opts) { super(); this._OpType = Opts?.OpType || ''; this._TableKind = Opts?.TableKind || 'Active'; }
+    Render(_V, Row) {
+        const Wrap = document.createElement('span');
+        if (Row._Rechecking) {
+            const Spin = document.createElement('i');
+            Spin.className = 'fas fa-spinner fa-spin text-primary';
+            Wrap.appendChild(Spin);
+            return Wrap;
+        }
+        if (Row._RecheckError) {
+            const ErrSpan = document.createElement('span');
+            ErrSpan.className = 'text-danger';
+            ErrSpan.title = Row._RecheckError;
+            ErrSpan.innerHTML = '<i class="fas fa-exclamation-triangle"></i>';
+            Wrap.appendChild(ErrSpan);
+            return Wrap;
+        }
+        const M = Row.Mitigation || {};
+        const Labels = window.MITIGATION_LABEL_MAP || {};
+        const L = Labels[M.Status] || Labels.unknown || { Text: '?', Cls: 'bg-light text-dark' };
+        Wrap.appendChild(MakeBadge(L.Cls, L.Text));
+        const Recheck = document.createElement('button');
+        Recheck.className = 'btn btn-outline-primary btn-sm py-0 px-1 ms-1';
+        Recheck.title = 'Re-analyze with ffprobe';
+        Recheck.innerHTML = '<i class="fas fa-redo-alt" style="font-size:0.7em"></i>';
+        Recheck.addEventListener('click', E => {
+            E.stopPropagation();
+            if (typeof window.recheckFile === 'function') window.recheckFile(Row, this._OpType, this._TableKind);
+        });
+        Wrap.appendChild(Recheck);
+        if (Row.Reason === 'subtitle_transcode' && M.Status === 'pending' && M.MediaFileId) {
+            const Sub = document.createElement('button');
+            Sub.className = 'btn btn-outline-warning btn-sm py-0 px-1 ms-1';
+            Sub.title = 'Fix subtitle burn-in';
+            Sub.innerHTML = '<i class="fas fa-closed-captioning" style="font-size:0.7em"></i>';
+            Sub.addEventListener('click', E => {
+                E.stopPropagation();
+                if (typeof window.queueSubtitleFix === 'function') window.queueSubtitleFix([M.MediaFileId], Sub);
+            });
+            Wrap.appendChild(Sub);
+        }
+        return Wrap;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _OpLastSeenRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Small = document.createElement('small');
+        Small.textContent = Row.LastSeen && window.formatTime ? window.formatTime(Row.LastSeen, 'datetime') : '-';
+        return Small;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _OpPlaysRenderer extends ICellRenderer {
+    Render(_V, Row) { return MakeText(Row.Count); }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DeviceNameRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Strong = document.createElement('strong');
+        Strong.textContent = Row.Name || '-';
+        return Strong;
+    }
+}
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DeviceAppRenderer extends ICellRenderer { Render(_V, Row) { return MakeText(Row.AppName || '-'); } }
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DeviceVersionRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Small = document.createElement('small');
+        Small.textContent = Row.AppVersion || '-';
+        return Small;
+    }
+}
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DeviceUserRenderer extends ICellRenderer { Render(_V, Row) { return MakeText(Row.LastUserName || '-'); } }
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DeviceLastActiveRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Small = document.createElement('small');
+        Small.textContent = Row.DateLastActivity && window.formatTime ? window.formatTime(Row.DateLastActivity, 'datetime') : '-';
+        return Small;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ActivityNameRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Div = document.createElement('div');
+        Div.style.maxWidth = '300px';
+        Div.style.overflow = 'hidden';
+        Div.style.textOverflow = 'ellipsis';
+        Div.style.whiteSpace = 'nowrap';
+        Div.title = Row.Name || '';
+        Div.textContent = Row.Name || '-';
+        return Div;
+    }
+}
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ActivityDetailsRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Div = document.createElement('div');
+        Div.style.maxWidth = '200px';
+        Div.style.overflow = 'hidden';
+        Div.style.textOverflow = 'ellipsis';
+        Div.style.whiteSpace = 'nowrap';
+        Div.title = Row.ShortOverview || '';
+        Div.textContent = Row.ShortOverview || '-';
+        return Div;
+    }
+}
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ActivityTypeRenderer extends ICellRenderer { Render(_V, Row) { return MakeCode(Row.Type || '-'); } }
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ActivityCountRenderer extends ICellRenderer { Render(_V, Row) { return MakeText(Row.Count || 0); } }
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _DeviceRecordCellRenderer extends ICellRenderer {
+    constructor(Opts) { super(); this._Key = Opts?.Key; }
+    Render(_V, Row) {
+        const Val = Row[this._Key] == null ? '-' : Row[this._Key];
+        const Div = document.createElement('div');
+        Div.style.maxWidth = '200px';
+        Div.style.overflow = 'hidden';
+        Div.style.textOverflow = 'ellipsis';
+        Div.style.whiteSpace = 'nowrap';
+        Div.title = String(Val);
+        Div.textContent = Truncate(Val, 50);
+        return Div;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _LogFieldKeyRenderer extends ICellRenderer { Render(_V, Row) { return MakeCode(Row.Field); } }
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _LogFieldValueRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Val = Row.Value;
+        const Span = document.createElement('span');
+        if (typeof Val === 'string' && Val.length > 80) {
+            Span.title = Val;
+            Span.textContent = Val.substring(0, 80) + '...';
+        } else {
+            Span.textContent = Val == null ? '-' : String(Val);
+        }
+        return Span;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const BuildTable = (Mount, Rows, Cols, RendererRegister, Capabilities) => {
+    const Cfg = new TableRendererConfig({ DefaultPageSize: 500 });
+    const Bus = new EventBus();
+    const Src = new ClientArrayDataSource(Rows);
+    const Caps = Capabilities || { Sortable: true };
+    const Sort = Caps.Sortable ? new SortController(Src, Bus, Cfg) : null;
+    const T = new TableRenderer({
+        Container: Mount,
+        DataSource: Src,
+        Columns: Cols,
+        Config: Cfg,
+        Bus,
+        Capabilities: Caps,
+        SortController: Sort
+    });
+    if (RendererRegister) RendererRegister(T._CellRegistry);
+    return { Table: T, Source: Src, Bus };
+};
+
+// Per-page badge maps exposed for cell renderers
+window.REASON_LABEL_MAP = window.REASON_LABEL_MAP || null;
+window.MITIGATION_LABEL_MAP = window.MITIGATION_LABEL_MAP || null;
+
+let _BreakdownTables = { Container: null, VideoCodec: null, AudioCodec: null };
+let _DestFormatsTable = null;
+let _LocalFilesTables = [];
+let _OpTables = { Active: null, Archived: null };
+let _DevicesTable = null;
+let _ActivitiesTable = null;
+let _DeviceRecordsTable = null;
+let _LogFieldsTable = null;
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderBreakdown = (Kind, Items, Total) => {
+    const MountId = Kind === 'Container' ? 'containerTableMount'
+        : Kind === 'VideoCodec' ? 'videoCodecTableMount' : 'audioCodecTableMount';
+    const KeyField = Kind === 'Container' ? 'Format' : 'Codec';
+    const Mount = document.getElementById(MountId);
+    if (!Mount) return;
+    if (_BreakdownTables[Kind]) { _BreakdownTables[Kind].Table.Destroy(); _BreakdownTables[Kind] = null; }
+    const Rows = (Items || []).slice(0, 10).map(Item => ({
+        Name: Item[KeyField] || 'unknown',
+        Count: Item.Count || 0,
+        Percentage: Total > 0 ? (Item.Count / Total * 100).toFixed(1) : '0'
+    }));
+    if (!Rows.length) { Mount.textContent = ''; return; }
+    const Cols = [
+        new ColumnDefinition({ Key: 'Name', Header: '', CellRendererName: 'BdName' }),
+        new ColumnDefinition({ Key: 'Count', Header: '', Align: 'right', CellRendererName: 'BdCount' }),
+        new ColumnDefinition({ Key: 'Percentage', Header: '', Align: 'right', Width: '60px', CellRendererName: 'BdPct' })
+    ];
+    _BreakdownTables[Kind] = BuildTable(Mount, Rows, Cols, R => {
+        R.Register('BdName', _BreakdownNameRenderer);
+        R.Register('BdCount', _BreakdownCountRenderer);
+        R.Register('BdPct', _BreakdownPctRenderer);
+    }, { Sortable: false });
+    _BreakdownTables[Kind].Table.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderDestFormats = (Rows) => {
+    const Mount = document.getElementById('destFormatsTableMount');
+    if (!Mount) return;
+    if (_DestFormatsTable) { _DestFormatsTable.Table.Destroy(); _DestFormatsTable = null; }
+    if (!Rows.length) { Mount.textContent = ''; return; }
+    const Cols = [
+        new ColumnDefinition({ Key: 'DestResolution', Header: 'Resolution', Sortable: true, CellRendererName: 'DfRes' }),
+        new ColumnDefinition({ Key: 'DestProfile', Header: 'Profile', Sortable: true, CellRendererName: 'DfProf' }),
+        new ColumnDefinition({ Key: 'DestLevel', Header: 'Level', Sortable: true, CellRendererName: 'DfLevel' }),
+        new ColumnDefinition({ Key: 'DestPixelFormat', Header: 'Pixel Format', Sortable: true, CellRendererName: 'DfPix' }),
+        new ColumnDefinition({ Key: 'DestFormat', Header: 'Container', Sortable: true, CellRendererName: 'DfFmt' }),
+        new ColumnDefinition({ Key: 'Count', Header: 'Count', Sortable: true, Align: 'right', CellRendererName: 'DfCnt' }),
+        new ColumnDefinition({ Key: 'Percentage', Header: '%', Sortable: true, Align: 'right', CellRendererName: 'DfPct' })
+    ];
+    _DestFormatsTable = BuildTable(Mount, Rows, Cols, R => {
+        R.Register('DfRes', _DestResolutionRenderer);
+        R.Register('DfProf', _DestProfileRenderer);
+        R.Register('DfLevel', _DestLevelRenderer);
+        R.Register('DfPix', _DestPixelRenderer);
+        R.Register('DfFmt', _DestFormatRenderer);
+        R.Register('DfCnt', _DestCountRenderer);
+        R.Register('DfPct', _DestPctRenderer);
+    });
+    _DestFormatsTable.Table.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderLocalFiles = (Mount, Files) => {
+    // Each invocation owns its own table+EventBus
+    const Rows = (Files || []).map(F => ({ ...F, _SelectedProfileId: F._SelectedProfileId || null }));
+    const Cols = [
+        new ColumnDefinition({ Key: 'FileName', Header: 'File', Sortable: true, CellRendererName: 'LfName' }),
+        new ColumnDefinition({ Key: 'Info', Header: 'Info', CellRendererName: 'LfInfo' }),
+        new ColumnDefinition({ Key: 'Resolution', Header: 'Resolution', Sortable: true, CellRendererName: 'LfRes' }),
+        new ColumnDefinition({ Key: 'SizeMB', Header: 'Size', Sortable: true, CellRendererName: 'LfSize' }),
+        new ColumnDefinition({
+            Key: '_SelectedProfileId', Header: 'Profile', Width: '220px',
+            Editable: true, EditorName: 'Select',
+            EditorOptions: {
+                OptionsLoader: async () => {
+                    const Empty = [{ Value: '', Label: 'Select Profile...' }];
+                    const Profiles = (window.AllProfiles || []).map(P => ({ Value: String(P.Id), Label: P.ProfileName }));
+                    return Empty.concat(Profiles);
+                },
+                ValueKey: 'Value', LabelKey: 'Label'
+            },
+            CellRendererName: 'LfProfile'
+        }),
+        new ColumnDefinition({ Key: '__Queue', Header: 'Queue', Width: '80px', CellRendererName: 'LfQueue' })
+    ];
+    const Pair = BuildTable(Mount, Rows, Cols, R => {
+        R.Register('LfName', _LocalFileNameRenderer);
+        R.Register('LfInfo', _LocalInfoRenderer);
+        R.Register('LfRes', _LocalResolutionRenderer);
+        R.Register('LfSize', _LocalSizeRenderer);
+        R.Register('LfProfile', _LocalProfileRenderer);
+        R.Register('LfQueue', _LocalQueueButtonRenderer);
+    }, { Sortable: true, Editable: true });
+    Pair.Bus.Subscribe('CellEdited', E => {
+        if (E.Key === '_SelectedProfileId') {
+            E.Row._SelectedProfileId = E.NewValue;
+            Pair.Table.Refresh();
+        }
+    });
+    _LocalFilesTables.push(Pair);
+    Pair.Table.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderOperationFiles = (TableKind, Files, OpType, IsArchived) => {
+    const MountId = TableKind === 'Active' ? 'opActiveTableMount' : 'opArchivedTableMount';
+    const Mount = document.getElementById(MountId);
+    if (!Mount) return;
+    if (_OpTables[TableKind]) { _OpTables[TableKind].Table.Destroy(); _OpTables[TableKind] = null; }
+    if (!Files.length) { Mount.textContent = ''; return; }
+    const Rows = Files.slice();
+    const ShowMitigation = OpType !== 'DirectStream';
+    const Cols = [
+        new ColumnDefinition({ Key: 'FileName', Header: 'File', Sortable: true, Width: '28%', CellRendererName: 'OpFile' }),
+        new ColumnDefinition({ Key: 'VideoCodec', Header: 'Video', Sortable: true, Width: '7%', CellRendererName: 'OpVid' }),
+        new ColumnDefinition({ Key: 'AudioCodec', Header: 'Audio', Sortable: true, Width: '7%', CellRendererName: 'OpAud' }),
+        new ColumnDefinition({ Key: 'Container', Header: 'Container', Sortable: true, Width: '7%', CellRendererName: 'OpCon' })
+    ];
+    if (OpType === 'Transcode') {
+        Cols.push(new ColumnDefinition({ Key: 'Reason', Header: 'Reason', Sortable: true, Width: '9%', CellRendererName: 'OpReason' }));
+        Cols.push(new ColumnDefinition({ Key: 'TranscodeActions', Header: 'Actions', Width: '13%', CellRendererName: 'OpActions' }));
+    }
+    if (IsArchived) {
+        Cols.push(new ColumnDefinition({ Key: '__Was', Header: 'Was', Width: '10%', CellRendererName: 'OpWas' }));
+    } else if (ShowMitigation) {
+        Cols.push(new ColumnDefinition({
+            Key: '__Status', Header: 'Status', Width: '10%',
+            CellRendererName: 'OpStatus',
+            CellRendererOptions: { OpType, TableKind }
+        }));
+    }
+    Cols.push(new ColumnDefinition({ Key: 'LastSeen', Header: 'Last Seen', Sortable: true, Width: '12%', CellRendererName: 'OpLast' }));
+    Cols.push(new ColumnDefinition({ Key: 'Count', Header: 'Plays', Sortable: true, Align: 'right', Width: '5%', CellRendererName: 'OpPlays' }));
+
+    _OpTables[TableKind] = BuildTable(Mount, Rows, Cols, R => {
+        R.Register('OpFile', _OpFileNameRenderer);
+        R.Register('OpVid', _OpVideoRenderer);
+        R.Register('OpAud', _OpAudioRenderer);
+        R.Register('OpCon', _OpContainerRenderer);
+        R.Register('OpReason', _OpReasonRenderer);
+        R.Register('OpActions', _OpActionsRenderer);
+        R.Register('OpWas', _OpArchivedWasRenderer);
+        R.Register('OpStatus', _OpStatusRenderer);
+        R.Register('OpLast', _OpLastSeenRenderer);
+        R.Register('OpPlays', _OpPlaysRenderer);
+    });
+    if (_OpTables[TableKind].Table._SortController) {
+        _OpTables[TableKind].Table._SortController.SetSort('Count', 'DESC');
+    }
+    _OpTables[TableKind].Table.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RefreshOperationTable = (TableKind) => {
+    const Pair = _OpTables[TableKind];
+    if (Pair && Pair.Table) Pair.Table.Refresh();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderDevices = (Rows) => {
+    const Mount = document.getElementById('devicesTableMount');
+    if (!Mount) return;
+    if (_DevicesTable) { _DevicesTable.Table.Destroy(); _DevicesTable = null; }
+    if (!Rows.length) { Mount.textContent = ''; return; }
+    const Cols = [
+        new ColumnDefinition({ Key: 'Name', Header: 'Device', Sortable: true, CellRendererName: 'DvName' }),
+        new ColumnDefinition({ Key: 'AppName', Header: 'App', Sortable: true, CellRendererName: 'DvApp' }),
+        new ColumnDefinition({ Key: 'AppVersion', Header: 'Version', Sortable: true, CellRendererName: 'DvVer' }),
+        new ColumnDefinition({ Key: 'LastUserName', Header: 'User', Sortable: true, CellRendererName: 'DvUser' }),
+        new ColumnDefinition({ Key: 'DateLastActivity', Header: 'Last Active', Sortable: true, CellRendererName: 'DvLast' })
+    ];
+    _DevicesTable = BuildTable(Mount, Rows, Cols, R => {
+        R.Register('DvName', _DeviceNameRenderer);
+        R.Register('DvApp', _DeviceAppRenderer);
+        R.Register('DvVer', _DeviceVersionRenderer);
+        R.Register('DvUser', _DeviceUserRenderer);
+        R.Register('DvLast', _DeviceLastActiveRenderer);
+    });
+    _DevicesTable.Table.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderActivities = (Rows) => {
+    const Mount = document.getElementById('activitiesTableMount');
+    if (!Mount) return;
+    if (_ActivitiesTable) { _ActivitiesTable.Table.Destroy(); _ActivitiesTable = null; }
+    if (!Rows.length) { Mount.textContent = ''; return; }
+    const Cols = [
+        new ColumnDefinition({ Key: 'Name', Header: 'Activity', Sortable: true, CellRendererName: 'AcName' }),
+        new ColumnDefinition({ Key: 'ShortOverview', Header: 'Details', CellRendererName: 'AcDet' }),
+        new ColumnDefinition({ Key: 'Type', Header: 'Type', Sortable: true, CellRendererName: 'AcType' }),
+        new ColumnDefinition({ Key: 'Count', Header: 'Count', Sortable: true, Align: 'right', CellRendererName: 'AcCnt' })
+    ];
+    _ActivitiesTable = BuildTable(Mount, Rows, Cols, R => {
+        R.Register('AcName', _ActivityNameRenderer);
+        R.Register('AcDet', _ActivityDetailsRenderer);
+        R.Register('AcType', _ActivityTypeRenderer);
+        R.Register('AcCnt', _ActivityCountRenderer);
+    });
+    _ActivitiesTable.Table.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderDeviceRecords = (Rows) => {
+    const Mount = document.getElementById('deviceRecordsTableMount');
+    if (!Mount) return;
+    if (_DeviceRecordsTable) { _DeviceRecordsTable.Table.Destroy(); _DeviceRecordsTable = null; }
+    if (!Rows.length) { Mount.textContent = ''; return; }
+    const Keys = Object.keys(Rows[0]);
+    const Cols = Keys.map(K => new ColumnDefinition({
+        Key: K, Header: K, Sortable: true, CellRendererName: 'DrCell_' + K, CellRendererOptions: { Key: K }
+    }));
+    _DeviceRecordsTable = BuildTable(Mount, Rows, Cols, R => {
+        Keys.forEach(K => R.Register('DrCell_' + K, _DeviceRecordCellRenderer));
+    });
+    _DeviceRecordsTable.Table.Render();
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const RenderLogFields = (Rows) => {
+    const Mount = document.getElementById('logFieldsTableMount');
+    if (!Mount) return;
+    if (_LogFieldsTable) { _LogFieldsTable.Table.Destroy(); _LogFieldsTable = null; }
+    if (!Rows.length) { Mount.textContent = ''; return; }
+    const Cols = [
+        new ColumnDefinition({ Key: 'Field', Header: 'Field', CellRendererName: 'LfKey' }),
+        new ColumnDefinition({ Key: 'Value', Header: 'Value', CellRendererName: 'LfVal' })
+    ];
+    _LogFieldsTable = BuildTable(Mount, Rows, Cols, R => {
+        R.Register('LfKey', _LogFieldKeyRenderer);
+        R.Register('LfVal', _LogFieldValueRenderer);
+    }, { Sortable: false });
+    _LogFieldsTable.Table.Render();
+};
+
+window.OptimizationTables = {
+    RenderBreakdown,
+    RenderDestFormats,
+    RenderLocalFiles,
+    RenderOperationFiles,
+    RefreshOperationTable,
+    RenderDevices,
+    RenderActivities,
+    RenderDeviceRecords,
+    RenderLogFields
+};
+
+// Sync constants from the page <script> block so cell renderers can read them
+const SyncConstants = () => {
+    if (window.REASON_LABEL_MAP_INIT) return true;
+    return false;
+};
+// The non-module script sets these as globals via the page-script REASON_LABEL_MAP / MITIGATION_LABEL_MAP consts.
+// Expose them on window so cell renderers can read them.
+if (typeof REASON_LABEL_MAP !== 'undefined') window.REASON_LABEL_MAP = REASON_LABEL_MAP;
+if (typeof MITIGATION_LABEL_MAP !== 'undefined') window.MITIGATION_LABEL_MAP = MITIGATION_LABEL_MAP;
 </script>
 {% endblock %}
