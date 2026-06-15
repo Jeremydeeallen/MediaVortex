@@ -55,8 +55,14 @@ class QualityTestRepository(BaseRepository):
             return None
 
     # directive: path-schema-migration | # see path.S8
+    QualityTestQueueSortWhitelist = {
+        "DateAdded": "DateAdded",
+        "Id": "Id",
+        "TranscodeAttemptId": "TranscodeAttemptId",
+    }
+
     def GetQualityTestQueue(self) -> List[Dict[str, Any]]:
-        """Get all quality test jobs in queue ordered by date."""
+        """Get all quality test jobs in queue ordered by date (legacy unpaged shape; new callers should use GetQualityTestQueuePaged)."""
         try:
             Query = (
                 "SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, LocalSourcePath, "
@@ -70,6 +76,26 @@ class QualityTestRepository(BaseRepository):
         except Exception as e:
             LoggingService.LogException("Exception getting quality test queue", e, "QualityTestRepository", "GetQualityTestQueue")
             return []
+
+    # directive: table-renderer-service | # see shared-table-renderer.S9
+    def GetQualityTestQueuePaged(self, PagedQueryObj):
+        """Paged quality test queue via PagedQueryBuilder; window-count strategy."""
+        from Core.Querying import PagedQueryBuilder, PagedQueryResult, CountStrategy
+        try:
+            Builder = PagedQueryBuilder(self.DatabaseService)
+            return Builder.Execute(
+                RowsSelect=(
+                    "SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, LocalSourcePath, "
+                    "DateAdded, DateStarted, DateCompleted, "
+                    "COUNT(*) OVER () AS __TotalCount "
+                    "FROM QualityTestingQueue"
+                ),
+                Query=PagedQueryObj,
+                CountStrategyChoice=CountStrategy.WINDOW,
+            )
+        except Exception as e:
+            LoggingService.LogException("Exception in GetQualityTestQueuePaged", e, "QualityTestRepository", "GetQualityTestQueuePaged")
+            return PagedQueryResult(Rows=[], TotalCount=0, Page=PagedQueryObj.Page, PageSize=PagedQueryObj.PageSize)
 
     # directive: path-schema-migration | # see path.S8
     def CreateQualityTestQueueEntry(self, TranscodeAttemptId: int, OriginalFilePath: str, LocalSourcePath: str, TranscodedFilePath: str) -> Optional[int]:

@@ -264,11 +264,43 @@ def GetQualityTestServiceStatus():
         return jsonify({"Success": False, "Message": "Failed to get service status", "Error": ErrorMsg}), 500
 
 @QualityTestBlueprint.route('/api/QualityTest/Queue', methods=['GET'])
+# directive: table-renderer-service | # see shared-table-renderer.S9
 def GetQualityTestQueue():
+    """Paged QT queue; TableRenderer-compatible (page/pageSize/sort=Key:Dir). No-param call returns full unpaged list for back-compat with the legacy Queue.html render path."""
     try:
+        from Core.Querying import PagedQuery, QuerySort
+        from Features.QualityTesting.QualityTestRepository import QualityTestRepository
+        HasPagingParams = any(k in request.args for k in ('page', 'pageSize', 'sort', 'Page', 'PageSize'))
+        if not HasPagingParams:
+            Controller = QualityTestController()
+            Result = Controller.GetQualityTestQueue()
+            return jsonify(Result)
+        ZeroBasedPageRaw = request.args.get('page')
+        if ZeroBasedPageRaw is not None:
+            Page = max(1, int(ZeroBasedPageRaw) + 1)
+        else:
+            Page = int(request.args.get('Page', 1))
+        PageSize = int(request.args.get('pageSize') or request.args.get('PageSize') or 50)
+        SortRaw = request.args.get('sort')
+        if SortRaw and ':' in SortRaw:
+            SortBy, _, SortOrder = SortRaw.partition(':')
+        else:
+            SortBy = request.args.get('SortBy', 'DateAdded')
+            SortOrder = request.args.get('SortOrder', 'ASC')
+        Sort = QuerySort.Create(SortBy, SortOrder, QualityTestRepository.QualityTestQueueSortWhitelist, DefaultColumn='DateAdded')
+        Query = PagedQuery(Page=Page, PageSize=PageSize, Sort=Sort)
         Controller = QualityTestController()
-        Result = Controller.GetQualityTestQueue()
-        return jsonify(Result)
+        Repo = Controller.DatabaseManager
+        Result = Repo.GetQualityTestQueuePaged(Query)
+        return jsonify({
+            'Success': True,
+            'Jobs': Result.Rows,
+            'Rows': Result.Rows,
+            'TotalCount': Result.TotalCount,
+            'Page': Result.Page,
+            'PageSize': Result.PageSize,
+            'TotalPages': Result.TotalPages(),
+        })
     except Exception as e:
         ErrorMsg = f"Exception in GetQualityTestQueue endpoint: {str(e)}"
         LoggingService.LogException(ErrorMsg, e, "QualityTestController", "GetQualityTestQueue")
