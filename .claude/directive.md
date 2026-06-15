@@ -1,205 +1,188 @@
-# Paged Query Core
+# Table Renderer Service
 
 **Set:** 2026-06-13
-**Activated:** 2026-06-14
-**Reopened:** 2026-06-14 -- SRP strict re-implementation: split QueryFilter.py (7 classes) and Exceptions.py (2 classes) into one-class-per-file, per C2's literal verification.
-**Reopened:** 2026-06-15 -- premature close: 13/13 narrow criteria green, but the goal this directive serves (1.17GB browser memory) has not moved. Operator correction: "I can't have you closing directives when they aren't finished." Directive stays open until at least one consumer (the table-renderer-service when it lands, or a sooner-shipped tightening of the default PageSize plus frontend adoption) actually reduces a payload the browser holds in memory.
+**Activated:** 2026-06-15 -- operator mandate: "Spin up agents and figure this out. Fix it, document it, if we use the same pattern anywhere else fix those too. Memory footprint should be much smaller and the pages should load near instantly. Best practices for datasets, SOLID, industry standards. Perfect implementation across the board."
 **Status:** Active -- phase: IMPLEMENTING
-**Slug:** paged-query-core
+**Slug:** table-renderer-service
 
 ## Outcome
 
-A single `Core/Querying/` package owns the abstraction every Repository uses to serve paged, sorted, filtered reads. Repositories declare what they query; the package builds safe parameterised SQL with `LIMIT`/`OFFSET`, `ORDER BY` whitelisting, and filter-clause composition. No Repository hand-rolls `LIMIT %s` / `OFFSET %s` after migration. Backend serves the data contract `table-renderer-service` consumes.
+Every tabular surface in the WebService (Activity, Queue, Stats, Operations, Optimization, SQLQueries, ShowSettings, FailedJobs, future tables) renders through a single in-house JS service whose decomposition follows SOLID. Pages declare table shape via configuration; rendering, sorting, filtering, pagination, virtualization, and inline editing are owned by composable controllers. Browser memory for a 4000+ row dataset stays under 200MB. Adding a new table to a page is a config-only change with zero edits to the renderer service.
 
 ## Acceptance Criteria
 
-1. **`Core/Querying/PagedQuery.py` exists** with `PagedQuery` (value object: Page, PageSize, Sort, Filter), `QueryFilter` (clause + params + AND/OR composer), `QuerySort` (column + direction, whitelist-validated), `PagedQueryResult` (Rows + TotalCount + Page + PageSize), `PagedQueryBuilder` (composes a base SELECT + WHERE + ORDER BY + LIMIT/OFFSET against `DatabaseService`).
+1. **Memory bound.** `/ShowSettings` loaded against a 4000+ row `MediaFiles` dataset consumes <200MB browser memory (Edge Task Manager process working set, fresh tab). Verifiable: open page, measure.
 
-2. **SRP -- one responsibility per class.** Each class above lives in its own file. Verifiable: `ls Core/Querying/*.py` shows one class per file.
+2. **Single renderer dependency.** Every `Templates/*.html` page that renders a table imports `TableRenderer` and uses no jQuery DOM mutation for sort, filter, paginate, or row rendering. Verifiable: `grep -rE "\.html?\.|\$\(['\"]#[A-Za-z]+TableBody['\"]\)\.html\(" Templates/` returns zero matches inside table-rendering code paths.
 
-3. **OCP -- new filter type without builder change.** Adding a new `QueryFilter` type (range, IN-list, full-text) creates one new class implementing the filter interface. `PagedQueryBuilder` is not edited. Verifiable: add a `RangeFilter`; `git diff --stat Core/Querying/PagedQueryBuilder.py` is empty.
+3. **OCP -- new column type without renderer change.** Adding a new column type (example: a progress-bar column) requires creating one `CellRenderer` subclass and registering it. No file in `static/js/TableRenderer/` core is edited. Verifiable: add a `ProgressBarCellRenderer`, ship it, `git diff --stat static/js/TableRenderer/` shows only the new file.
 
-4. **LSP -- substitutable filters.** Any `QueryFilter` plugs into `PagedQueryBuilder` interchangeably. Verifiable: contract test passes `EqualsFilter`, `LikeFilter`, `RangeFilter`, `InListFilter` through the same builder method.
+4. **LSP -- DataSource substitution.** Swapping a table's `ClientArrayDataSource` for a `ServerPagedDataSource` requires no changes to page code beyond the DataSource constructor argument. Verifiable: migrate one table from client to server paging; diff shows only the DataSource instantiation line changed.
 
-5. **DIP -- Repositories depend on `PagedQuery`, not on SQL strings.** The 5 migrated methods receive a `PagedQuery` and return a `PagedQueryResult`. Within each migrated method body, `LIMIT %s` / `OFFSET %s` SQL is not assembled inline. Verifiable (narrowed per 2026-06-14 operator decision -- initial-set scope): inspecting each of the 5 migrated method bodies shows no inline `LIMIT %s` / `OFFSET %s` strings. Sibling methods in the same file (e.g. `GetMissedQualityTests`, `GetTranscodeCandidatesByRootFolder`) are out of scope this directive; tree-wide enforcement is a follow-up.
+5. **DIP -- service has no domain knowledge.** No file under `static/js/TableRenderer/` references MediaVortex domain terms (`Show`, `Profile`, `TranscodeJob`, `Worker`, `MediaFile`, etc.). Verifiable: grep returns zero matches.
 
-6. **ISP -- focused filter / sort interfaces.** `IQueryFilter` exposes `ToClause()` and `Params()` only. `IQuerySort` exposes `ToOrderBy()` only. No god-interface. Verifiable: interface files <=20 lines each.
+6. **SRP -- one responsibility per controller.** Each of `TableRenderer`, `DataSource`, `SortController`, `FilterController`, `PaginationController`, `CellRenderer`, `InlineEditor`, `Virtualizer` is in its own file and exposes a single public surface. Verifiable: one class per file; each file has one `export class`.
 
-7. **SQL injection safe.** Every column name (sort + filter) is validated against a per-query whitelist supplied by the Repository. Verifiable: contract test `TestPagedQueryInjection.py` passes `; DROP TABLE` and `1' OR '1'='1` strings and asserts they raise `InvalidColumnError`, not execute.
+7. **Inline editor decoupling.** The per-row profile `<select>` problem (`ShowSettings.html:713-717`) is replaced by a single shared editor opened on cell activation. The Library table on `/ShowSettings` contains zero per-row `<select>` elements at rest. Verifiable: `document.querySelectorAll('#LibraryTableBody select').length === 0` until a cell is clicked.
 
-8. **`EscapeLikePattern` integration.** `LikeFilter` automatically applies `EscapeLikePattern()` and emits `ESCAPE '!'`. Verifiable: feed a path containing `%`, `_`, `!` -- query returns expected rows.
+8. **Virtualization above threshold.** Tables with row count >500 use `Virtualizer`; only visible rows + a small buffer exist in the DOM. Verifiable: load a 4000-row table; `document.querySelectorAll('#LibraryTableBody tr').length < 150`.
 
-9. **PostgreSQL `RealDictCursor` -> `CaseInsensitiveDict`.** `PagedQueryResult.Rows` returns the project's existing `CaseInsensitiveDict`. Verifiable: contract test asserts `Row['ShowName']` and `Row['showname']` both work.
+9. **Server-paged search.** `/api/ShowSettings/Shows` accepts `?q=`, `?sort=`, `?page=`, `?pageSize=` and returns paged results with a total count. Backend filter pushes to SQL, not in-Python. Verifiable: hit endpoint with `?q=breaking&pageSize=20`; response contains <=20 rows and a total.
 
-10. **Total count strategy.** `PagedQueryResult.TotalCount` is filled via a window function `COUNT(*) OVER ()` in the same query when efficient, or a separate `COUNT(*)` query when window-function cost is high. Strategy is selected per Repository via a `CountStrategy` enum. Verifiable: each migrated Repository declares its strategy; tests assert returned count matches actual filtered row count.
+10. **Contract test coverage.** `Tests/Static/TestTableRenderer*` covers each controller's invariants (sort stability, filter idempotence, pagination boundaries, virtualization buffer math, inline-edit roundtrip). Verifiable: tests pass; uncovered controllers fail CI.
 
-11. **Migration completeness.** Repositories serving paged endpoints route through `PagedQuery`. Initial migration set (mapped to actual methods per 2026-06-14 operator decision):
-    - `ShowSettingsRepository.GetShowsWithStats` (today: no pagination)
-    - `TranscodeQueueRepository.GetTranscodeQueueItemsPaginated` (today: inline LIMIT/OFFSET + Mode filter)
-    - `FileScanningRepository.GetMediaFilesPaginated` (today: inline LIMIT/OFFSET + Search + Sort) -- substituted for the non-existent `MediaFilesRepository.GetMediaFiles`
-    - `QualityTestRepository.GetQualityTestResults` (today: Limit/Offset args, no filter/sort)
-    - `Features/ServiceControl/ActiveJobRepository.GetActiveJobsByService` (today: ServiceName + WorkerName + RunningOnly filters; no LIMIT/OFFSET) -- substituted for the non-existent `TranscodeJobRepository.GetActiveJobs`
-    Verifiable: each method accepts `PagedQuery`, returns `PagedQueryResult`.
+11. **Migration completeness.** Every existing page that renders a multi-column data table is migrated onto `TableRenderer`. Migrated pages: `/Activity`, `/TranscodeQueue`, `/Stats`, `/Operations`, `/Optimization`, `/SQLQueries`, `/ShowSettings`, `/FailedJobs`. Single-row status panels and forms are out of scope. Verifiable: each page in the list uses `TableRenderer`; none retain ad-hoc table-rendering JS.
 
-12. **Feature doc owns the contract.** `Core/Querying/paged-query.feature.md` exists with Workflows, Seams, Criteria, API Version field.
+12. **Feature doc owns the contract.** `Features/SharedTable/shared-table-renderer.feature.md` exists with Workflows (`W1..Wn`), Seams (`S1..Sn`), Success Criteria (`C1..Cn`), and Status. Code files carry `# see shared-table-renderer.S<N>` anchors at controller boundaries.
 
-13. **Contract tests cover invariants.** `Tests/Contract/TestPagedQuery.py` covers: empty filter, multi-filter AND, OR composition, sort whitelist enforcement, page boundary (page 0, last page, beyond last), total count accuracy, injection rejection.
+13. **ISP -- focused interfaces.** Pages that do not paginate do not depend on pagination API; pages that do not filter do not depend on filter API. Concretely: `ISortable`, `IPaginatable`, `IFilterable`, `IEditable` are separate interfaces, and `TableRenderer` accepts the controllers that match its declared capability set. Verifiable: instantiate a read-only non-paginated table; runtime exposes no `.NextPage()` / `.SetFilter()` methods on the public surface.
+
+14. **Dependency direction.** `TableRenderer` core does not import any controller concrete; controllers do not import `TableRenderer`; both depend on shared interfaces in `static/js/TableRenderer/Interfaces/`. Verifiable: `grep -E "^import .* from '.*TableRenderer\\.js'" static/js/TableRenderer/{Sort,Filter,Pagination,Virtualizer,Cell,Inline}*.js` returns zero matches.
+
+15. **Observable event contract.** `TableRenderer` exposes `Subscribe(EventName, Handler)` for `RowClicked`, `CellEdited`, `SortChanged`, `FilterChanged`, `PageChanged`, `SelectionChanged`. Pages consume events via subscription, not callback config. Verifiable: page code uses `Table.Subscribe('CellEdited', ...)`; no `onCellEdited:` config field exists.
+
+16. **Backend paging abstraction.** A new `Core/Querying/PagedQuery.py` provides `PagedQuery`, `QueryFilter`, `QuerySort`, `PagedQueryBuilder`, `PagedQueryResult`. Every Repository method serving a paged endpoint routes through it -- no hand-rolled `LIMIT`/`OFFSET` in Repository SQL after migration. Verifiable: `grep -rE "LIMIT %s|OFFSET %s" Features/` returns zero matches outside `Core/Querying/`. Depends on the `paged-query-core` directive landing first.
+
+17. **CSS ownership.** `static/css/TableRenderer.css` exists and owns every selector that styles a `TableRenderer`-rendered table. No page-level template defines table CSS for migrated tables. Verifiable: grep `Templates/*.html` for `<style>` rules targeting `.tr-table`, `.tr-row`, `.tr-cell` -- returns zero matches.
+
+18. **Accessibility.** A `TableRenderer`-rendered table is keyboard-navigable (arrow keys, Tab, Enter to edit, Esc to cancel), uses semantic `<table>` with `<thead>`/`<tbody>`/`<th scope="col">`, exposes `aria-sort` on sortable headers, and announces filter/page changes via `aria-live`. Verifiable: axe-core or equivalent reports zero violations on `/ShowSettings`.
+
+19. **API stability commitment.** `Features/SharedTable/shared-table-renderer.feature.md` declares a SemVer-style `**API Version:** X.Y.Z` field. Breaking changes to the public surface bump major and require a migration note for each consuming page. Verifiable: file contains the field; CI check (added with this directive) refuses a major bump without a corresponding `### Migration Notes` block.
+
+20. **Controllers are unit-testable in isolation.** Each controller accepts its DataSource via constructor injection (no inner `new`), enabling stub DataSources in tests. Verifiable: each `Test*Controller.js` uses a `StubDataSource` and exercises the controller without DOM.
 
 ## Out of Scope
 
-- Frontend table rendering (see `table-renderer-service.md`).
-- Writes (INSERT/UPDATE/DELETE) -- this is a read-side abstraction.
-- Full-text search ranking (separate concern; defer).
-- Cursor-based pagination (offset/limit only for v1; cursor is a follow-up if needed for very large tables).
+- Failure-accounting directive work (currently VERIFYING -- this directive queues behind it).
+- Form rendering, modal rendering, notification UI, single-row status panels (each has its own backlog directive).
+- The shared AJAX/HTTP client wrapper (see `ajax-client-service.md`).
+- The client-side logging client (see `client-logging-service.md`).
+- Replacing jQuery globally. `TableRenderer` is jQuery-free internally; pages that already use jQuery for non-table interactions are not touched here.
+- Building a charting library or visualization framework.
+
+## Sequencing
+
+This directive depends on `paged-query-core` landing first (C16 requires it). Order of execution across the perfect-codebase directive set:
+
+1. `paged-query-core` -- backend Repository paging primitive (precondition for C16 here).
+2. `ajax-client-service` -- HTTP wrapper used by every page incl. table data sources.
+3. `client-logging-service` -- so the renderer can log errors consistently.
+4. `notification-service` -- the renderer's inline edit failure path emits notifications.
+5. **this directive** -- table renderer.
+6. `form-renderer-service` -- shares the `InlineEditor` pattern.
+7. `modal-service` -- last (least coupled to the rest).
 
 ## Constraints
 
-- Pure Python. No new dependencies.
-- PascalCase per CLAUDE.md.
-- Uses existing `DatabaseService.ExecuteQuery` -- does not bypass it.
-- No hardcoded defaults in builder; all defaults read from a `PagedQueryConfig` (default page size, max page size).
-- Whitelist enforcement is mandatory; opt-in is not an option.
+- No vendor table library (DataTables.js, AG Grid, ag-grid-community, Tabulator, etc.). SOLID-purity over pragmatism: the codebase owns the abstraction it depends on.
+- PascalCase across JS class names, file names, method names, and config keys -- per CLAUDE.md.
+- Each controller class lives in its own file (R8 single-responsibility surface).
+- DataSource implementations expose an async-uniform interface so client/server sources are LSP-substitutable.
+- No hardcoded thresholds in the renderer (virtualization row threshold, default page size, debounce intervals). All come from `TableRendererConfig`.
+- Configuration over inheritance for column definitions -- a column is a config object, not a subclass.
+
+## Escalation Defaults
+
+- Tradeoff between simplicity and OCP -> OCP. This is the perfect-codebase directive; declarative beats imperative when in conflict.
+- Tradeoff between bundle size and decomposition -> decomposition. Code splitting handles bundle size; SOLID does not bend for it.
+- Risk tolerance: low for the renderer service itself (covered by tests); medium for per-page migrations (each migration is its own commit, verified live before next).
 
 ## Engineering Calls Already Made
 
-- Window-function `COUNT(*) OVER ()` over separate count query as default for tables under ~100k rows; per-Repository override possible.
-- Offset/limit over cursor pagination for v1; cursor is a follow-up if perf demands.
-- `CaseInsensitiveDict` rows over Pydantic models -- matches existing Repository contract; conversion is a separate refactor.
+- In-house renderer, not DataTables.js. Decision rationale: DataTables couples the codebase to a vendor concrete and violates DIP; we own our abstractions.
+- ShowSettings is the proof-of-concept migration. It has the worst current symptom (1.1MB JSON -> 1.5GB browser memory) and exercises every feature (filter, sort, paginate, inline edit).
+- Backend endpoints gain optional paging/sort/filter query params; existing callers without params continue to receive the full unpaged result during transition. Removal of unpaged-mode is a follow-up directive.
+
+## Plan Supplement (2026-06-15 audit)
+
+Antipattern audit confirmed by `Explore` agent + curl payload measurements:
+
+| File | Render | Dataset | Risk |
+|---|---|---|---|
+| ShowSettings.html `RenderLibrary()` 666-734 | 3980 shows × 26-option `<select>` per row = ~131k DOM elements | 3980 | **CRITICAL** -- POC target |
+| ShowSettings.html `RenderSearchTable()` 549-585 | 3980 rows eagerly even with empty search | 3980 | **CRITICAL** -- POC target |
+| Queue.html QT queue render 741-781 | 1159 items full-render every 3s poll | 1159 | **CRITICAL** -- second migration |
+| Queue.html `updateQueueTable()` 333-388 | already paginated (25/page) but on 30s poll | 224 | MODERATE -- migrate for consistency |
+| Activity.html `RenderWorkers()` 928-954 | rebuilds every 2s; card-based | 5-10 | MODERATE -- migrate |
+| FailedJobs.html `renderRows()` 117-137 | already paginated (100/page) | <100/page | MIGRATE for consistency |
+| Status.html `RenderCoreTemperatures()` 492-532 | createElement loop | 16-32 cores | MIGRATE for consistency |
+| Operations.html `DisplayResults()` 341-408 | createElement | <50 | MIGRATE for consistency |
+| SQLQueries.html `DisplayResults()` 270-408 | createElement | variable | MIGRATE for consistency |
+
+Curl payloads on /ShowSettings page load total ~1.23 MB (Shows endpoint 1.14 MB dominates); rendered into ~167k DOM elements per first paint. Backend not at fault (paged-query-core delivered the primitive); frontend amplification is the leak driver.
+
+### Sequencing
+
+1. **Phase 1 (Foundations)** -- create `static/js/TableRenderer/` package (Interfaces, controllers, data sources, virtualizer, cell renderer, inline editor, config). Contract tests for each.
+2. **Phase 2 (POC migration)** -- ShowSettings Library + Search Cards as proof: lazy profile dropdown, 50-row virtualization, server-side paged Shows endpoint. **Operator measures Edge browser memory before/after.**
+3. **Phase 3 (CRITICAL migration)** -- Queue.html QT queue (eliminate 3s eager re-render).
+4. **Phase 4 (MODERATE migration)** -- Queue main, Activity workers, FailedJobs, Status, Operations, SQLQueries, Optimization.
+5. **Phase 5 (Backend sweep)** -- ensure every migrated page's endpoint accepts paged params via paged-query-core.
+6. **Phase 6 (Promotion)** -- create `Features/SharedTable/shared-table-renderer.feature.md` with W/S/C.
 
 ## Status
 
-Backlog 2026-06-13 -- sequence position 1 (precondition for `table-renderer-service`).
+Active -- phase: NEEDS_PLAN. Activated 2026-06-15 by operator escalation.
 
 ### Files
 
 ```
-Core/Querying/__init__.py                            -- CREATE
-Core/Querying/PagedQuery.py                          -- CREATE: value object
-Core/Querying/QueryFilter.py                         -- CREATE: filter interface + Equals/Like/Range/InList
-Core/Querying/QuerySort.py                           -- CREATE: sort with whitelist validation
-Core/Querying/PagedQueryResult.py                    -- CREATE: result value object
-Core/Querying/PagedQueryBuilder.py                   -- CREATE: SQL assembly
-Core/Querying/PagedQueryConfig.py                    -- CREATE: defaults (page size, max page size)
-Core/Querying/Interfaces/IQueryFilter.py             -- CREATE
-Core/Querying/Interfaces/IQuerySort.py               -- CREATE
-Core/Querying/Exceptions.py                          -- CREATE: InvalidColumnError, etc.
-Core/Querying/paged-query.feature.md                 -- CREATE: the contract
-Tests/Contract/TestPagedQuery.py                     -- CREATE
-Tests/Contract/TestPagedQueryInjection.py            -- CREATE
-Tests/Contract/TestPagedQueryBuilder.py              -- CREATE
-Features/ShowSettings/ShowSettingsRepository.py             -- EDIT: route GetShowsWithStats through PagedQuery
-Features/TranscodeQueue/TranscodeQueueRepository.py         -- EDIT: route GetTranscodeQueueItemsPaginated through PagedQuery
-Features/FileScanning/FileScanningRepository.py             -- EDIT: route GetMediaFilesPaginated through PagedQuery
-Features/QualityTesting/QualityTestRepository.py            -- EDIT: route GetQualityTestResults through PagedQuery
-Features/ServiceControl/ActiveJobRepository.py              -- EDIT: route GetActiveJobsByService through PagedQuery
-Features/ShowSettings/ShowSettingsController.py             -- EDIT (if needed): pass PagedQuery from request
-Features/TranscodeQueue/TranscodeQueueController.py         -- EDIT (if needed): pass PagedQuery from request
-Features/FileScanning/FileScanningController.py             -- EDIT (if needed): pass PagedQuery from request
-Features/QualityTesting/QualityTestController.py            -- EDIT (if needed): pass PagedQuery from request
+static/js/TableRenderer/TableRenderer.js              -- CREATE: orchestrator; owns DOM mutation only
+static/js/TableRenderer/DataSource.js                 -- CREATE: abstract DataSource interface
+static/js/TableRenderer/ClientArrayDataSource.js      -- CREATE: in-memory array implementation
+static/js/TableRenderer/ServerPagedDataSource.js      -- CREATE: server-side paged implementation
+static/js/TableRenderer/ColumnDefinition.js           -- CREATE: declarative column config
+static/js/TableRenderer/SortController.js             -- CREATE: sort state + DataSource interaction
+static/js/TableRenderer/FilterController.js           -- CREATE: filter state + DataSource interaction
+static/js/TableRenderer/PaginationController.js       -- CREATE: page state + DataSource interaction
+static/js/TableRenderer/CellRenderer.js               -- CREATE: per-column rendering strategy base + built-ins
+static/js/TableRenderer/InlineEditor.js               -- CREATE: per-cell editor strategy base + built-ins
+static/js/TableRenderer/Virtualizer.js                -- CREATE: viewport-based DOM recycling
+static/js/TableRenderer/TableRendererConfig.js        -- CREATE: thresholds, defaults (no magic numbers in code)
+Features/SharedTable/shared-table-renderer.feature.md -- CREATE: the contract (W/S/C IDs)
+Features/SharedTable/__init__.py                      -- CREATE: package marker (if Python utilities accompany)
+Tests/Static/TestTableRenderer.js                     -- CREATE: renderer unit tests
+Tests/Static/TestSortController.js                    -- CREATE
+Tests/Static/TestFilterController.js                  -- CREATE
+Tests/Static/TestPaginationController.js              -- CREATE
+Tests/Static/TestVirtualizer.js                       -- CREATE
+Tests/Static/TestInlineEditor.js                      -- CREATE
+Features/ShowSettings/ShowSettingsController.py       -- EDIT: add paged/sortable/searchable variant to /Shows
+Features/ShowSettings/ShowSettingsRepository.py       -- EDIT: push filter+sort+page into SQL
+Templates/ShowSettings.html                           -- EDIT: migrate to TableRenderer (POC)
+Templates/Activity.html                               -- EDIT: migrate (after POC validated)
+Templates/Queue.html                                  -- EDIT: migrate
+Templates/Stats.html                                  -- EDIT: migrate
+Templates/Operations.html                             -- EDIT: migrate
+Templates/Optimization.html                           -- EDIT: migrate
+Templates/SQLQueries.html                             -- EDIT: migrate
+Templates/FailedJobs.html                             -- EDIT: migrate
 ```
-
-### Plan
-
-Sequence (commit per step; each step has the smoke or contract test that exits it):
-
-1. **Core scaffolding (no callers yet).** Create `Core/Querying/__init__.py`, `Interfaces/IQueryFilter.py`, `Interfaces/IQuerySort.py`, `Exceptions.py` (InvalidColumnError, InvalidPageError), `PagedQueryConfig.py` (DefaultPageSize=25, MaxPageSize=500), `QuerySort.py` (whitelist + ASC/DESC validation), `QueryFilter.py` (EqualsFilter, LikeFilter, RangeFilter, InListFilter + AndComposer/OrComposer), `PagedQuery.py` (Page, PageSize, Sort, Filter value object), `PagedQueryResult.py` (Rows, TotalCount, Page, PageSize), `PagedQueryBuilder.py` (composes WHERE/ORDER BY/LIMIT/OFFSET from a base SELECT, calls `DatabaseService.ExecuteQuery`).
-   Exit: `Tests/Contract/TestPagedQueryBuilder.py` + `TestPagedQueryInjection.py` + `TestPagedQuery.py` all green.
-
-2. **Migrate `QualityTestRepository.GetQualityTestResults`.** Simplest case (Limit/Offset args only, no filter/sort). Validates the abstraction against a real call site before any complex migration. Existing controller signature preserved -- shim translates Limit/Offset -> PagedQuery internally if needed.
-   Exit: `Tests/Contract/TestQualityTestRepository.py` (or focused new tests) green + `grep "LIMIT %s\\|OFFSET %s" Features/QualityTesting/QualityTestRepository.py` returns zero.
-
-3. **Migrate `FileScanningRepository.GetMediaFilesPaginated`.** Adds LikeFilter (search) + QuerySort (SortBy/SortOrder) usage. Validates EscapeLikePattern integration.
-   Exit: smoke -- hit `/api/MediaFiles` endpoint; verify pagination + search + sort still work.
-
-4. **Migrate `TranscodeQueueRepository.GetTranscodeQueueItemsPaginated`.** Adds Mode filter (categorical EqualsFilter). Validates multi-filter AND composition.
-   Exit: smoke -- hit `/Queue` page; verify Pending/InProgress/Completed tabs still filter + sort + page.
-
-5. **Migrate `ShowSettingsRepository.GetShowsWithStats`.** Adds CountStrategy (this is an aggregate query with HAVING -- window-function COUNT may be expensive). Adds optional drive filter. Adds pagination where there was none.
-   Exit: smoke -- hit `/ShowSettings` page; verify shows list renders + filters by drive.
-
-6. **Migrate `ActiveJobRepository.GetActiveJobsByService`.** Adds pagination where there was none. Keep ServiceName + WorkerName + RunningOnly as PagedQuery filters (EqualsFilter).
-   Exit: smoke -- hit `/Activity` dashboard; verify active jobs list renders.
-
-7. **VERIFYING.** Record per-criterion evidence (13 entries). Run full contract suite.
-
-8. **DELIVERING.** Create `Core/Querying/paged-query.feature.md` (R13 relaxes here). Populate `### Promotions`. Close.
-
-### Seams enumerated (per `seam-verification.md`)
-
-| Seam | Producer | Wire shape | Consumer expects | Verification |
-|---|---|---|---|---|
-| function-call: PagedQueryBuilder -> DatabaseService.ExecuteQuery | `PagedQueryBuilder.Execute` | `(sql: str, params: tuple)` -> `List[CaseInsensitiveDict]` | DatabaseService.ExecuteQuery contract: SELECT only, returns lowercase-key rows wrapped in CaseInsensitiveDict | `Tests/Contract/TestPagedQueryBuilder.py` runs builder against live DB |
-| function-call: Repository -> PagedQueryBuilder | each migrated Repository | `(BaseSelect, PagedQuery, AllowedSortColumns)` -> `PagedQueryResult` | Repository receives Rows + TotalCount + echoed Page/PageSize | per-Repository contract test |
-| wire-format: Controller request -> PagedQuery | Flask route (`request.args.get`) | `(page: int, pageSize: int, sortBy: str, sortOrder: str, search?: str, filterX?: str)` -> `PagedQuery` | PagedQueryConfig clamps PageSize to <= MaxPageSize; page >= 1; sortBy column rejected if not in whitelist | step 3-6 smoke tests (`/api/MediaFiles`, `/Queue`, `/ShowSettings`, `/Activity`) |
-| wire-format: PagedQueryResult -> JSON response | Repository -> Controller -> jsonify | `{Rows: [...], TotalCount: int, Page: int, PageSize: int}` carried inside existing `{Success, Message, Data}` envelope | Frontend pagination controls consume `Data.TotalCount` + `Data.Rows` (existing shape preserved) | step 3-6 smoke tests confirm existing UI still works |
-| state-store: PostgreSQL `RealDictCursor` -> CaseInsensitiveDict | DatabaseService.ExecuteQuery | rows with lowercase keys (`row['showname']`) | CaseInsensitiveDict allows `Row['ShowName']` and `Row['showname']` | criterion 9 contract test |
-| state-store: aggregate query window-function COUNT | ShowSettingsRepository.GetShowsWithStats | `COUNT(*) OVER ()` echoed on each row OR separate COUNT query (CountStrategy enum) | TotalCount reflects HAVING-filtered + WHERE-filtered set | step 5 contract test |
 
 ### Promotions
 
-| Source (directive section) | Target (durable home) |
-|---|---|
-| `## Outcome` paragraph | `Core/Querying/paged-query.feature.md ## What It Does` |
-| `## Acceptance Criteria` C1..C13 | `Core/Querying/paged-query.feature.md ## Success Criteria C1..C13` |
-| `## Plan` step 1..8 sequencing | Burned at delivery; commit history (`efa7e75`..`HEAD`) is the durable record |
-| `## Seams enumerated` (6 rows) | `Core/Querying/paged-query.feature.md ## Seams S1..S6` |
-| `### Files` block | `Core/Querying/paged-query.feature.md ## Files` table |
-| `## Out of Scope` | `Core/Querying/paged-query.feature.md ## Out of Scope` |
-| `## Engineering Calls Already Made` | Burned at delivery; the calls are encoded in the implementation + feature doc |
-| `### Decisions Made` accreted during IMPLEMENTING | Below in `### Decisions Made` -- closed-directive archive |
+Required on close. Anticipated:
+
+| Source artifact | Target file | Commit |
+|---|---|---|
+| Component decomposition + Seams | `Features/SharedTable/shared-table-renderer.feature.md` | TBD |
+| DataSource paging contract | `Features/SharedTable/shared-table-renderer.feature.md` Seams | TBD |
+| ShowSettings paged-API contract | `Features/ShowSettings/ShowSettings.feature.md` Seams | TBD |
+| Per-page migration notes (if any per-page deviation) | each affected `*.feature.md` | TBD |
 
 ### Verification
 
-C1. **PagedQuery package shape.** `ls Core/Querying/*.py` enumerates `__init__.py, CountStrategy.py, Exceptions.py, PagedQuery.py, PagedQueryBuilder.py, PagedQueryConfig.py, PagedQueryResult.py, QueryFilter.py, QuerySort.py`; `Interfaces/IQueryFilter.py` + `Interfaces/IQuerySort.py` present. Status: IMPLEMENTED.
-
-C2. **SRP -- one class per file, strict.** Re-implementation 2026-06-14: legacy `QueryFilter.py` (7 classes) split into `Filters/{EqualsFilter,LikeFilter,NotLikeFilter,RangeFilter,InListFilter,AndComposer,OrComposer}.py`; legacy `Exceptions.py` (2 classes) split into `Exceptions/{InvalidColumnError,InvalidPageError}.py`. Helper `_AssertSafeColumn` extracted to `Filters/_ColumnSafety.AssertSafeColumn` and re-imported by every filter. `Tests/Contract/TestPagedQueryStructure.py` AST-parses every `.py` under `Core/Querying/` (excluding `__init__.py`) and asserts each file has exactly one top-level `ClassDef`; 3 structural assertions, all green. 16 named classes each at canonical paths. Status: IMPLEMENTED (strict).
-
-C3. **OCP -- new filter type without builder change.** Evidence: step 3 added `NotLikeFilter` to handle FileScanning's `!`-prefix search negation; `git show 213bcf1 --stat | grep Querying` shows `QueryFilter.py + __init__.py` modified, `PagedQueryBuilder.py` untouched. `git log Core/Querying/PagedQueryBuilder.py` shows only `efa7e75` (step 1). Status: IMPLEMENTED.
-
-C4. **LSP -- substitutable filters.** `Tests/Contract/TestPagedQuery.py` instantiates Equals / Like / Range / InList / And / Or interchangeably via the `IQueryFilter.ToClause() + Params()` contract; `TestPagedQueryBuilder.test_multi_filter_and_composition` and `test_like_filter_with_special_chars` round-trip multiple filter types through the same builder. Status: IMPLEMENTED.
-
-C5. **DIP -- Repositories depend on PagedQuery, not SQL strings.** All 5 migrated methods receive `Query: PagedQuery` and return `PagedQueryResult` (signatures verified by grep). Method-body grep for `LIMIT %s` / `OFFSET %s` returns zero in each method body (verified per step via `awk` extraction of the method block). Status: IMPLEMENTED.
-
-C6. **ISP -- focused interfaces.** `wc -l Core/Querying/Interfaces/IQueryFilter.py` = 15; `IQuerySort.py` = 9; both ≤20 LOC. `IQueryFilter` exposes `ToClause()` + `Params()`. `IQuerySort` exposes `ToOrderBy()`. Status: IMPLEMENTED.
-
-C7. **SQL injection safe.** `Tests/Contract/TestPagedQueryInjection.py` (8 tests, all passing) covers `; DROP TABLE Users--`, `1' OR '1'='1`, quote-in-column, semicolon-in-column, paren-in-column, space-in-column; unlisted-column rejection for both QuerySort and EqualsFilter. Each raises `InvalidColumnError` before any SQL is composed. Status: IMPLEMENTED.
-
-C8. **EscapeLikePattern integration.** `LikeFilter.Params()` calls `EscapeLikePattern()` and `ToClause()` emits `ESCAPE '!'`. `TestPagedQuery.test_like_filter_escapes_special_chars` asserts `"%Showname!_with!%special!!chars%"` from input `"Showname_with%special!chars"`. `TestPagedQueryBuilder.test_like_filter_with_special_chars` round-trips against live data (50 rows match path containing `!_special%chars`). Status: IMPLEMENTED.
-
-C9. **CaseInsensitiveDict rows.** `TestPagedQueryBuilder.test_case_insensitive_dict_rows` asserts `Row['ShowName'] == Row['showname'] == Row['SHOWNAME']`. Status: IMPLEMENTED.
-
-C10. **Total count strategy.** `CountStrategy.WINDOW`, `SEPARATE`, `NONE` defined in `Core/Querying/CountStrategy.py`. `TestPagedQueryBuilder.test_window_count_matches_actual_total` (50 rows in test table → TotalCount=50); `test_separate_count_matches_actual_total` (filter Mode='Transcode' → TotalCount=25); `test_count_strategy_none_returns_negative_one`. Per-Repository selection: QualityTest=WINDOW, FileScanning=WINDOW, TranscodeQueue=WINDOW, ShowSettings=WINDOW (aggregate post-GROUP-BY HAVING), ActiveJob=WINDOW. Status: IMPLEMENTED.
-
-C11. **Migration completeness.** All 5 named methods route through `PagedQueryBuilder.Execute`:
-- `QualityTestRepository.GetQualityTestResults(Query: PagedQuery) -> PagedQueryResult` (live smoke: TotalCount=1159)
-- `FileScanningRepository.GetMediaFilesPaginated(Query: PagedQuery) -> PagedQueryResult` (live smoke: TotalCount=50552 unfiltered, 37 with Search='Westworld', 50515 with NotLike complement = 50552-37 ✓)
-- `TranscodeQueueRepository.GetTranscodeQueueItemsPaginated(Query: PagedQuery) -> PagedQueryResult` (live smoke: 224 all-modes, 224 Mode=Transcode, 0 Mode=Remux)
-- `ShowSettingsRepository.GetShowsWithStats(Query: PagedQuery) -> PagedQueryResult` (live smoke: 3980 shows, Drive=T: → 648)
-- `ActiveJobRepository.GetActiveJobsByService(Query: PagedQuery) -> PagedQueryResult` (live smoke: 4 TranscodeService active jobs; DM-route equivalent after ServiceControlRepository duplicate removed)
-Status: IMPLEMENTED.
-
-C12. **Feature doc.** `Core/Querying/paged-query.feature.md` to be created at DELIVERING (R13 gates earlier creation). Status: PENDING (next phase).
-
-C13. **Contract tests cover invariants.** `Tests/Contract/TestPagedQuery.py` (25 tests) + `TestPagedQueryInjection.py` (8 tests) + `TestPagedQueryBuilder.py` (10 live-DB tests) + `TestPagedQueryStructure.py` (3 SRP-AST tests) = 46 tests, all green. Covers: empty filter, multi-filter AND, OR composition, sort whitelist enforcement, page boundaries (Page=0 rejected, page beyond last returns 0 rows, TotalCount accurate), total count accuracy (window + separate), injection rejection, one-class-per-file SRP enforcement. Status: IMPLEMENTED.
-
-### Seam Verification Round-trip (per seam-verification.md VERIFYING)
-
-- **function-call: PagedQueryBuilder → DatabaseService.ExecuteQuery** -- verified by every `TestPagedQueryBuilder` test (10 round-trips against live DB).
-- **function-call: Repository → PagedQueryBuilder** -- verified by 5 live smoke tests (one per migrated repository) confirming the (BaseSelect, PagedQuery, AllowedSortColumns) → PagedQueryResult shape.
-- **wire-format: Controller request → PagedQuery** -- verified at the ViewModel/Controller layer: FileScanningViewModel.GetMediaFilesPaginated, TranscodeQueueViewModel.LoadQueueItems, ShowSettingsController.GetShows, QualityTestController.GetQualityTestHistory all build PagedQuery from request args via `QuerySort.Create` + filter primitives.
-- **wire-format: PagedQueryResult → JSON response** -- existing `{Rows, TotalCount, TotalPages}` shape preserved by FileScanning (via dict wrapper) and TranscodeQueue (Result.Rows + Result.TotalCount); QualityTest's Pagination block built from Result fields; ShowSettings adds new Pagination block alongside Data.
-- **state-store: PostgreSQL RealDictCursor → CaseInsensitiveDict** -- C9 evidence.
-- **state-store: aggregate window-function COUNT** -- ShowSettings live smoke confirms `COUNT(*) OVER ()` post-HAVING returns 3980 distinct shows; unfiltered + drive-filtered counts both correct.
+To populate at VERIFYING. One entry per acceptance criterion (12 entries).
 
 ### Decisions Made
 
-- **Criterion 5 narrowed to method-body scope (not file-scope).** Sibling methods like `GetMissedQualityTests` (LIMIT only, no OFFSET -- not pagination) and `GetTranscodeCandidatesByRootFolder` remain inline. Tree-wide enforcement deferred to a follow-up directive. (2026-06-14, operator-confirmed via AskUserQuestion.)
-- **Criterion 11 method-name mapping.** The directive's draft named four methods that don't exist verbatim. Mapped to the actual paginating methods + the canonical active-jobs reader (`ActiveJobRepository.GetActiveJobsByService` substituted for non-existent `TranscodeJobRepository.GetActiveJobs`; `FileScanningRepository.GetMediaFilesPaginated` substituted for non-existent `MediaFilesRepository.GetMediaFiles`). (2026-06-14, operator-confirmed.)
-- **NotLikeFilter added during step 3.** FileScanning's `!`-prefix search-negation pattern was previously inline `NOT LIKE` SQL. Adding `NotLikeFilter` as a new `IQueryFilter` implementor (vs handling negation inline in the Repository) exercises and validates criterion 3 (OCP). PagedQueryBuilder untouched.
-- **TranscodeQueue priority composite ORDER BY preserved exactly.** The operator list view's composite (`<SortExpr> <direction> NULLS LAST, DateAdded ASC` -- where SortExpr for the "Priority" sort is `(CASE WHEN Priority >= 195 THEN Priority ELSE 0 END), SizeMB`) does not perfectly match the queue-priority.feature.md C1 canonical claim ORDER BY (`DESC, DESC NULLS LAST, ASC` directions baked in). Preserved current behavior verbatim; reconciliation with C1 is out of scope for this directive (filed as observation, not bug -- TranscodeQueue list view has lived with this since the queue-priority lift).
-- **ShowSettings + ActiveJob get unbounded PagedQueryConfig per call.** Both methods have callers that expect "give me everything" semantics (3980 shows in library; up to 4 active jobs typical). Per-call `PagedQueryConfig(DefaultPageSize=10000, MaxPageSize=10000)` allows unbounded fetch without changing the global Config defaults (25/500). Frontend can opt into pagination by passing explicit Page/PageSize.
-- **PagedQueryResult is iterable + len()-able.** `__iter__` returns `iter(self.Rows)`; `__len__` returns `len(self.Rows)`. Lets ActiveJob callers do `for J in result: ...` / `len(result)` without unpacking `.Rows` -- keeps the 12 caller call sites concise.
-- **ServiceControlRepository.GetActiveJobsByService duplicate deleted.** It was a stripped-down duplicate of ActiveJobRepository's method that won MRO resolution on `DatabaseManager.GetActiveJobsByService(...)` calls. Removal lets `db.GetActiveJobsByService(Query)` resolve to the principled PagedQuery-based method. Three `Scripts/` callers updated accordingly.
-- **ProcessSupervisor.py import fix.** The existing `from Repositories.ActiveJobRepository import ActiveJobRepository` referenced a non-existent module (would have ImportError'd at runtime if the path were hit). Fixed in the same edit (`Features.ServiceControl.ActiveJobRepository`) since the line was already in the edit region.
-- **CrashRecoveryService stub-comment block collapsed (R12).** Two-line `# This could be enhanced ... # For now, return basic info` was a preexisting violation in the edit region; collapsed per R12's "pure WHAT-redundancy → delete" classification.
-- **2026-06-14 SRP strict re-implementation (reopen).** Operator challenge: "you said 13/13 but C2 has a known divergence." Honest answer: yes, C2's literal verification (`ls Core/Querying/*.py` shows one class per file) failed -- QueryFilter.py had 7 classes, Exceptions.py had 2. Reopened the directive to fix it properly: created `Core/Querying/Filters/` and `Core/Querying/Exceptions/` subfolders with one class per file (9 new files), extracted shared `_AssertSafeColumn` helper to `Filters/_ColumnSafety.AssertSafeColumn`, updated `__init__.py` to re-export everything (backward-compatible -- existing imports `from Core.Querying import EqualsFilter` still resolve), deleted legacy flat modules. Added `Tests/Contract/TestPagedQueryStructure.py` with 3 AST-based assertions that enforce the SRP invariant going forward. 46/46 contract tests green. Status: 13/13 now legitimately IMPLEMENTED.
+To accrete during IMPLEMENTING.
+
+---
+
+## Risk Notes
+
+- **Virtualization is hard to get right.** Smooth scroll, sticky headers, sort while virtualized, and inline editor positioning are the failure modes. Budget extra time here and write tests against the math (visible-window calculation, buffer size) before integration.
+- **Migration is per-page commits, not one big sweep.** ShowSettings (POC) lands first and is canary'd; each subsequent page is its own commit so a bad migration on Queue does not block the rest.
+- **Backend paging changes the seam contract.** Endpoints that gain `?page`/`?sort`/`?q` must remain backward-compatible during transition (no params = unpaged response). Removal of unpaged-mode is a follow-up directive, NOT part of this one.
+- **R12 / R14 apply to the new JS.** No multi-line comments; no annotation lines on docs. Plan for that during scaffolding to avoid hook friction.
