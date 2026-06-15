@@ -10,27 +10,42 @@ Repository = ShowSettingsRepository()
 
 
 @ShowSettingsBlueprint.route('/Shows', methods=['GET'])
-# directive: paged-query-core | # see paged-query.C11
+# directive: table-renderer-service | # see shared-table-renderer.S9
 def GetShows():
-    """Get shows with stats + current settings; route through PagedQuery (unbounded by default for current frontend; Page/PageSize override available)."""
+    """Get shows with stats; accepts BOTH PascalCase (Page/PageSize/SortBy/SortOrder/Drive) and TableRenderer lowercase (page/pageSize/sort/q + filter.Drive) param conventions."""
     try:
         from Core.Querying import PagedQuery, QuerySort
-        Drive = request.args.get('Drive', None)
-        Page = int(request.args.get('Page', 1))
-        PageSize = int(request.args.get('PageSize', 10000))
-        SortBy = request.args.get('SortBy', 'TotalGB')
-        SortOrder = request.args.get('SortOrder', 'DESC')
+        ZeroBasedPageRaw = request.args.get('page')
+        if ZeroBasedPageRaw is not None:
+            Page = max(1, int(ZeroBasedPageRaw) + 1)
+        else:
+            Page = int(request.args.get('Page', 1))
+        PageSize = int(request.args.get('pageSize') or request.args.get('PageSize') or 50)
+        SortRaw = request.args.get('sort')
+        if SortRaw and ':' in SortRaw:
+            SortBy, _, SortOrder = SortRaw.partition(':')
+        else:
+            SortBy = request.args.get('SortBy', 'TotalGB')
+            SortOrder = request.args.get('SortOrder', 'DESC')
+        Drive = request.args.get('filter.Drive') or request.args.get('Drive', None)
+        SearchTerm = (request.args.get('q') or request.args.get('Search') or '').strip()
 
         DriveFilter = Repository.BuildShowsRootDriveFilter(Drive)
         if DriveFilter is False:
-            return jsonify({'Success': True, 'Data': [], 'Pagination': {'TotalCount': 0, 'Page': Page, 'PageSize': PageSize, 'TotalPages': 0}})
-        Filters = [DriveFilter] if DriveFilter is not None else []
+            return jsonify({'Success': True, 'Data': [], 'Rows': [], 'TotalCount': 0, 'Page': Page, 'PageSize': PageSize, 'TotalPages': 0, 'Pagination': {'TotalCount': 0, 'Page': Page, 'PageSize': PageSize, 'TotalPages': 0}})
+        SearchFilter = Repository.BuildShowsSearchFilter(SearchTerm)
+        Filters = [F for F in (DriveFilter, SearchFilter) if F is not None]
         Sort = QuerySort.Create(SortBy, SortOrder, Repository.ShowsWithStatsSortWhitelist, DefaultColumn='TotalGB')
         Query = PagedQuery(Page=Page, PageSize=PageSize, Sort=Sort, Filters=Filters)
         Result = Repository.GetShowsWithStats(Query)
         return jsonify({
             'Success': True,
             'Data': Result.Rows,
+            'Rows': Result.Rows,
+            'TotalCount': Result.TotalCount,
+            'Page': Result.Page,
+            'PageSize': Result.PageSize,
+            'TotalPages': Result.TotalPages(),
             'Pagination': {
                 'TotalCount': Result.TotalCount,
                 'Page': Result.Page,

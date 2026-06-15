@@ -34,8 +34,25 @@ def PrefixMap():
 from Features.ShowSettings.Models.ShowSettingModel import ShowSettingModel
 
 
+# directive: table-renderer-service | # see shared-table-renderer.S9
+class _ShowFolderSliceLikeFilter:
+    """Repository-local IQueryFilter implementor for the pre-aggregate show-folder ILIKE search."""
+
+    # directive: table-renderer-service | # see shared-table-renderer.S9
+    def __init__(self, EscapedPattern: str):
+        self.Pattern = f"%{EscapedPattern}%"
+
+    # directive: table-renderer-service | # see shared-table-renderer.S9
+    def ToClause(self) -> str:
+        return "LOWER(split_part(mf.RelativePath, '/', 1)) LIKE LOWER(%s) ESCAPE '!'"
+
+    # directive: table-renderer-service | # see shared-table-renderer.S9
+    def Params(self):
+        return (self.Pattern,)
+
+
+# directive: path-schema-migration | # see path.S8
 class ShowSettingsRepository(BaseRepository):
-    # directive: path-schema-migration | # see path.S8
     """Repository for ShowSettings table operations."""
 
     # directive: path-schema-migration | # see path.S8
@@ -193,6 +210,14 @@ class ShowSettingsRepository(BaseRepository):
         "FileCount": "COUNT(*)",
         "ShowName": "split_part(mf.RelativePath, '/', 1)",
     }
+
+    # directive: table-renderer-service | # see shared-table-renderer.S9
+    def BuildShowsSearchFilter(self, SearchTerm: str):
+        """Return an IQueryFilter that ILIKEs the show-folder slice pre-aggregate; returns None when empty."""
+        from Core.Database.DatabaseService import EscapeLikePattern
+        if not SearchTerm:
+            return None
+        return _ShowFolderSliceLikeFilter(EscapeLikePattern(SearchTerm))
 
     # directive: paged-query-core | # see paged-query.C11
     def BuildShowsRootDriveFilter(self, RootDrive: str):
