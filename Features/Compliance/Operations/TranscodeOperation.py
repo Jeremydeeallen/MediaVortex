@@ -38,10 +38,14 @@ class TranscodeOperation(IComplianceOperation):
             Reasons.append({'Rule': 'AcceptableVideoCodecsCsv', 'Operator': 'NOT IN', 'Actual': SrcCodec, 'Threshold': sorted(AcceptableCodecs), 'Outcome': 'applies'})
             Applies = True
 
+        # directive: mv-trust-savings-and-clamp -- AC1 savings rule skipped on MV-transcoded files; codec/resolution/upscale still fire.
+        MvTrusted = bool(getattr(Mf, 'TranscodedByMediaVortex', False))
         EstSavings = self._EstimatedSavingsMB(Mf, Profile)
-        if EstSavings is not None and EstSavings >= Rules.EstimatedSavingsMBThreshold:
+        if EstSavings is not None and EstSavings >= Rules.EstimatedSavingsMBThreshold and not MvTrusted:
             Reasons.append({'Rule': 'EstimatedSavingsMBThreshold', 'Operator': '>=', 'Actual': round(EstSavings, 1), 'Threshold': Rules.EstimatedSavingsMBThreshold, 'Outcome': 'applies'})
             Applies = True
+        elif EstSavings is not None and EstSavings >= Rules.EstimatedSavingsMBThreshold and MvTrusted:
+            Reasons.append({'Rule': 'EstimatedSavingsMBThreshold', 'Operator': 'skip-mv-trusted', 'Actual': round(EstSavings, 1), 'Threshold': Rules.EstimatedSavingsMBThreshold, 'Outcome': 'skip'})
 
         return OperationResult(OperationName=self.Name, Applies=Applies, Reasons=Reasons)
 

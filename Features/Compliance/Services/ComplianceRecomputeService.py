@@ -55,7 +55,7 @@ class ComplianceRecomputeService:
     @staticmethod
     def _SelectSql(N: int) -> str:
         Placeholders = ','.join(['%s'] * N)
-        return ("SELECT Id, FileName, SizeMB, DurationMinutes, Resolution, ResolutionCategory, Codec, VideoBitrateKbps, AudioCodec, AudioChannels, AudioBitrateKbps, AudioComplete, AudioCorruptSuspect, ContainerFormat, SubtitleFormats, AssignedProfile, HasExplicitEnglishAudio, HasForcedSubtitles, SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, SourceIntegratedThresholdLufs FROM MediaFiles WHERE Id IN (" + Placeholders + ")")
+        return ("SELECT Id, FileName, SizeMB, DurationMinutes, Resolution, ResolutionCategory, Codec, VideoBitrateKbps, AudioCodec, AudioChannels, AudioBitrateKbps, AudioComplete, AudioCorruptSuspect, ContainerFormat, SubtitleFormats, AssignedProfile, HasExplicitEnglishAudio, HasForcedSubtitles, SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, SourceIntegratedThresholdLufs, TranscodedByMediaVortex FROM MediaFiles WHERE Id IN (" + Placeholders + ")")
 
     @staticmethod
     def _RowToMediaFile(R: dict) -> MediaFileModel:
@@ -71,5 +71,7 @@ class ComplianceRecomputeService:
             HasExplicitEnglishAudio=R.get('HasExplicitEnglishAudio'), HasForcedSubtitles=R.get('HasForcedSubtitles'),
             SourceIntegratedLufs=R.get('SourceIntegratedLufs'), SourceLoudnessRangeLU=R.get('SourceLoudnessRangeLU'),
             SourceTruePeakDbtp=R.get('SourceTruePeakDbtp'), SourceIntegratedThresholdLufs=R.get('SourceIntegratedThresholdLufs'),
+            # directive: mv-trust-savings-and-clamp -- AC3 wiring.
+            TranscodedByMediaVortex=bool(R.get('TranscodedByMediaVortex')) if R.get('TranscodedByMediaVortex') is not None else None,
         )
 

@@ -36,7 +36,11 @@ class EffectiveProfileResolver:
             return int(Vk)
         Percent = Row.get('SourceBitratePercent')
         if Percent and Percent > 0 and Mf.VideoBitrateKbps:
-            return int(round(int(Mf.VideoBitrateKbps) * float(Percent) / 100.0))
+            # directive: mv-trust-savings-and-clamp -- AC2 VBR clamp.
+            Computed = int(round(int(Mf.VideoBitrateKbps) * float(Percent) / 100.0))
+            Floor = Row.get('MinBitrateKbps') or 0
+            Ceil = Row.get('MaxBitrateKbps') or 10**9
+            return max(int(Floor), min(int(Ceil), Computed))
         Crf = Row.get('Quality')
         Codec = Row.get('Codec')
         if Crf is not None and Codec and TargetResolution:
@@ -50,7 +54,7 @@ class EffectiveProfileResolver:
         """Single targeted JOIN -- pulls bitrates + Quality + Codec + SourceBitratePercent + TranscodeDownTo so the strategy dispatch has every input in one row."""
         try:
             Rows = self.DB.ExecuteQuery(
-                "SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.SourceBitratePercent, pt.TranscodeDownTo, p.Codec, p.RateControlMode "
+                "SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.SourceBitratePercent, pt.MinBitrateKbps, pt.MaxBitrateKbps, pt.TranscodeDownTo, p.Codec, p.RateControlMode "
                 "FROM ProfileThresholds pt "
                 "JOIN Profiles p ON pt.ProfileId = p.Id "
                 "WHERE p.ProfileName = %s AND pt.Resolution = %s "
@@ -67,6 +71,8 @@ class EffectiveProfileResolver:
                 'AudioBitrateKbps': R['AudioBitrateKbps'],
                 'Quality': R.get('Quality'),
                 'SourceBitratePercent': R.get('SourceBitratePercent'),
+                'MinBitrateKbps': R.get('MinBitrateKbps'),
+                'MaxBitrateKbps': R.get('MaxBitrateKbps'),
                 'TargetResolution': Target,
                 'Codec': R.get('Codec'),
                 'RateControlMode': R.get('RateControlMode'),

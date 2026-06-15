@@ -1615,6 +1615,8 @@ class QueueManagementBusinessService:
             SourceTruePeakDbtp=Row.get('SourceTruePeakDbtp'),
             SourceIntegratedThresholdLufs=Row.get('SourceIntegratedThresholdLufs'),
             LoudnessMeasurementFailureReason=Row.get('LoudnessMeasurementFailureReason'),
+            # directive: mv-trust-savings-and-clamp -- AC3 wiring.
+            TranscodedByMediaVortex=bool(Row.get('TranscodedByMediaVortex')) if Row.get('TranscodedByMediaVortex') is not None else None,
         )
 
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C12
@@ -1900,7 +1902,7 @@ class QueueManagementBusinessService:
                 "AudioComplete, AudioCorruptSuspect, AudioBitrateKbps, AudioChannels, "
                 "SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, "
                 "SourceIntegratedThresholdLufs, LoudnessMeasuredAt, "
-                "LoudnessMeasurementFailureReason "
+                "LoudnessMeasurementFailureReason, TranscodedByMediaVortex "
                 "FROM MediaFiles WHERE Id IN (" + placeholders + ")",
                 tuple(MediaFileIds)
             )
