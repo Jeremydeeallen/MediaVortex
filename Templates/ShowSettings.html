@@ -227,20 +227,20 @@
     <!-- Title Search + Media Library are cross-cutting per-show tools,
          not mode-specific -- always visible below the active section. -->
 
-    <!-- Card 2: Title Search -->
+    <!-- Card 2: Title Search -- TableRenderer-backed; no rows until user types -->
     <div class="card border-success mb-3" id="SearchCard">
         <div class="card-header bg-success text-white py-2">
             <div class="d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">Title Search</h5>
                 <div class="d-flex align-items-center gap-2">
                     <label class="mb-0 text-white text-nowrap small">Drive:</label>
-                    <select id="SearchDrive" class="form-select form-select-sm" style="width: 90px;" onchange="FilterSearchResults()">
+                    <select id="SearchDrive" class="form-select form-select-sm" style="width: 90px;">
                         <option value="">All</option>
                         <option value="T:" selected>T:</option>
                         <option value="M:">M:</option>
                         <option value="Z:">Z:</option>
                     </select>
-                    <input type="text" id="SearchBox" class="form-control form-control-sm" style="width: 280px;" placeholder="Search titles..." oninput="FilterSearchResults()">
+                    <input type="text" id="SearchBox" class="form-control form-control-sm" style="width: 280px;" placeholder="Type to search titles...">
                     <span class="text-white-50">|</span>
                     <label class="mb-0 text-white text-nowrap small">Profile:</label>
                     <select id="QueueProfileSelect" class="form-select form-select-sm" style="width: 200px;">
@@ -252,59 +252,44 @@
             </div>
         </div>
         <div class="card-body p-0">
-            <div class="table-responsive" style="max-height: 50vh; overflow-y: auto;">
-                <table class="table table-hover table-sm mb-0" id="SearchTable">
-                    <thead class="table-light sticky-top">
-                        <tr>
-                            <th style="width: 30px;"><input type="checkbox" id="SelectAllCheckbox" onchange="ToggleSelectAll(this)"></th>
-                            <th>Title</th>
-                            <th style="width: 70px;" class="text-end">Files</th>
-                            <th style="width: 90px;" class="text-end">Size (GB)</th>
-                            <th style="width: 100px;">Source Res</th>
-                            <th style="width: 90px;">Codec</th>
-                            <th style="width: 80px;">Done</th>
-                            <th style="width: 50px;"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="SearchTableBody">
-                        <tr><td colspan="8" class="text-center py-3 text-muted">Loading...</td></tr>
-                    </tbody>
-                </table>
+            <div id="SearchTableMount" style="max-height: 50vh; overflow-y: auto;">
+                <div class="text-center py-4 text-muted" id="SearchEmptyState">Type to search.</div>
+            </div>
+            <div class="d-flex justify-content-between align-items-center px-2 py-1 border-top small text-muted">
+                <span id="SearchPaginationInfo">-</span>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary" id="SearchPrevBtn" disabled>&laquo; Prev</button>
+                    <button class="btn btn-outline-secondary" id="SearchNextBtn" disabled>Next &raquo;</button>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Card 3: Media Library -->
+    <!-- Card 3: Media Library -- TableRenderer-backed; server-paged at 50 rows -->
     <div class="card mb-3" id="LibraryCard">
         <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center py-2">
             <div>
                 <h5 class="mb-0 d-inline">Media Library</h5>
                 <span id="LibraryCount" class="badge bg-light text-dark ms-2">0</span>
             </div>
-            <div class="d-flex align-items-center gap-3" style="font-size: 0.85rem;">
-                <span class="text-white-50"><strong id="LibraryTotalGB" class="text-white">-</strong> total</span>
-                <span class="text-white-50">|</span>
-                <span class="text-white-50"><strong id="LibraryTranscoded" class="text-white">-</strong> transcoded</span>
+            <div class="d-flex align-items-center gap-2" style="font-size: 0.85rem;">
+                <label class="mb-0 text-white text-nowrap">Drive:</label>
+                <select id="LibraryDriveSelect" class="form-select form-select-sm" style="width: 110px;">
+                    <option value="">All</option>
+                    <option value="T:">T:</option>
+                    <option value="M:">M:</option>
+                    <option value="Z:">Z:</option>
+                </select>
             </div>
         </div>
         <div class="card-body p-0">
-            <div class="table-responsive" style="max-height: 60vh; overflow-y: auto;">
-                <table class="table table-hover table-sm mb-0" id="LibraryTable">
-                    <thead class="table-light sticky-top">
-                        <tr>
-                            <th style="cursor:pointer;" onclick="SortLibrary('ShowName')">Title <i class="fas fa-sort" id="SortShowName"></i></th>
-                            <th style="width: 70px; cursor:pointer;" class="text-end" onclick="SortLibrary('FileCount')">Files <i class="fas fa-sort" id="SortFileCount"></i></th>
-                            <th style="width: 90px; cursor:pointer;" class="text-end" onclick="SortLibrary('TotalGB')">Size (GB) <i class="fas fa-sort" id="SortTotalGB"></i></th>
-                            <th style="width: 100px;">Source Res</th>
-                            <th style="width: 90px;">Codec</th>
-                            <th style="width: 90px;">Done</th>
-                            <th style="width: 220px;">Profile <small class="text-muted fw-normal">(blank = use default)</small></th>
-                        </tr>
-                    </thead>
-                    <tbody id="LibraryTableBody">
-                        <tr><td colspan="7" class="text-center py-3 text-muted">Loading...</td></tr>
-                    </tbody>
-                </table>
+            <div id="LibraryTableMount" style="max-height: 60vh; overflow-y: auto;"></div>
+            <div class="d-flex justify-content-between align-items-center px-2 py-1 border-top small text-muted">
+                <span id="LibraryPaginationInfo">-</span>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary" id="LibraryPrevBtn" disabled>&laquo; Prev</button>
+                    <button class="btn btn-outline-secondary" id="LibraryNextBtn" disabled>Next &raquo;</button>
+                </div>
             </div>
         </div>
     </div>
@@ -379,7 +364,7 @@ function _WriteStickySize(Key, Val) {
 
 
 $(document).ready(function() {
-    LoadShows();
+    // LoadShows() removed -- Library and Search cards now route through TableRenderer (see bottom of file).
     LoadProfiles();
 
     // Hydrate sticky batch sizes from localStorage (criterion 20).
@@ -518,6 +503,7 @@ function LoadProfiles() {
     $.get('/api/profiles', function(Response) {
         if (Response.success && Response.profiles) {
             AllProfiles = Response.profiles;
+            window.AllProfiles = AllProfiles;
             let Html = '<option value="">-- Select a Profile --</option>';
             AllProfiles.forEach(function(P) {
                 Html += '<option value="' + P.Id + '">' + EscapeHtml(P.ProfileName) + '</option>';
@@ -1550,5 +1536,357 @@ function EscapeAttr(Text) {
     if (!Text) return '';
     return Text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+</script>
+
+<style>
+    #LibraryTableMount .tr-table, #SearchTableMount .tr-table {
+        width: 100%; border-collapse: collapse; font-size: 0.875rem;
+    }
+    #LibraryTableMount .tr-th, #SearchTableMount .tr-th {
+        background: #f8f9fa; padding: 0.5rem; text-align: left; border-bottom: 2px solid #dee2e6; position: sticky; top: 0; z-index: 1;
+    }
+    #LibraryTableMount .tr-th-sortable, #SearchTableMount .tr-th-sortable { cursor: pointer; user-select: none; }
+    #LibraryTableMount .tr-row, #SearchTableMount .tr-row { border-bottom: 1px solid #f0f0f0; }
+    #LibraryTableMount .tr-row:hover, #SearchTableMount .tr-row:hover { background: #f8f9fa; }
+    #LibraryTableMount .tr-cell, #SearchTableMount .tr-cell { padding: 0.4rem 0.5rem; vertical-align: middle; }
+    #LibraryTableMount .tr-live, #SearchTableMount .tr-live { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+    #LibraryTableMount .tr-scroll, #SearchTableMount .tr-scroll { max-height: 56vh; }
+    #LibraryTableMount .tr-cell-editable, #SearchTableMount .tr-cell-editable { cursor: pointer; }
+    .ss-profile-placeholder { color: #6c757d; font-style: italic; }
+    .ss-profile-set { color: #0d6efd; }
+</style>
+
+<script type="module">
+import { TableRenderer } from "/static/js/TableRenderer/TableRenderer.js";
+import { TableRendererConfig } from "/static/js/TableRenderer/TableRendererConfig.js";
+import { EventBus } from "/static/js/TableRenderer/EventBus.js";
+import { ServerPagedDataSource } from "/static/js/TableRenderer/DataSources/ServerPagedDataSource.js";
+import { SortController } from "/static/js/TableRenderer/SortController.js";
+import { PaginationController } from "/static/js/TableRenderer/PaginationController.js";
+import { FilterController } from "/static/js/TableRenderer/FilterController.js";
+import { ColumnDefinition } from "/static/js/TableRenderer/ColumnDefinition.js";
+import { ICellRenderer } from "/static/js/TableRenderer/Interfaces/ICellRenderer.js";
+
+const PageStateBadge = (Total, Page, PageSize) => {
+    const Start = Total === 0 ? 0 : (Page * PageSize) + 1;
+    const End = Math.min((Page + 1) * PageSize, Total);
+    return `${Start}-${End} of ${Total.toLocaleString()}`;
+};
+
+class _ProfileCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(Value, Row) {
+        const Span = document.createElement('span');
+        const Name = Value || '';
+        Span.className = Name ? 'ss-profile-set' : 'ss-profile-placeholder';
+        Span.textContent = Name || '(use default)';
+        Span.title = 'Double-click to edit';
+        Span.dataset.showFolder = Row.ShowFolder || '';
+        return Span;
+    }
+}
+
+class _CheckboxCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(_Value, Row) {
+        const Cb = document.createElement('input');
+        Cb.type = 'checkbox';
+        Cb.className = 'ss-search-checkbox';
+        Cb.dataset.showFolder = Row.ShowFolder || '';
+        Cb.checked = window.SelectedShows && window.SelectedShows.has(Row.ShowFolder);
+        Cb.addEventListener('click', E => E.stopPropagation());
+        Cb.addEventListener('change', () => {
+            if (!window.SelectedShows) window.SelectedShows = new Set();
+            if (Cb.checked) window.SelectedShows.add(Cb.dataset.showFolder);
+            else window.SelectedShows.delete(Cb.dataset.showFolder);
+            const Cnt = window.SelectedShows.size;
+            const El = document.getElementById('SelectedCount');
+            if (El) El.textContent = Cnt + ' selected';
+        });
+        return Cb;
+    }
+}
+
+class _QueueButtonCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(_Value, Row) {
+        const Remaining = (Row.FileCount || 0) - (Row.TranscodedCount || 0);
+        const Wrap = document.createElement('span');
+        if (Remaining > 0) {
+            const Btn = document.createElement('button');
+            Btn.className = 'btn btn-sm btn-outline-success py-0 px-1';
+            Btn.title = `Queue ${Remaining} file${Remaining !== 1 ? 's' : ''}`;
+            Btn.textContent = '+';
+            Btn.addEventListener('click', E => {
+                E.stopPropagation();
+                if (typeof window.QueueFolder === 'function') window.QueueFolder(Row.ShowFolder);
+            });
+            Wrap.appendChild(Btn);
+        } else {
+            Wrap.className = 'text-success fw-bold';
+            Wrap.textContent = 'Done';
+        }
+        return Wrap;
+    }
+}
+
+const BadgeFor = (Text, ClassMap) => {
+    const Span = document.createElement('span');
+    Span.className = 'badge ' + (ClassMap[Text] || 'bg-secondary');
+    Span.textContent = Text || 'N/A';
+    return Span;
+};
+
+class _ResolutionBadgeRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(Value) { return BadgeFor(Value, {}); }
+}
+
+class _CodecBadgeRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(Value) {
+        return BadgeFor(Value, { h264: 'bg-info', h265: 'bg-warning text-dark', hevc: 'bg-warning text-dark', av1: 'bg-success', mpeg4: 'bg-secondary' });
+    }
+}
+
+class _GBCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(Value) {
+        const Td = document.createElement('span');
+        const N = Number(Value);
+        Td.textContent = Number.isFinite(N) ? N.toFixed(1) : '-';
+        Td.className = 'text-end';
+        return Td;
+    }
+}
+
+class _DoneRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(_Value, Row) {
+        const Tot = Row.FileCount || 0;
+        const Tr = Row.TranscodedCount || 0;
+        const Pct = Tot > 0 ? Math.round((Tr / Tot) * 100) : 0;
+        const Span = document.createElement('span');
+        Span.className = Pct === 100 ? 'text-success' : (Pct > 0 ? 'text-info' : 'text-muted');
+        Span.textContent = Tr + '/' + Tot;
+        return Span;
+    }
+}
+
+const SyncPaginationUi = (Pag, InfoEl, PrevBtn, NextBtn) => () => {
+    const Page = Pag.GetPage();
+    const Size = Pag.GetPageSize();
+    const Total = Pag._TotalCount;
+    InfoEl.textContent = PageStateBadge(Total, Page, Size);
+    PrevBtn.disabled = Page <= 0;
+    NextBtn.disabled = (Page + 1) * Size >= Total;
+};
+
+const InitLibraryCard = () => {
+    const Cfg = new TableRendererConfig({ DefaultPageSize: 50, VirtualizationThreshold: 100000 });
+    const Bus = new EventBus();
+    const Src = new ServerPagedDataSource('/api/ShowSettings/Shows', { Fetch: fetch.bind(window) });
+    const Sort = new SortController(Src, Bus, Cfg);
+    const Pag = new PaginationController(Src, Bus, Cfg);
+    const Filt = new FilterController(Src, Bus, Cfg);
+    Sort.SetSort('TotalGB', 'DESC');
+
+    const Cols = [
+        new ColumnDefinition({ Key: 'ShowName', Header: 'Title', Sortable: true }),
+        new ColumnDefinition({ Key: 'FileCount', Header: 'Files', Sortable: true, CellRendererName: 'Number', Align: 'right', Width: '70px' }),
+        new ColumnDefinition({ Key: 'TotalGB', Header: 'Size (GB)', Sortable: true, Align: 'right', Width: '90px' }),
+        new ColumnDefinition({ Key: 'CommonResolution', Header: 'Source Res', Width: '100px' }),
+        new ColumnDefinition({ Key: 'CommonCodec', Header: 'Codec', Width: '90px' }),
+        new ColumnDefinition({ Key: 'Done', Header: 'Done', Width: '90px' }),
+        new ColumnDefinition({ Key: 'AssignedProfile', Header: 'Profile', Editable: true, EditorName: 'Profile', Width: '220px' }),
+    ];
+
+    const T = new TableRenderer({
+        Container: document.getElementById('LibraryTableMount'),
+        DataSource: Src,
+        Columns: Cols,
+        Config: Cfg,
+        Bus,
+        Capabilities: { Sortable: true, Paginatable: true, Filterable: true, Editable: true, Virtualized: false },
+        SortController: Sort,
+        PaginationController: Pag,
+        FilterController: Filt
+    });
+    T._CellRegistry.Register('GB', _GBCellRenderer);
+    T._CellRegistry.Register('Done', _DoneRenderer);
+    T._CellRegistry.Register('ResolutionBadge', _ResolutionBadgeRenderer);
+    T._CellRegistry.Register('CodecBadge', _CodecBadgeRenderer);
+    T._CellRegistry.Register('Profile', _ProfileCellRenderer);
+    Cols[2].CellRendererName = 'GB';
+    Cols[3].CellRendererName = 'ResolutionBadge';
+    Cols[4].CellRendererName = 'CodecBadge';
+    Cols[5].CellRendererName = 'Done';
+    Cols[6].CellRendererName = 'Profile';
+
+    const InfoEl = document.getElementById('LibraryPaginationInfo');
+    const PrevBtn = document.getElementById('LibraryPrevBtn');
+    const NextBtn = document.getElementById('LibraryNextBtn');
+    const Sync = SyncPaginationUi(Pag, InfoEl, PrevBtn, NextBtn);
+    PrevBtn.addEventListener('click', () => Pag.PrevPage());
+    NextBtn.addEventListener('click', () => Pag.NextPage());
+    Bus.Subscribe('PageChanged', Sync);
+    Bus.Subscribe('SortChanged', () => Pag.GoTo(0));
+    Bus.Subscribe('FilterChanged', () => Pag.GoTo(0));
+
+    const DriveSel = document.getElementById('LibraryDriveSelect');
+    DriveSel.addEventListener('change', () => Filt.SetFilter('Drive', DriveSel.value || ''));
+
+    Bus.Subscribe('CellEdited', E => {
+        if (E.Key === 'AssignedProfile' && typeof window.SaveSeriesProfileForFolder === 'function') {
+            window.SaveSeriesProfileForFolder(E.Row.ShowFolder, E.NewValue);
+        }
+    });
+
+    document.querySelector('#LibraryCard').addEventListener('dblclick', Evt => {
+        const Cell = Evt.target.closest('.tr-cell[data-key="AssignedProfile"]');
+        if (!Cell || !window.AllProfiles) return;
+        const ShowFolder = Cell.querySelector('[data-show-folder]')?.dataset.showFolder;
+        if (!ShowFolder) return;
+        const Sel = document.createElement('select');
+        Sel.className = 'form-select form-select-sm';
+        const Empty = document.createElement('option');
+        Empty.value = ''; Empty.textContent = '(use default)';
+        Sel.appendChild(Empty);
+        window.AllProfiles.forEach(P => {
+            const O = document.createElement('option');
+            O.value = P.ProfileName; O.textContent = P.ProfileName;
+            if (Cell.textContent.trim() === P.ProfileName) O.selected = true;
+            Sel.appendChild(O);
+        });
+        Cell.innerHTML = '';
+        Cell.appendChild(Sel);
+        Sel.focus();
+        Sel.addEventListener('change', () => {
+            if (typeof window.SaveSeriesProfileForFolder === 'function') {
+                window.SaveSeriesProfileForFolder(ShowFolder, Sel.value);
+            }
+            T.Refresh();
+        });
+        Sel.addEventListener('blur', () => T.Refresh());
+    });
+
+    T.Render().then(() => {
+        Sync();
+        document.getElementById('LibraryCount').textContent = Pag._TotalCount.toLocaleString() + ' titles';
+        Bus.Subscribe('PageChanged', () => {
+            document.getElementById('LibraryCount').textContent = Pag._TotalCount.toLocaleString() + ' titles';
+        });
+    });
+    window.LibraryTable = T;
+};
+
+const InitSearchCard = () => {
+    const Cfg = new TableRendererConfig({ DefaultPageSize: 50 });
+    const Bus = new EventBus();
+    const Src = new ServerPagedDataSource('/api/ShowSettings/Shows', { Fetch: fetch.bind(window) });
+    const Sort = new SortController(Src, Bus, Cfg);
+    const Pag = new PaginationController(Src, Bus, Cfg);
+    const Filt = new FilterController(Src, Bus, Cfg);
+    Sort.SetSort('TotalGB', 'DESC');
+
+    const Cols = [
+        new ColumnDefinition({ Key: '__Checkbox', Header: '', CellRendererName: 'Checkbox', Width: '30px' }),
+        new ColumnDefinition({ Key: 'ShowName', Header: 'Title' }),
+        new ColumnDefinition({ Key: 'FileCount', Header: 'Files', Align: 'right', Width: '70px' }),
+        new ColumnDefinition({ Key: 'TotalGB', Header: 'Size (GB)', CellRendererName: 'GB', Align: 'right', Width: '90px' }),
+        new ColumnDefinition({ Key: 'CommonResolution', Header: 'Source Res', CellRendererName: 'ResolutionBadge', Width: '100px' }),
+        new ColumnDefinition({ Key: 'CommonCodec', Header: 'Codec', CellRendererName: 'CodecBadge', Width: '90px' }),
+        new ColumnDefinition({ Key: 'Done', Header: 'Done', CellRendererName: 'Done', Width: '80px' }),
+        new ColumnDefinition({ Key: '__Queue', Header: '', CellRendererName: 'QueueBtn', Width: '50px' })
+    ];
+
+    const Mount = document.getElementById('SearchTableMount');
+    Mount.innerHTML = '';
+    const T = new TableRenderer({
+        Container: Mount,
+        DataSource: Src,
+        Columns: Cols,
+        Config: Cfg,
+        Bus,
+        Capabilities: { Sortable: false, Paginatable: true, Filterable: true, Virtualized: false },
+        PaginationController: Pag,
+        FilterController: Filt
+    });
+    T._CellRegistry.Register('GB', _GBCellRenderer);
+    T._CellRegistry.Register('Done', _DoneRenderer);
+    T._CellRegistry.Register('ResolutionBadge', _ResolutionBadgeRenderer);
+    T._CellRegistry.Register('CodecBadge', _CodecBadgeRenderer);
+    T._CellRegistry.Register('Checkbox', _CheckboxCellRenderer);
+    T._CellRegistry.Register('QueueBtn', _QueueButtonCellRenderer);
+
+    const InfoEl = document.getElementById('SearchPaginationInfo');
+    const PrevBtn = document.getElementById('SearchPrevBtn');
+    const NextBtn = document.getElementById('SearchNextBtn');
+    const EmptyEl = document.getElementById('SearchEmptyState');
+    const Sync = SyncPaginationUi(Pag, InfoEl, PrevBtn, NextBtn);
+    PrevBtn.addEventListener('click', () => Pag.PrevPage());
+    NextBtn.addEventListener('click', () => Pag.NextPage());
+    Bus.Subscribe('PageChanged', Sync);
+    Bus.Subscribe('FilterChanged', () => Pag.GoTo(0));
+
+    if (!window.SelectedShows) window.SelectedShows = new Set();
+    window.SearchTable = T;
+
+    const SearchBox = document.getElementById('SearchBox');
+    const SearchDrive = document.getElementById('SearchDrive');
+    let TableRendered = false;
+    const Refire = () => {
+        const Term = (SearchBox.value || '').trim();
+        const Drive = SearchDrive.value || '';
+        if (!Term && !Drive) {
+            if (EmptyEl) EmptyEl.style.display = '';
+            if (Mount && TableRendered) Mount.innerHTML = '<div class="text-center py-4 text-muted">Type to search.</div>';
+            InfoEl.textContent = '-';
+            PrevBtn.disabled = true; NextBtn.disabled = true;
+            TableRendered = false;
+            return;
+        }
+        Filt.SetFilter('q', Term);
+        Filt.SetFilter('Drive', Drive);
+        if (!TableRendered) {
+            if (EmptyEl) EmptyEl.parentNode.removeChild(EmptyEl);
+            T.Render().then(Sync);
+            TableRendered = true;
+        }
+    };
+    SearchBox.addEventListener('input', Refire);
+    SearchDrive.addEventListener('change', Refire);
+};
+
+window.SaveSeriesProfileForFolder = function(ShowFolder, ProfileName) {
+    return $.ajax({
+        url: '/api/ShowSettings/SetSeriesProfile',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ ShowFolder, AssignedProfile: ProfileName || null })
+    }).done(function(R) {
+        const Short = (ShowFolder || '').split('\\').pop() || ShowFolder;
+        if (R.Success) {
+            if (typeof ShowNotification === 'function') {
+                ShowNotification(ProfileName ? `Set "${Short}" to ${ProfileName}` : `Cleared override for "${Short}"`, 'success');
+            }
+        } else if (typeof ShowNotification === 'function') {
+            ShowNotification('Failed: ' + (R.Message || 'Unknown error'), 'danger');
+        }
+    });
+};
+
+window.addEventListener('DOMContentLoaded', () => {
+    if (window.AllProfiles && window.AllProfiles.length) { InitLibraryCard(); InitSearchCard(); return; }
+    let Tries = 0;
+    const Wait = setInterval(() => {
+        Tries += 1;
+        if ((window.AllProfiles && window.AllProfiles.length) || Tries > 40) {
+            clearInterval(Wait);
+            InitLibraryCard();
+            InitSearchCard();
+        }
+    }, 100);
+});
 </script>
 {% endblock %}

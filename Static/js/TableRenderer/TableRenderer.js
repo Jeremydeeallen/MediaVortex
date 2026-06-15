@@ -19,7 +19,7 @@ export class TableRenderer {
         this._DataSource = Spec.DataSource;
         this._Columns = Spec.Columns.map(C => C instanceof ColumnDefinition ? C : new ColumnDefinition(C));
         this._Config = Spec.Config instanceof TableRendererConfig ? Spec.Config : new TableRendererConfig(Spec.Config ?? {});
-        this._Bus = new EventBus();
+        this._Bus = Spec.Bus instanceof EventBus ? Spec.Bus : new EventBus();
         this._CellRegistry = Spec.CellRendererRegistry instanceof CellRendererRegistry
             ? Spec.CellRendererRegistry : new CellRendererRegistry();
         this._EditorRegistry = Spec.InlineEditorRegistry instanceof InlineEditorRegistry
