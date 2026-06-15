@@ -3,6 +3,21 @@
 {% block title %}Activity - MediaVortex{% endblock %}
 
 {% block content %}
+<style>
+/* Activity TableRenderer mounts -- hide the live region clutter and let inner table inherit Bootstrap table classes via CSS */
+.activity-tr-mount .tr-table { width: 100%; margin-bottom: 0; }
+.activity-tr-mount .tr-table thead th { background: var(--bs-gray-100, #f8f9fa); padding: .35rem .5rem; font-size: .875rem; }
+.activity-tr-mount .tr-table tbody td { padding: .35rem .5rem; vertical-align: middle; font-size: .875rem; border-top: 1px solid var(--bs-border-color, #dee2e6); }
+.activity-tr-mount .tr-row:hover td { background: rgba(0,0,0,.025); }
+.activity-tr-mount .tr-live { position: absolute; left: -9999px; }
+/* Workers grid -- TableRenderer rows render as cards; hide the table chrome and lay rows out as a CSS grid */
+.activity-workers-mount .tr-table { display: block; }
+.activity-workers-mount .tr-table thead { display: none; }
+.activity-workers-mount .tr-table tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .75rem; }
+.activity-workers-mount .tr-row { display: block; }
+.activity-workers-mount .tr-row td { display: block; padding: 0; border-top: none; background: transparent !important; }
+.activity-workers-mount .activity-worker-group-header { grid-column: 1 / -1; }
+</style>
 <div class="container-fluid">
     <!-- Header -->
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -28,31 +43,11 @@
         <div class="card-body p-0">
             <div id="NoJobInfo" class="text-muted py-3 px-3"><em>No active jobs</em></div>
             <div id="ActiveJobsTable" class="d-none">
-                <table class="table table-sm table-hover mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th class="ps-3">File</th>
-                            <th style="width: 80px;">Type</th>
-                            <th style="width: 110px;">Worker</th>
-                            <th style="width: 90px;">Size</th>
-                            <th style="width: 200px;">Progress</th>
-                            <th style="width: 80px;">FPS</th>
-                            <th style="width: 80px;">Speed</th>
-                            <th style="width: 100px;">ETA</th>
-                            <th style="width: 60px;"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="ActiveJobsBody"></tbody>
-                    <tfoot id="ActiveJobsFooter" class="table-light fw-bold d-none">
-                        <tr>
-                            <td class="ps-3" colspan="3">Total</td>
-                            <td id="FooterTotalSize">-</td>
-                            <td></td>
-                            <td id="FooterTotalFPS">-</td>
-                            <td colspan="3"></td>
-                        </tr>
-                    </tfoot>
-                </table>
+                <div id="ActiveJobsMount" class="activity-tr-mount"></div>
+                <div id="ActiveJobsFooterPanel" class="d-flex justify-content-between px-3 py-2 small fw-bold border-top d-none">
+                    <span>Total: <span id="FooterTotalSize">-</span></span>
+                    <span><span id="FooterTotalFPS">-</span> fps</span>
+                </div>
                 <div id="MachineFpsSummary" class="px-3 py-2 small text-muted border-top d-none"></div>
             </div>
 
@@ -63,21 +58,7 @@
                 <div class="px-3 py-2 small fw-bold d-flex justify-content-between align-items-center">
                     <span><i class="fas fa-search me-2 text-success"></i>Active Scans <span id="ActiveScansCount" class="text-muted"></span></span>
                 </div>
-                <table class="table table-sm table-hover mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th class="ps-3" style="width: 90px;">Drive</th>
-                            <th style="width: 130px;">Worker</th>
-                            <th style="width: 130px;">Phase</th>
-                            <th style="width: 240px;">Progress</th>
-                            <th style="width: 110px;">Files</th>
-                            <th style="width: 90px;">Rate</th>
-                            <th style="width: 90px;">ETA</th>
-                            <th style="width: 60px;"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="ActiveScansBody"></tbody>
-                </table>
+                <div id="ActiveScansMount" class="activity-tr-mount"></div>
             </div>
 
             <!-- Scan history lives on /Operations. /Activity surfaces in-flight work only. -->
@@ -105,9 +86,7 @@
         </div>
         <div class="card-body">
             <div id="VersionMismatchBanner"></div>
-            <div class="row g-3" id="WorkersContainer">
-                <div class="col-12 text-center text-muted py-2">Loading...</div>
-            </div>
+            <div id="WorkersMount" class="activity-tr-mount activity-workers-mount"></div>
         </div>
     </div>
 
@@ -337,296 +316,93 @@ var ActivityPage = (function() {
         return N.toFixed(0) + ' MB';
     }
 
-    function RenderScanRowAndTopFiles(S) {
-        var Phase = S.Phase || 'Walking';
-        var IsStuck = !!S.IsStuck;
-        var RowClass = IsStuck ? ' class="table-warning"' : '';
-        var StuckBadge = IsStuck
-            ? '<i class="fas fa-exclamation-triangle ms-1 text-warning" title="Heartbeat stale (>10 min)"></i>'
-            : '';
-
-        // Drive cell: just the root (T:\, M:\, Z:\). Current directory shown
-        // under the progress bar instead -- the drive header stays clean.
-        var DriveEsc = EscapeHtml(S.RootFolderPath || '');
-        var DriveCell = '<td class="ps-3"><strong>' + DriveEsc + '</strong>' + StuckBadge + '</td>';
-
-        // Phase cell -- phase name with probe sub-count when relevant.
-        var PhaseLabel = Phase;
-        var PhaseBadgeClass = 'bg-secondary';
-        if (Phase === 'SizeSurvey') { PhaseBadgeClass = 'bg-primary'; PhaseLabel = 'Size Survey'; }
-        else if (Phase === 'Walking') { PhaseBadgeClass = 'bg-success'; }
-        else if (Phase === 'Reconciling') { PhaseBadgeClass = 'bg-warning text-dark'; }
-        else if (Phase === 'Probing') {
-            PhaseBadgeClass = 'bg-info text-dark';
-            if (S.FilesNeedingProbe) {
-                PhaseLabel = 'Probing ' + (S.ProbedFiles || 0) + '/' + S.FilesNeedingProbe;
-            }
-        }
-        else if (Phase === 'Completing') { PhaseBadgeClass = 'bg-success'; }
-        var PhaseCell = '<td><span class="badge ' + PhaseBadgeClass + '">' + EscapeHtml(PhaseLabel) + '</span></td>';
-
-        // Progress bar -- phase-aware percent.
-        var Pct = Math.max(0, Math.min(100, parseFloat(S.Progress) || 0)).toFixed(1);
-        var CountLabel;
-        if (Phase === 'SizeSurvey') {
-            Pct = '100';
-            CountLabel = 'enumerating files';
-        } else if (Phase === 'Probing') {
-            var TotalP = S.FilesNeedingProbe || 0, DoneP = S.ProbedFiles || 0;
-            Pct = TotalP > 0 ? (DoneP * 100.0 / TotalP).toFixed(1) : '0.0';
-            CountLabel = DoneP + ' / ' + TotalP + ' probed';
-        } else if (Phase === 'Reconciling') {
-            Pct = '100';
-            CountLabel = 'comparing DB vs disk';
-        } else if (Phase === 'Completing') {
-            Pct = '100';
-            CountLabel = 'finalizing';
-        } else {
-            CountLabel = (S.TotalFiles > 0)
-                ? (S.ProcessedFiles || 0).toLocaleString() + ' / ' + S.TotalFiles.toLocaleString()
-                : (S.ProcessedFiles || 0).toLocaleString() + ' files';
-        }
-        var CurDir = (S.CurrentDirectory && S.CurrentDirectory !== S.RootFolderPath)
-            ? '<div class="text-muted small text-truncate" style="max-width:320px" title="' + EscapeHtml(S.CurrentDirectory) + '">' + EscapeHtml(S.CurrentDirectory) + '</div>'
-            : '';
-        var ProgressCell =
-            '<td>' +
-                '<div class="d-flex align-items-center gap-2">' +
-                    '<div class="progress flex-grow-1" style="height: 14px;">' +
-                        '<div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" ' +
-                            'style="width: ' + Pct + '%" aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
-                    '</div>' +
-                    '<small class="text-nowrap">' + EscapeHtml(CountLabel) + '</small>' +
-                '</div>' +
-                CurDir +
-            '</td>';
-
-        // Files cell -- disposition counters in their own column.
-        var FilesCell = '<td><span title="' +
-            (S.NewFiles || 0) + ' new, ' + (S.UpdatedFiles || 0) + ' updated, ' + (S.DeletedFiles || 0) + ' deleted">' +
-            '<span class="text-success">+' + (S.NewFiles || 0) + '</span> ' +
-            '<span class="text-warning">~' + (S.UpdatedFiles || 0) + '</span> ' +
-            '<span class="text-danger">&minus;' + (S.DeletedFiles || 0) + '</span>' +
-            '</span></td>';
-
-        var RateCell = '<td>' + (S.FilesPerSec > 0 ? S.FilesPerSec.toFixed(1) + ' f/s' : '-') + '</td>';
-        var EtaCell = '<td>' + ((Phase === 'Reconciling' || Phase === 'Completing' || Phase === 'SizeSurvey') ? '-' : FormatEtaSec(S.EtaSec)) + '</td>';
-
-        var JobIdJs = EscapeHtml(S.JobId || '').replace(/'/g, "\\'");
-        var StopBtn = '<button class="btn btn-outline-danger btn-sm py-0 px-1" ' +
-            'onclick="ActivityPage.StopScan(\'' + JobIdJs + '\')" title="Soft-stop this scan">' +
-            '<i class="fas fa-stop"></i></button>';
-
-        var MainRow = '<tr' + RowClass + '>' +
-            DriveCell +
-            '<td>' + EscapeHtml(S.WorkerName || '<unknown>') + '</td>' +
-            PhaseCell +
-            ProgressCell +
-            FilesCell +
-            RateCell +
-            EtaCell +
-            '<td class="text-center">' + StopBtn + '</td>' +
-        '</tr>';
-
-        // Inline top-5 largest files from SizeSurvey under the row.
-        // Empty during SizeSurvey itself; populated as soon as it finishes.
-        var TopFiles = S.TopFiles || [];
-        var TopRowsHtml = '';
-        if (TopFiles.length > 0) {
-            var TopLis = TopFiles.map(function(F) {
-                var Name = EscapeHtml(F.fileName || F.path || '');
-                return '<li class="d-flex justify-content-between"><span class="text-truncate me-2" style="max-width:480px" title="' + EscapeHtml(F.path || '') + '">' + Name + '</span><span class="text-muted">' + FormatSizeMB(F.sizeMB) + '</span></li>';
-            }).join('');
-            TopRowsHtml = '<tr><td colspan="8" class="px-3 py-2 bg-light">' +
-                '<div class="small text-muted mb-1"><i class="fas fa-star me-1 text-warning"></i>Largest files found</div>' +
-                '<ul class="list-unstyled mb-0 small">' + TopLis + '</ul>' +
-                '</td></tr>';
-        } else if (Phase === 'SizeSurvey') {
-            TopRowsHtml = '<tr><td colspan="8" class="px-3 py-1 bg-light text-muted small">' +
-                '<i class="fas fa-spinner fa-spin me-1"></i>Enumerating largest files...' +
-                '</td></tr>';
-        }
-
-        return MainRow + TopRowsHtml;
+    // Row builders moved to module CellRenderers (see <script type="module"> block at end).
+    // RenderActiveJobs now only owns the per-fetch side effects: status badge, header
+    // suffix, footer panel, NoJob visibility, scan block visibility, and ETA timer
+    // reconcile. Row composition is fed to ActiveJobsSource / ActiveScansSource which
+    // the TableRenderer instances refresh from.
+    function FormatClaimAge(Sec) {
+        if (Sec == null || Sec < 0) return '-';
+        var Sn = Math.round(Sec);
+        if (Sn < 60) return Sn + 's';
+        var Mn = Math.floor(Sn / 60);
+        if (Mn < 60) return Mn + 'm';
+        var Hn = Math.floor(Mn / 60);
+        var Mr = Mn % 60;
+        return Hn + 'h ' + (Mr < 10 ? '0' : '') + Mr + 'm';
     }
 
-    function RenderActiveScans(ActiveScans) {
-        var Block = document.getElementById('ActiveScansBlock');
-        var Body = document.getElementById('ActiveScansBody');
-        var Count = document.getElementById('ActiveScansCount');
-        if (!ActiveScans || ActiveScans.length === 0) {
-            Block.classList.add('d-none');
-            Body.innerHTML = '';
-            Count.textContent = '';
-            return;
-        }
-        Body.innerHTML = ActiveScans.map(RenderScanRowAndTopFiles).join('');
-        Count.textContent = '(' + ActiveScans.length + ')';
-        Block.classList.remove('d-none');
+    function BuildCombinedJobRows(ActiveJobs, VmafJobs) {
+        var Rows = [];
+        (ActiveJobs || []).forEach(function(Job) {
+            var Row = Object.assign({}, Job);
+            Row.__Kind = 'Transcode';
+            Row.__AttemptId = Job.QueueId || Job.AttemptId || '';
+            Rows.push(Row);
+        });
+        var VmafList = Array.isArray(VmafJobs) ? VmafJobs : (VmafJobs ? [VmafJobs] : []);
+        VmafList.forEach(function(VmafJob) {
+            if (!VmafJob) return;
+            var Row = Object.assign({}, VmafJob);
+            Row.__Kind = 'Vmaf';
+            Row.ClaimAgeText = FormatClaimAge(VmafJob.ClaimAgeSec);
+            Rows.push(Row);
+        });
+        return Rows;
     }
 
     function RenderActiveJobs(D, VmafJobs) {
         var Status = D.ServiceStatus;
         var IsProcessing = D.IsProcessing;
         var ActiveJobs = D.ActiveJobs || [];
+        var Scans = D.ActiveScans || [];
 
         var Badge = document.getElementById('TranscodeStatusBadge');
         var NoJob = document.getElementById('NoJobInfo');
         var JobsTable = document.getElementById('ActiveJobsTable');
-        var JobsBody = document.getElementById('ActiveJobsBody');
 
-        var R = RenderTranscodeStatusBadge(Badge, Status, IsProcessing);
-        // directive: activity-dashboard-polish -- C1 dynamic header suffix.
+        RenderTranscodeStatusBadge(Badge, Status, IsProcessing);
         var TotalRunning = ActiveJobs.length + (Array.isArray(VmafJobs) ? VmafJobs.filter(function(v){return v;}).length : 0);
         document.getElementById('ActiveJobsHeaderSuffix').textContent = TotalRunning > 0 ? ' (' + TotalRunning + ' running)' : '';
 
-        var TranscodeRows = ActiveJobs.map(function(Job) {
-            var FileName = Job.FileName || Job.FilePath.split(/[/\\]/).pop();
-            var Pct = (Job.ProgressPercent || 0).toFixed(1);
-            var IsStuck = Job.IsStuck || false;
-            var StatusIcon = IsStuck
-                ? '<i class="fas fa-exclamation-triangle me-1 text-warning"></i>'
-                : '<i class="fas fa-spinner fa-spin me-1 text-primary"></i>';
-            var RowClass = IsStuck ? ' class="table-warning"' : '';
-            var ResetBtn = IsStuck
-                ? '<button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="ActivityPage.ResetStuckJob(' + Job.QueueId + ')" title="Reset to Pending"><i class="fas fa-redo-alt"></i></button>'
-                : '';
-            var ProgressBar = IsStuck
-                ? '<span class="text-warning fw-bold">Stuck</span>'
-                : '<div class="d-flex align-items-center gap-2">' +
-                    '<div class="progress flex-grow-1" style="height: 18px;">' +
-                        '<div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" ' +
-                            'role="progressbar" style="width: ' + Pct + '%" ' +
-                            'aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
-                    '</div>' +
-                    '<small class="text-nowrap">' + Pct + '%</small>' +
-                '</div>';
-            var Mode = Job.ProcessingMode || 'Transcode';
-            var ModeBadgeClass = (Mode === 'Remux') ? 'bg-info'
-                                : (Mode === 'SubtitleFix') ? 'bg-warning text-dark'
-                                : 'bg-primary';
-            return '<tr data-attempt-id="' + (Job.QueueId || Job.AttemptId || '') + '"' + RowClass + '>' +
-                '<td class="ps-3">' + StatusIcon +
-                    '<span title="' + (Job.FilePath || '').replace(/"/g, '&quot;') + '">' + EscapeHtml(FileName) + '</span></td>' +
-                '<td><span class="badge ' + ModeBadgeClass + '">' + EscapeHtml(Mode) + '</span></td>' +
-                '<td>' + (Job.ClaimedBy ? EscapeHtml(Job.ClaimedBy) : '<em class="text-muted">-</em>') + '</td>' +
-                '<td>' + (Job.SizeMB ? FormatSizeMB(Job.SizeMB) : '-') + '</td>' +
-                '<td>' + ProgressBar + '</td>' +
-                // directive: activity-dashboard-solid -- C2: prefer smoothed FPS/Speed/ETA when fresh; render '--' when stale (vs '-' for "never sampled").
-                '<td>' + (IsStuck ? '-' : (Job.SmoothingStale ? '<span class="text-muted">--</span>' : (Job.SmoothedFPS != null ? parseFloat(Job.SmoothedFPS).toFixed(1) : (Job.CurrentFPS ? parseFloat(Job.CurrentFPS).toFixed(1) : '-')))) + '</td>' +
-                '<td>' + (IsStuck ? '-' : (Job.SmoothingStale ? '<span class="text-muted">--</span>' : (Job.SmoothedSpeed != null ? (Job.SmoothedSpeed.toFixed(2) + 'x') : (Job.CurrentSpeed || '-')))) + '</td>' +
-                '<td data-eta-cell="1">' + (IsStuck ? '-' : (Job.SmoothingStale ? '<span class="text-muted">--:--:--</span>' : (Job.EtaSeconds != null ? FormatEtaSec(Job.EtaSeconds) : (Job.ETA || '-')))) + '</td>' +
-                '<td class="text-center">' + ResetBtn + '</td>' +
-            '</tr>';
-        });
-
-        // see activity-dashboard-improvements.C19 -- one row per QualityTestService claim; orphan claims render stale-claim badge instead of 0% bar.
-        function FormatClaimAge(Sec) {
-            if (Sec == null || Sec < 0) return '-';
-            var S = Math.round(Sec);
-            if (S < 60) return S + 's';
-            var M = Math.floor(S / 60);
-            if (M < 60) return M + 'm';
-            var H = Math.floor(M / 60);
-            var Mr = M % 60;
-            return H + 'h ' + (Mr < 10 ? '0' : '') + Mr + 'm';
+        var Combined = BuildCombinedJobRows(ActiveJobs, VmafJobs);
+        var HasJobs = Combined.length > 0;
+        if (window.MV_ActivityTables && window.MV_ActivityTables.Jobs) {
+            window.MV_ActivityTables.Jobs.SetData(Combined);
         }
-        var VmafRowsHtml = '';
-        var VmafList = Array.isArray(VmafJobs) ? VmafJobs : (VmafJobs ? [VmafJobs] : []);
-        VmafList.forEach(function(VmafJob) {
-            if (!VmafJob) return;
-            var VFile = VmafJob.FileName || (VmafJob.OriginalFilePath ? VmafJob.OriginalFilePath.split(/[/\\]/).pop() : 'VMAF');
-            var IsStale = VmafJob.ProgressPercentage == null;
-            var VWorker = VmafJob.WorkerName || VmafJob.ClaimedBy || '-';
-            var VSizeBytes = VmafJob.NewSizeBytes || VmafJob.OldSizeBytes;
-            var VSize = VSizeBytes ? (VSizeBytes / (1024 * 1024)).toFixed(0) + ' MB' : '-';
-            var ProgressCellHtml;
-            var VFps, VSpeed, VEta;
-            if (IsStale) {
-                var Age = FormatClaimAge(VmafJob.ClaimAgeSec);
-                ProgressCellHtml =
-                    '<span class="badge bg-warning text-dark" title="Worker holds this claim but has emitted no progress -- likely died or restarted holding the row">' +
-                        '<i class="fas fa-exclamation-triangle me-1"></i>stale claim ' + EscapeHtml(Age) +
-                    '</span>';
-                VFps = '-';
-                VSpeed = '-';
-                VEta = '-';
-            } else {
-                var VPct = (parseFloat(VmafJob.ProgressPercentage) || 0).toFixed(1);
-                ProgressCellHtml =
-                    '<div class="d-flex align-items-center gap-2">' +
-                        '<div class="progress flex-grow-1" style="height: 18px;">' +
-                            '<div class="progress-bar progress-bar-striped progress-bar-animated bg-info" ' +
-                                'role="progressbar" style="width: ' + VPct + '%" ' +
-                                'aria-valuenow="' + VPct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
-                        '</div>' +
-                        '<small class="text-nowrap">' + VPct + '%</small>' +
-                    '</div>';
-                VFps = '-';
-                if (VmafJob.CurrentFps != null) {
-                    VFps = parseFloat(VmafJob.CurrentFps).toFixed(0) + ' fps';
-                } else if (VmafJob.CurrentStep) {
-                    var _M = String(VmafJob.CurrentStep).match(/(\d+(?:\.\d+)?)\s*fps/);
-                    if (_M) { VFps = parseFloat(_M[1]).toFixed(0) + ' fps'; }
-                }
-                if (VmafJob.EtaSeconds != null && VmafJob.EtaSeconds > 0) {
-                    var _S = Math.round(VmafJob.EtaSeconds);
-                    var _H = Math.floor(_S / 3600);
-                    var _Mn = Math.floor((_S % 3600) / 60);
-                    var _Sc = _S % 60;
-                    VEta = (_H > 0 ? (_H + ':' + (_Mn < 10 ? '0' : '') + _Mn) : _Mn) + ':' + (_Sc < 10 ? '0' : '') + _Sc;
-                } else {
-                    VEta = VmafJob.ETA || '-';
-                }
-                VSpeed = VmafJob.ProcessingSpeed || '-';
-            }
-            var RowClass = IsStale ? ' class="table-warning"' : '';
-            VmafRowsHtml +=
-                '<tr' + RowClass + '>' +
-                    '<td class="ps-3"><i class="fas fa-chart-line me-1 text-info"></i>' +
-                        '<span title="' + EscapeHtml(VmafJob.OriginalFilePath || '') + '">' + EscapeHtml(VFile) + '</span></td>' +
-                    '<td><span class="badge bg-info">VMAF</span></td>' +
-                    '<td>' + EscapeHtml(String(VWorker)) + '</td>' +
-                    '<td>' + EscapeHtml(String(VSize)) + '</td>' +
-                    '<td>' + ProgressCellHtml + '</td>' +
-                    '<td>' + EscapeHtml(String(VFps)) + '</td>' +
-                    '<td>' + EscapeHtml(String(VSpeed)) + '</td>' +
-                    '<td>' + EscapeHtml(String(VEta)) + '</td>' +
-                    '<td>-</td>' +
-                '</tr>';
-        });
-        // Backward-compat alias for the single-row variable used below.
-        var VmafRow = VmafRowsHtml;
-
-        // Single-pass render: combined transcode + VMAF rows. Scans render in
-        // their OWN block (RenderActiveScans below) -- directive 2026-05-27
-        // moved them out of the transcode-shaped table.
-        var CombinedHtml = TranscodeRows.join('') + VmafRow;
-        var HasAnyJob = !!CombinedHtml || (D.ActiveScans && D.ActiveScans.length > 0);
-        if (CombinedHtml) {
+        if (HasJobs) {
             JobsTable.classList.remove('d-none');
-            JobsBody.innerHTML = CombinedHtml;
-            RenderJobFooter(ActiveJobs); ReconcileEtaTimers(ActiveJobs);
+            RenderJobFooter(ActiveJobs);
+            ReconcileEtaTimers(ActiveJobs);
         } else {
             JobsTable.classList.add('d-none');
-            JobsBody.innerHTML = '';
-            document.getElementById('ActiveJobsFooter').classList.add('d-none');
+            document.getElementById('ActiveJobsFooterPanel').classList.add('d-none');
             document.getElementById('MachineFpsSummary').classList.add('d-none');
         }
-        // "No active jobs" message hides if we have any scan OR transcode/VMAF.
+        var HasAnyJob = HasJobs || (Scans && Scans.length > 0);
         if (HasAnyJob) {
             NoJob.classList.add('d-none');
         } else {
             NoJob.classList.remove('d-none');
         }
 
-        // Active Scans block fed from the same /Overview tick. Recent Scans
-        // history lives on /Operations (directive 2026-05-28).
-        RenderActiveScans(D.ActiveScans || []);
+        // Feed scans into their own table; visibility owned here.
+        var Block = document.getElementById('ActiveScansBlock');
+        var Count = document.getElementById('ActiveScansCount');
+        if (window.MV_ActivityTables && window.MV_ActivityTables.Scans) {
+            window.MV_ActivityTables.Scans.SetData(Scans);
+        }
+        if (Scans.length > 0) {
+            Block.classList.remove('d-none');
+            Count.textContent = '(' + Scans.length + ')';
+        } else {
+            Block.classList.add('d-none');
+            Count.textContent = '';
+        }
     }
 
     function RenderJobFooter(ActiveJobs) {
-        var Footer = document.getElementById('ActiveJobsFooter');
+        var Footer = document.getElementById('ActiveJobsFooterPanel');
         var MachineSummary = document.getElementById('MachineFpsSummary');
 
         if (!ActiveJobs || ActiveJobs.length === 0) {
@@ -635,10 +411,9 @@ var ActivityPage = (function() {
             return;
         }
 
-        // Compute totals
         var TotalFPS = 0;
         var TotalSizeMB = 0;
-        var MachineFPS = {};  // WorkerName -> sum of FPS
+        var MachineFPS = {};
 
         ActiveJobs.forEach(function(Job) {
             var Fps = parseFloat(Job.CurrentFPS) || 0;
@@ -646,18 +421,15 @@ var ActivityPage = (function() {
             TotalSizeMB += parseFloat(Job.SizeMB) || 0;
 
             var Worker = Job.ClaimedBy || 'Unknown';
-            // Group by machine: strip the container suffix (larry-worker-1 -> larry)
             var Machine = Worker.replace(/-worker-\d+$/, '') || Worker;
             if (!MachineFPS[Machine]) MachineFPS[Machine] = 0;
             MachineFPS[Machine] += Fps;
         });
 
-        // Render footer row
         document.getElementById('FooterTotalSize').textContent = TotalSizeMB > 0 ? FormatSizeMB(TotalSizeMB) : '-';
         document.getElementById('FooterTotalFPS').textContent = TotalFPS > 0 ? TotalFPS.toFixed(1) : '-';
         Footer.classList.remove('d-none');
 
-        // Render per-machine FPS summary
         var MachineNames = Object.keys(MachineFPS).sort();
         if (MachineNames.length > 1) {
             var Parts = MachineNames.map(function(M) {
@@ -671,15 +443,25 @@ var ActivityPage = (function() {
     }
 
     // directive: activity-dashboard-polish -- ETACountdownTimer; smooth per-second decrement between polls, server-resets on delta > 5s.
+    // Migrated to TableRenderer: rows no longer carry data-attempt-id; we look the row up by index in the rendered table, mapping AttemptId -> index via the table's current data snapshot.
     var EtaTimers = {};
     function EtaTick() {
+        var T = window.MV_ActivityTables && window.MV_ActivityTables.Jobs;
+        if (!T) return;
+        var Snap = T.GetData ? T.GetData() : { Rows: [] };
+        var Rows = Snap.Rows || [];
+        var IndexById = {};
+        Rows.forEach(function(R, I) { if (R && R.__AttemptId != null) IndexById[R.__AttemptId] = I; });
+        var TrList = document.querySelectorAll('#ActiveJobsMount tbody tr');
         Object.keys(EtaTimers).forEach(function(Id) {
             var State = EtaTimers[Id];
             if (State.Eta == null) return;
             State.Eta = Math.max(0, State.Eta - 1);
-            var Row = document.querySelector('tr[data-attempt-id="' + Id + '"]');
-            if (!Row) { delete EtaTimers[Id]; return; }
-            var Cell = Row.querySelector('td[data-eta-cell]');
+            var Idx = IndexById[Id];
+            if (Idx == null) { delete EtaTimers[Id]; return; }
+            var Tr = TrList[Idx];
+            if (!Tr) { delete EtaTimers[Id]; return; }
+            var Cell = Tr.querySelector('td[data-key="EtaSeconds"]');
             if (Cell) Cell.textContent = FormatEtaSec(State.Eta);
         });
     }
@@ -732,12 +514,11 @@ var ActivityPage = (function() {
                     Workers = Data.Data;
                     if (Array.isArray(Data.ProfileCatalog)) ProfileCatalog = Data.ProfileCatalog;
                     if (Array.isArray(Data.NvencProfiles)) NvencProfiles = Data.NvencProfiles;
-                    RenderWorkers(Workers);
+                    PushWorkersToTable(Workers);
                 }
             })
             .catch(function(E) { console.error('Workers error:', E); });
 
-        // Parallel fetch for the fleet-wide version-mismatch banner
         fetch('/api/TeamStatus/Workers/VersionStatus')
             .then(function(R) { return R.json(); })
             .then(function(Data) {
@@ -747,6 +528,29 @@ var ActivityPage = (function() {
             })
             .catch(function(E) { console.error('VersionStatus error:', E); });
         return P;
+    }
+
+    function PushWorkersToTable(WorkerList) {
+        var T = window.MV_ActivityTables && window.MV_ActivityTables.Workers;
+        if (!T) { return; }
+        var List = WorkerList || [];
+        var Rows = [];
+        if (List.length === 0) {
+            T.SetData([]);
+            T.SetContext({ NvencProfiles: NvencProfiles });
+            return;
+        }
+        var Groups = GroupWorkersByMachine(List);
+        Groups.forEach(function(G) {
+            Rows.push({ __Kind: 'GroupHeader', GroupName: G.Name, Count: G.Workers.length });
+            G.Workers.forEach(function(W) {
+                var R = Object.assign({}, W);
+                R.__Kind = 'Worker';
+                Rows.push(R);
+            });
+        });
+        T.SetContext({ NvencProfiles: NvencProfiles });
+        T.SetData(Rows);
     }
 
     function RenderVersionBanner(VS) {
@@ -792,165 +596,32 @@ var ActivityPage = (function() {
         return Order.map(function(K) { return { Name: K, Workers: Groups[K] }; });
     }
 
-    function RenderWorkerTile(W) {
-        var HeartbeatAge = W.HeartbeatAgeSec;
-        var IsDisabled = W.Enabled === false;
-        var DisplayStatus = IsDisabled ? 'Disabled' : (W.Status || 'Paused');
-        var BadgeCls = IsDisabled ? 'bg-dark' : GetWorkerStatusBadge(DisplayStatus);
-        var CardCls = IsDisabled ? 'card border-secondary opacity-50' : GetWorkerCardClass(DisplayStatus);
-        var HeartbeatText = FormatHeartbeatAge(HeartbeatAge);
-        var HeartbeatDot = GetHeartbeatDotClass(HeartbeatAge);
-        var WorkerNameEsc = EscapeHtml(W.WorkerName);
-        var WorkerNameJs = WorkerNameEsc.replace(/'/g, "\\'");
-
-        var VersionShort, VersionTooltip, VersionCls;
-        if (W.Version && W.Version !== 'unknown') {
-            VersionShort = EscapeHtml(W.Version.substring(0, 7));
-            VersionTooltip = EscapeHtml(W.Version) + (W.BuildInfo ? '\n' + EscapeHtml(W.BuildInfo) : '');
-            VersionCls = 'text-muted';
-        } else {
-            VersionShort = '<em>unknown</em>';
-            VersionTooltip = 'Worker has not reported a build version.';
-            VersionCls = 'text-warning';
-        }
-        var VersionHtml = ' <small class="' + VersionCls + ' ms-2" title="' + VersionTooltip + '" style="white-space:pre-line">v: ' + VersionShort + '</small>';
-
-        var NvencMisconfigHtml = '';
-        if (W.NvencCapable === false && typeof W.AllowedProfiles === 'string' && W.AllowedProfiles.length > 0 && NvencProfiles.length > 0) {
-            var AllowedList = W.AllowedProfiles.split(',').map(function(s) { return s.trim(); });
-            var NvencSelected = AllowedList.filter(function(P) { return NvencProfiles.indexOf(P) !== -1; });
-            if (NvencSelected.length > 0) {
-                NvencMisconfigHtml =
-                    '<div class="alert alert-warning py-2 px-2 mb-2 small" role="alert">' +
-                        '<i class="fas fa-exclamation-triangle me-1"></i>' +
-                        '<strong>NVENC misconfig.</strong> ' + NvencSelected.length + ' NVENC profile(s) selected but NvencCapable=false &mdash; claims silently no-op. ' +
-                        'Enable NvencCapable in the modal if this worker has NVIDIA hardware, or unselect the NVENC profiles.' +
-                    '</div>';
-            }
-        }
-
-        var MountErrorHtml = '';
-        if (W.MountValidationError) {
-            MountErrorHtml =
-                '<div class="alert alert-danger py-2 px-2 mb-2 small" role="alert">' +
-                    '<i class="fas fa-exclamation-triangle me-1"></i>' +
-                    '<strong>Mount validation failed -- no jobs claimed.</strong> ' +
-                    '<span class="d-block mt-1" style="word-break:break-all">' + EscapeHtml(W.MountValidationError) + '</span>' +
-                '</div>';
-        }
-
-        var IsOnline = DisplayStatus === 'Online';
-        var ToggleClass = IsOnline ? 'btn-success' : 'btn-outline-success';
-        var ToggleTarget = IsOnline ? 'Paused' : 'Online';
-        var ToggleIcon = IsOnline ? 'fa-pause' : 'fa-play';
-        var ToggleLabel = IsOnline ? 'Pause' : 'Online';
-
-        // Directive 2026-05-27 criterion 17: scan posture line.
-        // Three states: currently scanning, idle with prior history (show next ETA),
-        // or idle without history (show "imminent"). Omitted entirely when
-        // ScanEnabled=false so the tile stays compact for non-scanning workers.
-        var ScanLineHtml = '';
-        if (W.ScanEnabled) {
-            if (W.CurrentScanRootFolder) {
-                ScanLineHtml = '<div class="small text-success mb-1">' +
-                    '<i class="fas fa-search me-1"></i>Scan: <strong>' + EscapeHtml(W.CurrentScanRootFolder) + '</strong>' +
-                    '</div>';
-            } else if (W.NextScanEstimate) {
-                var NextStr = '';
-                try {
-                    var T = new Date(W.NextScanEstimate + (W.NextScanEstimate.endsWith('Z') ? '' : 'Z')).getTime();
-                    var Delta = Math.floor((T - Date.now()) / 1000);
-                    if (Delta <= 0) NextStr = 'imminent';
-                    else if (Delta < 60) NextStr = 'in ' + Delta + 's';
-                    else if (Delta < 3600) NextStr = 'in ' + Math.floor(Delta / 60) + 'm';
-                    else NextStr = 'in ' + Math.floor(Delta / 3600) + 'h ' + Math.floor((Delta % 3600) / 60) + 'm';
-                } catch (e) { NextStr = String(W.NextScanEstimate); }
-                ScanLineHtml = '<div class="small text-muted mb-1">' +
-                    '<i class="fas fa-clock me-1"></i>Scan: idle -- next ' + EscapeHtml(NextStr) +
-                    '</div>';
-            } else {
-                ScanLineHtml = '<div class="small text-muted mb-1">' +
-                    '<i class="fas fa-clock me-1"></i>Scan: idle -- next imminent' +
-                    '</div>';
-            }
-        }
-
-        var ProfilesLabel = FormatAllowedProfilesShort(W.AllowedProfiles);
-        var ProfilesTooltip = FormatAllowedProfilesTooltip(W.AllowedProfiles);
-        var ProfilesLineHtml = '<div class="small text-muted mb-1" title="' + ProfilesTooltip + '">' +
-            '<i class="fas fa-filter me-1"></i>Profiles: <strong>' + ProfilesLabel + '</strong>' +
-            '</div>';
-        var StagingLineHtml = '';
-        if (W.LocalStagingEnabled) {
-            var StagingPath = W.LocalScratchDir || '';
-            var StagingShort = StagingPath.length > 80 ? StagingPath.substring(0, 77) + '...' : StagingPath;
-            var ModeLabel = W.LocalVmafFirst ? ' (VMAF local)' : '';
-            StagingLineHtml = '<div class="small text-muted mb-1" title="' + EscapeHtml(StagingPath) + (W.LocalVmafFirst ? ' | Local VMAF first' : ' | Mode B copy-back') + '">' +
-                '<i class="fas fa-hdd me-1"></i>Staging: <strong>' + EscapeHtml(StagingShort) + '</strong>' + ModeLabel +
-                '</div>';
-        }
-
-        var Col = document.createElement('div');
-        Col.className = 'col-6 col-lg-4 col-xl-3';
-        Col.innerHTML = '<div class="' + CardCls + '" style="cursor:pointer" onclick="ActivityPage.OpenWorkerSettings(\'' + WorkerNameJs + '\')">' +
-            '<div class="card-body py-3">' +
-                '<h6 class="card-title mb-2 d-flex justify-content-between align-items-center">' +
-                    '<span><i class="fas fa-circle me-1 small ' + HeartbeatDot + '" title="Last heartbeat: ' + HeartbeatText + '"></i>' + WorkerNameEsc + VersionHtml + '</span>' +
-                    '<span class="badge ' + BadgeCls + '">' + DisplayStatus + '</span>' +
-                '</h6>' +
-                MountErrorHtml +
-                NvencMisconfigHtml +
-                ScanLineHtml +
-                ProfilesLineHtml +
-                StagingLineHtml +
-                '<button class="btn btn-sm w-100 ' + ToggleClass + '" onclick="event.stopPropagation(); ActivityPage.SetWorkerStatus(\'' + WorkerNameJs + '\', \'' + ToggleTarget + '\')">' +
-                    '<i class="fas ' + ToggleIcon + ' me-1"></i>' + ToggleLabel +
-                '</button>' +
-            '</div>' +
-        '</div>';
-        return Col;
-    }
-
+    // RenderWorkerTile / RenderWorkers removed -- replaced by module-scope CellRenderer
+    // subclasses (see <script type="module"> block). Data is fed via PushWorkersToTable.
     function FormatAllowedProfilesShort(Raw) {
-        if (Raw === null || Raw === undefined) return '&lt;all&gt;';
-        if (Raw === '') return '&lt;none&gt;';
+        if (Raw === null || Raw === undefined) return '<all>';
+        if (Raw === '') return '<none>';
         var Joined = String(Raw);
         if (Joined.length > 80) Joined = Joined.substring(0, 77) + '...';
-        return EscapeHtml(Joined);
+        return Joined;
     }
 
     function FormatAllowedProfilesTooltip(Raw) {
         if (Raw === null || Raw === undefined) return 'All profiles allowed (worker has no allowlist set).';
         if (Raw === '') return 'No profiles allowed -- worker is parked.';
-        return EscapeHtml(String(Raw).split(',').join(', '));
+        return String(Raw).split(',').join(', ');
     }
 
-    function RenderWorkers(WorkerList) {
-        var Container = document.getElementById('WorkersContainer');
-        Container.innerHTML = '';
-        if (!WorkerList || WorkerList.length === 0) {
-            Container.innerHTML = '<div class="col-12 text-center text-muted py-2">No workers registered</div>';
-            return;
-        }
-        var Groups = GroupWorkersByMachine(WorkerList);
-        Groups.forEach(function(G) {
-            var GroupNameEsc = EscapeHtml(G.Name);
-            var GroupJs = GroupNameEsc.replace(/'/g, "\\'");
-            var Header = document.createElement('div');
-            Header.className = 'col-12 mt-2';
-            Header.innerHTML =
-                '<div class="d-flex justify-content-between align-items-center border-bottom pb-1 mb-2">' +
-                    '<h6 class="mb-0"><i class="fas fa-server me-1 text-muted"></i>' + GroupNameEsc + ' <small class="text-muted">(' + G.Workers.length + ')</small></h6>' +
-                    '<div class="btn-group btn-group-sm" role="group">' +
-                        '<button class="btn btn-outline-success" onclick="ActivityPage.SetMachineStatus(\'' + GroupJs + '\', \'Online\')" title="Resume all workers on ' + GroupNameEsc + '"><i class="fas fa-play me-1"></i>Resume Machine</button>' +
-                        '<button class="btn btn-outline-secondary" onclick="ActivityPage.SetMachineStatus(\'' + GroupJs + '\', \'Paused\')" title="Pause all workers on ' + GroupNameEsc + '"><i class="fas fa-pause me-1"></i>Pause Machine</button>' +
-                    '</div>' +
-                '</div>';
-            Container.appendChild(Header);
-            G.Workers.forEach(function(W) {
-                Container.appendChild(RenderWorkerTile(W));
-            });
-        });
+    function FormatNextScanRel(NextScanEstimate) {
+        if (!NextScanEstimate) return 'imminent';
+        try {
+            var T = new Date(NextScanEstimate + (NextScanEstimate.endsWith('Z') ? '' : 'Z')).getTime();
+            var Delta = Math.floor((T - Date.now()) / 1000);
+            if (Delta <= 0) return 'imminent';
+            if (Delta < 60) return 'in ' + Delta + 's';
+            if (Delta < 3600) return 'in ' + Math.floor(Delta / 60) + 'm';
+            return 'in ' + Math.floor(Delta / 3600) + 'h ' + Math.floor((Delta % 3600) / 60) + 'm';
+        } catch (e) { return String(NextScanEstimate); }
     }
 
     var CurrentSettingsWorker = null;
@@ -1289,8 +960,11 @@ var ActivityPage = (function() {
     }
 
     function StartPolling() {
-        // Overview polls at 2s for active-job progress.
-        OverviewInterval = setInterval(LoadOverview, 2000);
+        // Overview polls at 5s. Reduced from 2s after TableRenderer migration --
+        // per-poll work is now ClientArrayDataSource.SetRows + TableRenderer.Refresh
+        // (no innerHTML wipe + forEach->appendChild), and 5s tracks server-side
+        // smoothing window. EtaTick at 1s still drives smooth countdown between polls.
+        OverviewInterval = setInterval(LoadOverview, 5000);
     }
 
     function StopPolling() {
@@ -1400,6 +1074,7 @@ var ActivityPage = (function() {
     document.addEventListener('DOMContentLoaded', Init);
 
     return {
+        RefreshAll: RefreshAll,
         ResetStuckJob: ResetStuckJob,
         StopScan: StopScan,
         SetWorkerStatus: SetWorkerStatus,
@@ -1414,9 +1089,521 @@ var ActivityPage = (function() {
         OpenWorkerSettings: OpenWorkerSettings,
         DisableFromModal: DisableFromModal,
         DisableWorker: DisableWorker,
-        EnableWorker: EnableWorker
+        EnableWorker: EnableWorker,
+        FormatSizeMB: FormatSizeMB,
+        FormatEtaSec: FormatEtaSec,
+        FormatHeartbeatAge: FormatHeartbeatAge,
+        FormatClaimAge: FormatClaimAge,
+        FormatAllowedProfilesShort: FormatAllowedProfilesShort,
+        FormatAllowedProfilesTooltip: FormatAllowedProfilesTooltip,
+        FormatNextScanRel: FormatNextScanRel,
+        GetWorkerStatusBadge: GetWorkerStatusBadge,
+        GetWorkerCardClass: GetWorkerCardClass,
+        GetHeartbeatDotClass: GetHeartbeatDotClass
         // RetryQualityTest moved to /Queue page.
     };
 })();
+</script>
+
+<script type="module">
+import { TableRenderer } from "/static/js/TableRenderer/TableRenderer.js";
+import { TableRendererConfig } from "/static/js/TableRenderer/TableRendererConfig.js";
+import { EventBus } from "/static/js/TableRenderer/EventBus.js";
+import { ClientArrayDataSource } from "/static/js/TableRenderer/DataSources/ClientArrayDataSource.js";
+import { ColumnDefinition } from "/static/js/TableRenderer/ColumnDefinition.js";
+import { ICellRenderer } from "/static/js/TableRenderer/Interfaces/ICellRenderer.js";
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const Esc = (T) => { const D = document.createElement('div'); D.textContent = T == null ? '' : String(T); return D.innerHTML; };
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const Page = () => window.ActivityPage || {};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ActiveJobFileRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Td = document.createElement('span');
+        if (Row.__Kind === 'Vmaf') {
+            const File = Row.FileName || (Row.OriginalFilePath ? String(Row.OriginalFilePath).split(/[/\\]/).pop() : 'VMAF');
+            Td.innerHTML = '<i class="fas fa-chart-line me-1 text-info"></i><span title="' + Esc(Row.OriginalFilePath || '') + '">' + Esc(File) + '</span>';
+            return Td;
+        }
+        const FileName = Row.FileName || (Row.FilePath ? String(Row.FilePath).split(/[/\\]/).pop() : '');
+        const Icon = Row.IsStuck ? '<i class="fas fa-exclamation-triangle me-1 text-warning"></i>' : '<i class="fas fa-spinner fa-spin me-1 text-primary"></i>';
+        Td.innerHTML = Icon + '<span title="' + Esc(Row.FilePath || '') + '">' + Esc(FileName) + '</span>';
+        return Td;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ActiveJobTypeRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const S = document.createElement('span');
+        if (Row.__Kind === 'Vmaf') { S.className = 'badge bg-info'; S.textContent = 'VMAF'; return S; }
+        const Mode = Row.ProcessingMode || 'Transcode';
+        const Cls = Mode === 'Remux' ? 'bg-info' : Mode === 'SubtitleFix' ? 'bg-warning text-dark' : 'bg-primary';
+        S.className = 'badge ' + Cls;
+        S.textContent = Mode;
+        return S;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ActiveJobWorkerRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const S = document.createElement('span');
+        if (Row.__Kind === 'Vmaf') { S.textContent = Row.WorkerName || Row.ClaimedBy || '-'; return S; }
+        if (Row.ClaimedBy) { S.textContent = Row.ClaimedBy; } else { S.innerHTML = '<em class="text-muted">-</em>'; }
+        return S;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ActiveJobSizeRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const S = document.createElement('span');
+        if (Row.__Kind === 'Vmaf') {
+            const B = Row.NewSizeBytes || Row.OldSizeBytes;
+            S.textContent = B ? ((B / (1024 * 1024)).toFixed(0) + ' MB') : '-';
+            return S;
+        }
+        S.textContent = Row.SizeMB ? Page().FormatSizeMB(Row.SizeMB) : '-';
+        return S;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ActiveJobProgressRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Wrap = document.createElement('div');
+        if (Row.__Kind === 'Vmaf') {
+            if (Row.ProgressPercentage == null) {
+                Wrap.innerHTML = '<span class="badge bg-warning text-dark" title="Worker holds this claim but has emitted no progress -- likely died or restarted holding the row"><i class="fas fa-exclamation-triangle me-1"></i>stale claim ' + Esc(Row.ClaimAgeText || '-') + '</span>';
+                return Wrap;
+            }
+            const VP = (parseFloat(Row.ProgressPercentage) || 0).toFixed(1);
+            Wrap.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="progress flex-grow-1" style="height: 18px;"><div class="progress-bar progress-bar-striped progress-bar-animated bg-info" role="progressbar" style="width: ' + VP + '%" aria-valuenow="' + VP + '" aria-valuemin="0" aria-valuemax="100"></div></div><small class="text-nowrap">' + VP + '%</small></div>';
+            return Wrap;
+        }
+        if (Row.IsStuck) { Wrap.innerHTML = '<span class="text-warning fw-bold">Stuck</span>'; return Wrap; }
+        const P = (Row.ProgressPercent || 0).toFixed(1);
+        Wrap.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="progress flex-grow-1" style="height: 18px;"><div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" role="progressbar" style="width: ' + P + '%" aria-valuenow="' + P + '" aria-valuemin="0" aria-valuemax="100"></div></div><small class="text-nowrap">' + P + '%</small></div>';
+        return Wrap;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ActiveJobFpsRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const S = document.createElement('span');
+        if (Row.__Kind === 'Vmaf') {
+            let V = '-';
+            if (Row.CurrentFps != null) V = parseFloat(Row.CurrentFps).toFixed(0) + ' fps';
+            else if (Row.CurrentStep) { const M = String(Row.CurrentStep).match(/(\d+(?:\.\d+)?)\s*fps/); if (M) V = parseFloat(M[1]).toFixed(0) + ' fps'; }
+            S.textContent = V;
+            return S;
+        }
+        if (Row.IsStuck) { S.textContent = '-'; return S; }
+        if (Row.SmoothingStale) { S.innerHTML = '<span class="text-muted">--</span>'; return S; }
+        if (Row.SmoothedFPS != null) { S.textContent = parseFloat(Row.SmoothedFPS).toFixed(1); return S; }
+        S.textContent = Row.CurrentFPS ? parseFloat(Row.CurrentFPS).toFixed(1) : '-';
+        return S;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ActiveJobSpeedRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const S = document.createElement('span');
+        if (Row.__Kind === 'Vmaf') { S.textContent = Row.ProcessingSpeed || '-'; return S; }
+        if (Row.IsStuck) { S.textContent = '-'; return S; }
+        if (Row.SmoothingStale) { S.innerHTML = '<span class="text-muted">--</span>'; return S; }
+        if (Row.SmoothedSpeed != null) { S.textContent = Row.SmoothedSpeed.toFixed(2) + 'x'; return S; }
+        S.textContent = Row.CurrentSpeed || '-';
+        return S;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ActiveJobEtaRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const S = document.createElement('span');
+        if (Row.__Kind === 'Vmaf') {
+            if (Row.EtaSeconds != null && Row.EtaSeconds > 0) {
+                const Sec = Math.round(Row.EtaSeconds), H = Math.floor(Sec / 3600), Mn = Math.floor((Sec % 3600) / 60), Sc = Sec % 60;
+                S.textContent = (H > 0 ? (H + ':' + (Mn < 10 ? '0' : '') + Mn) : Mn) + ':' + (Sc < 10 ? '0' : '') + Sc;
+            } else { S.textContent = Row.ETA || '-'; }
+            return S;
+        }
+        if (Row.IsStuck) { S.textContent = '-'; return S; }
+        if (Row.SmoothingStale) { S.innerHTML = '<span class="text-muted">--:--:--</span>'; return S; }
+        if (Row.EtaSeconds != null) { S.textContent = Page().FormatEtaSec(Row.EtaSeconds); return S; }
+        S.textContent = Row.ETA || '-';
+        return S;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ActiveJobActionRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const W = document.createElement('span');
+        if (Row.__Kind === 'Vmaf') { W.textContent = '-'; return W; }
+        if (Row.IsStuck) {
+            const B = document.createElement('button');
+            B.className = 'btn btn-outline-warning btn-sm py-0 px-1';
+            B.title = 'Reset to Pending';
+            B.innerHTML = '<i class="fas fa-redo-alt"></i>';
+            B.addEventListener('click', () => Page().ResetStuckJob && Page().ResetStuckJob(Row.QueueId));
+            W.appendChild(B);
+        }
+        return W;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const ActiveJobColumns = () => [
+    new ColumnDefinition({ Key: 'FileName', Header: 'File', CellRendererName: 'AJFile' }),
+    new ColumnDefinition({ Key: '__Type', Header: 'Type', CellRendererName: 'AJType', Width: '80px' }),
+    new ColumnDefinition({ Key: 'ClaimedBy', Header: 'Worker', CellRendererName: 'AJWorker', Width: '110px' }),
+    new ColumnDefinition({ Key: 'SizeMB', Header: 'Size', CellRendererName: 'AJSize', Width: '90px' }),
+    new ColumnDefinition({ Key: 'ProgressPercent', Header: 'Progress', CellRendererName: 'AJProgress', Width: '200px' }),
+    new ColumnDefinition({ Key: 'SmoothedFPS', Header: 'FPS', CellRendererName: 'AJFps', Width: '80px' }),
+    new ColumnDefinition({ Key: 'SmoothedSpeed', Header: 'Speed', CellRendererName: 'AJSpeed', Width: '80px' }),
+    new ColumnDefinition({ Key: 'EtaSeconds', Header: 'ETA', CellRendererName: 'AJEta', Width: '100px' }),
+    new ColumnDefinition({ Key: '__Actions', Header: '', CellRendererName: 'AJAction', Width: '60px' })
+];
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ScanDriveRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Stuck = Row.IsStuck ? '<i class="fas fa-exclamation-triangle ms-1 text-warning" title="Heartbeat stale (>10 min)"></i>' : '';
+        const W = document.createElement('span');
+        W.innerHTML = '<strong>' + Esc(Row.RootFolderPath || '') + '</strong>' + Stuck;
+        return W;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ScanWorkerRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const S = document.createElement('span');
+        S.textContent = Row.WorkerName || '<unknown>';
+        return S;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ScanPhaseRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Phase = Row.Phase || 'Walking';
+        let Label = Phase, Cls = 'bg-secondary';
+        if (Phase === 'SizeSurvey') { Cls = 'bg-primary'; Label = 'Size Survey'; }
+        else if (Phase === 'Walking') { Cls = 'bg-success'; }
+        else if (Phase === 'Reconciling') { Cls = 'bg-warning text-dark'; }
+        else if (Phase === 'Probing') { Cls = 'bg-info text-dark'; if (Row.FilesNeedingProbe) Label = 'Probing ' + (Row.ProbedFiles || 0) + '/' + Row.FilesNeedingProbe; }
+        else if (Phase === 'Completing') { Cls = 'bg-success'; }
+        const S = document.createElement('span');
+        S.className = 'badge ' + Cls;
+        S.textContent = Label;
+        return S;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ScanProgressRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Phase = Row.Phase || 'Walking';
+        let Pct = Math.max(0, Math.min(100, parseFloat(Row.Progress) || 0)).toFixed(1);
+        let CountLabel;
+        if (Phase === 'SizeSurvey') { Pct = '100'; CountLabel = 'enumerating files'; }
+        else if (Phase === 'Probing') { const TotalP = Row.FilesNeedingProbe || 0, DoneP = Row.ProbedFiles || 0; Pct = TotalP > 0 ? (DoneP * 100.0 / TotalP).toFixed(1) : '0.0'; CountLabel = DoneP + ' / ' + TotalP + ' probed'; }
+        else if (Phase === 'Reconciling') { Pct = '100'; CountLabel = 'comparing DB vs disk'; }
+        else if (Phase === 'Completing') { Pct = '100'; CountLabel = 'finalizing'; }
+        else { CountLabel = (Row.TotalFiles > 0) ? (Row.ProcessedFiles || 0).toLocaleString() + ' / ' + Row.TotalFiles.toLocaleString() : (Row.ProcessedFiles || 0).toLocaleString() + ' files'; }
+        const CurDir = (Row.CurrentDirectory && Row.CurrentDirectory !== Row.RootFolderPath) ? '<div class="text-muted small text-truncate" style="max-width:320px" title="' + Esc(Row.CurrentDirectory) + '">' + Esc(Row.CurrentDirectory) + '</div>' : '';
+        const TopFiles = Row.TopFiles || [];
+        let TopHtml = '';
+        if (TopFiles.length > 0) {
+            const Lis = TopFiles.map((F) => '<li class="d-flex justify-content-between"><span class="text-truncate me-2" style="max-width:480px" title="' + Esc(F.path || '') + '">' + Esc(F.fileName || F.path || '') + '</span><span class="text-muted">' + Esc(Page().FormatSizeMB(F.sizeMB)) + '</span></li>').join('');
+            TopHtml = '<div class="px-1 py-2 mt-1 bg-light"><div class="small text-muted mb-1"><i class="fas fa-star me-1 text-warning"></i>Largest files found</div><ul class="list-unstyled mb-0 small">' + Lis + '</ul></div>';
+        } else if (Phase === 'SizeSurvey') {
+            TopHtml = '<div class="px-1 py-1 mt-1 bg-light text-muted small"><i class="fas fa-spinner fa-spin me-1"></i>Enumerating largest files...</div>';
+        }
+        const Wrap = document.createElement('div');
+        Wrap.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="progress flex-grow-1" style="height: 14px;"><div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: ' + Pct + '%" aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div></div><small class="text-nowrap">' + Esc(CountLabel) + '</small></div>' + CurDir + TopHtml;
+        return Wrap;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ScanFilesRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const S = document.createElement('span');
+        const Tip = (Row.NewFiles || 0) + ' new, ' + (Row.UpdatedFiles || 0) + ' updated, ' + (Row.DeletedFiles || 0) + ' deleted';
+        S.innerHTML = '<span title="' + Tip + '"><span class="text-success">+' + (Row.NewFiles || 0) + '</span> <span class="text-warning">~' + (Row.UpdatedFiles || 0) + '</span> <span class="text-danger">&minus;' + (Row.DeletedFiles || 0) + '</span></span>';
+        return S;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ScanRateRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const S = document.createElement('span');
+        S.textContent = Row.FilesPerSec > 0 ? (Row.FilesPerSec.toFixed(1) + ' f/s') : '-';
+        return S;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ScanEtaRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Phase = Row.Phase || 'Walking';
+        const S = document.createElement('span');
+        S.textContent = (Phase === 'Reconciling' || Phase === 'Completing' || Phase === 'SizeSurvey') ? '-' : Page().FormatEtaSec(Row.EtaSec);
+        return S;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _ScanStopRenderer extends ICellRenderer {
+    Render(_V, Row) {
+        const Wrap = document.createElement('span');
+        const Btn = document.createElement('button');
+        Btn.className = 'btn btn-outline-danger btn-sm py-0 px-1';
+        Btn.title = 'Soft-stop this scan';
+        Btn.innerHTML = '<i class="fas fa-stop"></i>';
+        Btn.addEventListener('click', () => Page().StopScan && Page().StopScan(Row.JobId));
+        Wrap.appendChild(Btn);
+        return Wrap;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const ActiveScanColumns = () => [
+    new ColumnDefinition({ Key: 'RootFolderPath', Header: 'Drive', CellRendererName: 'SCDrive', Width: '90px' }),
+    new ColumnDefinition({ Key: 'WorkerName', Header: 'Worker', CellRendererName: 'SCWorker', Width: '130px' }),
+    new ColumnDefinition({ Key: 'Phase', Header: 'Phase', CellRendererName: 'SCPhase', Width: '130px' }),
+    new ColumnDefinition({ Key: 'Progress', Header: 'Progress', CellRendererName: 'SCProgress', Width: '240px' }),
+    new ColumnDefinition({ Key: '__Files', Header: 'Files', CellRendererName: 'SCFiles', Width: '110px' }),
+    new ColumnDefinition({ Key: 'FilesPerSec', Header: 'Rate', CellRendererName: 'SCRate', Width: '90px' }),
+    new ColumnDefinition({ Key: 'EtaSec', Header: 'ETA', CellRendererName: 'SCEta', Width: '90px' }),
+    new ColumnDefinition({ Key: '__Stop', Header: '', CellRendererName: 'SCStop', Width: '60px' })
+];
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const WorkerContextRef = { NvencProfiles: [] };
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _WorkerCardRenderer extends ICellRenderer {
+    constructor() { super(); this._Context = WorkerContextRef; }
+    Render(_V, Row) {
+        if (Row.__Kind === 'GroupHeader') { return this._RenderGroupHeader(Row); }
+        return this._RenderWorker(Row);
+    }
+    _RenderGroupHeader(Row) {
+        const W = document.createElement('div');
+        const NameEsc = Esc(Row.GroupName);
+        W.innerHTML =
+            '<div class="d-flex justify-content-between align-items-center border-bottom pb-1 mb-1">' +
+                '<h6 class="mb-0"><i class="fas fa-server me-1 text-muted"></i>' + NameEsc + ' <small class="text-muted">(' + Row.Count + ')</small></h6>' +
+                '<div class="btn-group btn-group-sm" role="group">' +
+                    '<button class="btn btn-outline-success" data-action="machine-resume" data-group="' + NameEsc + '" title="Resume all workers on ' + NameEsc + '"><i class="fas fa-play me-1"></i>Resume Machine</button>' +
+                    '<button class="btn btn-outline-secondary" data-action="machine-pause" data-group="' + NameEsc + '" title="Pause all workers on ' + NameEsc + '"><i class="fas fa-pause me-1"></i>Pause Machine</button>' +
+                '</div>' +
+            '</div>';
+        const G = W.querySelector('[data-action="machine-resume"]');
+        const P = W.querySelector('[data-action="machine-pause"]');
+        if (G) G.addEventListener('click', (E) => { E.stopPropagation(); Page().SetMachineStatus && Page().SetMachineStatus(Row.GroupName, 'Online'); });
+        if (P) P.addEventListener('click', (E) => { E.stopPropagation(); Page().SetMachineStatus && Page().SetMachineStatus(Row.GroupName, 'Paused'); });
+        return W;
+    }
+    _RenderWorker(Row) {
+        const P = Page();
+        const IsDisabled = Row.Enabled === false;
+        const DisplayStatus = IsDisabled ? 'Disabled' : (Row.Status || 'Paused');
+        const BadgeCls = IsDisabled ? 'bg-dark' : P.GetWorkerStatusBadge(DisplayStatus);
+        const CardCls = IsDisabled ? 'card border-secondary opacity-50' : P.GetWorkerCardClass(DisplayStatus);
+        const HeartbeatText = P.FormatHeartbeatAge(Row.HeartbeatAgeSec);
+        const HeartbeatDot = P.GetHeartbeatDotClass(Row.HeartbeatAgeSec);
+        const NameEsc = Esc(Row.WorkerName);
+        let VersionShort, VersionTooltip, VersionCls;
+        if (Row.Version && Row.Version !== 'unknown') {
+            VersionShort = Esc(Row.Version.substring(0, 7));
+            VersionTooltip = Esc(Row.Version) + (Row.BuildInfo ? '\n' + Esc(Row.BuildInfo) : '');
+            VersionCls = 'text-muted';
+        } else {
+            VersionShort = '<em>unknown</em>';
+            VersionTooltip = 'Worker has not reported a build version.';
+            VersionCls = 'text-warning';
+        }
+        const VersionHtml = ' <small class="' + VersionCls + ' ms-2" title="' + VersionTooltip + '" style="white-space:pre-line">v: ' + VersionShort + '</small>';
+        let NvencMisconfigHtml = '';
+        const NvencProfiles = (this._Context && this._Context.NvencProfiles) || [];
+        if (Row.NvencCapable === false && typeof Row.AllowedProfiles === 'string' && Row.AllowedProfiles.length > 0 && NvencProfiles.length > 0) {
+            const AllowedList = Row.AllowedProfiles.split(',').map((s) => s.trim());
+            const NvencSelected = AllowedList.filter((Pf) => NvencProfiles.indexOf(Pf) !== -1);
+            if (NvencSelected.length > 0) {
+                NvencMisconfigHtml = '<div class="alert alert-warning py-2 px-2 mb-2 small" role="alert"><i class="fas fa-exclamation-triangle me-1"></i><strong>NVENC misconfig.</strong> ' + NvencSelected.length + ' NVENC profile(s) selected but NvencCapable=false &mdash; claims silently no-op. Enable NvencCapable in the modal if this worker has NVIDIA hardware, or unselect the NVENC profiles.</div>';
+            }
+        }
+        let MountErrorHtml = '';
+        if (Row.MountValidationError) {
+            MountErrorHtml = '<div class="alert alert-danger py-2 px-2 mb-2 small" role="alert"><i class="fas fa-exclamation-triangle me-1"></i><strong>Mount validation failed -- no jobs claimed.</strong> <span class="d-block mt-1" style="word-break:break-all">' + Esc(Row.MountValidationError) + '</span></div>';
+        }
+        const IsOnline = DisplayStatus === 'Online';
+        const ToggleClass = IsOnline ? 'btn-success' : 'btn-outline-success';
+        const ToggleTarget = IsOnline ? 'Paused' : 'Online';
+        const ToggleIcon = IsOnline ? 'fa-pause' : 'fa-play';
+        const ToggleLabel = IsOnline ? 'Pause' : 'Online';
+        let ScanLineHtml = '';
+        if (Row.ScanEnabled) {
+            if (Row.CurrentScanRootFolder) {
+                ScanLineHtml = '<div class="small text-success mb-1"><i class="fas fa-search me-1"></i>Scan: <strong>' + Esc(Row.CurrentScanRootFolder) + '</strong></div>';
+            } else {
+                const Rel = P.FormatNextScanRel(Row.NextScanEstimate);
+                ScanLineHtml = '<div class="small text-muted mb-1"><i class="fas fa-clock me-1"></i>Scan: idle -- next ' + Esc(Rel) + '</div>';
+            }
+        }
+        const ProfilesLabel = Esc(P.FormatAllowedProfilesShort(Row.AllowedProfiles));
+        const ProfilesTooltip = Esc(P.FormatAllowedProfilesTooltip(Row.AllowedProfiles));
+        const ProfilesLineHtml = '<div class="small text-muted mb-1" title="' + ProfilesTooltip + '"><i class="fas fa-filter me-1"></i>Profiles: <strong>' + ProfilesLabel + '</strong></div>';
+        let StagingLineHtml = '';
+        if (Row.LocalStagingEnabled) {
+            const StagingPath = Row.LocalScratchDir || '';
+            const StagingShort = StagingPath.length > 80 ? StagingPath.substring(0, 77) + '...' : StagingPath;
+            const ModeLabel = Row.LocalVmafFirst ? ' (VMAF local)' : '';
+            StagingLineHtml = '<div class="small text-muted mb-1" title="' + Esc(StagingPath) + (Row.LocalVmafFirst ? ' | Local VMAF first' : ' | Mode B copy-back') + '"><i class="fas fa-hdd me-1"></i>Staging: <strong>' + Esc(StagingShort) + '</strong>' + ModeLabel + '</div>';
+        }
+        const Card = document.createElement('div');
+        Card.className = CardCls;
+        Card.style.cursor = 'pointer';
+        Card.innerHTML =
+            '<div class="card-body py-3">' +
+                '<h6 class="card-title mb-2 d-flex justify-content-between align-items-center">' +
+                    '<span><i class="fas fa-circle me-1 small ' + HeartbeatDot + '" title="Last heartbeat: ' + HeartbeatText + '"></i>' + NameEsc + VersionHtml + '</span>' +
+                    '<span class="badge ' + BadgeCls + '">' + DisplayStatus + '</span>' +
+                '</h6>' +
+                MountErrorHtml +
+                NvencMisconfigHtml +
+                ScanLineHtml +
+                ProfilesLineHtml +
+                StagingLineHtml +
+                '<button data-action="toggle-status" class="btn btn-sm w-100 ' + ToggleClass + '"><i class="fas ' + ToggleIcon + ' me-1"></i>' + ToggleLabel + '</button>' +
+            '</div>';
+        Card.addEventListener('click', () => Page().OpenWorkerSettings && Page().OpenWorkerSettings(Row.WorkerName));
+        const Btn = Card.querySelector('[data-action="toggle-status"]');
+        if (Btn) Btn.addEventListener('click', (E) => { E.stopPropagation(); Page().SetWorkerStatus && Page().SetWorkerStatus(Row.WorkerName, ToggleTarget); });
+        return Card;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const WorkerColumns = () => [
+    new ColumnDefinition({ Key: '__Card', Header: '', CellRendererName: 'WorkerCard' })
+];
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const BuildTable = (Spec) => {
+    const Cfg = new TableRendererConfig({ DefaultPageSize: 1000, VirtualizationThreshold: 100000 });
+    const Bus = new EventBus();
+    const Src = new ClientArrayDataSource([]);
+    const T = new TableRenderer({
+        Container: Spec.Container,
+        DataSource: Src,
+        Columns: Spec.Columns,
+        Config: Cfg,
+        Bus,
+        Capabilities: { Sortable: false, Paginatable: false, Filterable: false, Editable: false, Virtualized: false }
+    });
+    Spec.RegisterCells(T);
+    let Ctx = {};
+    const Api = {
+        SetData(Rows) {
+            Src.SetRows(Rows || []);
+            return T.Refresh().then(() => { if (Spec.OnAfterRefresh) Spec.OnAfterRefresh(T, Rows || [], Ctx); });
+        },
+        SetContext(NewCtx) {
+            Ctx = NewCtx || {};
+            if (Spec.OnContextChanged) Spec.OnContextChanged(T, Ctx);
+        },
+        GetData() { return T.GetData(); },
+        Refresh() { return T.Refresh(); },
+        _Inner: T,
+        _Bus: Bus
+    };
+    return Api;
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const InitJobsTable = () => BuildTable({
+    Container: document.getElementById('ActiveJobsMount'),
+    Columns: ActiveJobColumns(),
+    RegisterCells: (T) => {
+        T._CellRegistry.Register('AJFile', _ActiveJobFileRenderer);
+        T._CellRegistry.Register('AJType', _ActiveJobTypeRenderer);
+        T._CellRegistry.Register('AJWorker', _ActiveJobWorkerRenderer);
+        T._CellRegistry.Register('AJSize', _ActiveJobSizeRenderer);
+        T._CellRegistry.Register('AJProgress', _ActiveJobProgressRenderer);
+        T._CellRegistry.Register('AJFps', _ActiveJobFpsRenderer);
+        T._CellRegistry.Register('AJSpeed', _ActiveJobSpeedRenderer);
+        T._CellRegistry.Register('AJEta', _ActiveJobEtaRenderer);
+        T._CellRegistry.Register('AJAction', _ActiveJobActionRenderer);
+    }
+});
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const InitScansTable = () => BuildTable({
+    Container: document.getElementById('ActiveScansMount'),
+    Columns: ActiveScanColumns(),
+    RegisterCells: (T) => {
+        T._CellRegistry.Register('SCDrive', _ScanDriveRenderer);
+        T._CellRegistry.Register('SCWorker', _ScanWorkerRenderer);
+        T._CellRegistry.Register('SCPhase', _ScanPhaseRenderer);
+        T._CellRegistry.Register('SCProgress', _ScanProgressRenderer);
+        T._CellRegistry.Register('SCFiles', _ScanFilesRenderer);
+        T._CellRegistry.Register('SCRate', _ScanRateRenderer);
+        T._CellRegistry.Register('SCEta', _ScanEtaRenderer);
+        T._CellRegistry.Register('SCStop', _ScanStopRenderer);
+    }
+});
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const InitWorkersTable = () => BuildTable({
+    Container: document.getElementById('WorkersMount'),
+    Columns: WorkerColumns(),
+    RegisterCells: (T) => {
+        T._CellRegistry.Register('WorkerCard', _WorkerCardRenderer);
+    },
+    OnContextChanged: (_T, Ctx) => {
+        WorkerContextRef.NvencProfiles = (Ctx && Ctx.NvencProfiles) || [];
+    },
+    OnAfterRefresh: (_T, Rows) => {
+        const Trs = document.querySelectorAll('#WorkersMount tbody tr');
+        Rows.forEach((R, I) => {
+            const Tr = Trs[I];
+            if (!Tr) return;
+            if (R && R.__Kind === 'GroupHeader') Tr.classList.add('activity-worker-group-header');
+        });
+    }
+});
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const Init = () => {
+    const Jobs = InitJobsTable();
+    const Scans = InitScansTable();
+    const Workers = InitWorkersTable();
+    window.MV_ActivityTables = { Jobs, Scans, Workers };
+    Promise.all([Jobs._Inner.Render(), Scans._Inner.Render(), Workers._Inner.Render()]).then(() => {
+        // Tables online -- request a one-shot data load so any pre-init fetches that found MV_ActivityTables undefined can populate now.
+        if (typeof window.RefreshAll === 'function') window.RefreshAll();
+        if (window.ActivityPage && typeof window.ActivityPage.RefreshAll === 'function') window.ActivityPage.RefreshAll();
+    });
+};
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', Init);
+} else {
+    Init();
+}
 </script>
 {% endblock %}
