@@ -299,10 +299,8 @@
 
 {% block scripts %}
 <script>
-let AllShows = [];
-let SearchResults = [];
-let SelectedShows = new Set();
-let LibrarySort = { Column: 'TotalGB', Direction: 'desc' };
+// Globals: AllShows / SearchResults / LibrarySort retired with the TableRenderer migration.
+// SelectedShows is owned by the new checkbox CellRenderer (window.SelectedShows).
 
 // Card 1 (TV Transcode) batch state
 let AllSuggestions = [];
@@ -484,20 +482,7 @@ $(document).ready(function() {
     });
 });
 
-// ── Data Loading ──
-
-function LoadShows() {
-    $.get('/api/ShowSettings/Shows', function(Response) {
-        if (Response.Success) {
-            AllShows = Response.Data;
-            FilterSearchResults();
-            RenderLibrary();
-        }
-    }).fail(function() {
-        $('#SearchTableBody').html('<tr><td colspan="8" class="text-center text-danger">Failed to load</td></tr>');
-        $('#LibraryTableBody').html('<tr><td colspan="6" class="text-center text-danger">Failed to load</td></tr>');
-    });
-}
+// ── Data Loading ── Library and Search cards now route through TableRenderer (bottom of file).
 
 function LoadProfiles() {
     $.get('/api/profiles', function(Response) {
@@ -515,89 +500,10 @@ function LoadProfiles() {
     });
 }
 
-// ── Card 2: Title Search ──
-
-function FilterSearchResults() {
-    const Drive = $('#SearchDrive').val();
-    const Term = $('#SearchBox').val().toLowerCase().trim();
-
-    SearchResults = AllShows.filter(function(Show) {
-        const Folder = Show.ShowFolder || '';
-        const Name = (Show.ShowName || '').toLowerCase();
-        const DriveMatch = !Drive || Folder.toUpperCase().startsWith(Drive.toUpperCase());
-        const TermMatch = !Term || Name.includes(Term);
-        return DriveMatch && TermMatch;
-    });
-
-    RenderSearchTable();
-}
-
-function RenderSearchTable() {
-    const Tbody = $('#SearchTableBody');
-    if (SearchResults.length === 0) {
-        Tbody.html('<tr><td colspan="8" class="text-center py-3 text-muted">No results</td></tr>');
-        return;
-    }
-
-    let Html = '';
-    SearchResults.forEach(function(Show) {
-        const Folder = Show.ShowFolder || '';
-        const IsSelected = SelectedShows.has(Folder);
-        const DoneRatio = Show.TranscodedCount + '/' + Show.FileCount;
-        const DonePercent = Show.FileCount > 0 ? Math.round((Show.TranscodedCount / Show.FileCount) * 100) : 0;
-        const DoneClass = DonePercent === 100 ? 'text-success' : (DonePercent > 0 ? 'text-info' : '');
-        const Remaining = Show.FileCount - Show.TranscodedCount;
-
-        Html += '<tr data-folder="' + EscapeAttr(Folder) + '">'
-            + '<td><input type="checkbox" class="ShowCheckbox" data-folder="' + EscapeAttr(Folder) + '" ' + (IsSelected ? 'checked' : '') + ' onchange="ToggleShow(this)"></td>'
-            + '<td>' + EscapeHtml(Show.ShowName || 'Unknown') + '</td>'
-            + '<td class="text-end">' + (Show.FileCount || 0) + '</td>'
-            + '<td class="text-end">' + (Show.TotalGB || 0) + '</td>'
-            + '<td><span class="badge bg-secondary">' + EscapeHtml(Show.CommonResolution || 'N/A') + '</span></td>'
-            + '<td><span class="badge ' + GetCodecBadgeClass(Show.CommonCodec) + '">' + EscapeHtml(Show.CommonCodec || 'N/A') + '</span></td>'
-            + '<td class="' + DoneClass + '">' + DoneRatio + '</td>'
-            + '<td>';
-
-        if (Remaining > 0) {
-            Html += '<button class="btn btn-sm btn-outline-success py-0 px-1" onclick="QueueFolder(\'' + EscapeAttr(Folder) + '\')" title="Queue ' + Remaining + ' file' + (Remaining !== 1 ? 's' : '') + '">+</button>';
-        } else {
-            Html += '<span class="text-success fw-bold">Done</span>';
-        }
-
-        Html += '</td></tr>';
-    });
-
-    Tbody.html(Html);
-}
-
-// ── Card 2: Selection ──
-
-function ToggleShow(Checkbox) {
-    const Folder = $(Checkbox).data('folder');
-    if (Checkbox.checked) SelectedShows.add(Folder);
-    else SelectedShows.delete(Folder);
-    UpdateSelectedCount();
-}
-
-function SelectAll() {
-    SearchResults.forEach(function(S) { SelectedShows.add(S.ShowFolder); });
-    $('.ShowCheckbox').prop('checked', true);
-    UpdateSelectedCount();
-}
-
-function SelectNone() {
-    SelectedShows.clear();
-    $('.ShowCheckbox').prop('checked', false);
-    UpdateSelectedCount();
-}
-
-function ToggleSelectAll(Checkbox) {
-    if (Checkbox.checked) SelectAll();
-    else SelectNone();
-}
+// ── Card 2: Selected-count updater (called by the new checkbox CellRenderer) ──
 
 function UpdateSelectedCount() {
-    $('#SelectedCount').text(SelectedShows.size + ' selected');
+    if (window.SelectedShows) $('#SelectedCount').text(window.SelectedShows.size + ' selected');
 }
 
 // ── Card 2: Queue Actions ──
@@ -624,7 +530,8 @@ function FireQueue(Folders) {
                 if (Skipped > 0) Msg += ' ' + Skipped + ' already queued.';
                 if (Added === 0 && Skipped === 0) Msg = Response.Message || 'No files to queue.';
                 ShowNotification(Msg, 'success');
-                LoadShows();
+                if (window.LibraryTable && typeof window.LibraryTable.Refresh === 'function') window.LibraryTable.Refresh();
+                if (window.SearchTable && typeof window.SearchTable.Refresh === 'function') window.SearchTable.Refresh();
             } else {
                 ShowNotification(Response.Message || 'Failed to queue files', 'danger');
             }
@@ -640,130 +547,12 @@ function QueueFolder(ShowFolder) {
 }
 
 function QueueSelected() {
-    if (SelectedShows.size === 0) {
+    const Sel = window.SelectedShows || new Set();
+    if (Sel.size === 0) {
         ShowNotification('No items selected', 'danger');
         return;
     }
-    FireQueue(Array.from(SelectedShows));
-}
-
-// ── Card 3: Media Library ──
-
-function RenderLibrary() {
-    let Shows = AllShows.slice();
-
-    Shows.sort(function(A, B) {
-        let ValA = A[LibrarySort.Column];
-        let ValB = B[LibrarySort.Column];
-        if (ValA === null || ValA === undefined) ValA = '';
-        if (ValB === null || ValB === undefined) ValB = '';
-        if (typeof ValA === 'string') ValA = ValA.toLowerCase();
-        if (typeof ValB === 'string') ValB = ValB.toLowerCase();
-        let Result = ValA < ValB ? -1 : (ValA > ValB ? 1 : 0);
-        return LibrarySort.Direction === 'desc' ? -Result : Result;
-    });
-
-    // Stats
-    let TotalGB = 0;
-    let TotalFiles = 0;
-    let TranscodedFiles = 0;
-    AllShows.forEach(function(Show) {
-        TotalGB += parseFloat(Show.TotalGB || 0);
-        TotalFiles += (Show.FileCount || 0);
-        TranscodedFiles += (Show.TranscodedCount || 0);
-    });
-
-    $('#LibraryCount').text(AllShows.length + ' titles');
-    $('#LibraryTotalGB').text(TotalGB.toFixed(1) + ' GB');
-    const TranscodedPct = TotalFiles > 0 ? Math.round((TranscodedFiles / TotalFiles) * 100) : 0;
-    $('#LibraryTranscoded').text(TranscodedFiles + '/' + TotalFiles + ' files (' + TranscodedPct + '%)');
-
-    // Render
-    const Tbody = $('#LibraryTableBody');
-    if (Shows.length === 0) {
-        Tbody.html('<tr><td colspan="7" class="text-center py-3 text-muted">No media found</td></tr>');
-        return;
-    }
-
-    let Html = '';
-    Shows.forEach(function(Show, Idx) {
-        const DoneRatio = Show.TranscodedCount + '/' + Show.FileCount;
-        const DonePercent = Show.FileCount > 0 ? Math.round((Show.TranscodedCount / Show.FileCount) * 100) : 0;
-        const DoneClass = DonePercent === 100 ? 'text-success' : (DonePercent > 0 ? 'text-info' : '');
-
-        // Per-show profile dropdown -- writes to ShowSettings.AssignedProfile
-        // via /api/ShowSettings/SetSeriesProfile. Empty value = clear override
-        // (inherit SystemSettings.DefaultProfileName).
-        const ShowFolder = Show.ShowFolder || '';
-        const Current = Show.AssignedProfile || '';
-        let ProfileOpts = '<option value="">(use default)</option>';
-        AllProfiles.forEach(function(P) {
-            const Sel = (P.ProfileName === Current) ? ' selected' : '';
-            ProfileOpts += '<option value="' + EscapeAttr(P.ProfileName) + '"' + Sel + '>' + EscapeHtml(P.ProfileName) + '</option>';
-        });
-        const ProfileSelect = '<select class="form-select form-select-sm" '
-            + 'data-show-folder="' + EscapeAttr(ShowFolder) + '" '
-            + 'onchange="SaveSeriesProfile(this)">' + ProfileOpts + '</select>';
-
-        Html += '<tr>'
-            + '<td>' + EscapeHtml(Show.ShowName || 'Unknown') + '</td>'
-            + '<td class="text-end">' + (Show.FileCount || 0) + '</td>'
-            + '<td class="text-end">' + (Show.TotalGB || 0) + '</td>'
-            + '<td><span class="badge bg-secondary">' + EscapeHtml(Show.CommonResolution || 'N/A') + '</span></td>'
-            + '<td><span class="badge ' + GetCodecBadgeClass(Show.CommonCodec) + '">' + EscapeHtml(Show.CommonCodec || 'N/A') + '</span></td>'
-            + '<td class="' + DoneClass + '">' + DoneRatio + '</td>'
-            + '<td>' + ProfileSelect + '</td>'
-            + '</tr>';
-    });
-
-    Tbody.html(Html);
-}
-
-function SaveSeriesProfile(SelectEl) {
-    const ShowFolder = SelectEl.getAttribute('data-show-folder');
-    const ProfileName = SelectEl.value || '';
-    if (!ShowFolder) {
-        ShowNotification('No ShowFolder for this row -- cannot save profile', 'danger');
-        return;
-    }
-    SelectEl.disabled = true;
-    $.ajax({
-        url: '/api/ShowSettings/SetSeriesProfile',
-        method: 'POST',
-        contentType: 'application/json',
-        data: JSON.stringify({ ShowFolder: ShowFolder, ProfileName: ProfileName })
-    })
-    .done(function(Response) {
-        if (Response.Success) {
-            const ShortFolder = ShowFolder.split('\\').pop() || ShowFolder;
-            const Msg = ProfileName
-                ? 'Set "' + ShortFolder + '" to ' + ProfileName
-                : 'Cleared override for "' + ShortFolder + '" (now inherits default)';
-            ShowNotification(Msg, 'success');
-            // Update in-memory model so subsequent re-renders show the new value.
-            const Match = AllShows.find(function(S) { return S.ShowFolder === ShowFolder; });
-            if (Match) Match.AssignedProfile = ProfileName || null;
-        } else {
-            ShowNotification('Failed: ' + (Response.Message || 'Unknown error'), 'danger');
-        }
-    })
-    .fail(function(XHR) {
-        const Msg = (XHR.responseJSON && XHR.responseJSON.Message) || 'Request failed';
-        ShowNotification('Failed: ' + Msg, 'danger');
-    })
-    .always(function() {
-        SelectEl.disabled = false;
-    });
-}
-
-function SortLibrary(Column) {
-    if (LibrarySort.Column === Column) {
-        LibrarySort.Direction = LibrarySort.Direction === 'asc' ? 'desc' : 'asc';
-    } else {
-        LibrarySort.Column = Column;
-        LibrarySort.Direction = Column === 'ShowName' ? 'asc' : 'desc';
-    }
-    RenderLibrary();
+    FireQueue(Array.from(Sel));
 }
 
 // ── Card 1: Next Batch ──
@@ -1539,19 +1328,7 @@ function EscapeAttr(Text) {
 </script>
 
 <style>
-    #LibraryTableMount .tr-table, #SearchTableMount .tr-table {
-        width: 100%; border-collapse: collapse; font-size: 0.875rem;
-    }
-    #LibraryTableMount .tr-th, #SearchTableMount .tr-th {
-        background: #f8f9fa; padding: 0.5rem; text-align: left; border-bottom: 2px solid #dee2e6; position: sticky; top: 0; z-index: 1;
-    }
-    #LibraryTableMount .tr-th-sortable, #SearchTableMount .tr-th-sortable { cursor: pointer; user-select: none; }
-    #LibraryTableMount .tr-row, #SearchTableMount .tr-row { border-bottom: 1px solid #f0f0f0; }
-    #LibraryTableMount .tr-row:hover, #SearchTableMount .tr-row:hover { background: #f8f9fa; }
-    #LibraryTableMount .tr-cell, #SearchTableMount .tr-cell { padding: 0.4rem 0.5rem; vertical-align: middle; }
-    #LibraryTableMount .tr-live, #SearchTableMount .tr-live { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
-    #LibraryTableMount .tr-scroll, #SearchTableMount .tr-scroll { max-height: 56vh; }
-    #LibraryTableMount .tr-cell-editable, #SearchTableMount .tr-cell-editable { cursor: pointer; }
+    /* Shared tr-* styles live in static/css/TableRenderer.css (loaded by Base.html). Page-specific helpers below. */
     .ss-profile-placeholder { color: #6c757d; font-style: italic; }
     .ss-profile-set { color: #0d6efd; }
 </style>

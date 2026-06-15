@@ -1,0 +1,77 @@
+/* directive: table-renderer-service | see shared-table-renderer.S1 -- shared TableRenderer styles loaded by Base.html; applies to every TableRenderer mount across the site */
+
+.tr-root { width: 100%; }
+
+.tr-scroll {
+    position: relative;
+    overflow: auto;
+    max-height: 60vh;
+}
+
+.tr-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    background: var(--bs-body-bg, #fff);
+}
+
+.tr-th {
+    background: var(--bs-light, #f8f9fa);
+    padding: 0.5rem;
+    text-align: left;
+    border-bottom: 2px solid #dee2e6;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    font-weight: 600;
+}
+
+.tr-th-sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.tr-th-sortable:hover {
+    background: #eef0f3;
+}
+
+.tr-th[aria-sort="ascending"]::after { content: " \25B2"; opacity: 0.6; }
+.tr-th[aria-sort="descending"]::after { content: " \25BC"; opacity: 0.6; }
+
+.tr-row { border-bottom: 1px solid #f0f0f0; }
+.tr-row:hover { background: var(--bs-light, #f8f9fa); }
+
+.tr-cell {
+    padding: 0.4rem 0.5rem;
+    vertical-align: middle;
+}
+
+.tr-cell-editable { cursor: pointer; }
+.tr-cell-editable:hover { background: #eef5ff; }
+
+.tr-live {
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+}
+
+.tr-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.4rem 0.5rem;
+    border-top: 1px solid #dee2e6;
+    font-size: 0.85rem;
+    color: var(--bs-secondary, #6c757d);
+}
+
+.tr-pagination .btn-group .btn { font-size: 0.85rem; }
+
+.tr-empty {
+    text-align: center;
+    padding: 1.5rem;
+    color: var(--bs-secondary, #6c757d);
+    font-style: italic;
+}
