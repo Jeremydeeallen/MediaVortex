@@ -6,7 +6,7 @@ import subprocess
 from typing import Any
 
 from Core.Database.DatabaseService import DatabaseService
-from Features.LoudnessAnalysis.LoudnessAnalysisService import ParseSummary
+from Features.AudioNormalization.Measurement.EbuR128MeasurementService import ParseSummary
 
 
 # directive: compliance-solid-refactor | # see compliance-solid-refactor.C15

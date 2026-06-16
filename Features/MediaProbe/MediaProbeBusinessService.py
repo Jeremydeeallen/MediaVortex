@@ -133,8 +133,8 @@ class MediaProbeBusinessService:
                 # Loudness measurement (best-effort -- failure does NOT roll
                 # back the probe). See Features/LoudnessAnalysis/.
                 try:
-                    from Features.LoudnessAnalysis.LoudnessAnalysisService import LoudnessAnalysisService
-                    LoudnessSvc = LoudnessAnalysisService()
+                    from Features.AudioNormalization.Measurement.EbuR128MeasurementService import EbuR128MeasurementService
+                    LoudnessSvc = EbuR128MeasurementService()
                     Ok, FailureReason = LoudnessSvc.MeasureAndPersist(MediaFile.Id, LocalPath)
                     if not Ok and FailureReason:
                         LoggingService.LogWarning(
