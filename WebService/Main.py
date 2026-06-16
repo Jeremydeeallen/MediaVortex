@@ -441,7 +441,7 @@ class WebServiceApp:
         from Features.MediaProbe.MediaProbeController import MediaProbeBlueprint
         from Features.FailureTracking.FailureTrackingController import FailureTrackingBlueprint
         from Features.ShowSettings.ShowSettingsController import ShowSettingsBlueprint
-        from Features.AudioCompletion.AudioCompletionController import AudioCompletionBlueprint
+        from Features.AudioNormalization.Controllers.AudioCompletionController import AudioCompletionBlueprint
         from Features.AudioNormalization.AudioNormalizationController import BuildBlueprint as BuildAudioNormalizationBlueprint
         from Features.Activity.ActivityController import ActivityBlueprint
         from Features.TranscodeQueue.AudioFixPriorityHintsController import AudioFixPriorityHintsBlueprint

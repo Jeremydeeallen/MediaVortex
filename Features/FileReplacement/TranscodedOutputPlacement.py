@@ -197,7 +197,7 @@ class TranscodedOutputPlacement:
                 RecomputeMediaFileId = UpdateResult.get('MediaFileId')
                 if RecomputeMediaFileId:
                     try:
-                        from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
+                        from Features.AudioNormalization.Services.AudioCompletionService import AudioCompletionService
                         if AudioCompletionService.DetectNormalizationInCommand(FFmpegCommand):
                             if AudioCompletionService.MarkAudioComplete(RecomputeMediaFileId):
                                 StepsCompleted.append("Marked AudioComplete=true (post-normalize)")
@@ -410,7 +410,7 @@ class TranscodedOutputPlacement:
 
             if FFmpegCommand:
                 try:
-                    from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
+                    from Features.AudioNormalization.Services.AudioCompletionService import AudioCompletionService
                     DerivedMode = AudioCompletionService.DetectNormalizationMode(FFmpegCommand)
                     if DerivedMode is not None:
                         media_file.AudioNormalizationMode = DerivedMode

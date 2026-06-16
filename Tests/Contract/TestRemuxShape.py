@@ -55,53 +55,47 @@ def _MakeShape(Blocks=None, Policy=None):
 class TestRemuxShape:
     """Contract: RemuxShape.Build emits -f mp4 + -movflags +faststart unconditionally."""
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
-    def test_emits_f_mp4_unconditionally(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_emits_f_mp4_unconditionally(self):
         """-f mp4 appears in the command regardless of ProfileSettings."""
         Shape = _MakeShape()
         Spec = Shape.Build(_MakeMediaFile(), MagicMock(), _MakeContext())
         assert Spec is not None
         assert '-f mp4' in Spec.Command
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
-    def test_emits_movflags_faststart_unconditionally(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_emits_movflags_faststart_unconditionally(self):
         """-movflags +faststart appears regardless of ProfileSettings."""
         Shape = _MakeShape()
         Spec = Shape.Build(_MakeMediaFile(), MagicMock(), _MakeContext())
         assert Spec is not None
         assert '-movflags +faststart' in Spec.Command
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
-    def test_returns_commandspec_value_object(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_returns_commandspec_value_object(self):
         """Build returns the typed CommandSpec, not a plain dict."""
         Shape = _MakeShape()
         Spec = Shape.Build(_MakeMediaFile(), MagicMock(), _MakeContext())
         assert isinstance(Spec, CommandSpec)
         assert Spec.OutputPath.endswith("-mv.mp4.inprogress")
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
-    def test_video_stream_copy(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_video_stream_copy(self):
         """Video stream is always copy (no re-encode) in Remux."""
         Shape = _MakeShape()
         Spec = Shape.Build(_MakeMediaFile(), MagicMock(), _MakeContext())
         assert '-c:v copy' in Spec.Command
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
-    def test_hevc_gets_hvc1_tag(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_hevc_gets_hvc1_tag(self):
         """HEVC source video gets -tag:v hvc1 for MP4 compatibility."""
         Shape = _MakeShape()
         Mf = _MakeMediaFile(Codec="hevc")
         Spec = Shape.Build(Mf, MagicMock(), _MakeContext())
         assert '-tag:v hvc1' in Spec.Command
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
-    def test_output_collision_refuses(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_output_collision_refuses(self):
         """OutputPath equal to InputPath -- shape refuses (returns None)."""
         Shape = _MakeShape()
         Ctx = _MakeContext(InputPath="T:\\foo-mv.mp4.inprogress")
@@ -109,9 +103,8 @@ class TestRemuxShape:
         Spec = Shape.Build(_MakeMediaFile(FileName="foo-mv.mp4.inprogress"), MagicMock(), Ctx)
         assert Spec is None
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
-    def test_no_audio_skips_audio_map(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_no_audio_skips_audio_map(self):
         """When HasAudio=False, no -map 0:a:N entry is emitted."""
         Shape = _MakeShape()
         Ctx = _MakeContext(HasAudio=False)

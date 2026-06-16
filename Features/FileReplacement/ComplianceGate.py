@@ -107,7 +107,7 @@ class ComplianceGate:
             }
 
             try:
-                from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
+                from Features.AudioNormalization.Services.AudioCompletionService import AudioCompletionService
                 if FFmpegCommand and AudioCompletionService.DetectNormalizationInCommand(FFmpegCommand):
                     CandidateRow['AudioComplete'] = True
             except Exception:

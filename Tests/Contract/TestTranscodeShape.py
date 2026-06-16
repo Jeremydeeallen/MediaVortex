@@ -69,23 +69,20 @@ def _MakeContext(UseNvidia=0):
 class TestTranscodeShape:
     """Contract: TranscodeShape orchestrates collaborators and returns a CommandSpec for the encode."""
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=False)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C12
-    def test_returns_commandspec(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_returns_commandspec(self):
         """Build returns a CommandSpec value object."""
         Spec = _MakeShape().Build(_MakeMediaFile(), MagicMock(), _MakeContext())
         assert isinstance(Spec, CommandSpec)
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=False)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C12
-    def test_nvenc_dispatch(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_nvenc_dispatch(self):
         """ProfileSettings.UseNvidiaHardware=1 selects av1_nvenc codec."""
         Spec = _MakeShape().Build(_MakeMediaFile(), MagicMock(), _MakeContext(UseNvidia=1))
         assert '-c:v av1_nvenc' in Spec.Command
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=False)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C12
-    def test_software_dispatch(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_software_dispatch(self):
         """ProfileSettings.UseNvidiaHardware=0 falls back to ProfileSettings.Codec."""
         Spec = _MakeShape().Build(_MakeMediaFile(), MagicMock(), _MakeContext(UseNvidia=0))
         assert '-c:v libsvtav1' in Spec.Command

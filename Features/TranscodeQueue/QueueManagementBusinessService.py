@@ -645,6 +645,8 @@ class QueueManagementBusinessService:
             finally:
                 Db.CloseConnection(Connection)
 
+            self._SnapshotAudioPoliciesOnRecentInserts()
+
             ItemsSkipped = len(NormalizedIds) - ItemsAdded
             LoggingService.LogInfo(
                 f"AddSuggestionsToQueue: {ItemsAdded} added, {ItemsSkipped} skipped "
@@ -734,6 +736,8 @@ class QueueManagementBusinessService:
             finally:
                 Db.CloseConnection(Connection)
 
+            self._SnapshotAudioPoliciesOnRecentInserts()
+
             LoggingService.LogInfo(
                 f"QueueAllMatching: {ItemsAdded} added (mode={Mode}, search='{Search or ''}', drive='{Drive or ''}')",
                 "QueueManagementBusinessService", "QueueAllMatching"
@@ -744,6 +748,18 @@ class QueueManagementBusinessService:
             ErrorMsg = f"Exception in QueueAllMatching: {str(Ex)}"
             LoggingService.LogException(ErrorMsg, Ex, "QueueManagementBusinessService", "QueueAllMatching")
             return {"Success": False, "ErrorMessage": ErrorMsg, "ItemsAdded": 0}
+
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C12
+    def _SnapshotAudioPoliciesOnRecentInserts(self):
+        """Backfill TranscodeQueue.AudioPolicyJson on rows inserted in the last 60s via the admission gate; failure never breaks queue admission."""
+        try:
+            from Features.AudioNormalization.AudioPolicyAdmissionGate import AudioPolicyAdmissionGate
+            AudioPolicyAdmissionGate().BackfillRecentInserts()
+        except Exception as Ex:
+            LoggingService.LogException(
+                "Audio policy snapshot backfill failed -- queue rows may have NULL AudioPolicyJson",
+                Ex, "QueueManagementBusinessService", "_SnapshotAudioPoliciesOnRecentInserts",
+            )
 
     # directive: path-schema-migration | # see path.S8
     def GetMediaFilesWithProfilesOrderedBySize(self, RootFolderPath: str = None) -> List[MediaFileModel]:

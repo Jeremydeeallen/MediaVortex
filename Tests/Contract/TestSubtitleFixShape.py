@@ -55,39 +55,34 @@ def _MakeContext():
 class TestSubtitleFixShape:
     """Contract: SubtitleFixShape emits unconditional -f mp4 + -movflags +faststart + mov_text subtitle codec."""
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C14
-    def test_emits_f_mp4_unconditionally(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_emits_f_mp4_unconditionally(self):
         """SubtitleFix output is always MP4 -- emits -f mp4 regardless of ProfileSettings."""
         Spec = _MakeShape().Build(_MakeMediaFile(), MagicMock(), _MakeContext())
         assert Spec is not None
         assert '-f mp4' in Spec.Command
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C14
-    def test_emits_movflags_faststart_unconditionally(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_emits_movflags_faststart_unconditionally(self):
         """SubtitleFix output gets +faststart; matches Remux invariant."""
         Spec = _MakeShape().Build(_MakeMediaFile(), MagicMock(), _MakeContext())
         assert Spec is not None
         assert '-movflags +faststart' in Spec.Command
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C14
-    def test_emits_mov_text_subtitle_codec(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_emits_mov_text_subtitle_codec(self):
         """ASS/SSA -> mov_text conversion is the SubtitleFix shape's defining transform."""
         Spec = _MakeShape().Build(_MakeMediaFile(), MagicMock(), _MakeContext())
         assert '-c:s mov_text' in Spec.Command
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C14
-    def test_video_stream_copy(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_video_stream_copy(self):
         """SubtitleFix keeps video as -c:v copy."""
         Spec = _MakeShape().Build(_MakeMediaFile(), MagicMock(), _MakeContext())
         assert '-c:v copy' in Spec.Command
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C14
-    def test_returns_commandspec_value_object(self, _Mock):
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C14
+    def test_returns_commandspec_value_object(self):
         """Build returns CommandSpec; OutputPath ends in -mv.mp4.inprogress."""
         Spec = _MakeShape().Build(_MakeMediaFile(), MagicMock(), _MakeContext())
         assert isinstance(Spec, CommandSpec)

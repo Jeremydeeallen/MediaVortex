@@ -1,15 +1,3 @@
-"""AudioCompletionController -- admin endpoints for AudioComplete state.
-
-Two symmetric POST endpoints:
-  - /api/AudioCompletion/Reset       -- force re-normalize on next encode
-  - /api/AudioCompletion/MarkComplete -- force trust-the-source, no normalize
-
-Both accept the same scoping body: MediaFileIds[], ShowFolder, Drive.
-At least one filter is required (refuses unbounded library-wide calls).
-
-See audio-completion.feature.md criterion 19.
-"""
-
 from typing import List, Optional, Tuple
 
 from flask import Blueprint, request, jsonify
@@ -23,26 +11,35 @@ AudioCompletionBlueprint = Blueprint(
 )
 
 
+RESET_BY_IDS_SQL = (
+    "UPDATE MediaFiles "
+    "SET AudioComplete = FALSE, "
+    "AudioCompletedAt = NULL, "
+    "AudioCorruptReason = NULL "
+    "WHERE Id = ANY(%s) "
+    "AND AudioCorruptSuspect = FALSE"
+)
+
+
+MARK_COMPLETE_BY_IDS_SQL = (
+    "UPDATE MediaFiles "
+    "SET AudioComplete = TRUE, "
+    "AudioCompletedAt = NOW() "
+    "WHERE Id = ANY(%s) "
+    "AND AudioCorruptSuspect = FALSE"
+)
+
+
+# directive: audio-vertical-compliance-and-activity | # see audio-normalization.C22
 def _ResolveMediaFileIds(Data: dict) -> Tuple[List[int], Optional[str]]:
-    """Translate the request body into a concrete MediaFileIds list.
-
-    Accepts at least one of:
-      - MediaFileIds: List[int]
-      - ShowFolder: str  (matches MediaFiles.FilePath via LIKE)
-      - Drive: str       (matches MediaFiles.FilePath prefix via LIKE)
-
-    Returns (Ids, ErrorMessage). On error, Ids is [] and ErrorMessage is set.
-    """
+    """Translate the request body into a concrete MediaFileIds list; returns (Ids, ErrorMessage)."""
     if not Data:
         return ([], "Request body required (JSON)")
-
     RawIds = Data.get('MediaFileIds') or []
     ShowFolder = (Data.get('ShowFolder') or '').strip()
     Drive = (Data.get('Drive') or '').strip()
-
     if not RawIds and not ShowFolder and not Drive:
         return ([], "At least one of MediaFileIds, ShowFolder, or Drive is required")
-
     if RawIds:
         try:
             ParsedIds = [int(x) for x in RawIds]
@@ -50,7 +47,7 @@ def _ResolveMediaFileIds(Data: dict) -> Tuple[List[int], Optional[str]]:
             return ([], "MediaFileIds must be a list of integers")
         return (ParsedIds, None)
 
-    # directive: path-class-perfection | # see path.C22
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C22
     from Core.Path.Path import Path as _PathAC, PathError as _PEAC
     from Core.Path.PathStorageRoots import GetStorageRoots as _GSRAC, GetPrefixMap as _GPMAC
     Filters = []
@@ -72,7 +69,7 @@ def _ResolveMediaFileIds(Data: dict) -> Tuple[List[int], Optional[str]]:
     Where = " AND ".join(Filters)
     try:
         Rows = DatabaseService().ExecuteQuery(
-            f"SELECT Id FROM MediaFiles WHERE {Where}",
+            "SELECT Id FROM MediaFiles WHERE " + Where,
             tuple(Params),
         )
         return ([int(R['Id']) for R in Rows], None)
@@ -84,98 +81,63 @@ def _ResolveMediaFileIds(Data: dict) -> Tuple[List[int], Optional[str]]:
         return ([], f"Failed to resolve scope: {Ex}")
 
 
+# directive: audio-vertical-compliance-and-activity | # see audio-normalization.C22
 @AudioCompletionBlueprint.route('/Reset', methods=['POST'])
 def Reset():
-    """Force re-normalize on next encode for the matched rows.
-
-    Sets AudioComplete=false, AudioCompletedAt=NULL, AudioCorruptReason=NULL
-    where AudioCorruptSuspect=false. Suspect rows are left alone -- they
-    require a separate code path to clear.
-    """
+    """Force re-normalize on next encode for the matched rows; spares AudioCorruptSuspect."""
     Data = request.get_json(silent=True) or {}
     Ids, Err = _ResolveMediaFileIds(Data)
     if Err:
         return jsonify({'Success': False, 'Message': Err}), 400
     if not Ids:
         return jsonify({'Success': True, 'Message': 'No matching rows', 'RowsAffected': 0})
-
     try:
         Db = DatabaseService()
         Conn = Db.GetConnection()
         try:
             Cur = Conn.cursor()
-            Cur.execute(
-                """
-                UPDATE MediaFiles
-                SET AudioComplete = FALSE,
-                    AudioCompletedAt = NULL,
-                    AudioCorruptReason = NULL
-                WHERE Id = ANY(%s)
-                  AND AudioCorruptSuspect = FALSE
-                """,
-                (Ids,),
-            )
+            Cur.execute(RESET_BY_IDS_SQL, (Ids,))
             RowsAffected = Cur.rowcount
             Conn.commit()
         finally:
             Db.CloseConnection(Conn)
-
         LoggingService.LogInfo(
             f"AudioCompletion/Reset: scope={len(Ids)} ids, RowsAffected={RowsAffected}",
             "AudioCompletionController", "Reset",
         )
         return jsonify({'Success': True, 'RowsAffected': RowsAffected})
     except Exception as Ex:
-        LoggingService.LogException(
-            "AudioCompletion/Reset failed", Ex,
-            "AudioCompletionController", "Reset",
-        )
+        LoggingService.LogException("AudioCompletion/Reset failed", Ex,
+                                    "AudioCompletionController", "Reset")
         return jsonify({'Success': False, 'Message': str(Ex)}), 500
 
 
+# directive: audio-vertical-compliance-and-activity | # see audio-normalization.C22
 @AudioCompletionBlueprint.route('/MarkComplete', methods=['POST'])
 def MarkComplete():
-    """Force trust-the-source -- no normalize pass will ever run.
-
-    Sets AudioComplete=true, AudioCompletedAt=NOW() for matched rows where
-    AudioCorruptSuspect=false. Use for carefully-mastered imports (Blu-ray
-    rips, etc.) the operator wants to skip the one-shot normalize pass.
-    """
+    """Force trust-the-source -- AudioComplete=TRUE so no normalize chain runs; spares AudioCorruptSuspect."""
     Data = request.get_json(silent=True) or {}
     Ids, Err = _ResolveMediaFileIds(Data)
     if Err:
         return jsonify({'Success': False, 'Message': Err}), 400
     if not Ids:
         return jsonify({'Success': True, 'Message': 'No matching rows', 'RowsAffected': 0})
-
     try:
         Db = DatabaseService()
         Conn = Db.GetConnection()
         try:
             Cur = Conn.cursor()
-            Cur.execute(
-                """
-                UPDATE MediaFiles
-                SET AudioComplete = TRUE,
-                    AudioCompletedAt = NOW()
-                WHERE Id = ANY(%s)
-                  AND AudioCorruptSuspect = FALSE
-                """,
-                (Ids,),
-            )
+            Cur.execute(MARK_COMPLETE_BY_IDS_SQL, (Ids,))
             RowsAffected = Cur.rowcount
             Conn.commit()
         finally:
             Db.CloseConnection(Conn)
-
         LoggingService.LogInfo(
             f"AudioCompletion/MarkComplete: scope={len(Ids)} ids, RowsAffected={RowsAffected}",
             "AudioCompletionController", "MarkComplete",
         )
         return jsonify({'Success': True, 'RowsAffected': RowsAffected})
     except Exception as Ex:
-        LoggingService.LogException(
-            "AudioCompletion/MarkComplete failed", Ex,
-            "AudioCompletionController", "MarkComplete",
-        )
+        LoggingService.LogException("AudioCompletion/MarkComplete failed", Ex,
+                                    "AudioCompletionController", "MarkComplete")
         return jsonify({'Success': False, 'Message': str(Ex)}), 500

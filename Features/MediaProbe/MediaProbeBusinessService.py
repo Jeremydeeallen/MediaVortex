@@ -290,7 +290,7 @@ class MediaProbeBusinessService:
         """
         try:
             from Core.Database.DatabaseService import DatabaseService
-            from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
+            from Features.AudioNormalization.Services.AudioCompletionService import AudioCompletionService
             Db = DatabaseService()
             Rows = Db.ExecuteQuery(
                 """
