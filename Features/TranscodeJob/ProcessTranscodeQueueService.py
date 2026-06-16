@@ -585,6 +585,8 @@ class ProcessTranscodeQueueService:
                 'QualityTestRequired': False
             })
 
+            self._RunPostEncodeAudioProbe(TranscodeAttemptId, OutputFilePath)
+
             # Update TranscodeFiles record
             self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes, MediaFileId=Job.MediaFileId)
 
@@ -859,6 +861,22 @@ class ProcessTranscodeQueueService:
         except Exception as e:
             LoggingService.LogException("Exception getting transcoding settings", e, "ProcessTranscodeQueueService", "GetTranscodingSettings")
             return None
+
+    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C15
+    def _RunPostEncodeAudioProbe(self, TranscodeAttemptId, OutputFilePath):
+        """Fire-and-forget per-track ebur128 against the encoded output; failure never blocks the encode."""
+        try:
+            from Features.AudioNormalization.Services.PostEncodeMeasurementService import (
+                PostEncodeMeasurementService,
+            )
+            PostEncodeMeasurementService(FFprobePath=self.FFprobePath).Probe(
+                TranscodeAttemptId, OutputFilePath,
+            )
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"Post-encode audio probe skipped for AttemptId={TranscodeAttemptId}",
+                Ex, "ProcessTranscodeQueueService", "_RunPostEncodeAudioProbe",
+            )
 
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
     def BuildTranscodeCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel,
