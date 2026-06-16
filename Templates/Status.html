@@ -122,9 +122,7 @@
         </div>
         <div class="collapse show" id="CoreTemperaturesCollapse">
             <div class="card-body py-2">
-                <div class="row g-2" id="CoreTemperaturesGrid">
-                    <div class="col-12 text-center text-muted">Loading...</div>
-                </div>
+                <div id="CoreTemperaturesMount"></div>
             </div>
         </div>
     </div>
@@ -163,23 +161,7 @@
             <h6 class="mb-0"><i class="fas fa-hdd me-2"></i>Savings by Volume</h6>
         </div>
         <div class="card-body p-0">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover table-sm mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th class="ps-3">Volume</th>
-                            <th class="text-end">Jobs</th>
-                            <th class="text-end">Original</th>
-                            <th class="text-end">Transcoded</th>
-                            <th class="text-end">Saved</th>
-                            <th class="text-end pe-3">%</th>
-                        </tr>
-                    </thead>
-                    <tbody id="VolumeTableBody">
-                        <tr><td colspan="6" class="text-center text-muted py-3">Loading...</td></tr>
-                    </tbody>
-                </table>
-            </div>
+            <div id="VolumeTableMount"></div>
         </div>
     </div>
 
@@ -341,31 +323,8 @@ function LoadTranscodeOverview() {
         .catch(() => {});
 }
 
-function LoadSavingsByVolume() {
-    fetch('/api/TeamStatus/SavingsByVolume')
-        .then(R => R.json())
-        .then(Result => {
-            const Tbody = document.getElementById('VolumeTableBody');
-            if (!Result.Success || !Result.Data || !Result.Data.length) {
-                Tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No data</td></tr>';
-                return;
-            }
-            Tbody.innerHTML = Result.Data.map(Row => {
-                const Pct = Row.TotalOriginalBytes > 0 ? ((Row.TotalSavedBytes / Row.TotalOriginalBytes) * 100).toFixed(1) : '0.0';
-                return `<tr>
-                    <td class="ps-3"><strong>${Row.Volume}</strong></td>
-                    <td class="text-end">${Row.JobCount.toLocaleString()}</td>
-                    <td class="text-end">${FormatBytes(Row.TotalOriginalBytes)}</td>
-                    <td class="text-end">${FormatBytes(Row.TotalNewBytes)}</td>
-                    <td class="text-end text-success fw-bold">${FormatBytes(Row.TotalSavedBytes)}</td>
-                    <td class="text-end pe-3">${Pct}%</td>
-                </tr>`;
-            }).join('');
-        })
-        .catch(() => {
-            document.getElementById('VolumeTableBody').innerHTML = '<tr><td colspan="6" class="text-center text-danger py-3">Failed to load</td></tr>';
-        });
-}
+// LoadSavingsByVolume + RenderCoreTemperatures migrated to TableRenderer in the module script at the bottom of the file.
+function LoadSavingsByVolume() { if (typeof window.RefreshSavingsByVolumeTable === 'function') window.RefreshSavingsByVolumeTable(); }
 
 function LoadSavingsByDay() {
     const Days = document.getElementById('DayFilter').value;
@@ -490,45 +449,7 @@ class ServiceStatusManager {
     }
 
     RenderCoreTemperatures(CpuTemp) {
-        const Grid = document.getElementById('CoreTemperaturesGrid');
-        Grid.innerHTML = '';
-        if (!CpuTemp.Cores || CpuTemp.Cores.length === 0) {
-            Grid.innerHTML = '<div class="col-12 text-center text-muted">No core data</div>';
-            return;
-        }
-        const Sorted = [...CpuTemp.Cores].sort((A, B) => (A.Core || 0) - (B.Core || 0));
-        Sorted.forEach(Core => {
-            const Num = Core.Core !== undefined ? Core.Core : -1;
-            const Temp = Core.Temperature;
-            const IsNA = Temp === null || Temp === undefined;
-            const Status = Core.Status || 'available';
-            const JobType = Core.JobType || '';
-
-            let Color = '#6c757d', Text = 'N/A', Border = '', StatusBadge = '';
-            if (!IsNA) {
-                const F = (Temp * 9/5 + 32).toFixed(1);
-                Text = Temp + '\u00B0C / ' + F + '\u00B0F';
-                if (Temp < 30) Color = '#0d6efd';
-                else if (Temp < 50) Color = '#0f9b8e';
-                else if (Temp < 70) Color = '#198754';
-                else if (Temp < 85) Color = '#ffc107';
-                else if (Temp < 95) Color = '#e8590c';
-                else Color = '#dc3545';
-            }
-            if (Status === 'active') {
-                Border = 'border border-primary border-3';
-                StatusBadge = '<span class="badge bg-primary position-absolute top-0 start-50 translate-middle" style="font-size:.65em">' + (JobType || 'Active') + '</span>';
-            } else if (Status === 'cooling') {
-                Border = 'border border-info border-2';
-                StatusBadge = '<span class="badge bg-info position-absolute top-0 start-50 translate-middle" style="font-size:.65em">Cooling</span>';
-            }
-
-            const El = document.createElement('div');
-            El.className = 'col-4 col-md-2 col-lg-1 mb-1';
-            El.innerHTML = '<div class="card text-white ' + Border + '" style="position:relative;background-color:' + Color + '">' + StatusBadge +
-                '<div class="card-body text-center p-1"><div class="small fw-bold" style="font-size:.7em">Core ' + Num + '</div><div style="font-size:.75em">' + Text + '</div></div></div>';
-            Grid.appendChild(El);
-        });
+        if (typeof window.RenderCoreTemperatures === 'function') window.RenderCoreTemperatures(CpuTemp);
     }
 
     async LoadContinuousScanStatus() {
@@ -565,5 +486,155 @@ class ServiceStatusManager {
 document.addEventListener('DOMContentLoaded', function() {
     window.serviceStatusManager = new ServiceStatusManager();
 });
+</script>
+
+<script type="module">
+import { TableRenderer } from "/static/js/TableRenderer/TableRenderer.js";
+import { TableRendererConfig } from "/static/js/TableRenderer/TableRendererConfig.js";
+import { EventBus } from "/static/js/TableRenderer/EventBus.js";
+import { ClientArrayDataSource } from "/static/js/TableRenderer/DataSources/ClientArrayDataSource.js";
+import { SortController } from "/static/js/TableRenderer/SortController.js";
+import { ColumnDefinition } from "/static/js/TableRenderer/ColumnDefinition.js";
+import { ICellRenderer } from "/static/js/TableRenderer/Interfaces/ICellRenderer.js";
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+const FmtBytes = N => (typeof window.FormatBytes === 'function') ? window.FormatBytes(N) : (Number(N || 0).toLocaleString() + ' B');
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _StrongCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(V) { const S = document.createElement('strong'); S.textContent = V == null ? '' : String(V); return S; }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _BytesCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(V) { const S = document.createElement('span'); S.className = 'text-end d-block'; S.textContent = FmtBytes(V); return S; }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _SavedBytesCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(V) { const S = document.createElement('span'); S.className = 'text-end d-block text-success fw-bold'; S.textContent = FmtBytes(V); return S; }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _IntCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(V) { const S = document.createElement('span'); S.className = 'text-end d-block'; S.textContent = Number(V || 0).toLocaleString(); return S; }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _PercentCellRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(_V, Row) {
+        const Pct = Row.TotalOriginalBytes > 0 ? ((Row.TotalSavedBytes / Row.TotalOriginalBytes) * 100).toFixed(1) : '0.0';
+        const S = document.createElement('span'); S.className = 'text-end d-block'; S.textContent = Pct + '%'; return S;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+class _CoreCardRenderer extends ICellRenderer {
+    constructor() { super(); }
+    Render(_V, Row) {
+        const Wrap = document.createElement('div');
+        Wrap.className = 'col-4 col-md-2 col-lg-1 mb-1';
+        const Num = Row.Core !== undefined ? Row.Core : -1;
+        const Temp = Row.Temperature;
+        const IsNA = Temp === null || Temp === undefined;
+        const Status = Row.Status || 'available';
+        const JobType = Row.JobType || '';
+        let Color = '#6c757d', Text = 'N/A', Border = '', StatusBadge = '';
+        if (!IsNA) {
+            const F = (Temp * 9/5 + 32).toFixed(1);
+            Text = Temp + '°C / ' + F + '°F';
+            if (Temp < 30) Color = '#0d6efd';
+            else if (Temp < 50) Color = '#0f9b8e';
+            else if (Temp < 70) Color = '#198754';
+            else if (Temp < 85) Color = '#ffc107';
+            else if (Temp < 95) Color = '#e8590c';
+            else Color = '#dc3545';
+        }
+        if (Status === 'active') {
+            Border = 'border border-primary border-3';
+            StatusBadge = '<span class="badge bg-primary position-absolute top-0 start-50 translate-middle" style="font-size:.65em">' + (JobType || 'Active') + '</span>';
+        } else if (Status === 'cooling') {
+            Border = 'border border-info border-2';
+            StatusBadge = '<span class="badge bg-info position-absolute top-0 start-50 translate-middle" style="font-size:.65em">Cooling</span>';
+        }
+        Wrap.innerHTML = '<div class="card text-white ' + Border + '" style="position:relative;background-color:' + Color + '">' + StatusBadge +
+            '<div class="card-body text-center p-1"><div class="small fw-bold" style="font-size:.7em">Core ' + Num + '</div><div style="font-size:.75em">' + Text + '</div></div></div>';
+        return Wrap;
+    }
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+function BuildVolumeTable() {
+    const Cfg = new TableRendererConfig({ DefaultPageSize: 100, VirtualizationThreshold: 100000 });
+    const Bus = new EventBus();
+    const Src = new ClientArrayDataSource([], { CaseInsensitive: true });
+    const Sort = new SortController(Src, Bus, Cfg);
+    const Cols = [
+        new ColumnDefinition({ Key: 'Volume', Header: 'Volume', Sortable: true, CellRendererName: 'Strong' }),
+        new ColumnDefinition({ Key: 'JobCount', Header: 'Jobs', Sortable: true, CellRendererName: 'Int', Align: 'right' }),
+        new ColumnDefinition({ Key: 'TotalOriginalBytes', Header: 'Original', Sortable: true, CellRendererName: 'Bytes', Align: 'right' }),
+        new ColumnDefinition({ Key: 'TotalNewBytes', Header: 'Transcoded', Sortable: true, CellRendererName: 'Bytes', Align: 'right' }),
+        new ColumnDefinition({ Key: 'TotalSavedBytes', Header: 'Saved', Sortable: true, CellRendererName: 'SavedBytes', Align: 'right' }),
+        new ColumnDefinition({ Key: '__Pct', Header: '%', CellRendererName: 'Percent', Align: 'right' })
+    ];
+    const T = new TableRenderer({
+        Container: document.getElementById('VolumeTableMount'),
+        DataSource: Src, Columns: Cols, Config: Cfg, Bus,
+        Capabilities: { Sortable: true, Paginatable: false, Virtualized: false },
+        SortController: Sort
+    });
+    T._CellRegistry.Register('Strong', _StrongCellRenderer);
+    T._CellRegistry.Register('Int', _IntCellRenderer);
+    T._CellRegistry.Register('Bytes', _BytesCellRenderer);
+    T._CellRegistry.Register('SavedBytes', _SavedBytesCellRenderer);
+    T._CellRegistry.Register('Percent', _PercentCellRenderer);
+    T.Render();
+    window.VolumeTable = T;
+    window.VolumeSource = Src;
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+function BuildCoreTempTable() {
+    const Cfg = new TableRendererConfig({ DefaultPageSize: 100, VirtualizationThreshold: 100000 });
+    const Bus = new EventBus();
+    const Src = new ClientArrayDataSource([], { CaseInsensitive: true });
+    const Cols = [ new ColumnDefinition({ Key: '__Card', Header: '', CellRendererName: 'CoreCard' }) ];
+    const T = new TableRenderer({
+        Container: document.getElementById('CoreTemperaturesMount'),
+        DataSource: Src, Columns: Cols, Config: Cfg, Bus,
+        Capabilities: { Sortable: false, Paginatable: false, Virtualized: false }
+    });
+    T._CellRegistry.Register('CoreCard', _CoreCardRenderer);
+    T.Render();
+    window.CoreTempTable = T;
+    window.CoreTempSource = Src;
+}
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+window.RefreshSavingsByVolumeTable = function() {
+    if (!window.VolumeSource) return;
+    fetch('/api/TeamStatus/SavingsByVolume')
+        .then(R => R.json())
+        .then(Result => {
+            const Rows = (Result && Result.Success && Array.isArray(Result.Data)) ? Result.Data : [];
+            window.VolumeSource.SetRows(Rows);
+            window.VolumeTable.Refresh();
+        }).catch(() => {});
+};
+
+// directive: table-renderer-service | // see shared-table-renderer.S1
+window.RenderCoreTemperatures = function(CpuTemp) {
+    if (!window.CoreTempSource) return;
+    const Cores = (CpuTemp && Array.isArray(CpuTemp.Cores)) ? CpuTemp.Cores.slice().sort((A, B) => (A.Core || 0) - (B.Core || 0)) : [];
+    window.CoreTempSource.SetRows(Cores);
+    window.CoreTempTable.Refresh();
+};
+
+document.addEventListener('DOMContentLoaded', () => { BuildVolumeTable(); BuildCoreTempTable(); });
 </script>
 {% endblock %}
