@@ -3,6 +3,7 @@ from typing import Optional, Dict, Any
 
 from Core.Database.BaseRepository import BaseRepository
 from Core.Logging.LoggingService import LoggingService
+from Core.Resolution.ResolutionTierRegistry import ResolutionTierRegistry
 
 
 @dataclass
@@ -155,19 +156,13 @@ class EncoderKnobRepository(BaseRepository):
         Value = Rows[0].get('TranscodeDownTo')
         return Value if Value else 'No downscaling'
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: resolution-types | # see resolution-types.C4
     def _NormalizeResolution(self, Resolution: str) -> str:
-        """Bucket WIDTHxHEIGHT pixel strings to category labels by long-edge (letterbox-safe; portrait-safe)."""
+        """Bucket WIDTHxHEIGHT pixel strings to category labels via the data-driven ResolutionTierRegistry (replaces hardcoded width-primary thresholds that misclassified 1916x1040 to '720p')."""
         if not Resolution or 'x' not in Resolution:
             return Resolution
         Parts = Resolution.lower().split('x')
         if len(Parts) != 2 or not Parts[0].isdigit() or not Parts[1].isdigit():
             return Resolution
-        Tier = max(int(Parts[0]), int(Parts[1]))
-        if Tier >= 3840:
-            return '2160p'
-        if Tier >= 1920:
-            return '1080p'
-        if Tier >= 1280:
-            return '720p'
-        return '480p'
+        Tier = ResolutionTierRegistry().FromDims(int(Parts[0]), int(Parts[1]))
+        return Tier.Name[1:] if Tier.Name.startswith('T') else Tier.Name

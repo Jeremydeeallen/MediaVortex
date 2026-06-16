@@ -1,7 +1,7 @@
 # Resolution Types -- typed value objects + ScalePolicy (eliminates string-heterogeneity bug)
 
 **Set:** 2026-06-15
-**Status:** Active -- phase: VERIFYING
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** resolution-types
 **Interrupts:** table-renderer-service (paused 2026-06-15), quality-floor-lift (paused 2026-06-15 at 45278eb)
 **Bug:** Live -- Men in Black II (MF 621554) 2026-06-15: 81.6% reduction discarded because the encoded output wasn't downscaled.
@@ -107,6 +107,7 @@ Features/TranscodeJob/Emit/ResolutionCalculator.py                -- EDIT delega
 Features/Compliance/Operations/TranscodeOperation.py              -- EDIT replace _HeightOf with ResolutionTier
 Features/Compliance/Services/EffectiveProfileResolver.py          -- EDIT return typed TargetTier
 Features/Compliance/Models/EffectiveProfile.py                    -- EDIT field type Optional[ResolutionTier]
+Features/Profiles/EncoderKnobRepository.py                        -- EDIT _NormalizeResolution -> Registry.FromDims (root-cause; live encode still missing scale filter without this)
 Tests/Contract/TestResolution.py                                  -- NEW
 Tests/Contract/TestResolutionTier.py                              -- NEW
 Tests/Contract/TestScalePolicy.py                                 -- NEW
