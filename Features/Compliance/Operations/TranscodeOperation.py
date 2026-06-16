@@ -1,19 +1,23 @@
 from typing import Optional
 from Models.MediaFileModel import MediaFileModel
+from Core.Resolution.ResolutionTier import ResolutionTier
+from Core.Resolution.ResolutionTierRegistry import ResolutionTierRegistry
 from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
 from Features.Compliance.Models.OperationResult import OperationResult
 from Features.Compliance.Models.TranscodeRulesModel import TranscodeRulesModel
 from Features.Compliance.Operations.IComplianceOperation import IComplianceOperation
 
 
-_RES_HEIGHTS = {'480p': 480, '720p': 720, '1080p': 1080, '2160p': 2160, '4k': 2160}
-
-
 # directive: compliance-solid-refactor | # see compliance-solid-refactor.C2
 class TranscodeOperation(IComplianceOperation):
-    """Transcode operation predicate -- evaluates upscale guard + resolution + codec + savings rules."""
+    """Transcode operation predicate -- evaluates upscale guard + resolution + codec + savings rules. Tier comparisons use ResolutionTier.Rank (resolution-types.C5); the legacy _HeightOf dict is gone."""
 
     Name = "Transcode"
+
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C2
+    def __init__(self, TierRegistry: Optional[ResolutionTierRegistry] = None):
+        # directive: resolution-types | # see resolution-types.C5
+        self._TierRegistry = TierRegistry
 
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C2
     def Apply(self, Mf: MediaFileModel, Profile: EffectiveProfile, Rules: TranscodeRulesModel) -> OperationResult:
@@ -21,15 +25,16 @@ class TranscodeOperation(IComplianceOperation):
         Reasons = []
         Applies = False
 
-        SrcH = self._HeightOf(Mf.ResolutionCategory)
-        TgtH = self._HeightOf(Profile.TargetResolutionCategory)
+        # directive: resolution-types | # see resolution-types.C5
+        SrcTier = self._ResolveTier(Mf.ResolutionCategory)
+        TgtTier = Profile.TargetResolutionCategory if isinstance(Profile.TargetResolutionCategory, ResolutionTier) else None
 
-        if Rules.PreventUpscale and SrcH is not None and TgtH is not None and SrcH < TgtH:
-            Reasons.append({'Rule': 'PreventUpscale', 'Operator': '<', 'Actual': SrcH, 'Threshold': TgtH, 'Outcome': 'skip'})
+        if Rules.PreventUpscale and SrcTier is not None and TgtTier is not None and SrcTier.Rank < TgtTier.Rank:
+            Reasons.append({'Rule': 'PreventUpscale', 'Operator': '<', 'Actual': SrcTier.Name, 'Threshold': TgtTier.Name, 'Outcome': 'skip'})
             return OperationResult(OperationName=self.Name, Applies=False, Reasons=Reasons)
 
-        if Rules.ResolutionExceedsProfileTarget and SrcH is not None and TgtH is not None and SrcH > TgtH:
-            Reasons.append({'Rule': 'ResolutionExceedsProfileTarget', 'Operator': '>', 'Actual': SrcH, 'Threshold': TgtH, 'Outcome': 'applies'})
+        if Rules.ResolutionExceedsProfileTarget and SrcTier is not None and TgtTier is not None and SrcTier.Rank > TgtTier.Rank:
+            Reasons.append({'Rule': 'ResolutionExceedsProfileTarget', 'Operator': '>', 'Actual': SrcTier.Name, 'Threshold': TgtTier.Name, 'Outcome': 'applies'})
             Applies = True
 
         SrcCodec = (Mf.Codec or '').lower()
@@ -38,7 +43,7 @@ class TranscodeOperation(IComplianceOperation):
             Reasons.append({'Rule': 'AcceptableVideoCodecsCsv', 'Operator': 'NOT IN', 'Actual': SrcCodec, 'Threshold': sorted(AcceptableCodecs), 'Outcome': 'applies'})
             Applies = True
 
-        # directive: mv-trust-savings-and-clamp -- AC1 savings rule skipped on MV-transcoded files; codec/resolution/upscale still fire.
+        # directive: mv-trust-savings-and-clamp | # see mv-trust-savings-and-clamp.C1
         MvTrusted = bool(getattr(Mf, 'TranscodedByMediaVortex', False))
         EstSavings = self._EstimatedSavingsMB(Mf, Profile)
         if EstSavings is not None and EstSavings >= Rules.EstimatedSavingsMBThreshold and not MvTrusted:
@@ -49,19 +54,25 @@ class TranscodeOperation(IComplianceOperation):
 
         return OperationResult(OperationName=self.Name, Applies=Applies, Reasons=Reasons)
 
-    @staticmethod
-    def _HeightOf(Category: Optional[str]) -> Optional[int]:
+    # directive: resolution-types | # see resolution-types.C5
+    def _ResolveTier(self, Category: Optional[str]) -> Optional[ResolutionTier]:
+        """Lazily build a registry (per-operation-call) and translate the legacy category string into a typed Tier. None for unknown / missing."""
         if not Category:
             return None
-        return _RES_HEIGHTS.get(Category.lower())
+        Reg = self._TierRegistry or ResolutionTierRegistry()
+        if self._TierRegistry is None:
+            self._TierRegistry = Reg
+        return Reg.FromCategory(Category)
 
     @staticmethod
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C2
     def _ParseCsv(Csv: Optional[str]) -> set:
         if not Csv:
             return set()
         return {Tok.strip().lower() for Tok in Csv.split(',') if Tok.strip()}
 
     @staticmethod
+    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C2
     def _EstimatedSavingsMB(Mf: MediaFileModel, Profile: EffectiveProfile) -> Optional[float]:
         if not Profile.TargetVideoKbps:
             return None

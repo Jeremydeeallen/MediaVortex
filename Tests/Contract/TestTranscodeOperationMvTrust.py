@@ -6,10 +6,24 @@ from unittest.mock import MagicMock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from Models.MediaFileModel import MediaFileModel
+from Core.Resolution.ResolutionTier import ResolutionTier
 from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
 from Features.Compliance.Models.TranscodeRulesModel import TranscodeRulesModel
 from Features.Compliance.Operations.TranscodeOperation import TranscodeOperation
 from Features.Compliance.Services.EffectiveProfileResolver import EffectiveProfileResolver
+
+
+# directive: resolution-types | # see resolution-types.C5
+def _Tier(Name):
+    """Test factory -- mirrors the four seeded ResolutionTiers rows so the unit tests don't need PostgreSQL."""
+    Table = {
+        'T480p':  ResolutionTier('T480p',  600,  854,  480,  1),
+        'T720p':  ResolutionTier('T720p',  1100, 1280, 720,  2),
+        'T1080p': ResolutionTier('T1080p', 1700, 1920, 1080, 3),
+        'T2160p': ResolutionTier('T2160p', 3000, 3840, 2160, 4),
+    }
+    Alias = {'480p': 'T480p', '720p': 'T720p', '1080p': 'T1080p', '2160p': 'T2160p', '4k': 'T2160p'}
+    return Table[Alias.get(Name, Name)]
 
 
 def _mf(*, TranscodedByMediaVortex, Codec='av1', Res='480p', SizeMB=215.0, DurationMinutes=42.7, VideoBitrateKbps=607):
@@ -27,7 +41,7 @@ def _mf(*, TranscodedByMediaVortex, Codec='av1', Res='480p', SizeMB=215.0, Durat
 
 
 def _profile(TargetVideoKbps=182, TargetRes='480p'):
-    return EffectiveProfile(ProfileName='NVENC AV1 P7 CANARY VBR -720p', TargetVideoKbps=TargetVideoKbps, TargetAudioKbps=0, TargetResolutionCategory=TargetRes)
+    return EffectiveProfile(ProfileName='NVENC AV1 P7 CANARY VBR -720p', TargetVideoKbps=TargetVideoKbps, TargetAudioKbps=0, TargetResolutionCategory=_Tier(TargetRes))
 
 
 def _rules():

@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from Models.MediaFileModel import MediaFileModel
+from Core.Resolution.ResolutionTier import ResolutionTier
 from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
 from Features.Compliance.Models.ComplianceRuleCache import ComplianceRuleCache
 from Features.Compliance.Models.ComplianceGatesModel import ComplianceGatesModel
@@ -13,6 +14,19 @@ from Features.Compliance.Models.RemuxRulesModel import RemuxRulesModel
 from Features.Compliance.Models.AudioFixRulesModel import AudioFixRulesModel
 from Features.Compliance.Models.SubtitleFixRulesModel import SubtitleFixRulesModel
 from Features.Compliance.ComplianceComposition import BuildEvaluator, BuildRuleCache
+
+
+# directive: resolution-types | # see resolution-types.C5
+def _Tier(Name):
+    """Test factory -- canonical ResolutionTier instances matching the seeded DB rows (resolution-types.C13). Decoupled from DB so unit tests don't need PostgreSQL."""
+    Table = {
+        'T480p':  ResolutionTier('T480p',  600,  854,  480,  1),
+        'T720p':  ResolutionTier('T720p',  1100, 1280, 720,  2),
+        'T1080p': ResolutionTier('T1080p', 1700, 1920, 1080, 3),
+        'T2160p': ResolutionTier('T2160p', 3000, 3840, 2160, 4),
+    }
+    Alias = {'480p': 'T480p', '720p': 'T720p', '1080p': 'T1080p', '2160p': 'T2160p', '4k': 'T2160p'}
+    return Table[Alias.get(Name, Name)]
 
 
 # directive: compliance-solid-refactor | # see compliance-solid-refactor.C26
@@ -45,7 +59,7 @@ def CompliantMediaFile(**Over):
 
 # directive: compliance-solid-refactor | # see compliance-solid-refactor.C26
 def DefaultProfile():
-    return EffectiveProfile(ProfileName='Test480p', TargetVideoKbps=600, TargetAudioKbps=96, TargetResolutionCategory='480p')
+    return EffectiveProfile(ProfileName='Test480p', TargetVideoKbps=600, TargetAudioKbps=96, TargetResolutionCategory=_Tier('T480p'))
 
 
 class TestGates(unittest.TestCase):
@@ -86,7 +100,7 @@ class TestGates(unittest.TestCase):
         self.assertEqual(D.GateBlocked, 'ResolutionCategory')
 
     def test_profile_thresholds_gate_fires(self):
-        BadProfile = EffectiveProfile(ProfileName='Test480p', TargetVideoKbps=None, TargetAudioKbps=None, TargetResolutionCategory='480p')
+        BadProfile = EffectiveProfile(ProfileName='Test480p', TargetVideoKbps=None, TargetAudioKbps=None, TargetResolutionCategory=_Tier('T480p'))
         D = self.Ev.Evaluate(CompliantMediaFile(), BadProfile, MakeCache())
         self.assertEqual(D.GateBlocked, 'ProfileThresholds')
 
@@ -123,7 +137,7 @@ class TestOperations(unittest.TestCase):
         self.assertEqual(D.WorkBucket, 'Transcode')
 
     def test_transcode_blocked_by_upscale_guard(self):
-        P = EffectiveProfile(ProfileName='X', TargetVideoKbps=1500, TargetAudioKbps=128, TargetResolutionCategory='720p')
+        P = EffectiveProfile(ProfileName='X', TargetVideoKbps=1500, TargetAudioKbps=128, TargetResolutionCategory=_Tier('T720p'))
         Mf = CompliantMediaFile(ResolutionCategory='480p')
         D = self.Ev.Evaluate(Mf, P, MakeCache())
         self.assertNotIn('Transcode', D.OperationsNeeded)
@@ -215,21 +229,21 @@ class TestCrfProfileRegression(unittest.TestCase):
     def test_crf_profile_zero_bitrate_passes_thresholds_gate(self):
         """A CRF profile (TargetVideoKbps=0, TargetAudioKbps=0) is valid; the ProfileThresholds gate fires only on None, not 0."""
         Mf = CompliantMediaFile(ResolutionCategory='720p', Codec='hevc', AudioCodec='aac', ContainerFormat='mp4', AudioComplete=True)
-        CrfProfile = EffectiveProfile(ProfileName='NVENC AV1 P7 CANARY VBR -720p', TargetVideoKbps=0, TargetAudioKbps=0, TargetResolutionCategory='720p')
+        CrfProfile = EffectiveProfile(ProfileName='NVENC AV1 P7 CANARY VBR -720p', TargetVideoKbps=0, TargetAudioKbps=0, TargetResolutionCategory=_Tier('T720p'))
         D = self.Ev.Evaluate(Mf, CrfProfile, MakeCache())
         self.assertNotEqual(D.GateBlocked, 'ProfileThresholds')
 
     def test_crf_profile_zero_bitrate_does_not_trigger_savings(self):
         """When CRF profile (kbps=0) is in play, EstimatedSavingsMBThreshold rule MUST NOT propose Transcode just because savings calc looks unbounded."""
         Mf = CompliantMediaFile(SizeMB=5000, DurationMinutes=60, ResolutionCategory='720p', Codec='av1', AudioCodec='aac', ContainerFormat='mp4', AudioComplete=True)
-        CrfProfile = EffectiveProfile(ProfileName='X', TargetVideoKbps=0, TargetAudioKbps=0, TargetResolutionCategory='720p')
+        CrfProfile = EffectiveProfile(ProfileName='X', TargetVideoKbps=0, TargetAudioKbps=0, TargetResolutionCategory=_Tier('T720p'))
         D = self.Ev.Evaluate(Mf, CrfProfile, MakeCache())
         self.assertNotIn('Transcode', D.OperationsNeeded)
 
     def test_missing_thresholds_still_blocks(self):
         """ProfileThresholds gate must still fire when TargetVideoKbps IS None (distinct from 0)."""
         Mf = CompliantMediaFile()
-        NoThresholdsProfile = EffectiveProfile(ProfileName='X', TargetVideoKbps=None, TargetAudioKbps=None, TargetResolutionCategory='720p')
+        NoThresholdsProfile = EffectiveProfile(ProfileName='X', TargetVideoKbps=None, TargetAudioKbps=None, TargetResolutionCategory=_Tier('T720p'))
         D = self.Ev.Evaluate(Mf, NoThresholdsProfile, MakeCache())
         self.assertEqual(D.GateBlocked, 'ProfileThresholds')
 

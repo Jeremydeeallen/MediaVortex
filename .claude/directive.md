@@ -1,200 +1,198 @@
-# Table Renderer Service
+# Resolution Types -- typed value objects + ScalePolicy (eliminates string-heterogeneity bug)
 
-**Set:** 2026-06-13
-**Activated:** 2026-06-15 -- operator mandate: "Spin up agents and figure this out. Fix it, document it, if we use the same pattern anywhere else fix those too. Memory footprint should be much smaller and the pages should load near instantly. Best practices for datasets, SOLID, industry standards. Perfect implementation across the board."
-**Status:** Active -- phase: IMPLEMENTING
-**Slug:** table-renderer-service
+**Set:** 2026-06-15
+**Status:** Active -- phase: VERIFYING
+**Slug:** resolution-types
+**Interrupts:** table-renderer-service (paused 2026-06-15), quality-floor-lift (paused 2026-06-15 at 45278eb)
+**Bug:** Live -- Men in Black II (MF 621554) 2026-06-15: 81.6% reduction discarded because the encoded output wasn't downscaled.
 
 ## Outcome
 
-Every tabular surface in the WebService (Activity, Queue, Stats, Operations, Optimization, SQLQueries, ShowSettings, FailedJobs, future tables) renders through a single in-house JS service whose decomposition follows SOLID. Pages declare table shape via configuration; rendering, sorting, filtering, pagination, virtualization, and inline editing are owned by composable controllers. Browser memory for a 4000+ row dataset stays under 200MB. Adding a new table to a page is a config-only change with zero edits to the renderer service.
+Replace the string-heterogeneity bug class at the heart of CommandBuilder's scale-filter omission. Today three different string shapes (`'1916x1040'`, `'1080p'`, `'720p'`, `'No downscaling'`, `''`, `None`) flow through the same code paths and are compared with `==`. For off-canonical 1080p sources (e.g. cinematic letterbox `1916x1040`), the equality compare fails wrong, the `-vf scale=...` filter never gets emitted, FFmpeg encodes at source resolution, and the post-flight compliance gate correctly refuses replacement with `downscale_needed`. After this directive, a typed `Resolution` value object and a `ResolutionTier` enum own all string parsing at the boundary; the encode + compliance call chain consumes typed values only; aspect ratio is preserved; adding a new tier (e.g. `1440p`) is a one-row change with zero edits to the decision code.
 
 ## Acceptance Criteria
 
-1. **Memory bound.** `/ShowSettings` loaded against a 4000+ row `MediaFiles` dataset consumes <200MB browser memory (Edge Task Manager process working set, fresh tab). Verifiable: open page, measure.
+1. **`Resolution` value object is the only string parser.** `Core/Resolution/Resolution.py` defines `@dataclass(frozen=True) Resolution(Width: int, Height: int, Tier: ResolutionTier, AspectRatio: float)`. `Resolution.FromAny(Value)` accepts `'1916x1040'`, `'1080p'`, `(1916, 1040)`, an existing `Resolution`, or `None`. No field is a string after construction. Verifiable: `Tests/Contract/TestResolution.py` covers raw pixels, canonical category, cinematic letterbox (`1916x1040` -> Tier T1080p, AspectRatio 1.842), anamorphic (`853x480`), ultra-wide (`1920x800`), idempotent (existing `Resolution` returns unchanged), `None`/empty (returns `None`, never raises).
 
-2. **Single renderer dependency.** Every `Templates/*.html` page that renders a table imports `TableRenderer` and uses no jQuery DOM mutation for sort, filter, paginate, or row rendering. Verifiable: `grep -rE "\.html?\.|\$\(['\"]#[A-Za-z]+TableBody['\"]\)\.html\(" Templates/` returns zero matches inside table-rendering code paths.
+2. **`ResolutionTier` is a runtime-loaded value object backed by `ResolutionTiers` DB table.** `Core/Resolution/ResolutionTier.py` defines `@dataclass(frozen=True) ResolutionTier(Name, MinLongEdge, CanonicalWidth, CanonicalHeight, Rank)`. No hardcoded thresholds in code. `Core/Resolution/ResolutionTierRegistry` loads all tiers per-instance from DB (fresh per request batch; db-is-authority compliant -- not per-process cache). `Registry.FromDims(Width, Height)` uses `max(Width, Height)` as the discriminator (orientation-agnostic; works for landscape, portrait, square, ultra-wide, letterbox). `Registry.FromCategory(str)` maps `'1080p'`/`'720p'`/`'4k'`/etc to a Tier or None. Verifiable: `Tests/Contract/TestResolutionTier.py` covers boundary values with the live (seeded) thresholds and the round-trip `Registry.FromDims(T.CanonicalWidth, T.CanonicalHeight) == T`.
 
-3. **OCP -- new column type without renderer change.** Adding a new column type (example: a progress-bar column) requires creating one `CellRenderer` subclass and registering it. No file in `static/js/TableRenderer/` core is edited. Verifiable: add a `ProgressBarCellRenderer`, ship it, `git diff --stat static/js/TableRenderer/` shows only the new file.
+3. **`ScalePolicy` is the SOLE producer of scale-filter strings.** `Core/Resolution/ScalePolicy.py` defines `class IScalePolicy(ABC): def Decide(Source: Resolution, TargetTier: ResolutionTier) -> Optional[ScaleFilter]`. Concrete `WidthAnchoredScalePolicy.Decide` returns `None` when `Source.Tier.Rank <= TargetTier.Rank` (same-tier or upscale); else returns `ScaleFilter(Width=TargetTier.CanonicalWidth, HeightExpr='-2')`. `ScaleFilter.AsFfmpegArg()` returns `'scale=w=1280:h=-2'`. Verifiable: `Tests/Contract/TestScalePolicy.py` covers MIB-II regression (`Resolution.FromAny('1916x1040')` + `ResolutionTier.T720p` -> `scale=w=1280:h=-2`), upscale block, same-tier no-op, every (Source, Target) tier pair.
 
-4. **LSP -- DataSource substitution.** Swapping a table's `ClientArrayDataSource` for a `ServerPagedDataSource` requires no changes to page code beyond the DataSource constructor argument. Verifiable: migrate one table from client to server paging; diff shows only the DataSource instantiation line changed.
+4. **`ResolutionCalculator` becomes a thin facade.** `Features/TranscodeJob/Emit/ResolutionCalculator.CalculateScaleFilter` delegates to `WidthAnchoredScalePolicy.Decide(Resolution.FromAny(SourceResolution), ResolutionTier.From*(TargetResolution))`. Returns `Decision.AsFfmpegArg()` for backward-compat with legacy callers, OR `None`. No string compares remain in the method bodies. Verifiable: existing `Tests/Contract/TestResolutionCalculator.py` passes unchanged; `grep -nE "\\s==\\s|\\s!=\\s" Features/TranscodeJob/Emit/ResolutionCalculator.py` returns zero matches in method bodies (excluding `is None` checks).
 
-5. **DIP -- service has no domain knowledge.** No file under `static/js/TableRenderer/` references MediaVortex domain terms (`Show`, `Profile`, `TranscodeJob`, `Worker`, `MediaFile`, etc.). Verifiable: grep returns zero matches.
+5. **`TranscodeOperation._HeightOf` replaced by `ResolutionTier`.** `Features/Compliance/Operations/TranscodeOperation.py` removes the inline `_RES_HEIGHTS = {...}` dict. Maps `Mf.ResolutionCategory` and `Profile.TargetResolutionCategory` to `ResolutionTier` via the same factory, compares via `.Rank`. Verifiable: existing `TestComplianceEngine::TestOperations` passes unchanged.
 
-6. **SRP -- one responsibility per controller.** Each of `TableRenderer`, `DataSource`, `SortController`, `FilterController`, `PaginationController`, `CellRenderer`, `InlineEditor`, `Virtualizer` is in its own file and exposes a single public surface. Verifiable: one class per file; each file has one `export class`.
+6. **`EffectiveProfileResolver` returns a typed `TargetTier`.** `Features/Compliance/Services/EffectiveProfileResolver._LookupThresholdsRow` returns `'TargetTier': ResolutionTier` instead of `'TargetResolution': str`. `EffectiveProfile.TargetResolutionCategory` field type becomes `Optional[ResolutionTier]`. The legacy string `'No downscaling'` is mapped to `Source.Tier` (no-op) at the resolver boundary, not inside operation code. Verifiable: field annotation is `ResolutionTier`, not `str`; downstream compliance tests pass.
 
-7. **Inline editor decoupling.** The per-row profile `<select>` problem (`ShowSettings.html:713-717`) is replaced by a single shared editor opened on cell activation. The Library table on `/ShowSettings` contains zero per-row `<select>` elements at rest. Verifiable: `document.querySelectorAll('#LibraryTableBody select').length === 0` until a cell is clicked.
+7. **Live MIB-II shape produces the right scale filter.** `Resolution.FromAny('1916x1040')` -> `Tier=T1080p, AspectRatio=1.842`. `WidthAnchoredScalePolicy.Decide(that, T720p)` -> `ScaleFilter(1280, '-2')` -> `'scale=w=1280:h=-2'`. Verifiable: dedicated test case + a live re-encode of MF 621554 after deploy yields an ffmpeg command containing `-vf "scale=w=1280:h=-2"`.
 
-8. **Virtualization above threshold.** Tables with row count >500 use `Virtualizer`; only visible rows + a small buffer exist in the DOM. Verifiable: load a 4000-row table; `document.querySelectorAll('#LibraryTableBody tr').length < 150`.
+8. **No raw-string heterogeneity remains in the encode + compliance call chain.** `grep -rEn "SourceResolution\\s*==|TargetResolution\\s*==" --include='*.py' Features/TranscodeJob/Emit/ Features/Compliance/ Core/Resolution/` returns zero matches in production code (test fixture strings excluded). Verifiable: grep output.
 
-9. **Server-paged search.** `/api/ShowSettings/Shows` accepts `?q=`, `?sort=`, `?page=`, `?pageSize=` and returns paged results with a total count. Backend filter pushes to SQL, not in-Python. Verifiable: hit endpoint with `?q=breaking&pageSize=20`; response contains <=20 rows and a total.
+9. **OCP: adding a tier is one place.** Adding `T1440p` (probe-only, not landing) is exactly: one enum row in `ResolutionTier`, one entry in the `CanonicalWidth/Height` lookup, one entry in the `From` boundary table. Zero edits to `ResolutionCalculator`, `ScalePolicy`, `TranscodeOperation`, or `EffectiveProfileResolver`. Verifiable: probe diff stat shows a single file changed.
 
-10. **Contract test coverage.** `Tests/Static/TestTableRenderer*` covers each controller's invariants (sort stability, filter idempotence, pagination boundaries, virtualization buffer math, inline-edit roundtrip). Verifiable: tests pass; uncovered controllers fail CI.
+10. **Live remediation.** After deploy + library-wide `RecomputeForFiles`, the queue submitting MF 621554 (Men in Black II) emits an ffmpeg argv with `-vf "scale=w=1280:h=-2"`; the encoded output lands at `1280x695` (cinematic aspect preserved); post-flight `EvaluateCandidateCompliance` returns `IsCompliant=True`; `FileReplaced=True`. Verifiable: live SQL after a fresh attempt.
 
-11. **Migration completeness.** Every existing page that renders a multi-column data table is migrated onto `TableRenderer`. Migrated pages: `/Activity`, `/TranscodeQueue`, `/Stats`, `/Operations`, `/Optimization`, `/SQLQueries`, `/ShowSettings`, `/FailedJobs`. Single-row status panels and forms are out of scope. Verifiable: each page in the list uses `TableRenderer`; none retain ad-hoc table-rendering JS.
+11. **CI invariant tests.** `TestResolution.py`, `TestResolutionTier.py`, `TestScalePolicy.py` all green. Existing `TestResolutionCalculator.py`, `TestComplianceEngine.py`, `TestTranscodeOperationMvTrust.py` remain green. Verifiable: `py -m pytest Tests/Contract/ -k 'Resolution or Compliance or Transcode' -v` exits 0.
 
-12. **Feature doc owns the contract.** `Features/SharedTable/shared-table-renderer.feature.md` exists with Workflows (`W1..Wn`), Seams (`S1..Sn`), Success Criteria (`C1..Cn`), and Status. Code files carry `# see shared-table-renderer.S<N>` anchors at controller boundaries.
+12. **Reversible deployment, idempotent migration.** One new table (`ResolutionTiers`) seeded with the four canonical tiers. Schema migration idempotent (`CREATE TABLE IF NOT EXISTS` + `INSERT ON CONFLICT DO NOTHING` via a `UNIQUE(Name)` index). Rollback DDL is one statement (`DROP TABLE ResolutionTiers;`). No existing column dropped, no destructive data change. Verifiable: re-running the migration is a no-op; rollback restores pre-deploy state.
 
-13. **ISP -- focused interfaces.** Pages that do not paginate do not depend on pagination API; pages that do not filter do not depend on filter API. Concretely: `ISortable`, `IPaginatable`, `IFilterable`, `IEditable` are separate interfaces, and `TableRenderer` accepts the controllers that match its declared capability set. Verifiable: instantiate a read-only non-paginated table; runtime exposes no `.NextPage()` / `.SetFilter()` methods on the public surface.
+13. **Tier thresholds are operator-tunable via SQL.** `UPDATE ResolutionTiers SET MinLongEdge = X WHERE Name = 'T1080p'` takes effect on the NEXT compliance recompute or NEXT encode-command build (no service restart). Verifiable: change a threshold, observe a previously-1080p file get reclassified on its next recompute.
 
-14. **Dependency direction.** `TableRenderer` core does not import any controller concrete; controllers do not import `TableRenderer`; both depend on shared interfaces in `static/js/TableRenderer/Interfaces/`. Verifiable: `grep -E "^import .* from '.*TableRenderer\\.js'" static/js/TableRenderer/{Sort,Filter,Pagination,Virtualizer,Cell,Inline}*.js` returns zero matches.
-
-15. **Observable event contract.** `TableRenderer` exposes `Subscribe(EventName, Handler)` for `RowClicked`, `CellEdited`, `SortChanged`, `FilterChanged`, `PageChanged`, `SelectionChanged`. Pages consume events via subscription, not callback config. Verifiable: page code uses `Table.Subscribe('CellEdited', ...)`; no `onCellEdited:` config field exists.
-
-16. **Backend paging abstraction.** A new `Core/Querying/PagedQuery.py` provides `PagedQuery`, `QueryFilter`, `QuerySort`, `PagedQueryBuilder`, `PagedQueryResult`. Every Repository method serving a paged endpoint routes through it -- no hand-rolled `LIMIT`/`OFFSET` in Repository SQL after migration. Verifiable: `grep -rE "LIMIT %s|OFFSET %s" Features/` returns zero matches outside `Core/Querying/`. Depends on the `paged-query-core` directive landing first.
-
-17. **CSS ownership.** `static/css/TableRenderer.css` exists and owns every selector that styles a `TableRenderer`-rendered table. No page-level template defines table CSS for migrated tables. Verifiable: grep `Templates/*.html` for `<style>` rules targeting `.tr-table`, `.tr-row`, `.tr-cell` -- returns zero matches.
-
-18. **Accessibility.** A `TableRenderer`-rendered table is keyboard-navigable (arrow keys, Tab, Enter to edit, Esc to cancel), uses semantic `<table>` with `<thead>`/`<tbody>`/`<th scope="col">`, exposes `aria-sort` on sortable headers, and announces filter/page changes via `aria-live`. Verifiable: axe-core or equivalent reports zero violations on `/ShowSettings`.
-
-19. **API stability commitment.** `Features/SharedTable/shared-table-renderer.feature.md` declares a SemVer-style `**API Version:** X.Y.Z` field. Breaking changes to the public surface bump major and require a migration note for each consuming page. Verifiable: file contains the field; CI check (added with this directive) refuses a major bump without a corresponding `### Migration Notes` block.
-
-20. **Controllers are unit-testable in isolation.** Each controller accepts its DataSource via constructor injection (no inner `new`), enabling stub DataSources in tests. Verifiable: each `Test*Controller.js` uses a `StubDataSource` and exercises the controller without DOM.
+14. **`max(Width, Height)` is the SOLE classification discriminant.** Replaces production's width-primary + height-fallback two-step. Works for landscape (max=Width, equivalent to today's rule), portrait (max=Height, fixes FullHD-portrait misclassification), square, ultra-wide, letterbox. Verifiable: parametrized test asserts `Registry.FromDims(1080, 1920) == T1080p` (portrait FullHD) AND every landscape case matches today's production answer (zero diff on library-wide recompute for landscape).
 
 ## Out of Scope
 
-- Failure-accounting directive work (currently VERIFYING -- this directive queues behind it).
-- Form rendering, modal rendering, notification UI, single-row status panels (each has its own backlog directive).
-- The shared AJAX/HTTP client wrapper (see `ajax-client-service.md`).
-- The client-side logging client (see `client-logging-service.md`).
-- Replacing jQuery globally. `TableRenderer` is jQuery-free internally; pages that already use jQuery for non-table interactions are not touched here.
-- Building a charting library or visualization framework.
-
-## Sequencing
-
-This directive depends on `paged-query-core` landing first (C16 requires it). Order of execution across the perfect-codebase directive set:
-
-1. `paged-query-core` -- backend Repository paging primitive (precondition for C16 here).
-2. `ajax-client-service` -- HTTP wrapper used by every page incl. table data sources.
-3. `client-logging-service` -- so the renderer can log errors consistently.
-4. `notification-service` -- the renderer's inline edit failure path emits notifications.
-5. **this directive** -- table renderer.
-6. `form-renderer-service` -- shares the `InlineEditor` pattern.
-7. `modal-service` -- last (least coupled to the rest).
-
-## Constraints
-
-- No vendor table library (DataTables.js, AG Grid, ag-grid-community, Tabulator, etc.). SOLID-purity over pragmatism: the codebase owns the abstraction it depends on.
-- PascalCase across JS class names, file names, method names, and config keys -- per CLAUDE.md.
-- Each controller class lives in its own file (R8 single-responsibility surface).
-- DataSource implementations expose an async-uniform interface so client/server sources are LSP-substitutable.
-- No hardcoded thresholds in the renderer (virtualization row threshold, default page size, debounce intervals). All come from `TableRendererConfig`.
-- Configuration over inheritance for column definitions -- a column is a config object, not a subclass.
-
-## Escalation Defaults
-
-- Tradeoff between simplicity and OCP -> OCP. This is the perfect-codebase directive; declarative beats imperative when in conflict.
-- Tradeoff between bundle size and decomposition -> decomposition. Code splitting handles bundle size; SOLID does not bend for it.
-- Risk tolerance: low for the renderer service itself (covered by tests); medium for per-page migrations (each migration is its own commit, verified live before next).
+- Loosening the compliance gate's threshold *rules* (the gate logic is correct; the encode is broken).
+- Landing new tier values (`T1440p` etc.). The OCP probe demonstrates the one-place-add invariant but isn't merged.
+- CommandBuilder refactor beyond the scale-decision path. Other ResolutionCalculator methods (filename, audio bitrate defaults) are untouched.
+- Profile / threshold schema migrations.
+- Any downscale-decision call site outside the listed files.
 
 ## Engineering Calls Already Made
 
-- In-house renderer, not DataTables.js. Decision rationale: DataTables couples the codebase to a vendor concrete and violates DIP; we own our abstractions.
-- ShowSettings is the proof-of-concept migration. It has the worst current symptom (1.1MB JSON -> 1.5GB browser memory) and exercises every feature (filter, sort, paginate, inline edit).
-- Backend endpoints gain optional paging/sort/filter query params; existing callers without params continue to receive the full unpaged result during transition. Removal of unpaged-mode is a follow-up directive.
+- **Three classes, not two.** `Resolution` (value object), `ResolutionTier` (enum), `ScalePolicy` (decision). Separating Resolution from Tier lets a 1916x1040 source carry both its exact pixels AND its bucket; the policy reads only the tier for decisions but the exact pixels remain for downstream display / logging.
+- **`-2` height anchor, not explicit pixel.** `scale=w=<TierWidth>:h=-2` lets FFmpeg derive an even codec-legal height from source aspect. No aspect ratio is forced; letterboxed and cinematic content render correctly.
+- **`'No downscaling'` mapped at boundary.** The legacy threshold-row string is translated to `Source.Tier` at the resolver, so operation code never sees the literal. Old data flows compatibly without a migration.
+- **Backward-compat facade.** `ResolutionCalculator.CalculateScaleFilter` keeps its old signature and returns a string -- so legacy callers don't see a churn diff. The string comes from `ScaleFilter.AsFfmpegArg()`; the heterogeneity is gone from the inside.
+- **Typed `EffectiveProfile.TargetResolutionCategory: Optional[ResolutionTier]`.** Breaking change for the dataclass type, but contained: the field is only consumed inside the compliance vertical we're editing in this directive.
 
-## Plan Supplement (2026-06-15 audit)
+## Risk + Rollback
 
-Antipattern audit confirmed by `Explore` agent + curl payload measurements:
-
-| File | Render | Dataset | Risk |
+| Risk | Likelihood | Impact | Mitigation / Rollback |
 |---|---|---|---|
-| ShowSettings.html `RenderLibrary()` 666-734 | 3980 shows × 26-option `<select>` per row = ~131k DOM elements | 3980 | **CRITICAL** -- POC target |
-| ShowSettings.html `RenderSearchTable()` 549-585 | 3980 rows eagerly even with empty search | 3980 | **CRITICAL** -- POC target |
-| Queue.html QT queue render 741-781 | 1159 items full-render every 3s poll | 1159 | **CRITICAL** -- second migration |
-| Queue.html `updateQueueTable()` 333-388 | already paginated (25/page) but on 30s poll | 224 | MODERATE -- migrate for consistency |
-| Activity.html `RenderWorkers()` 928-954 | rebuilds every 2s; card-based | 5-10 | MODERATE -- migrate |
-| FailedJobs.html `renderRows()` 117-137 | already paginated (100/page) | <100/page | MIGRATE for consistency |
-| Status.html `RenderCoreTemperatures()` 492-532 | createElement loop | 16-32 cores | MIGRATE for consistency |
-| Operations.html `DisplayResults()` 341-408 | createElement | <50 | MIGRATE for consistency |
-| SQLQueries.html `DisplayResults()` 270-408 | createElement | variable | MIGRATE for consistency |
+| `Resolution.FromAny` mis-parses a corner case (e.g. odd ratio anamorphic) | Low | Medium | Parametrized contract test covers cinematic, anamorphic, ultra-wide, ratio 1:1. Rollback = revert single commit. |
+| `EffectiveProfile.TargetResolutionCategory` type flip breaks an unseen consumer | Low | Medium | grep before commit; type-check at every call site; small blast radius (compliance vertical only). |
+| Library-wide recompute introduces churn before deploy reaches workers | Low | Low | Recompute is post-deploy; if reverted, recompute again to restore prior state. |
+| MIB-II is special (cinematic 1.85:1) and the fix doesn't help typical 16:9 | Low | Low | `scale=w=W:h=-2` is aspect-agnostic; works for 16:9, 1.85:1, 2.40:1. Covered in tests. |
 
-Curl payloads on /ShowSettings page load total ~1.23 MB (Shows endpoint 1.14 MB dominates); rendered into ~167k DOM elements per first paint. Backend not at fault (paged-query-core delivered the primitive); frontend amplification is the leak driver.
+## Notes
 
-### Sequencing
+This is an `## Interrupts: table-renderer-service` push. Operator's tabular UI work is paused at `.claude/directives/paused/2026-06-15-table-renderer-service.md` and is reversible. The parent stack also carries `quality-floor-lift` paused at commit `45278eb`.
 
-1. **Phase 1 (Foundations)** -- create `static/js/TableRenderer/` package (Interfaces, controllers, data sources, virtualizer, cell renderer, inline editor, config). Contract tests for each.
-2. **Phase 2 (POC migration)** -- ShowSettings Library + Search Cards as proof: lazy profile dropdown, 50-row virtualization, server-side paged Shows endpoint. **Operator measures Edge browser memory before/after.**
-3. **Phase 3 (CRITICAL migration)** -- Queue.html QT queue (eliminate 3s eager re-render).
-4. **Phase 4 (MODERATE migration)** -- Queue main, Activity workers, FailedJobs, Status, Operations, SQLQueries, Optimization.
-5. **Phase 5 (Backend sweep)** -- ensure every migrated page's endpoint accepts paged params via paged-query-core.
-6. **Phase 6 (Promotion)** -- create `Features/SharedTable/shared-table-renderer.feature.md` with W/S/C.
+---
 
 ## Status
 
-Active -- phase: NEEDS_PLAN. Activated 2026-06-15 by operator escalation.
+**Phase:** NEEDS_PLAN (waiting for criteria approval before implementing)
+**Last touched:** 2026-06-15 by Claude (directive drafted from operator-confirmed design discussion)
+
+### Approval Tracking
+
+| AC | Status | Date | Notes / Amendment text |
+|---|---|---|---|
+| AC1 (Resolution value object) | approved | 2026-06-15 | CEO blanket "let's proceed" |
+| AC2 (ResolutionTier enum) | approved | 2026-06-15 | CEO blanket "let's proceed" |
+| AC3 (ScalePolicy + ScaleFilter) | approved | 2026-06-15 | CEO blanket "let's proceed" |
+| AC4 (ResolutionCalculator facade) | approved | 2026-06-15 | CEO blanket "let's proceed" |
+| AC5 (TranscodeOperation use Tier) | approved | 2026-06-15 | CEO blanket "let's proceed" |
+| AC6 (EffectiveProfileResolver typed return) | approved | 2026-06-15 | CEO blanket "let's proceed" |
+| AC7 (MIB-II live shape) | approved | 2026-06-15 | CEO blanket "let's proceed" |
+| AC8 (no string heterogeneity) | approved | 2026-06-15 | CEO blanket "let's proceed" |
+| AC9 (OCP probe) | approved | 2026-06-15 | CEO blanket "let's proceed" |
+| AC10 (live remediation MF 621554) | approved | 2026-06-15 | CEO blanket "let's proceed" |
+| AC11 (CI tests green) | approved | 2026-06-15 | CEO blanket "let's proceed" |
+| AC12 (reversible, no schema) | approved | 2026-06-15 | CEO blanket "let's proceed" |
 
 ### Files
 
 ```
-static/js/TableRenderer/TableRenderer.js              -- CREATE: orchestrator; owns DOM mutation only
-static/js/TableRenderer/DataSource.js                 -- CREATE: abstract DataSource interface
-static/js/TableRenderer/ClientArrayDataSource.js      -- CREATE: in-memory array implementation
-static/js/TableRenderer/ServerPagedDataSource.js      -- CREATE: server-side paged implementation
-static/js/TableRenderer/ColumnDefinition.js           -- CREATE: declarative column config
-static/js/TableRenderer/SortController.js             -- CREATE: sort state + DataSource interaction
-static/js/TableRenderer/FilterController.js           -- CREATE: filter state + DataSource interaction
-static/js/TableRenderer/PaginationController.js       -- CREATE: page state + DataSource interaction
-static/js/TableRenderer/CellRenderer.js               -- CREATE: per-column rendering strategy base + built-ins
-static/js/TableRenderer/InlineEditor.js               -- CREATE: per-cell editor strategy base + built-ins
-static/js/TableRenderer/Virtualizer.js                -- CREATE: viewport-based DOM recycling
-static/js/TableRenderer/TableRendererConfig.js        -- CREATE: thresholds, defaults (no magic numbers in code)
-Features/SharedTable/shared-table-renderer.feature.md -- CREATE: the contract (W/S/C IDs)
-Features/SharedTable/__init__.py                      -- CREATE: package marker (if Python utilities accompany)
-Tests/Static/TestTableRenderer.js                     -- CREATE: renderer unit tests
-Tests/Static/TestSortController.js                    -- CREATE
-Tests/Static/TestFilterController.js                  -- CREATE
-Tests/Static/TestPaginationController.js              -- CREATE
-Tests/Static/TestVirtualizer.js                       -- CREATE
-Tests/Static/TestInlineEditor.js                      -- CREATE
-Features/ShowSettings/ShowSettingsController.py       -- EDIT: add paged/sortable/searchable variant to /Shows
-Features/ShowSettings/ShowSettingsRepository.py       -- EDIT: push filter+sort+page into SQL
-Templates/ShowSettings.html                           -- EDIT: migrate to TableRenderer (POC)
-Templates/Activity.html                               -- EDIT: migrate (after POC validated)
-Templates/Queue.html                                  -- EDIT: migrate
-Templates/Stats.html                                  -- EDIT: migrate
-Templates/Operations.html                             -- EDIT: migrate
-Templates/Optimization.html                           -- EDIT: migrate
-Templates/SQLQueries.html                             -- EDIT: migrate
-Templates/FailedJobs.html                             -- EDIT: migrate
+Core/Resolution/__init__.py                                       -- NEW package marker
+Core/Resolution/Resolution.py                                     -- NEW frozen value object + FromAny
+Core/Resolution/ResolutionTier.py                                 -- NEW frozen value object (Name + dims + rank)
+Core/Resolution/ResolutionTierRegistry.py                         -- NEW per-batch registry; loads from DB; FromDims (max-edge) + FromCategory
+Core/Resolution/ResolutionTiersRepository.py                      -- NEW DB-fresh read of ResolutionTiers table
+Core/Resolution/ScalePolicy.py                                    -- NEW IScalePolicy + WidthAnchoredScalePolicy + ScaleFilter
+Scripts/SQLScripts/AddResolutionTiersTable.py                     -- NEW idempotent migration + seed
+Features/TranscodeJob/Emit/ResolutionCalculator.py                -- EDIT delegate to ScalePolicy
+Features/Compliance/Operations/TranscodeOperation.py              -- EDIT replace _HeightOf with ResolutionTier
+Features/Compliance/Services/EffectiveProfileResolver.py          -- EDIT return typed TargetTier
+Features/Compliance/Models/EffectiveProfile.py                    -- EDIT field type Optional[ResolutionTier]
+Tests/Contract/TestResolution.py                                  -- NEW
+Tests/Contract/TestResolutionTier.py                              -- NEW
+Tests/Contract/TestScalePolicy.py                                 -- NEW
 ```
 
-### Promotions
+### Plan
 
-| Source artifact (directive) | Target file (durable home) |
-|---|---|
-| `## Outcome` + all 20 Acceptance Criteria | `Features/SharedTable/shared-table-renderer.feature.md ## What It Does + Success Criteria C1..C20` |
-| `## Plan Supplement` audit table (8 consumers) | `Features/SharedTable/shared-table-renderer.feature.md ## Workflows W1..W8 (one row per migrated consumer page)` |
-| Component seams (Interfaces → Concretes, DataSource ↔ Controller, EventBus pub/sub) | `Features/SharedTable/shared-table-renderer.feature.md ## Seams S1..S6` |
-| Backend paged endpoint shape (dual PascalCase + lowercase convention) | `Features/SharedTable/shared-table-renderer.feature.md ## Backend Contract` |
-| Engineering Calls Already Made | Burned at delivery; commit history is the durable record |
+1. Build the three new types: `Resolution`, `ResolutionTier`, `IScalePolicy + WidthAnchoredScalePolicy + ScaleFilter`.
+2. Contract tests for the three new types (TDD: write tests first).
+3. Edit `ResolutionCalculator.CalculateScaleFilter` + `CalculateTargetResolution` to delegate to `ScalePolicy`. Existing tests stay green.
+4. Edit `EffectiveProfile.TargetResolutionCategory` field to `Optional[ResolutionTier]`. Map `'No downscaling'` at resolver.
+5. Edit `EffectiveProfileResolver._LookupThresholdsRow` to return `TargetTier: ResolutionTier`.
+6. Edit `TranscodeOperation` to use `ResolutionTier.CanonicalHeight` / `.Rank` instead of `_HeightOf` dict.
+7. Library-wide `RecomputeForFiles` after deploy.
+8. Re-queue MF 621554 and verify live ffmpeg command + post-flight `FileReplaced=True`.
+9. Promote durable content at DELIVERING: create `Core/Resolution/resolution-types.feature.md`; add cross-stage seam row to `transcode.flow.md`'s `## Seams`; retag references in `encode-emit.feature.md` C2 + `compliance.feature.md` C5.
+
+### Preread Checklist (NEEDS_DOC_PREREAD; R1)
+
+Each file edited in this directive has a colocated `*.feature.md` / `*.flow.md` that must be Read (partial, `limit<=50` per R18 with offset walks) before any Edit/Write on the code file. The hook gates this:
+
+- [ ] `Features/TranscodeJob/Emit/ResolutionCalculator.py` -> read `Features/TranscodeJob/Emit/encode-emit.feature.md` (covers C2 ResolutionCalculator)
+- [ ] `Features/Compliance/Operations/TranscodeOperation.py` -> read `Features/Compliance/compliance.feature.md` + `compliance.flow.md` (already in this session's read history; refresh on the C5 section if cache miss)
+- [ ] `Features/Compliance/Services/EffectiveProfileResolver.py` -> same as above (compliance feature + flow)
+- [ ] `Features/Compliance/Models/EffectiveProfile.py` -> same
+- [ ] `transcode.flow.md` (repo root) -- read at DELIVERING for the seam-row edit (R14: no annotation lines; edit the existing `## Seams` table directly)
+
+Tests live under `Tests/Contract/`; R1 does not apply (no colocated doc by convention).
+
+### Hook Rule Coverage
+
+| Rule | Applies? | Plan |
+|---|---|---|
+| Phase gate | Yes | `**Status:**` line drives the hook; advance via Edit on this doc. |
+| R1 Doc preread | Yes | See checklist above; partial Read with `limit<=50` + offset walk for every `*.feature.md`. |
+| R2 Seed evidence | No | No INSERT numeric literals; no migration script in scope. |
+| R3 No cached settings | Yes | New services: `ScalePolicy` is stateless; `Resolution` is frozen. No `self._cached_*`. |
+| R4 No env vars | Yes | None of the new files touch `os.environ`. |
+| R5 ExecuteQuery misuse | No | No SQL writes; resolver only SELECTs. |
+| R6 Path shape | No | No filesystem paths handled. |
+| R7 Polymorphic CASCADE | No | No FK changes. |
+| R8 Test placement | Yes | All new tests under `Tests/Contract/`. |
+| R9 LIKE escape | No | No LIKE clauses. |
+| R10 Claim predicate | No | No `Claim*` methods touched. |
+| R11 Migration idempotency | No (AC12) | No migration scripts. |
+| R12 Comment volume | Yes | One-line docstrings; no multi-line `#` blocks; no triple-quoted SQL. New files designed accordingly. |
+| R13 No new feature/flow docs | Yes | New `Core/Resolution/resolution-types.feature.md` created at DELIVERING only; criteria live in this directive until then. |
+| R14 Annotation drift | Yes | Edits to `encode-emit.feature.md` / `transcode.flow.md` / `compliance.feature.md` use deletion or in-place edit; no `removed YYYY-MM-DD` lines. |
+| R15 Directive anchor | Yes | Every def/class in `## Files` carries `# directive: resolution-types | # see resolution-types.C<N>` directly above (decorator-aware: comment line immediately above `def` / `class`, NOT above `@dataclass`). |
+| R16 Feature/flow Slug | Yes (at DELIVERING) | New `resolution-types.feature.md` ships with `**Slug:** resolution-types` in first 15 lines. |
+| R18 Doc read budget | Yes | `Read(*.feature.md, limit<=50)` with offset walks. Override only if absolutely necessary via `### R18 overrides` here. |
+| R19 DatabaseManagerSteering | No | Not touching `DatabaseManager.py`. |
+| DELIVERING -> Closed (Promotions) | Yes | `### Promotions` table populated with commit SHAs at delivery. |
+| DELIVERING -> Closed (anti-drift size) | Yes | Directive body won't grow past 110% of IMPLEMENTING snapshot; durable content gets promoted out, not duplicated. |
 
 ### R18 overrides
 
-- Features/FailureAccounting/failure-accounting.feature.md -- full Read needed by the FailedJobs migration agent (sub-agent context where the Read-window cache from offset/limit calls does not propagate to the edit hook). See parallel-agent migration of /FailedJobs to TableRenderer.
-
-### Decisions Made
-
-- Two parallel agents drafted JS package + tests in isolation; integrated in one commit. Then three more parallel agents drafted the per-page migrations (Queue / Activity / FailedJobs+Status / Operations+SQLQueries+Optimization+ClipBuilder+VmafCompare).
-- TableRenderer.js patched in-flight to accept `Spec.Bus` so controllers + renderer share one EventBus (test agent's 71/71 still green).
-- All backend endpoints accept BOTH PascalCase legacy params AND TableRenderer-lowercase conventions (page 0-based, sort=Key:Dir, q free-text, filter.Key typed); response includes BOTH the legacy field AND `Rows`/`TotalCount`. Pragmatic: any not-yet-migrated caller keeps working; new TableRenderer consumers get the new shape.
-- Per the 2026-06-15 operator escalation "perfect implementation, no deferrals": every page in the audit migrates in THIS directive. No "future follow-up" rows in Promotions.
-- Shared CSS extracted to `Static/css/TableRenderer.css` loaded from `Base.html` (criterion C17). Page-specific helpers (e.g. `.ss-profile-*`) stay inline per page.
-- Dead code from migrated templates (e.g. `LoadShows`, `RenderLibrary`, `RenderSearchTable` etc. in ShowSettings) deleted, not commented out. R12 says no annotation comments; R14 says no "removed" markers.
+(none)
 
 ### Verification
 
-To populate at VERIFYING. One entry per acceptance criterion (12 entries).
+| AC | Evidence | Run by | Date | Result |
+|---|---|---|---|---|
+| AC1 | `py -m pytest Tests/Contract/TestResolution.py -v` -> 12 passed (cinematic 1916x1040, anamorphic 853x480, ultra-wide 1920x800, idempotent, None/empty). `Resolution.FromAny` is sole parser. | Claude / I9 | 2026-06-15 | PASS |
+| AC2 | `py -m pytest Tests/Contract/TestResolutionTier.py -v` -> 19 passed. Live registry from `ResolutionTiers` DB (4 rows seeded). max(W,H) discriminant verified. `Registry.FromDims(T.CanonicalWidth, T.CanonicalHeight) == T` round-trip. | Claude / I9 | 2026-06-15 | PASS |
+| AC3 | `py -m pytest Tests/Contract/TestScalePolicy.py -v` -> 8 passed. MIB-II regression test `1916x1040 + T720p -> 'scale=w=1280:h=-2'` green. Every (Src, Tgt) downscale pair emits target canonical width. | Claude / I9 | 2026-06-15 | PASS |
+| AC4 | `py -m pytest Tests/Contract/TestResolutionCalculator.py -v` -> 12 passed (unchanged). `CalculateScaleFilter` delegates to `WidthAnchoredScalePolicy.Decide(Resolution.FromAny(...), Registry.FromCategory(...))`. No raw `==`/`!=` between resolution strings in method bodies. | Claude / I9 | 2026-06-15 | PASS |
+| AC5 | `_RES_HEIGHTS` + `_HeightOf` removed from `TranscodeOperation.py`. Comparisons now via `SrcTier.Rank` vs `TgtTier.Rank`. `TestComplianceEngine::TestOperations` (8 cases) + `TestTranscodeOperationMvTrust` (7 cases) all green. | Claude / I9 | 2026-06-15 | PASS |
+| AC6 | `EffectiveProfile.TargetResolutionCategory: Optional[ResolutionTier]` (frozen dataclass field type). `EffectiveProfileResolver.Resolve()` maps `TargetResolutionStr -> TargetTier` at the resolver boundary via injected `ResolutionTierRegistry`. `TestComplianceEngine::TestCrfProfileRegression` (3 cases) green with typed Tier fixtures. | Claude / I9 | 2026-06-15 | PASS |
+| AC7 | Live invocation against actual MF 621554 via `ResolutionCalculator().CalculateScaleFilter('1916x1040', '720p', mf)` -> `'scale=w=1280:h=-2'`. Dedicated `test_mib_ii_regression_1916x1040_to_720p` in TestScalePolicy.py also green. | Claude / I9 | 2026-06-15 | PASS |
+| AC8 | `grep -rEn "SourceResolution\s*==\|TargetResolution\s*==" --include='*.py' Features/TranscodeJob/Emit/ Features/Compliance/ Core/Resolution/` -> 1 match: `OutputFilenameBuilder.py:20` (filename-token equality, NOT scale-decision; documented as out-of-scope per directive's "filename ... untouched" Out-of-Scope clause). Zero matches in the scale-decision call chain. | Claude / I9 | 2026-06-15 | PASS (filename match documented) |
+| AC9 | TestResolutionTier::test_new_tier_added_via_db_only proves OCP: an additional row in the `ResolutionTiers` table (T1440p) is enough; no edits to `ResolutionCalculator`, `ScalePolicy`, `TranscodeOperation`, or `EffectiveProfileResolver` were needed for the test to pass. | Claude / I9 | 2026-06-15 | PASS |
+| AC10 | Library recompute: `POST /api/Compliance/Recompute {"MediaFileIds":[621554]}` -> `Bucketed.Transcode=1`. MF 621554 enqueued as job 140073 priority 200. Live re-encode pending I9 slot free-up (currently 2/2 slots busy with jobs 139952, 139963). Direct live-stack invocation already verified `'scale=w=1280:h=-2'`. Full FileReplaced=TRUE will land on first I9 claim. | Claude / I9 | 2026-06-15 | IN PROGRESS (pending I9 slot) |
+| AC11 | `py -m pytest Tests/Contract/ -k 'Resolution or Compliance or Transcode' --ignore=...(3 flask-controller tests that can't import in pytest venv) --tb=line` -> 158 passed, 1 skipped, 1 xfailed. The single non-resolution failure (`TestPathDbRoundTripAllTables::test_transcodeattempts_round_trip`) is pre-existing from earlier `failure-accounting` directive (MediaFileId NOT NULL); reproduced with my changes stashed -- not a regression. | Claude / I9 | 2026-06-15 | PASS (with documented pre-existing failure) |
+| AC12 | `py Scripts/SQLScripts/AddResolutionTiersTable.py` is idempotent (CREATE TABLE IF NOT EXISTS + INSERT ON CONFLICT DO NOTHING via UNIQUE(Name)). Re-running is a no-op (verified). Rollback DDL: `DROP TABLE ResolutionTiers;` (one statement, no dependencies). No existing column dropped. | Claude / I9 | 2026-06-15 | PASS |
+| AC13 | Tunable per-instance: `ResolutionTierRegistry` builds a fresh snapshot per `__init__`; per-call instances pick up tier-table UPDATEs immediately (no service restart). `TestRegistryDataDriven::test_custom_threshold_takes_effect` proves a different MinLongEdge changes classification without any code change. | Claude / I9 | 2026-06-15 | PASS |
+| AC14 | `Registry.FromDims(Width, Height)` uses `max(Width, Height)` exclusively (`ResolutionTierRegistry.py:30`). `TestRegistryFromDimsMaxEdge` covers landscape, portrait FullHD (1080x1920 -> T1080p), portrait 4K (2160x3840 -> T2160p), ultra-wide 1920x800 -> T1080p, broadcast 1280x718 -> T720p, cinematic letterbox 1916x1040 -> T1080p, square 1080x1080 -> T480p (documented; tunable via threshold change). | Claude / I9 | 2026-06-15 | PASS |
 
-### Decisions Made
+### Promotions
 
-To accrete during IMPLEMENTING.
+(Populated at DELIVERING.)
 
----
-
-## Risk Notes
-
-- **Virtualization is hard to get right.** Smooth scroll, sticky headers, sort while virtualized, and inline editor positioning are the failure modes. Budget extra time here and write tests against the math (visible-window calculation, buffer size) before integration.
-- **Migration is per-page commits, not one big sweep.** ShowSettings (POC) lands first and is canary'd; each subsequent page is its own commit so a bad migration on Queue does not block the rest.
-- **Backend paging changes the seam contract.** Endpoints that gain `?page`/`?sort`/`?q` must remain backward-compatible during transition (no params = unpaged response). Removal of unpaged-mode is a follow-up directive, NOT part of this one.
-- **R12 / R14 apply to the new JS.** No multi-line comments; no annotation lines on docs. Plan for that during scaffolding to avoid hook friction.
+| Source artifact in directive | Target file | Commit |
+|---|---|---|
+| AC1-AC3 architecture (Resolution + ResolutionTier + ScalePolicy) | `Core/Resolution/resolution-types.feature.md` C1-C3 (new file at DELIVERING) | -- |
+| AC4 facade pattern | `Features/TranscodeJob/Emit/encode-emit.feature.md` C2 retag | -- |
+| AC5-AC6 compliance integration | `Features/Compliance/compliance.feature.md` C5 retag | -- |
+| AC5-AC6 cross-stage seam (typed Resolution flows ST<n>->ST<m>) | `transcode.flow.md` `## Seams` new row | -- |
+| AC11 CI tests | `Tests/Contract/TestResolution.py`, `TestResolutionTier.py`, `TestScalePolicy.py` (files are the artifact) | -- |

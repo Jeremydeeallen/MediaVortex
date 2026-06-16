@@ -1,6 +1,8 @@
 from typing import Optional
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
+from Core.Resolution.ResolutionTier import ResolutionTier
+from Core.Resolution.ResolutionTierRegistry import ResolutionTierRegistry
 from Models.MediaFileModel import MediaFileModel
 from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
 from Features.TranscodeQueue.CrfBitrateEstimateRepository import CrfBitrateEstimateRepository
@@ -8,25 +10,28 @@ from Features.TranscodeQueue.CrfBitrateEstimateRepository import CrfBitrateEstim
 
 # directive: compliance-solid-refactor | # see compliance-solid-refactor.C12
 class EffectiveProfileResolver:
-    """Resolves MediaFile -> EffectiveProfile via Profile cascade + bitrate-strategy dispatch (fixed / VBR / CRF). SRP: profile resolution only."""
+    """Resolves MediaFile -> EffectiveProfile via Profile cascade + bitrate-strategy dispatch (fixed / VBR / CRF). SRP: profile resolution only. Returns TargetResolutionCategory as a typed ResolutionTier (resolution-types.C6)."""
 
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C11
-    def __init__(self, DatabaseServiceInstance: Optional[DatabaseService] = None, CrfBitrateRepo: Optional[CrfBitrateEstimateRepository] = None):
+    def __init__(self, DatabaseServiceInstance: Optional[DatabaseService] = None, CrfBitrateRepo: Optional[CrfBitrateEstimateRepository] = None, TierRegistry: Optional[ResolutionTierRegistry] = None):
         self.DB = DatabaseServiceInstance or DatabaseService()
         self.CrfBitrateRepo = CrfBitrateRepo or CrfBitrateEstimateRepository()
+        # directive: resolution-types | # see resolution-types.C6
+        self.TierRegistry = TierRegistry or ResolutionTierRegistry()
 
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C12
     def Resolve(self, Mf: MediaFileModel) -> Optional[EffectiveProfile]:
-        """Cascade resolves the profile name (today: MediaFile.AssignedProfile denormalized cache); thresholds lookup picks the row for the source resolution; bitrate strategy fills TargetVideoKbps from fixed / VBR-percent / CRF-estimate; returns None when no profile assigned."""
+        """Cascade resolves the profile name; thresholds lookup picks the row for the source resolution; bitrate strategy fills TargetVideoKbps; returns None when no profile assigned. TargetResolutionCategory is mapped to a ResolutionTier at this boundary (resolution-types.C6)."""
         if not Mf.AssignedProfile or not Mf.ResolutionCategory:
             return None
         Row = self._LookupThresholdsRow(Mf.AssignedProfile, Mf.ResolutionCategory)
         if not Row:
             return EffectiveProfile(ProfileName=Mf.AssignedProfile, TargetVideoKbps=None, TargetAudioKbps=None, TargetResolutionCategory=None)
-        TargetResolution = Row['TargetResolution']
+        TargetResolutionStr = Row['TargetResolution']
+        TargetTier = self.TierRegistry.FromCategory(TargetResolutionStr)
         TargetAudioKbps = Row['AudioBitrateKbps'] if Row['AudioBitrateKbps'] is not None else None
-        TargetVideoKbps = self._ResolveTargetVideoKbps(Row, Mf, TargetResolution)
-        return EffectiveProfile(ProfileName=Mf.AssignedProfile, TargetVideoKbps=TargetVideoKbps, TargetAudioKbps=TargetAudioKbps, TargetResolutionCategory=TargetResolution)
+        TargetVideoKbps = self._ResolveTargetVideoKbps(Row, Mf, TargetResolutionStr)
+        return EffectiveProfile(ProfileName=Mf.AssignedProfile, TargetVideoKbps=TargetVideoKbps, TargetAudioKbps=TargetAudioKbps, TargetResolutionCategory=TargetTier)
 
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C12
     def _ResolveTargetVideoKbps(self, Row: dict, Mf: MediaFileModel, TargetResolution: Optional[str]) -> Optional[int]:

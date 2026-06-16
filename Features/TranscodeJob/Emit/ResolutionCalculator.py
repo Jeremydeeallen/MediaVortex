@@ -2,11 +2,19 @@
 from typing import Dict, Any, Optional
 
 from Core.Logging.LoggingService import LoggingService
+from Core.Resolution.Resolution import Resolution
+from Core.Resolution.ResolutionTierRegistry import ResolutionTierRegistry
+from Core.Resolution.ScalePolicy import WidthAnchoredScalePolicy
 
 
 # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C2
 class ResolutionCalculator:
-    """Pure value-computation for resolution math (target, scale filter, dims)."""
+    """Pure value-computation for resolution math (target, scale filter, dims). CalculateScaleFilter is now a thin facade over WidthAnchoredScalePolicy (resolution-types.C4)."""
+
+    # directive: resolution-types | # see resolution-types.C4
+    def __init__(self, Registry: Optional[ResolutionTierRegistry] = None, Policy: Optional[WidthAnchoredScalePolicy] = None):
+        self._Registry = Registry
+        self._Policy = Policy or WidthAnchoredScalePolicy()
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C2
     def CalculateTargetResolution(self, ProfileSettings: Dict[str, Any], SourceResolution: str) -> str:
@@ -14,26 +22,39 @@ class ResolutionCalculator:
         Target = ProfileSettings.get('TargetResolution')
         return Target if Target else SourceResolution
 
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C2
+    # directive: resolution-types | # see resolution-types.C4
     def CalculateScaleFilter(self, SourceResolution: str, TargetResolution: str, MediaFile, ProfileSettings: Optional[Dict[str, Any]] = None) -> Optional[str]:
-        """Emit width-anchored scale=w=<TierWidth>:h=-2 (letterbox-safe; codec-legal even height)."""
+        """Backward-compat facade. Prefers MediaFile.Resolution (exact pixels) over the category SourceResolution so off-canonical letterbox sources (e.g. 1916x1040) classify as their true tier. Delegates the decision to WidthAnchoredScalePolicy."""
         try:
-            if SourceResolution == TargetResolution:
+            Reg = self._RegistryRef()
+            if Reg is None:
                 return None
-            from Services.ResolutionService import ResolutionService
-            ResolutionServiceInstance = ResolutionService()
-            StandardizedTarget = ResolutionServiceInstance.StandardizeResolution(TargetResolution)
-            TargetHeight = self.ExtractHeightFromResolution(StandardizedTarget)
-            StandardTargetHeight = ResolutionServiceInstance.GetStandardHeight(TargetHeight)
-            TierWidth = {2160: 3840, 1080: 1920, 720: 1280, 480: 854}.get(StandardTargetHeight)
-            if TierWidth is None:
-                return None
-            return f"scale=w={TierWidth}:h=-2"
-        except Exception as e:
+            SourceInput = self._BestSourceInput(MediaFile, SourceResolution)
+            SourceRes = Resolution.FromAny(SourceInput, Registry=Reg)
+            TargetTier = Reg.FromCategory(TargetResolution)
+            Decision = self._Policy.Decide(SourceRes, TargetTier)
+            return Decision.AsFfmpegArg() if Decision is not None else None
+        except Exception as Ex:
             LoggingService.LogException(
-                "Exception calculating scale filter", e, "CalculateScaleFilter", "ResolutionCalculator"
+                "Exception calculating scale filter", Ex, "CalculateScaleFilter", "ResolutionCalculator"
             )
             return None
+
+    # directive: resolution-types | # see resolution-types.C4
+    def _RegistryRef(self) -> Optional[ResolutionTierRegistry]:
+        if self._Registry is None:
+            self._Registry = ResolutionTierRegistry()
+        return self._Registry
+
+    @staticmethod
+    # directive: resolution-types | # see resolution-types.C4
+    def _BestSourceInput(MediaFile, SourceResolution: str):
+        """Prefer MediaFile.Resolution (raw WxH) over the legacy category string when available -- exact pixels classify off-canonical sources correctly (e.g. 1916x1040 -> T1080p)."""
+        if MediaFile is not None:
+            ExactPixels = getattr(MediaFile, 'Resolution', None)
+            if isinstance(ExactPixels, str) and 'x' in ExactPixels:
+                return ExactPixels
+        return SourceResolution
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C2
     def ExtractHeightFromResolution(self, Resolution: str) -> int:
