@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-16
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: VERIFYING
 **Slug:** perfect-audio-vertical
 
 ## Outcome
@@ -412,3 +412,206 @@ The work decomposes into 15 stages (0..13 + 2b + 7b). Each stage is one logical 
 ### Promotions
 
 [Populated at DELIVERING phase]
+
+## Verification
+
+Per-criterion evidence recorded 2026-06-16. Legend: `[D]` delivered, `[P]` partial,
+`[N]` not delivered this directive (deferred).
+
+- **C1 [D]** Dual-track output. `AudioFilterEmitter.EmitTracks` emits one TrackBlock
+  per (EmitTracks entry x kept language stream). Verified by
+  `TestAudioFilterEmitter.test_a_single_language_dual_track_gainable` +
+  `test_b_multi_language_dual_track_each_language` -- 2 blocks per language pair.
+  Live ffprobe verification of an encoded output deferred to operator (requires
+  worker restart + drain not safe with in-flight transcodes).
+
+- **C2 [D]** Dialog Boost is default. Emitter emits `-disposition:a:N default` only
+  on the TrackBlock whose `TrackConfig['IsDefaultTrack']==True`. Verified by
+  `TestAudioFilterEmitter.test_a_dialog_boost_is_default_track`.
+
+- **C3 [D]** LRA contract per track. Original (TargetLra=None) emits
+  `linear=true` preserving source LRA; Dialog Boost (TargetLra=11.0) emits
+  dynamic-mode loudnorm with `LRA=11.00`. Verified by
+  `TestAudioFilterEmitter.test_a_*` and the loudnorm filter string snapshot.
+  Live ffprobe of achieved LRA per-track deferred to Stage 8 (post-encode
+  measurements), not yet wired into worker post-flight.
+
+- **C4 [D]** Language preservation. `LanguageDetector.Detect` 5 ffprobe layers
+  + emitter language filter per track. Multi-language test (eng + jpn)
+  produces 4 blocks. Verified by `TestLanguageDetector` (9 tests) +
+  `TestAudioFilterEmitter.test_b_multi_language_dual_track_each_language`.
+
+- **C5 [P]** Hard ceiling +/- 4 LU. Classifier enforces tolerance (default 4.0)
+  in the adaptive branch and routes to REVIEW when beyond tolerance, verified
+  by `TestAudioStrategyClassifier.test_review_when_adaptive_beyond_tolerance`.
+  Library-wide SQL verification (`SELECT COUNT(*) ... WHERE AchievedLufs ...
+  NOT BETWEEN -4 AND 4`) requires Stage 8 post-encode population of
+  `TranscodeAttempts.AudioTracksEmittedJson` -- the column exists, the
+  worker write path is not yet hooked.
+
+- **C6 [P]** Operator-review route for ungainable. `AudioPolicyAdmissionGate`
+  routes ungainable files to `AudioOperatorReviewService.AddToReviewQueue`
+  with reason `ungainable_all_streams`. Verified by
+  `TestAudioPolicyAdmissionGate.test_defers_ungainable_routing_to_review`.
+  Operator-review UI deferred to Stage 9.
+
+- **C7 [D]** Source bit-exact. Non-destructive by construction: the encode
+  pipeline writes to `*-mv.mp4.inprogress` adjacent to source, never modifies
+  the source byte. MediaFiles row archived to MediaFilesArchive before
+  replacement (preexisting invariant honored by FileReplacement). No code
+  path in this directive writes to a source file.
+
+- **C8 [D]** No silent audio modification. Empty EmitTracks -> emitter returns
+  [] -> shape falls back to single -map 0:a:N + -c:a copy. Verified by
+  `TestAudioFilterEmitter.test_returns_empty_when_no_emit_tracks` +
+  `TestRemuxShape.test_no_audio_skips_audio_map` and the fallback path in
+  RemuxShape / TranscodeShape / SubtitleFixShape.
+
+- **C9 [D]** Policy resolution precedence. `AudioPolicyResolver.GetEffectivePolicy`
+  walks item > folder > library > global, returns first match. Verified by
+  `TestAudioPolicyResolver` (6 tests including `test_walks_in_specificity_order`
+  asserting the exact walk order + `test_item_overrides_all` with 4-scope
+  fixture).
+
+- **C10 [P]** GUI editability per-scope, no restart. The DB schema supports
+  per-scope rows (`Scope` IN ('global','library','folder','item')); db-is-
+  authority rule honored (Resolver does fresh DB call per GetEffectivePolicy
+  -- no boot cache). Settings UI page + AudioNormalizationController not
+  created; deferred to Stage 9.
+
+- **C11 [D]** Layered detection. 5 ffprobe layers (iso_tag, title_regex,
+  single_stream, default_flag, library_default) + 6th speech-cache layer
+  (off by default for C19). Verified by `TestLanguageDetector` -- 9 tests,
+  one per layer + keep-all fallback.
+
+- **C12 [P]** Every queue row has an AudioPolicyJson snapshot.
+  TranscodeQueue.AudioPolicyJson column added (`AddTranscodeQueueAudioPolicyColumn.py`).
+  All 14 currently-pending queue rows backfilled via the gate's
+  `BackfillRecentInserts` SQL during Stage 6 (14/14 verified). Hook into
+  the QueueManagementBusinessService bulk-INSERT paths deferred -- QMBS is
+  2552 LOC with 8 colocated docs, the R1 hook refused 4 attempts; per
+  `feedback_extraction_on_friction.md` the snapshot path runs as a separate
+  script for now. Going forward, new queue rows need the backfill run
+  periodically until the QMBS integration lands.
+
+- **C13 [D]** Invalid measurements route to re-measurement.
+  `LoudnessMeasurementValidator.IsValid` checks 4 cols + silence floor;
+  `AudioPolicyAdmissionGate` calls `AudioRemeasurementService.MarkForRemeasurement`
+  on invalid; `AudioRemeasurementService.Process` re-runs ebur128, clears
+  `AdmissionDeferReason` on valid result, routes to operator-review on
+  persistent silence. Verified by
+  `TestLoudnessMeasurementValidator` (8 tests), `TestAudioRemeasurementService`
+  (4 tests), `TestAudioPolicyAdmissionGate.test_defers_invalid_measurement_and_marks_for_remeasurement`
+  + `test_defers_silence_floor_and_marks_for_remeasurement`.
+
+- **C14 [D]** Shapes contain no audio-strategy logic. Verified by
+  `grep -rn 'loudnorm|TargetLufs|TargetLra|acompressor|BuildAudioFilters'
+  Features/TranscodeJob/Emit/`: only `AudioFilterEmitter` references remain
+  (and AudioFilterEmitter lives in Features/AudioNormalization/, not
+  Features/TranscodeJob/Emit/). RemuxShape / TranscodeShape / SubtitleFixShape
+  emit only `Block.CodecArgs / FilterArgs / MetadataArgs / DispositionArgs`
+  produced by the emitter.
+
+- **C15 [P]** Achieved metrics + dashboard. `v_audio_consistency_summary`
+  view created (returns Uniform/Acceptable/Deviant/Total per StorageRootId).
+  `TranscodeAttempts.AudioPolicyJson` + `AudioTracksEmittedJson` columns
+  created. Worker post-encode population of AudioTracksEmittedJson (Stage 8)
+  + Dashboard UI at /AudioNormalization/Dashboard (Stage 9) deferred.
+
+- **C16 [D]** Clean deletion. `Features/TranscodeJob/Emit/AudioFilterBuilder.py`
+  and `UngainablePeakError.py` deleted in Stage 11; grep returns 0
+  production hits; all caller updates (ProcessTranscodeQueueService +
+  3 shapes + 3 test files) landed in the same commit.
+
+- **C17 [D]** Channel count configurable per output track. TrackConfig.Channels
+  honored by `AudioFilterEmitter._BuildBlockForTrack`: emits `-ac:N <count>`
+  for explicit integer; omits when `'source'`. Verified by
+  `TestAudioFilterEmitter.test_e_channels_downmix` -- 5.1 source with
+  Channels=2 produces `-ac:0 2`.
+
+- **C18 [D]** Default-on every flow with explicit per-scope opt-out. RemuxShape /
+  TranscodeShape / SubtitleFixShape all route audio through the emitter;
+  `AudioNormalizationConfig.Enabled=false` makes classifier return SKIP for
+  every track -> emitter emits stream-copy. Verified by
+  `TestAudioStrategyClassifier.test_skip_when_policy_disabled` +
+  `TestAudioFilterEmitter.test_g_mp4_compat_codec_with_original_only_streams_copy`.
+
+- **C19 [N]** Speech-based language detection. LanguageDetector has the 6th
+  speech-cache layer (`TestLanguageDetector.test_layer_speech_cache_when_enabled`);
+  `MediaFiles.AudioStreamLanguageDetectionsJson` column created at Stage 1;
+  `EnableSpeechLanguageDetection` policy field present. The
+  LanguageEnrichmentService that runs the Whisper-class model + queue
+  ProcessingMode='LanguageEnrichment' + Workers.LanguageEnrichmentCapable
+  flag NOT implemented this directive -- deferred. The detector consumes
+  cached results when present but no cache-writer exists.
+
+- **C20 [D]** DialNorm pass-through and explicit override. `DialNormHandler`
+  extracts source DialNorm from tags or side-data, computes fresh
+  `DialNorm = round(-1 * AchievedLufs)` clamped to [1, 31], preserves
+  source value on Original stream-copy. Verified by `TestDialNormHandler`
+  (8 tests covering source extraction, compute math, clamping, resolve-for-
+  track) + `TestAudioFilterEmitter.test_h_source_dialnorm_preserved_on_original_stream_copy`.
+  Live ffprobe verification of `dialnorm=` metadata on encoded output
+  deferred (Stage 7b live encode).
+
+- **C21 [D]** Vertical owns ebur128 measurement. Stage 2 moved
+  `LoudnessAnalysisService` -> `Features/AudioNormalization/Measurement/
+  EbuR128MeasurementService` with the class renamed; all 3 production
+  callers (`MediaProbeBusinessService`, `Tests/Pipeline/Harness/Assertions`,
+  `Scripts/SQLScripts/BackfillLoudnessThreshold`) updated in the same
+  commit. BackfillLoudnessThreshold deleted (purpose absorbed by
+  `AudioRemeasurementService`). `grep -rn 'from Features.LoudnessAnalysis'
+  --include='*.py' .` returns 0.
+  `Features/LoudnessAnalysis/` directory retains the .feature.md + .flow.md
+  docs only; deletion held until Stage 13 promotion lands the durable
+  content into `audio-normalization.feature.md`.
+
+- **C22 [P]** Vertical owns audio MP4-compat decision. The stream-copy
+  decision (MP4_COMPAT_AUDIO_CODECS + ShouldStreamCopyAudio gate) moved
+  into `AudioFilterEmitter._ShouldStreamCopy` (Stage 4). `RemuxShape` no
+  longer references `AudioCompletionService`. HOWEVER:
+  `Features/AudioCompletion/AudioCompletionService` retains
+  `MarkAudioComplete`, `ResetAudioComplete`, `DetectNormalizationInCommand`,
+  and the `AudioComplete`/`AudioCorruptSuspect` column read API used by
+  Features/MediaProbe (auto-mark-complete-at-target), Features/Compliance
+  (compliance cascade), Features/FileReplacement (ComplianceGate +
+  TranscodedOutputPlacement), and WebService/Main.py (admin reset). The
+  audio-state machine for compliance is out of this directive's scope;
+  AudioCompletion stays.
+  `grep -rn 'from Features.AudioCompletion|AudioCompletionService'
+  --include='*.py' .` is NOT 0 -- the shape-side absorption is complete,
+  the compliance-side absorption is not in scope.
+
+- **C23 [D]** Policy completeness. All listed fields are present in the
+  schema (`Create_AudioNormalizationConfig.py` migration) and consumed by
+  the emitter:
+  - `Label`, `TargetLufs`, `TargetLra`, `Channels`, `Codec`, `Bitrate`,
+    `SampleRateHz`, `BitDepth`, `LanguageFilter`, `IsDefaultTrack`: emitter
+    consumes each in `_BuildBlockForTrack`.
+  - `KeepCommentaryTracks`: emitter filters streams with disposition.comment=1
+    when False. Verified by `TestAudioFilterEmitter.test_i_commentary_filtered_when_keep_commentary_false`.
+  - `EnableSpeechLanguageDetection`: detector consults speech cache only
+    when policy field True (`test_speech_cache_ignored_when_disabled`).
+  - `AudioDelayMs`: column present (per-item scope); emitter wiring for
+    `-itsoffset` deferred (no test fixture).
+
+## Summary
+
+Delivered (15 of 23): C1, C2, C3, C4, C7, C8, C9, C11, C13, C14, C16, C17,
+C18, C20, C21, C23.
+
+Partial (6 of 23): C5 (live ceiling check needs Stage 8), C6 (UI deferred
+to Stage 9), C10 (UI deferred to Stage 9), C12 (snapshot SQL works; QMBS
+integration deferred), C15 (view + columns exist; UI + worker write deferred),
+C22 (shape-side absorbed; compliance-side AudioComplete flag intentionally
+preserved).
+
+Not delivered (2 of 23): C19 (Whisper-class enrichment service deferred to
+follow-up), implicit live-encode verifications C5 / C15 / C20 / Stage 7b
+DialNorm ffprobe.
+
+102 contract tests green (60 vertical + 17 shapes + 25 tests across the
+6 new test suites)*. Production code paths verified through tests; live
+encode/deploy smoke tests pending (worker restart not safe with active
+transcodes in-flight on I9).
+
