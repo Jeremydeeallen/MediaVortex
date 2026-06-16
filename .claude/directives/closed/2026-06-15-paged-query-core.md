@@ -4,7 +4,8 @@
 **Activated:** 2026-06-14
 **Reopened:** 2026-06-14 -- SRP strict re-implementation: split QueryFilter.py (7 classes) and Exceptions.py (2 classes) into one-class-per-file, per C2's literal verification.
 **Reopened:** 2026-06-15 -- premature close: 13/13 narrow criteria green, but the goal this directive serves (1.17GB browser memory) has not moved. Operator correction: "I can't have you closing directives when they aren't finished." Directive stays open until at least one consumer (the table-renderer-service when it lands, or a sooner-shipped tightening of the default PageSize plus frontend adoption) actually reduces a payload the browser holds in memory.
-**Status:** Active -- phase: IMPLEMENTING
+**Closed:** 2026-06-15 -- goal reached: table-renderer-service shipped + operator measured 99MB on /ShowSettings (12x reduction from 1.17GB).
+**Status:** Closed
 **Slug:** paged-query-core
 
 ## Outcome
