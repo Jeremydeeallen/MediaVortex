@@ -200,8 +200,8 @@ class AudioFilterEmitter:
             Block.FilterArgs = [f'-filter:a:{OutputIndex}', Filter]
 
         Block.MetadataArgs = [
-            f'-metadata:s:a:{OutputIndex}', f'language={Language}',
-            f'-metadata:s:a:{OutputIndex}', f'title={Label}',
+            f'-metadata:s:a:{OutputIndex}', f'"language={Language}"',
+            f'-metadata:s:a:{OutputIndex}', f'"title={Label}"',
         ]
 
         SourceDialNorm = self.DialNormHandler.GetSourceDialNorm(Stream)
@@ -209,7 +209,7 @@ class AudioFilterEmitter:
         DialNorm = self.DialNormHandler.ResolveForTrack(Strategy, SourceDialNorm, IsOriginalCopy)
         if DialNorm is not None:
             Block.MetadataArgs += [
-                f'-metadata:s:a:{OutputIndex}', f'dialnorm={DialNorm}',
+                f'-metadata:s:a:{OutputIndex}', f'"dialnorm={DialNorm}"',
             ]
 
         if bool(TrackConfig.get('IsDefaultTrack')):
