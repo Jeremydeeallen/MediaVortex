@@ -20,7 +20,7 @@ Owns the ffmpeg argv construction for every job type the worker can run. Decompo
 
 C1. **CommandSpec is a typed frozen value object.** `Features/TranscodeJob/Emit/CommandSpec.py` defines `@dataclass(frozen=True) class CommandSpec(Command: str, OutputPath: str)`. Every EncodeShape.Build that returns a non-None result returns a CommandSpec, not a dict. Verifiable: `Tests/Contract/TestCommandSpec.py` 3/3 pass.
 
-C2. **ResolutionCalculator owns target-resolution + scale-filter math.** Pure value computation, no DB, no logging, no class state beyond the methods. `Tests/Contract/TestResolutionCalculator.py` covers tier conversion (480p/720p/1080p/2160p), height extraction from `WxH` strings, width-from-height calculation with aspect ratio.
+C2. **ResolutionCalculator owns target-resolution + scale-filter math.** Pure value computation, no DB, no logging, no class state beyond the methods. `CalculateScaleFilter` is now a thin facade over `WidthAnchoredScalePolicy` (see `resolution-types.C3`): it builds a `Resolution` via `Resolution.FromAny`, resolves the target tier via `ResolutionTierRegistry.FromCategory`, and emits `Decision.AsFfmpegArg()` (or `None`). `Tests/Contract/TestResolutionCalculator.py` covers tier conversion (480p/720p/1080p/2160p), height extraction from `WxH` strings, width-from-height calculation with aspect ratio.
 
 C3. **OutputFilenameBuilder owns filename + path normalization.** Replaces 5 methods that were duplicated between CommandBuilder and ProcessTranscodeQueueService. `-mv.mp4.inprogress` convention preserved. `-mv-mv` collapse via `CollapseMvSuffix`. Verifiable: `Tests/Contract/TestOutputFilenameBuilder.py`.
 

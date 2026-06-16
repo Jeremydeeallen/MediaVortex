@@ -55,6 +55,8 @@ The contract that survives directive close:
 
 9. **[BUG-0062] SQL CHECK constraint (Layer 3).** `MediaFiles` carries a CHECK constraint `chk_compliance_consistency` enforcing the C6 three-way disjunction at storage. INSERT/UPDATE that would violate the invariant raises `CheckViolation` (`psycopg2.errors.CheckViolation`, SQLSTATE `23514`). Rollback is single-statement: `ALTER TABLE MediaFiles DROP CONSTRAINT chk_compliance_consistency;`. Verifiable: `SELECT conname FROM pg_constraint WHERE conname='chk_compliance_consistency'` returns one row; a synthetic UPDATE setting (`IsCompliant=TRUE, WorkBucket='Transcode'`) raises `CheckViolation`.
 
+10. **Typed `ResolutionTier` flows through the compliance vertical.** `EffectiveProfile.TargetResolutionCategory` is `Optional[ResolutionTier]`, not `str` -- the resolver (`EffectiveProfileResolver`) maps profile-threshold strings to a typed tier at a single boundary via the injected `ResolutionTierRegistry`. `TranscodeOperation` reasons about upscale + resolution-exceeds via `Tier.Rank` comparisons; the legacy inline `_RES_HEIGHTS` height-table is gone. Tier definitions live in the `ResolutionTiers` DB table (data-driven; see `resolution-types` feature doc, C5+C6). Verifiable: `Tests/Contract/TestComplianceEngine.py::TestOperations` (8 cases) green; `EffectiveProfile.py` field annotation; zero `_HeightOf`/`_RES_HEIGHTS` references in `Features/Compliance/`.
+
 ## Seams
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |

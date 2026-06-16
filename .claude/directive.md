@@ -1,7 +1,7 @@
 # Resolution Types -- typed value objects + ScalePolicy (eliminates string-heterogeneity bug)
 
 **Set:** 2026-06-15
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** resolution-types
 **Interrupts:** table-renderer-service (paused 2026-06-15), quality-floor-lift (paused 2026-06-15 at 45278eb)
 **Bug:** Live -- Men in Black II (MF 621554) 2026-06-15: 81.6% reduction discarded because the encoded output wasn't downscaled.
@@ -180,7 +180,7 @@ Tests live under `Tests/Contract/`; R1 does not apply (no colocated doc by conve
 | AC7 | Live invocation against actual MF 621554 via `ResolutionCalculator().CalculateScaleFilter('1916x1040', '720p', mf)` -> `'scale=w=1280:h=-2'`. Dedicated `test_mib_ii_regression_1916x1040_to_720p` in TestScalePolicy.py also green. | Claude / I9 | 2026-06-15 | PASS |
 | AC8 | `grep -rEn "SourceResolution\s*==\|TargetResolution\s*==" --include='*.py' Features/TranscodeJob/Emit/ Features/Compliance/ Core/Resolution/` -> 1 match: `OutputFilenameBuilder.py:20` (filename-token equality, NOT scale-decision; documented as out-of-scope per directive's "filename ... untouched" Out-of-Scope clause). Zero matches in the scale-decision call chain. | Claude / I9 | 2026-06-15 | PASS (filename match documented) |
 | AC9 | TestResolutionTier::test_new_tier_added_via_db_only proves OCP: an additional row in the `ResolutionTiers` table (T1440p) is enough; no edits to `ResolutionCalculator`, `ScalePolicy`, `TranscodeOperation`, or `EffectiveProfileResolver` were needed for the test to pass. | Claude / I9 | 2026-06-15 | PASS |
-| AC10 | Library recompute: `POST /api/Compliance/Recompute {"MediaFileIds":[621554]}` -> `Bucketed.Transcode=1`. MF 621554 enqueued as job 140073 priority 200. Live re-encode pending I9 slot free-up (currently 2/2 slots busy with jobs 139952, 139963). Direct live-stack invocation already verified `'scale=w=1280:h=-2'`. Full FileReplaced=TRUE will land on first I9 claim. | Claude / I9 | 2026-06-15 | IN PROGRESS (pending I9 slot) |
+| AC10 | Library recompute: `POST /api/Compliance/Recompute {"MediaFileIds":[621554]}` -> `Bucketed.Transcode=1`. MF 621554 enqueued (140074 prio 200) -> claimed by I9-2024 as TranscodeAttempt 37754. Live FFmpeg argv contains `-vf "scale=w=1280:h=-2"` (root-cause fix in EncoderKnobRepository._NormalizeResolution + Resolution/ScalePolicy chain). Encode completed in 11 min: output `1280x694` (cinematic 1.85:1 preserved), `Codec=av1`, `SizeMB=466` (was 2732 MB; 82.94% reduction), `IsCompliant=True`, `TranscodedByMediaVortex=True`, `FileReplaced=TRUE`, `Disposition=BypassReplace/QualityTestingGloballyDisabled`. | Claude / I9 | 2026-06-15 | PASS |
 | AC11 | `py -m pytest Tests/Contract/ -k 'Resolution or Compliance or Transcode' --ignore=...(3 flask-controller tests that can't import in pytest venv) --tb=line` -> 158 passed, 1 skipped, 1 xfailed. The single non-resolution failure (`TestPathDbRoundTripAllTables::test_transcodeattempts_round_trip`) is pre-existing from earlier `failure-accounting` directive (MediaFileId NOT NULL); reproduced with my changes stashed -- not a regression. | Claude / I9 | 2026-06-15 | PASS (with documented pre-existing failure) |
 | AC12 | `py Scripts/SQLScripts/AddResolutionTiersTable.py` is idempotent (CREATE TABLE IF NOT EXISTS + INSERT ON CONFLICT DO NOTHING via UNIQUE(Name)). Re-running is a no-op (verified). Rollback DDL: `DROP TABLE ResolutionTiers;` (one statement, no dependencies). No existing column dropped. | Claude / I9 | 2026-06-15 | PASS |
 | AC13 | Tunable per-instance: `ResolutionTierRegistry` builds a fresh snapshot per `__init__`; per-call instances pick up tier-table UPDATEs immediately (no service restart). `TestRegistryDataDriven::test_custom_threshold_takes_effect` proves a different MinLongEdge changes classification without any code change. | Claude / I9 | 2026-06-15 | PASS |
@@ -188,12 +188,11 @@ Tests live under `Tests/Contract/`; R1 does not apply (no colocated doc by conve
 
 ### Promotions
 
-(Populated at DELIVERING.)
-
 | Source artifact in directive | Target file | Commit |
 |---|---|---|
-| AC1-AC3 architecture (Resolution + ResolutionTier + ScalePolicy) | `Core/Resolution/resolution-types.feature.md` C1-C3 (new file at DELIVERING) | -- |
-| AC4 facade pattern | `Features/TranscodeJob/Emit/encode-emit.feature.md` C2 retag | -- |
-| AC5-AC6 compliance integration | `Features/Compliance/compliance.feature.md` C5 retag | -- |
-| AC5-AC6 cross-stage seam (typed Resolution flows ST<n>->ST<m>) | `transcode.flow.md` `## Seams` new row | -- |
-| AC11 CI tests | `Tests/Contract/TestResolution.py`, `TestResolutionTier.py`, `TestScalePolicy.py` (files are the artifact) | -- |
+| AC1-AC3 architecture (Resolution + ResolutionTier + ScalePolicy) + AC9 OCP + AC13 tunable + AC14 max-edge | `Core/Resolution/resolution-types.feature.md` (new) C1-C10 + S1-S5 | DELIVERING commit |
+| AC4 facade pattern | `Features/TranscodeJob/Emit/encode-emit.feature.md` C2 -- amended to cite typed delegation | DELIVERING commit |
+| AC5-AC6 compliance integration | `Features/Compliance/compliance.feature.md` -- new criterion 10 (typed `ResolutionTier` through compliance vertical) | DELIVERING commit |
+| AC5-AC6 + AC10 cross-stage typed-resolution seam | `transcode.flow.md` `## Seams` new row S6 | DELIVERING commit |
+| AC11 CI tests (artifacts are the files themselves) | `Tests/Contract/TestResolution.py`, `TestResolutionTier.py`, `TestScalePolicy.py`, `TestEncoderKnobNormalizeResolution.py` | 957578e + 8d5fb3a |
+| AC2/AC13 schema migration (artifact is the file itself) | `Scripts/SQLScripts/AddResolutionTiersTable.py` | 957578e |
