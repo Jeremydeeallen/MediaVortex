@@ -12,7 +12,7 @@ class ComplianceGatesRepository(BaseRepository):
     def Get(self) -> ComplianceGatesModel:
         """Read the Id=1 row fresh per call; fall back to dataclass defaults if missing."""
         try:
-            Rows = self.ExecuteQuery("SELECT Id, RequireExplicitEnglishAudio, BlockOnAudioCorruptSuspect, RequireAudioStream, RequireLoudnessMeasurements, RequireProbeMetadata, RequireEffectiveProfile, RequireResolutionCategory, RequireProfileThresholds, LastUpdated FROM ComplianceGates WHERE Id = 1")
+            Rows = self.ExecuteQuery("SELECT Id, RequireExplicitEnglishAudio, BlockOnAudioCorruptSuspect, RequireAudioStream, RequireLoudnessMeasurements, RequireProbeMetadata, RequireEffectiveProfile, RequireResolutionCategory, RequireProfileThresholds, BlockOnAudioPolicyDeferred, LastUpdated FROM ComplianceGates WHERE Id = 1")
             if not Rows:
                 LoggingService.LogWarning("ComplianceGates row Id=1 missing -- returning defaults; run AddComplianceRuleTables.py", "ComplianceGatesRepository", "Get")
                 return ComplianceGatesModel()
@@ -27,6 +27,7 @@ class ComplianceGatesRepository(BaseRepository):
                 RequireEffectiveProfile=R['RequireEffectiveProfile'],
                 RequireResolutionCategory=R['RequireResolutionCategory'],
                 RequireProfileThresholds=R['RequireProfileThresholds'],
+                BlockOnAudioPolicyDeferred=R.get('BlockOnAudioPolicyDeferred', True),
                 LastUpdated=R.get('LastUpdated'),
             )
         except Exception as Ex:

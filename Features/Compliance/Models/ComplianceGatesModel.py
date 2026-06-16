@@ -15,4 +15,5 @@ class ComplianceGatesModel:
     RequireEffectiveProfile: bool = True
     RequireResolutionCategory: bool = True
     RequireProfileThresholds: bool = True
+    BlockOnAudioPolicyDeferred: bool = True
     LastUpdated: Optional[datetime] = None

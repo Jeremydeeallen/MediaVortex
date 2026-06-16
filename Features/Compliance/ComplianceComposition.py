@@ -12,6 +12,7 @@ from Features.Compliance.Gates.EnglishAudioGate import EnglishAudioGate
 from Features.Compliance.Gates.AudioCorruptSuspectGate import AudioCorruptSuspectGate
 from Features.Compliance.Gates.AudioStreamGate import AudioStreamGate
 from Features.Compliance.Gates.LoudnessMeasurementsGate import LoudnessMeasurementsGate
+from Features.Compliance.Gates.AudioPolicyDeferredGate import AudioPolicyDeferredGate
 from Features.Compliance.Gates.ProbeMetadataGate import ProbeMetadataGate
 from Features.Compliance.Gates.EffectiveProfileGate import EffectiveProfileGate
 from Features.Compliance.Gates.ResolutionCategoryGate import ResolutionCategoryGate
@@ -34,6 +35,7 @@ def BuildEvaluator() -> ComplianceEvaluator:
         ResolutionCategoryGate(),
         ProfileThresholdsGate(),
         LoudnessMeasurementsGate(),
+        AudioPolicyDeferredGate(),
     ]
     Operations = [
         TranscodeOperation(),

@@ -201,6 +201,30 @@ class ActivityRepository(BaseRepository):
         )
         return {R['Reason']: R['N'] for R in Rows}
 
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C6
+    def GetAudioNormalizationBreakdown(self) -> Dict[str, int]:
+        """Return per-AdmissionDeferReason counts owned by the audio-normalization vertical."""
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT "
+            "SUM(CASE WHEN AdmissionDeferReason IS NULL THEN 1 ELSE 0 END) AS Admitted, "
+            "SUM(CASE WHEN AdmissionDeferReason = 'invalid_loudness_measurement' THEN 1 ELSE 0 END) AS InvalidMeasurement, "
+            "SUM(CASE WHEN AdmissionDeferReason = 'ungainable_all_streams' THEN 1 ELSE 0 END) AS Ungainable, "
+            "SUM(CASE WHEN AdmissionDeferReason = 'operator_review_pending' THEN 1 ELSE 0 END) AS OperatorReview, "
+            "SUM(CASE WHEN AdmissionDeferReason = 'awaiting_speech_enrichment' THEN 1 ELSE 0 END) AS AwaitingSpeech, "
+            "SUM(CASE WHEN AdmissionDeferReason IS NOT NULL AND AdmissionDeferReason NOT IN ('invalid_loudness_measurement', 'ungainable_all_streams', 'operator_review_pending', 'awaiting_speech_enrichment') THEN 1 ELSE 0 END) AS OtherDeferred "
+            "FROM MediaFiles"
+        )
+        return dict(Rows[0]) if Rows else {}
+
+    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C15
+    def GetAudioConsistencyBands(self) -> List[Dict]:
+        """Return v_audio_consistency_summary rows for the Activity dashboard."""
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT LibraryId, UniformCount, AcceptableCount, DeviantCount, TotalCount "
+            "FROM v_audio_consistency_summary ORDER BY LibraryId"
+        )
+        return [dict(R) for R in Rows] if Rows else []
+
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
     def GetLoudnessBreakdown(self) -> Dict[str, int]:
         """Return {Measured, Unmeasured, OnTarget, OffTarget, WideLRA} loudness distribution."""

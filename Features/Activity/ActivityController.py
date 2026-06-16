@@ -48,6 +48,8 @@ def LibraryCompliance():
             'Audio': Repo.GetAudioCompleteBreakdown(),
             'SuspectByReason': Repo.GetSuspectByReason(),
             'Loudness': Repo.GetLoudnessBreakdown(),
+            'AudioNormalization': Repo.GetAudioNormalizationBreakdown(),
+            'AudioConsistencyBands': Repo.GetAudioConsistencyBands(),
         })
     except Exception as Ex:
         LoggingService.LogException(

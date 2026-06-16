@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-16
-**Status:** Closed 2026-06-16 PM
+**Status:** Active -- phase: IMPLEMENTING -- (reopened: audio-vertical-compliance-and-activity)
 
 ## Delivery Report
 
