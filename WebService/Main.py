@@ -442,6 +442,7 @@ class WebServiceApp:
         from Features.FailureTracking.FailureTrackingController import FailureTrackingBlueprint
         from Features.ShowSettings.ShowSettingsController import ShowSettingsBlueprint
         from Features.AudioCompletion.AudioCompletionController import AudioCompletionBlueprint
+        from Features.AudioNormalization.AudioNormalizationController import BuildBlueprint as BuildAudioNormalizationBlueprint
         from Features.Activity.ActivityController import ActivityBlueprint
         from Features.TranscodeQueue.AudioFixPriorityHintsController import AudioFixPriorityHintsBlueprint
         from Features.Compliance.ComplianceController import ComplianceBlueprint
@@ -451,6 +452,7 @@ class WebServiceApp:
         # Register all blueprints
         self.App.register_blueprint(ShowSettingsBlueprint)
         self.App.register_blueprint(AudioCompletionBlueprint)
+        self.App.register_blueprint(BuildAudioNormalizationBlueprint())
         self.App.register_blueprint(ActivityBlueprint)
         self.App.register_blueprint(AudioFixPriorityHintsBlueprint)
         self.App.register_blueprint(ServiceControlBlueprint)
