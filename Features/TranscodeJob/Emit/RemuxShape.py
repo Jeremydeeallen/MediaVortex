@@ -2,22 +2,26 @@ import os
 from typing import Optional, Dict, Any
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalDirname, LocalSamePath
-from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
+from Features.AudioNormalization.AudioFilterEmitter import AudioFilterEmitter
+from Features.AudioNormalization.AudioPolicyResolver import AudioPolicyResolver
 from Features.TranscodeJob.Emit.CommandSpec import CommandSpec
 from Features.TranscodeJob.Emit.EncodeShape import EncodeShape
 
 
-# directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
+# directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
 class RemuxShape(EncodeShape):
-    """Builds ffmpeg argv for container-swap jobs; always emits -f mp4 + -movflags +faststart."""
+    """Builds ffmpeg argv for container-swap jobs; always emits -f mp4 + -movflags +faststart; audio goes through AudioFilterEmitter."""
 
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
-    def __init__(self, OutputFilenameBuilder, AudioCodecArgsBuilder, AudioFilterBuilder, MediaProbeAdapter):
-        """Inject minimal collaborators needed for remux (no video filter or codec assembler)."""
+    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
+    def __init__(self, OutputFilenameBuilder, AudioCodecArgsBuilder, AudioFilterBuilder, MediaProbeAdapter,
+                 Resolver=None, Emitter=None):
+        """Inject collaborators; legacy AudioFilterBuilder kept for backward compat, ignored by audio path."""
         self.OutputFilenameBuilder = OutputFilenameBuilder
         self.AudioCodecArgsBuilder = AudioCodecArgsBuilder
         self.AudioFilterBuilder = AudioFilterBuilder
         self.MediaProbeAdapter = MediaProbeAdapter
+        self.Resolver = Resolver or AudioPolicyResolver()
+        self.Emitter = Emitter or AudioFilterEmitter()
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
     def Build(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[CommandSpec]:
@@ -62,9 +66,6 @@ class RemuxShape(EncodeShape):
 
             HasAudio = CommandData.get('HasAudio', True)
             CommandParts.extend(['-map', '0:v:0'])
-            if HasAudio:
-                AudioStreamIndex = CommandData.get('AudioStreamIndex', 0)
-                CommandParts.extend(['-map', f'0:a:{AudioStreamIndex}'])
 
             CommandParts.extend(['-c:v', 'copy'])
 
@@ -73,26 +74,20 @@ class RemuxShape(EncodeShape):
                 CommandParts.extend(['-tag:v', 'hvc1'])
 
             if HasAudio:
-                if AudioCompletionService.ShouldStreamCopyAudio(MediaFile):
-                    SourceCodec = (getattr(MediaFile, 'AudioCodec', '') or '').lower()
-                    if SourceCodec and SourceCodec not in AudioCompletionService.MP4_COMPAT_AUDIO_CODECS:
-                        MediaFileId = getattr(MediaFile, 'Id', None)
-                        LoggingService.LogError(
-                            f"RemuxShape.Build: AudioComplete=true but AudioCodec={SourceCodec!r} is not MP4-stream-copy-compatible (MediaFileId={MediaFileId}). Flagging AudioCorruptSuspect=true and refusing the command.",
-                            "RemuxShape", "Build",
-                        )
-                        if MediaFileId is not None:
-                            AudioCompletionService.MarkAudioCorruptSuspect(
-                                MediaFileId,
-                                AudioCompletionService.REASON_INCOMPATIBLE_CODEC_UNSUPPORTED,
-                            )
-                        return None
-                    CommandParts.extend(['-c:a', 'copy'])
+                AudioStreamIndex = CommandData.get('AudioStreamIndex', 0)
+                Policy = self.Resolver.GetEffectivePolicy(MediaFile)
+                Blocks = self.Emitter.EmitTracks(MediaFile, Policy) if Policy else []
+                if not Blocks:
+                    CommandParts.extend(['-map', f'0:a:{AudioStreamIndex}', '-c:a', 'copy'])
                 else:
-                    CommandParts.extend(self.AudioCodecArgsBuilder.BuildAudioCodecArgs(MediaFile, ProfileBitrate=0))
-                    AudioFilter = self.AudioFilterBuilder.Build(MediaFile)
-                    if AudioFilter:
-                        CommandParts.extend(['-af', f'"{AudioFilter}"'])
+                    for Block in Blocks:
+                        CommandParts.extend(Block.MapArgs)
+                        CommandParts.extend(Block.CodecArgs)
+                        if Block.FilterArgs:
+                            CommandParts.extend(Block.FilterArgs[:1])
+                            CommandParts.append(f'"{Block.FilterArgs[1]}"')
+                        CommandParts.extend(Block.MetadataArgs)
+                        CommandParts.extend(Block.DispositionArgs)
 
             CommandParts.extend(['-f', 'mp4'])
             CommandParts.extend(['-movflags', '+faststart'])

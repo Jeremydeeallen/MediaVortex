@@ -28,9 +28,9 @@ def _MakeContext(InputPath="T:\\Shows\\Season 1\\Show.mkv", FFmpegPath="C:\\ffmp
     }
 
 
-# directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
-def _MakeShape():
-    """Wire RemuxShape with mock collaborators that pass paths through unchanged."""
+# directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
+def _MakeShape(Blocks=None, Policy=None):
+    """Wire RemuxShape with mock collaborators; Blocks=None makes the emitter return [] (fallback to -c:a copy)."""
     Filename = MagicMock()
     Filename.NormalizeFfmpegPath = lambda P: (P or '').strip().strip('"')
     Filename.CollapseMvSuffix = lambda B: B
@@ -40,11 +40,17 @@ def _MakeShape():
     AudioFilter.Build = lambda Mf: None
     Probe = MagicMock()
     Probe.RunAnalysis = lambda InputPath: None
+    Resolver = MagicMock()
+    Resolver.GetEffectivePolicy = lambda Mf: Policy
+    Emitter = MagicMock()
+    Emitter.EmitTracks = lambda Mf, P, AudioStreams=None, LibraryDefault=None: Blocks or []
     return RemuxShape(
         OutputFilenameBuilder=Filename,
         AudioCodecArgsBuilder=AudioCodec,
         AudioFilterBuilder=AudioFilter,
         MediaProbeAdapter=Probe,
+        Resolver=Resolver,
+        Emitter=Emitter,
     )
 
 

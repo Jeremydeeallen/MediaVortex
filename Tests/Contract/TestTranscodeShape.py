@@ -27,6 +27,10 @@ def _MakeShape():
     VideoFilter.Build = lambda Profile, Scale, Interlaced: 'scale=w=1280:h=-2'
     Probe = MagicMock()
     Probe.RunAnalysis = lambda InputPath: None
+    Resolver = MagicMock()
+    Resolver.GetEffectivePolicy = lambda Mf: None
+    Emitter = MagicMock()
+    Emitter.EmitTracks = lambda Mf, P, AudioStreams=None, LibraryDefault=None: []
     return TranscodeShape(
         ResolutionCalculator=Resolution,
         OutputFilenameBuilder=Filename,
@@ -35,6 +39,8 @@ def _MakeShape():
         AudioFilterBuilder=AudioFilter,
         VideoFilterBuilder=VideoFilter,
         MediaProbeAdapter=Probe,
+        Resolver=Resolver,
+        Emitter=Emitter,
     )
 
 
@@ -87,17 +93,31 @@ class TestTranscodeShape:
         Spec = _MakeShape().Build(_MakeMediaFile(), MagicMock(), _MakeContext(UseNvidia=0))
         assert '-c:v libsvtav1' in Spec.Command
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=False)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C12
-    def test_audio_filter_applied_when_present(self, _Mock):
-        """AudioFilterBuilder.Build result is passed to ffmpeg via -af."""
-        Spec = _MakeShape().Build(_MakeMediaFile(), MagicMock(), _MakeContext())
-        assert '-af' in Spec.Command
+    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
+    def test_audio_filter_applied_via_emitter_blocks(self):
+        """Emitter returning a block with FilterArgs lands the per-track filter in the command."""
+        from Features.AudioNormalization.AudioFilterEmitter import TrackBlock
+        Block = TrackBlock(
+            Label='Original', Language='eng', Strategy='linear',
+            MapArgs=['-map', '0:a:0'],
+            CodecArgs=['-c:a:0', 'eac3'],
+            FilterArgs=['-filter:a:0', 'loudnorm=I=-23:linear=true'],
+            MetadataArgs=['-metadata:s:a:0', 'language=eng'],
+            DispositionArgs=['-disposition:a:0', '0'],
+        )
+        Resolver = MagicMock()
+        Resolver.GetEffectivePolicy = lambda Mf: {'Enabled': True}
+        Emitter = MagicMock()
+        Emitter.EmitTracks = lambda Mf, P, AudioStreams=None, LibraryDefault=None: [Block]
+        Shape = _MakeShape()
+        Shape.Resolver = Resolver
+        Shape.Emitter = Emitter
+        Spec = Shape.Build(_MakeMediaFile(), MagicMock(), _MakeContext())
+        assert '-filter:a:0' in Spec.Command
         assert 'loudnorm=I=-23:linear=true' in Spec.Command
 
-    @patch('Features.AudioCompletion.AudioCompletionService.AudioCompletionService.ShouldStreamCopyAudio', return_value=True)
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C12
-    def test_audio_stream_copy_when_complete(self, _Mock):
-        """AudioCompleteService.ShouldStreamCopy=True -> -c:a copy emitted, no filter probe."""
+    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C8
+    def test_audio_stream_copy_when_emitter_empty(self):
+        """No policy / no emitter blocks -> fallback to single-stream -c:a copy."""
         Spec = _MakeShape().Build(_MakeMediaFile(), MagicMock(), _MakeContext())
         assert '-c:a copy' in Spec.Command

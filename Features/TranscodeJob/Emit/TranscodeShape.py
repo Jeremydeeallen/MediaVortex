@@ -2,19 +2,21 @@ import os
 from typing import Optional, Dict, Any
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalDirname
-from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
+from Features.AudioNormalization.AudioFilterEmitter import AudioFilterEmitter
+from Features.AudioNormalization.AudioPolicyResolver import AudioPolicyResolver
 from Features.TranscodeJob.Emit.CommandSpec import CommandSpec
 from Features.TranscodeJob.Emit.EncodeShape import EncodeShape
 
 
-# directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C12
+# directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
 class TranscodeShape(EncodeShape):
-    """Builds ffmpeg argv for full video re-encode jobs; composes resolution + filename + codec + filter + audio collaborators."""
+    """Builds ffmpeg argv for full video re-encode jobs; audio goes through AudioFilterEmitter (no profile-pinned override)."""
 
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C12
+    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
     def __init__(self, ResolutionCalculator, OutputFilenameBuilder, CodecParameterAssembler,
-                 AudioCodecArgsBuilder, AudioFilterBuilder, VideoFilterBuilder, MediaProbeAdapter):
-        """Inject domain primitive collaborators via constructor (DIP)."""
+                 AudioCodecArgsBuilder, AudioFilterBuilder, VideoFilterBuilder, MediaProbeAdapter,
+                 Resolver=None, Emitter=None):
+        """Inject collaborators; legacy AudioCodecArgsBuilder + AudioFilterBuilder accepted for backward compat, ignored by audio path."""
         self.ResolutionCalculator = ResolutionCalculator
         self.OutputFilenameBuilder = OutputFilenameBuilder
         self.CodecParameterAssembler = CodecParameterAssembler
@@ -22,6 +24,8 @@ class TranscodeShape(EncodeShape):
         self.AudioFilterBuilder = AudioFilterBuilder
         self.VideoFilterBuilder = VideoFilterBuilder
         self.MediaProbeAdapter = MediaProbeAdapter
+        self.Resolver = Resolver or AudioPolicyResolver()
+        self.Emitter = Emitter or AudioFilterEmitter()
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C12
     def Build(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[CommandSpec]:
@@ -62,7 +66,7 @@ class TranscodeShape(EncodeShape):
             CommandParts.extend(['-i', f'"{InputPath}"'])
 
             AudioStreamIndex = CommandData.get('AudioStreamIndex', 0)
-            CommandParts.extend(['-map', '0:v:0', '-map', f'0:a:{AudioStreamIndex}'])
+            CommandParts.extend(['-map', '0:v:0'])
 
             UseNvidiaHardware = ProfileSettings.get('UseNvidiaHardware', 0)
             VideoCodec = 'av1_nvenc' if UseNvidiaHardware == 1 else ProfileSettings.get('Codec', 'libsvtav1')
@@ -74,31 +78,19 @@ class TranscodeShape(EncodeShape):
 
             self.CodecParameterAssembler.AddCodecParameters(CommandParts, CodecParameters, ProfileSettings)
 
-            if AudioCompletionService.ShouldStreamCopyAudio(MediaFile):
-                CommandParts.extend(['-c:a', 'copy'])
+            Policy = self.Resolver.GetEffectivePolicy(MediaFile)
+            Blocks = self.Emitter.EmitTracks(MediaFile, Policy) if Policy else []
+            if not Blocks:
+                CommandParts.extend(['-map', f'0:a:{AudioStreamIndex}', '-c:a', 'copy'])
             else:
-                ProfilePinnedCodec = ProfileSettings.get('AudioCodec')
-                if ProfilePinnedCodec:
-                    CommandParts.extend(['-c:a', str(ProfilePinnedCodec)])
-                    PinnedChannels = ProfileSettings.get('AudioChannels')
-                    if PinnedChannels is not None:
-                        CommandParts.extend(['-ac', str(int(PinnedChannels))])
-                    PinnedBitrate = ProfileSettings.get('AudioBitrateKbps')
-                    if PinnedBitrate is not None:
-                        CommandParts.extend(['-b:a', f'{int(PinnedBitrate)}k'])
-                    PinnedAudioFilter = ProfileSettings.get('AudioFilter')
-                    if PinnedAudioFilter:
-                        CommandParts.extend(['-af', f'"{PinnedAudioFilter}"'])
-                else:
-                    ProfileAudioBitrate = ProfileSettings.get('AudioBitrateKbps')
-                    try:
-                        ProfileAudioBitrate = int(ProfileAudioBitrate) if ProfileAudioBitrate not in (None, '', 'None') else 0
-                    except (TypeError, ValueError):
-                        ProfileAudioBitrate = 0
-                    CommandParts.extend(self.AudioCodecArgsBuilder.BuildAudioCodecArgs(MediaFile, ProfileAudioBitrate))
-                    AudioFilter = self.AudioFilterBuilder.Build(MediaFile)
-                    if AudioFilter:
-                        CommandParts.extend(['-af', f'"{AudioFilter}"'])
+                for Block in Blocks:
+                    CommandParts.extend(Block.MapArgs)
+                    CommandParts.extend(Block.CodecArgs)
+                    if Block.FilterArgs:
+                        CommandParts.extend(Block.FilterArgs[:1])
+                        CommandParts.append(f'"{Block.FilterArgs[1]}"')
+                    CommandParts.extend(Block.MetadataArgs)
+                    CommandParts.extend(Block.DispositionArgs)
 
             RawInterlaced = getattr(MediaFile, 'IsInterlaced', None) if MediaFile else None
             IsInterlaced = str(RawInterlaced).strip().lower() in ('1', 'true', 'yes', 't') if RawInterlaced is not None else False

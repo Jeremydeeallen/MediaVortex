@@ -2,22 +2,26 @@ import os
 from typing import Optional, Dict, Any
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalDirname, LocalSamePath
-from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
+from Features.AudioNormalization.AudioFilterEmitter import AudioFilterEmitter
+from Features.AudioNormalization.AudioPolicyResolver import AudioPolicyResolver
 from Features.TranscodeJob.Emit.CommandSpec import CommandSpec
 from Features.TranscodeJob.Emit.EncodeShape import EncodeShape
 
 
-# directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C14
+# directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
 class SubtitleFixShape(EncodeShape):
-    """Builds ffmpeg argv for subtitle-fix jobs (ASS/SSA -> mov_text); always emits -f mp4 + -movflags +faststart."""
+    """Builds ffmpeg argv for subtitle-fix jobs (ASS/SSA -> mov_text); audio goes through AudioFilterEmitter."""
 
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C14
-    def __init__(self, OutputFilenameBuilder, AudioCodecArgsBuilder, AudioFilterBuilder, MediaProbeAdapter):
-        """Inject minimal collaborators needed for subtitle-fix (no video filter or codec assembler)."""
+    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
+    def __init__(self, OutputFilenameBuilder, AudioCodecArgsBuilder, AudioFilterBuilder, MediaProbeAdapter,
+                 Resolver=None, Emitter=None):
+        """Inject collaborators; legacy AudioCodecArgsBuilder + AudioFilterBuilder accepted for backward compat, ignored by audio path."""
         self.OutputFilenameBuilder = OutputFilenameBuilder
         self.AudioCodecArgsBuilder = AudioCodecArgsBuilder
         self.AudioFilterBuilder = AudioFilterBuilder
         self.MediaProbeAdapter = MediaProbeAdapter
+        self.Resolver = Resolver or AudioPolicyResolver()
+        self.Emitter = Emitter or AudioFilterEmitter()
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C14
     def Build(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[CommandSpec]:
@@ -63,20 +67,26 @@ class SubtitleFixShape(EncodeShape):
                 raise ValueError("FFmpegPath missing from CommandData. The caller (worker) must resolve this from Workers.FFmpegPath via WorkerContext before invoking the shape.")
             CommandParts = [FFmpegPath]
             CommandParts.extend(['-i', f'"{InputPath}"'])
-            CommandParts.extend(['-map', '0:v:0', '-map', f'0:a:{AudioStreamIndex}', '-map', f'0:s:{SubtitleStreamIndex}'])
+            CommandParts.extend(['-map', '0:v:0', '-map', f'0:s:{SubtitleStreamIndex}'])
             CommandParts.extend(['-c:v', 'copy'])
 
             VideoCodec = (getattr(MediaFile, 'Codec', '') or '').lower()
             if VideoCodec in ('hevc', 'h265', 'x265'):
                 CommandParts.extend(['-tag:v', 'hvc1'])
 
-            if AudioCompletionService.ShouldStreamCopyAudio(MediaFile):
-                CommandParts.extend(['-c:a', 'copy'])
+            Policy = self.Resolver.GetEffectivePolicy(MediaFile)
+            Blocks = self.Emitter.EmitTracks(MediaFile, Policy) if Policy else []
+            if not Blocks:
+                CommandParts.extend(['-map', f'0:a:{AudioStreamIndex}', '-c:a', 'copy'])
             else:
-                CommandParts.extend(self.AudioCodecArgsBuilder.BuildAudioCodecArgs(MediaFile, ProfileBitrate=0))
-                AudioFilter = self.AudioFilterBuilder.Build(MediaFile)
-                if AudioFilter:
-                    CommandParts.extend(['-af', f'"{AudioFilter}"'])
+                for Block in Blocks:
+                    CommandParts.extend(Block.MapArgs)
+                    CommandParts.extend(Block.CodecArgs)
+                    if Block.FilterArgs:
+                        CommandParts.extend(Block.FilterArgs[:1])
+                        CommandParts.append(f'"{Block.FilterArgs[1]}"')
+                    CommandParts.extend(Block.MetadataArgs)
+                    CommandParts.extend(Block.DispositionArgs)
 
             CommandParts.extend(['-c:s', 'mov_text'])
             CommandParts.extend(['-f', 'mp4'])
