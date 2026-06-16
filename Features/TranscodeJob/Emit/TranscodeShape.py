@@ -14,14 +14,13 @@ class TranscodeShape(EncodeShape):
 
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
     def __init__(self, ResolutionCalculator, OutputFilenameBuilder, CodecParameterAssembler,
-                 AudioCodecArgsBuilder, AudioFilterBuilder, VideoFilterBuilder, MediaProbeAdapter,
+                 AudioCodecArgsBuilder, VideoFilterBuilder, MediaProbeAdapter,
                  Resolver=None, Emitter=None):
-        """Inject collaborators; legacy AudioCodecArgsBuilder + AudioFilterBuilder accepted for backward compat, ignored by audio path."""
+        """Inject collaborators; audio path goes through Resolver + Emitter."""
         self.ResolutionCalculator = ResolutionCalculator
         self.OutputFilenameBuilder = OutputFilenameBuilder
         self.CodecParameterAssembler = CodecParameterAssembler
         self.AudioCodecArgsBuilder = AudioCodecArgsBuilder
-        self.AudioFilterBuilder = AudioFilterBuilder
         self.VideoFilterBuilder = VideoFilterBuilder
         self.MediaProbeAdapter = MediaProbeAdapter
         self.Resolver = Resolver or AudioPolicyResolver()

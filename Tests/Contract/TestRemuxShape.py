@@ -36,8 +36,6 @@ def _MakeShape(Blocks=None, Policy=None):
     Filename.CollapseMvSuffix = lambda B: B
     AudioCodec = MagicMock()
     AudioCodec.BuildAudioCodecArgs = lambda Mf, ProfileBitrate: ['-c:a', 'aac', '-b:a', '128k']
-    AudioFilter = MagicMock()
-    AudioFilter.Build = lambda Mf: None
     Probe = MagicMock()
     Probe.RunAnalysis = lambda InputPath: None
     Resolver = MagicMock()
@@ -47,7 +45,6 @@ def _MakeShape(Blocks=None, Policy=None):
     return RemuxShape(
         OutputFilenameBuilder=Filename,
         AudioCodecArgsBuilder=AudioCodec,
-        AudioFilterBuilder=AudioFilter,
         MediaProbeAdapter=Probe,
         Resolver=Resolver,
         Emitter=Emitter,

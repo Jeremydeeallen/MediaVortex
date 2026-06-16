@@ -18,10 +18,8 @@ from Features.TranscodeJob.Emit.ResolutionCalculator import ResolutionCalculator
 from Features.TranscodeJob.Emit.OutputFilenameBuilder import OutputFilenameBuilder
 from Features.TranscodeJob.Emit.CodecParameterAssembler import CodecParameterAssembler
 from Features.TranscodeJob.Emit.AudioCodecArgsBuilder import AudioCodecArgsBuilder
-from Features.TranscodeJob.Emit.AudioFilterBuilder import AudioFilterBuilder
 from Features.TranscodeJob.Emit.VideoFilterBuilder import VideoFilterBuilder
 from Features.TranscodeJob.Emit.MediaProbeAdapter import MediaProbeAdapter
-from Features.TranscodeJob.Emit.UngainablePeakError import UngainablePeakError
 from Features.TranscodeJob.VideoTranscodingService import VideoTranscodingService
 from Services.QueueManagementService import QueueManagementService
 from Features.QualityTesting.Disposition.DispositionDispatcher import DispositionDispatcher
@@ -130,12 +128,11 @@ class ProcessTranscodeQueueService:
         Filename = OutputFilenameBuilder()
         CodecAssembler = CodecParameterAssembler()
         AudioCodec = AudioCodecArgsBuilder()
-        AudioFilter = AudioFilterBuilder(DatabaseManagerInstance=self.DatabaseManager)
         VideoFilter = VideoFilterBuilder()
         Probe = MediaProbeAdapter(FFprobePath=self.FFprobePath)
-        TranscodeS = TranscodeShape(Resolution, Filename, CodecAssembler, AudioCodec, AudioFilter, VideoFilter, Probe)
-        RemuxS = RemuxShape(Filename, AudioCodec, AudioFilter, Probe)
-        SubtitleS = SubtitleFixShape(Filename, AudioCodec, AudioFilter, Probe)
+        TranscodeS = TranscodeShape(Resolution, Filename, CodecAssembler, AudioCodec, VideoFilter, Probe)
+        RemuxS = RemuxShape(Filename, AudioCodec, Probe)
+        SubtitleS = SubtitleFixShape(Filename, AudioCodec, Probe)
         return EncodeShapeRegistry({
             'Transcode': TranscodeS,
             'Remux': RemuxS,
@@ -863,18 +860,15 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception getting transcoding settings", e, "ProcessTranscodeQueueService", "GetTranscodingSettings")
             return None
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
     def BuildTranscodeCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel,
                               TranscodingSettings: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Build the complete transcoding command via EncodeShapeRegistry; UngainablePeakError propagates for caller deferral."""
+        """Build the complete transcoding command via EncodeShapeRegistry; admission gate prevents ungainable files reaching here."""
         try:
-            # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C16
             Spec = self.EncodeShapeRegistry.Get(Job.ProcessingMode).Build(MediaFile, Job, TranscodingSettings)
             if Spec is None:
                 return None
             return {'Command': Spec.Command, 'OutputPath': Spec.OutputPath}
-        except UngainablePeakError:
-            raise
         except Exception as e:
             LoggingService.LogException("Exception building transcode command", e, "ProcessTranscodeQueueService", "BuildTranscodeCommand")
             return None

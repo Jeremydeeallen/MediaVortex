@@ -13,12 +13,11 @@ class SubtitleFixShape(EncodeShape):
     """Builds ffmpeg argv for subtitle-fix jobs (ASS/SSA -> mov_text); audio goes through AudioFilterEmitter."""
 
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
-    def __init__(self, OutputFilenameBuilder, AudioCodecArgsBuilder, AudioFilterBuilder, MediaProbeAdapter,
+    def __init__(self, OutputFilenameBuilder, AudioCodecArgsBuilder, MediaProbeAdapter,
                  Resolver=None, Emitter=None):
-        """Inject collaborators; legacy AudioCodecArgsBuilder + AudioFilterBuilder accepted for backward compat, ignored by audio path."""
+        """Inject collaborators; audio path goes through Resolver + Emitter."""
         self.OutputFilenameBuilder = OutputFilenameBuilder
         self.AudioCodecArgsBuilder = AudioCodecArgsBuilder
-        self.AudioFilterBuilder = AudioFilterBuilder
         self.MediaProbeAdapter = MediaProbeAdapter
         self.Resolver = Resolver or AudioPolicyResolver()
         self.Emitter = Emitter or AudioFilterEmitter()

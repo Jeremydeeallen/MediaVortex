@@ -21,8 +21,6 @@ def _MakeShape():
     CodecAssembler.AddPixelFormatParameter = MagicMock()
     AudioCodec = MagicMock()
     AudioCodec.BuildAudioCodecArgs = lambda Mf, Bitrate: ['-c:a', 'aac', '-b:a', '128k']
-    AudioFilter = MagicMock()
-    AudioFilter.Build = lambda Mf: 'loudnorm=I=-23:linear=true'
     VideoFilter = MagicMock()
     VideoFilter.Build = lambda Profile, Scale, Interlaced: 'scale=w=1280:h=-2'
     Probe = MagicMock()
@@ -36,7 +34,6 @@ def _MakeShape():
         OutputFilenameBuilder=Filename,
         CodecParameterAssembler=CodecAssembler,
         AudioCodecArgsBuilder=AudioCodec,
-        AudioFilterBuilder=AudioFilter,
         VideoFilterBuilder=VideoFilter,
         MediaProbeAdapter=Probe,
         Resolver=Resolver,

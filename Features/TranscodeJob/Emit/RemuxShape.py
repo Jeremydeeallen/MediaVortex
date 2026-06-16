@@ -13,12 +13,11 @@ class RemuxShape(EncodeShape):
     """Builds ffmpeg argv for container-swap jobs; always emits -f mp4 + -movflags +faststart; audio goes through AudioFilterEmitter."""
 
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
-    def __init__(self, OutputFilenameBuilder, AudioCodecArgsBuilder, AudioFilterBuilder, MediaProbeAdapter,
+    def __init__(self, OutputFilenameBuilder, AudioCodecArgsBuilder, MediaProbeAdapter,
                  Resolver=None, Emitter=None):
-        """Inject collaborators; legacy AudioFilterBuilder kept for backward compat, ignored by audio path."""
+        """Inject collaborators; audio path goes through Resolver + Emitter."""
         self.OutputFilenameBuilder = OutputFilenameBuilder
         self.AudioCodecArgsBuilder = AudioCodecArgsBuilder
-        self.AudioFilterBuilder = AudioFilterBuilder
         self.MediaProbeAdapter = MediaProbeAdapter
         self.Resolver = Resolver or AudioPolicyResolver()
         self.Emitter = Emitter or AudioFilterEmitter()

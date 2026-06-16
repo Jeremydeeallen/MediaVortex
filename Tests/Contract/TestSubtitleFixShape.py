@@ -14,15 +14,18 @@ def _MakeShape():
     Filename.CollapseMvSuffix = lambda B: B
     AudioCodec = MagicMock()
     AudioCodec.BuildAudioCodecArgs = lambda Mf, ProfileBitrate: ['-c:a', 'aac', '-b:a', '128k']
-    AudioFilter = MagicMock()
-    AudioFilter.Build = lambda Mf: None
     Probe = MagicMock()
     Probe.RunAnalysis = lambda InputPath: None
+    Resolver = MagicMock()
+    Resolver.GetEffectivePolicy = lambda Mf: None
+    Emitter = MagicMock()
+    Emitter.EmitTracks = lambda Mf, P, AudioStreams=None, LibraryDefault=None: []
     return SubtitleFixShape(
         OutputFilenameBuilder=Filename,
         AudioCodecArgsBuilder=AudioCodec,
-        AudioFilterBuilder=AudioFilter,
         MediaProbeAdapter=Probe,
+        Resolver=Resolver,
+        Emitter=Emitter,
     )
 
 
