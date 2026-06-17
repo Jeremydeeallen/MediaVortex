@@ -21,6 +21,10 @@ Tests/Pipeline/_backup/*
 !Tests/Pipeline/_backup/.gitkeep
 Tests/Pipeline/_jellyfin_capture/*
 !Tests/Pipeline/_jellyfin_capture/.gitkeep
+# Whisper / langdetect models (operator-deployed; not source-controlled)
+AIModels/*.bin
+whisper_*.jsonl
+
 # Python
 __pycache__/
 *.py[cod]

@@ -1,11 +1,12 @@
 import json
 import os
-import re
 import subprocess
+import tempfile
 from typing import List, Optional
 
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
+from Core.Path.LocalPath import LocalBasename, LocalExists
 
 
 WRITE_CACHE_SQL = (
@@ -19,8 +20,7 @@ LOAD_CACHE_SQL = (
 
 
 WHISPER_MODEL_SETTING = 'WhisperModelPath'
-WHISPER_LANG_RE = re.compile(r"detected language:\s*([a-z]{2,3})", re.IGNORECASE)
-WHISPER_PROB_RE = re.compile(r"detected language probability:\s*([0-9.]+)", re.IGNORECASE)
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C19
@@ -71,42 +71,88 @@ class WhisperFfmpegBackend:
             pass
         return None
 
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C19
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.L3
     def IsAvailable(self):
-        """True when ffmpeg + a model file are resolvable + the model exists on disk."""
-        return bool(self._ResolveFFmpegPath() and self._ModelPath and os.path.exists(self._ModelPath))
+        """True when ffmpeg + a model file are resolvable + the model exists on the worker's local FS."""
+        return bool(self._ResolveFFmpegPath() and self._ModelPath and LocalExists(self._ModelPath))
 
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C19
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.L3
     def Detect(self, LocalFilePath, StreamIndex, DurationSeconds=60):
-        """Run ffmpeg whisper filter on first DurationSeconds; return {Language, Confidence}; 'und' on failure."""
+        """Run ffmpeg whisper filter to transcribe first DurationSeconds, then langdetect on transcript text."""
         Fp = self._ResolveFFmpegPath()
         if not Fp or not self._ModelPath:
             return {'Language': 'und', 'Confidence': 0.0, 'Error': 'whisper_backend_unavailable'}
+        ModelArg = self._ModelPathForFilter(self._ModelPath)
+        if ModelArg is None:
+            return {'Language': 'und', 'Confidence': 0.0, 'Error': 'model_path_not_under_repo_root'}
         NullSink = 'NUL' if os.name == 'nt' else '/dev/null'
+        Fd, OutLocalPath = tempfile.mkstemp(prefix='whisper_', suffix='.jsonl', dir=REPO_ROOT)
+        os.close(Fd)
+        OutBasename = LocalBasename(OutLocalPath)
         Cmd = [
             Fp, '-hide_banner', '-nostdin',
             '-t', str(int(DurationSeconds)),
             '-i', LocalFilePath,
             '-map', f'0:a:{StreamIndex}',
-            '-af', f'whisper=model={self._ModelPath}:queue=10:destination=-',
+            '-af', f'whisper=model={ModelArg}:queue=10:destination={OutBasename}:format=json',
             '-f', 'null', NullSink,
         ]
         try:
-            Result = subprocess.run(
+            subprocess.run(
                 Cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                timeout=self._Timeout, check=False,
+                timeout=self._Timeout, check=False, cwd=REPO_ROOT,
             )
+            return self._LangDetectFromTranscript(OutLocalPath)
         except (subprocess.TimeoutExpired, FileNotFoundError) as Ex:
             return {'Language': 'und', 'Confidence': 0.0, 'Error': type(Ex).__name__}
-        Stderr = Result.stderr.decode('utf-8', errors='replace') if Result.stderr else ''
-        Match = WHISPER_LANG_RE.search(Stderr)
-        Prob = WHISPER_PROB_RE.search(Stderr)
-        if not Match:
-            return {'Language': 'und', 'Confidence': 0.0, 'Error': 'language_not_detected'}
-        return {
-            'Language': Match.group(1).strip().lower(),
-            'Confidence': float(Prob.group(1)) if Prob else 0.0,
-        }
+        finally:
+            try:
+                os.remove(OutLocalPath)
+            except OSError:
+                pass
+
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.L3
+    def _ModelPathForFilter(self, ModelLocalPath):
+        """Return a forward-slashed relative-to-REPO_ROOT path so ffmpeg filter syntax has no drive-letter colon."""
+        try:
+            Rel = os.path.relpath(ModelLocalPath, REPO_ROOT)
+        except ValueError:
+            return None
+        if Rel.startswith('..'):
+            return None
+        return Rel.replace('\\', '/')
+
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.L3
+    def _LangDetectFromTranscript(self, TranscriptLocalPath):
+        """Assemble whisper JSON-line transcript text and pass to langdetect; return {Language, Confidence}."""
+        if not LocalExists(TranscriptLocalPath):
+            return {'Language': 'und', 'Confidence': 0.0, 'Error': 'transcript_not_produced'}
+        Segments = []
+        with open(TranscriptLocalPath, 'r', encoding='utf-8', errors='replace') as F:
+            for Line in F:
+                Line = Line.strip()
+                if not Line:
+                    continue
+                try:
+                    Obj = json.loads(Line)
+                except ValueError:
+                    continue
+                Text = (Obj.get('text') or '').strip()
+                if Text and not Text.startswith('['):
+                    Segments.append(Text)
+        Transcript = ' '.join(Segments).strip()
+        if len(Transcript) < 20:
+            return {'Language': 'und', 'Confidence': 0.0, 'Error': 'transcript_too_short'}
+        try:
+            from langdetect import detect_langs, DetectorFactory
+            DetectorFactory.seed = 0
+            Ranked = detect_langs(Transcript)
+        except Exception as Ex:
+            return {'Language': 'und', 'Confidence': 0.0, 'Error': type(Ex).__name__}
+        if not Ranked:
+            return {'Language': 'und', 'Confidence': 0.0, 'Error': 'langdetect_returned_empty'}
+        Top = Ranked[0]
+        return {'Language': str(Top.lang).lower(), 'Confidence': float(Top.prob)}
 
 
 # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C19

@@ -179,13 +179,22 @@ Boost (eng)`. Operator-facing identification of the Dialog Boost
 track is the per-stream `handler_name` value AND
 `disposition.default=1`.
 
-L3. Whisper backend live verified -- a synthetic file with no language
-tag, scope-configured with `EnableSpeechLanguageDetection=true` and
-`SystemSettings.WhisperModelPath` set to a deployed Whisper-compatible
-model, produces a real detected language in
-`MediaFiles.AudioStreamLanguageDetectionsJson` cache after the
-enrichment job runs. OR operator explicitly states stub is acceptable
-and this criterion is amended in writing.
+L3. Whisper backend live verified -- `ggml-tiny.bin` (multilingual
+~77MB) deployed under `AIModels/` and `SystemSettings.WhisperModelPath`
+points to it. `WhisperFfmpegBackend` runs ffmpeg's `whisper` filter on
+the first 60 s of the audio stream, captures the JSON-line transcript,
+assembles the text, and runs `langdetect` (deterministic seed) over
+it; the top-ranked ISO 639-1 code lands in
+`MediaFiles.AudioStreamLanguageDetectionsJson`. Verified live against
+MediaFile 24139 (`Bob Hearts Abishola - S01E15`, audiolanguages=`und`)
+-> `{Language: en, Confidence: 0.9999955}`. ffmpeg filter syntax
+forbids drive-letter colons inside the value; the backend resolves
+the model + transcript paths relative to repo root (via cwd) so the
+filter argument is `whisper=model=AIModels/ggml-tiny.bin:...`. The
+two-tool split (Whisper transcribes; langdetect identifies) is the
+documented design; the regex-on-stderr approach the original backend
+attempted does not work because ffmpeg's whisper filter does not
+emit a detected-language stderr line.
 
 ## Seams
 
