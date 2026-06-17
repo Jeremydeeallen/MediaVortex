@@ -34,9 +34,9 @@ MARK_SUSPECT_SQL = (
 )
 
 
-# directive: audio-vertical-compliance-and-activity | # see audio-normalization.C22
-class AudioCompletionService:
-    """Per-file audio-completion state -- AudioComplete flag, suspect routing, normalize-history detection; absorbed into the audio-normalization vertical 2026-06-16."""
+# directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
+class AudioStateService:
+    """Audio-state machine on MediaFile: AudioComplete flag, suspect routing, normalize-history detection (S2 rename of AudioCompletionService)."""
 
     MP4_COMPAT_AUDIO_CODECS = ('aac', 'ac3', 'eac3', 'mp3')
 
@@ -48,7 +48,7 @@ class AudioCompletionService:
     TARGET_LUFS = -23.0
     TARGET_LUFS_TOLERANCE = 1.0
 
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C22
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
     @staticmethod
     def DetectNormalizationInCommand(FFmpegCommand: Optional[str]) -> bool:
         """True iff the command string contains 'loudnorm' (case-insensitive)."""
@@ -56,7 +56,7 @@ class AudioCompletionService:
             return False
         return 'loudnorm' in FFmpegCommand.lower()
 
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C22
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
     @staticmethod
     def DetectNormalizationMode(FFmpegCommand: Optional[str]) -> Optional[str]:
         """Return 'linear' / 'dynamic' / None for the loudnorm mode in this command."""
@@ -67,7 +67,7 @@ class AudioCompletionService:
             return None
         return 'linear' if 'linear=true' in Lower else 'dynamic'
 
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C22
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
     @staticmethod
     def ShouldStreamCopyAudio(MediaFile: Any) -> bool:
         """True when the next encode must emit -c:a copy; consults AudioCorruptSuspect + AudioComplete."""
@@ -77,7 +77,7 @@ class AudioCompletionService:
             return True
         return getattr(MediaFile, 'AudioComplete', None) is True
 
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C22
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
     @classmethod
     def FloorForChannels(cls, Channels: Optional[int], FloorCfg: Any) -> int:
         """Resolve the bitrate floor (kbps) for the channel count; defaults to Stereo when unknown."""
@@ -89,7 +89,7 @@ class AudioCompletionService:
             return int(getattr(FloorCfg, 'MinAudioBitrateKbpsStereo', 96))
         return int(getattr(FloorCfg, 'MinAudioBitrateKbpsSurround', 128))
 
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C22
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
     @classmethod
     def EvaluateInitialAudioState(cls, Row, FloorCfg, HasLoudnormHistory):
         """Pure cascade returning (AudioComplete, AudioCorruptSuspect, AudioCorruptReason) from probe metadata."""
@@ -119,24 +119,24 @@ class AudioCompletionService:
 
         return (False, False, None)
 
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C22
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
     @staticmethod
     def MarkAudioComplete(MediaFileId: int) -> bool:
         """Idempotent setter: AudioComplete=TRUE, AudioCompletedAt=NOW(); clears below-floor reason."""
         try:
             DatabaseService().ExecuteNonQuery(
                 MARK_COMPLETE_SQL,
-                (AudioCompletionService.REASON_BELOW_BITRATE_FLOOR, MediaFileId),
+                (AudioStateService.REASON_BELOW_BITRATE_FLOOR, MediaFileId),
             )
             return True
         except Exception as Ex:
             LoggingService.LogException(
                 f"MarkAudioComplete failed for MediaFileId={MediaFileId}",
-                Ex, "AudioCompletionService", "MarkAudioComplete",
+                Ex, "AudioStateService", "MarkAudioComplete",
             )
             return False
 
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C22
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
     @staticmethod
     def ResetAudioComplete(MediaFileIds: List[int]) -> int:
         """Force re-normalize on next encode; returns rowcount; spares AudioCorruptSuspect rows."""
@@ -156,11 +156,11 @@ class AudioCompletionService:
         except Exception as Ex:
             LoggingService.LogException(
                 f"ResetAudioComplete failed for {len(MediaFileIds)} ids",
-                Ex, "AudioCompletionService", "ResetAudioComplete",
+                Ex, "AudioStateService", "ResetAudioComplete",
             )
             return 0
 
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C22
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
     @staticmethod
     def MarkAudioCorruptSuspect(MediaFileId: int, Reason: str) -> bool:
         """Flag a file as suspect with a structured reason; called when audio path encounters a blocking codec."""
@@ -170,6 +170,6 @@ class AudioCompletionService:
         except Exception as Ex:
             LoggingService.LogException(
                 f"MarkAudioCorruptSuspect failed for MediaFileId={MediaFileId}",
-                Ex, "AudioCompletionService", "MarkAudioCorruptSuspect",
+                Ex, "AudioStateService", "MarkAudioCorruptSuspect",
             )
             return False

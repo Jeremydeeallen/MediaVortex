@@ -278,19 +278,10 @@ class MediaProbeBusinessService:
             return None
 
     def _MaybeAutoMarkAudioCompleteAtTarget(self, MediaFileId: int) -> None:
-        """If newly-measured file is at -23 LUFS (+/- 1) AND has an MP4-compat
-        audio codec, mark it AudioComplete=true with
-        AudioCorruptReason='already_at_target_loudness' so it never enters
-        the encode path. See linear-loudnorm.feature.md criterion 28 and
-        AudioCompletionService.EvaluateInitialAudioState clause (d).
-
-        Best-effort -- exceptions are logged but never propagated. The
-        worst case is a wasted zero-gain encode on a file that should have
-        short-circuited; next admin recompute will reconcile.
-        """
+        """If newly-measured file is at -23 LUFS (+/- 1) with MP4-compat audio codec, mark AudioComplete=true with AudioStateService clause-d reason; best-effort."""
         try:
             from Core.Database.DatabaseService import DatabaseService
-            from Features.AudioNormalization.Services.AudioCompletionService import AudioCompletionService
+            from Features.AudioNormalization.Services.AudioStateService import AudioStateService
             Db = DatabaseService()
             Rows = Db.ExecuteQuery(
                 """
@@ -312,16 +303,16 @@ class MediaProbeBusinessService:
             # history; the probe co-trigger is the steady-state path.
             from Features.TranscodeQueue.QueueAdmissionConfigRepository import QueueAdmissionConfigRepository
             FloorCfg = QueueAdmissionConfigRepository().Get()
-            Complete, Suspect, Reason = AudioCompletionService.EvaluateInitialAudioState(
+            Complete, Suspect, Reason = AudioStateService.EvaluateInitialAudioState(
                 Row, FloorCfg, HasLoudnormHistory=False,
             )
-            if Complete is True and Reason == AudioCompletionService.REASON_ALREADY_AT_TARGET_LOUDNESS:
-                if AudioCompletionService.MarkAudioComplete(MediaFileId):
+            if Complete is True and Reason == AudioStateService.REASON_ALREADY_AT_TARGET_LOUDNESS:
+                if AudioStateService.MarkAudioComplete(MediaFileId):
                     # Also stamp the reason -- MarkAudioComplete only sets the
                     # flag + timestamp; the reason needs a separate write.
                     Db.ExecuteNonQuery(
                         "UPDATE MediaFiles SET AudioCorruptReason = %s WHERE Id = %s",
-                        (AudioCompletionService.REASON_ALREADY_AT_TARGET_LOUDNESS, MediaFileId),
+                        (AudioStateService.REASON_ALREADY_AT_TARGET_LOUDNESS, MediaFileId),
                     )
                     LoggingService.LogInfo(
                         f"Auto-marked AudioComplete=true (already_at_target_loudness) "

@@ -7,7 +7,7 @@ from Features.Compliance.Gates.IComplianceGate import IComplianceGate
 
 # directive: compliance-solid-refactor | # see compliance-solid-refactor.C6
 class AudioCorruptSuspectGate(IComplianceGate):
-    """Hard-block: AudioCompletionService flagged this row as suspect (no_audio_stream / incompatible_codec_unsupported)."""
+    """Hard-block: AudioStateService flagged this row as suspect (no_audio_stream / incompatible_codec_unsupported)."""
 
     Name = "AudioCorruptSuspect"
 

@@ -197,9 +197,9 @@ class TranscodedOutputPlacement:
                 RecomputeMediaFileId = UpdateResult.get('MediaFileId')
                 if RecomputeMediaFileId:
                     try:
-                        from Features.AudioNormalization.Services.AudioCompletionService import AudioCompletionService
-                        if AudioCompletionService.DetectNormalizationInCommand(FFmpegCommand):
-                            if AudioCompletionService.MarkAudioComplete(RecomputeMediaFileId):
+                        from Features.AudioNormalization.Services.AudioStateService import AudioStateService
+                        if AudioStateService.DetectNormalizationInCommand(FFmpegCommand):
+                            if AudioStateService.MarkAudioComplete(RecomputeMediaFileId):
                                 StepsCompleted.append("Marked AudioComplete=true (post-normalize)")
                     except Exception as AudioEx:
                         LoggingService.LogException(
@@ -410,8 +410,8 @@ class TranscodedOutputPlacement:
 
             if FFmpegCommand:
                 try:
-                    from Features.AudioNormalization.Services.AudioCompletionService import AudioCompletionService
-                    DerivedMode = AudioCompletionService.DetectNormalizationMode(FFmpegCommand)
+                    from Features.AudioNormalization.Services.AudioStateService import AudioStateService
+                    DerivedMode = AudioStateService.DetectNormalizationMode(FFmpegCommand)
                     if DerivedMode is not None:
                         media_file.AudioNormalizationMode = DerivedMode
                 except Exception as ModeEx:
