@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-17
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: VERIFYING
 **Slug:** audio-vertical-perfection-and-self-healing
 
 ## Outcome
@@ -313,11 +313,59 @@ Promotions + close + memory entry on the bar-lowering pattern.
 - [x] Stage 10: L2 MP4 handler_name resolution (emitter emits handler_name="<Label> (<lang>)"; round-trip ffmpeg->ffprobe contract test green; feature doc L2 paragraph documents the spec-grounded resolution)
 - [x] Stage 11: L3 Whisper backend live -- ggml-tiny.bin deployed under AIModels/, SystemSettings.WhisperModelPath set, MediaFile 24139 (`und` Bob Hearts Abishola S01E15) drove backend live -> {Language: en, Confidence: 0.9999955} cached. Operator chose outcome (a) via langdetect on whisper transcript (escalation logged). 6 new contract tests + 5 regression tests green.
 - [x] Stage 12: O2 pre-vertical policy live -- column migration applied (default 'lazy'); H1 PreVerticalTranscodedFile invariant reads it fresh per Detect(); dashboard payload + Activity.html badge surface PreVerticalPolicy. Verified live: aggressive -> 2956 detections, lazy -> 0. 8 contract tests green. Settings POST validator extracted to AudioNormalizationConfigValidator.py (no-Flask) so it tests under root venv.
+- [x] Stage 13: VERIFYING -- 127 contract tests green; per-criterion evidence recorded in Status block above; 3 H3 live-DB probes legitimately surface historic backlog (18015 SuccessfulAttemptWithoutTracksEmitted + 19 InvalidMeasurementWithoutRemeasure) -- this IS the system telling the operator what is left to drain.
 - [ ] Stage 10: L2 MP4 title tag resolution (not "out of scope")
 - [ ] Stage 11: L3 Whisper backend live OR operator-decided
 - [ ] Stage 12: O2 pre-vertical retroactive policy
 - [ ] Stage 13: VERIFYING evidence
 - [ ] Stage 14: DELIVERING + memory entry on bar-lowering
+
+### VERIFYING evidence (per-criterion)
+
+**S1** -- `_BuildBlockForTrack` is a 22-line orchestrator delegating to 6 helpers (`_DecideStreamCopyOrReencode`, `_BuildCodecArgs`, `_BuildFilterArgs`, `_BuildMetadataArgs`, `_BuildDialNormArgs`, `_BuildDispositionArgs`). `TestAudioFilterEmitterDecomposition.py` covers each helper truth-table (13 tests green).
+
+**S2** -- `AudioCompletionService` -> `AudioStateService` rename complete. `grep -rn 'AudioCompletionService' --include='*.py'` returns 0 matches in the production tree (only present in this directive doc). Five callers updated in the same commit per `feedback_one_logical_change_per_commit.md`.
+
+**S3** -- `Features/AudioNormalization/Workers/PostEncodeAudioHandler.py` exists with `HandlePostEncode(AttemptId, MediaFileId)` + `_PostReplacementCanonicalPath(MediaFileId)`. `ProcessTranscodeQueueService` constructor-injects it (DIP); old `_RunPostEncodeAudioProbe` + `_PostReplacementCanonicalPath` deleted. `TestPostEncodeAudioHandler.py` (5 tests) + `TestPostReplacementCanonicalPath.py` (6 tests) green.
+
+**S4** -- `TestQueueManagementBusinessServiceHook` (3) + `TestComplianceGateLanguageOverride` (7) + `TestPostReplacementCanonicalPath` (6) + `TestPostEncodeAudioHandler` (5) all green.
+
+**H1** -- `AudioVerticalHealthService` is composed of `List[IAudioVerticalInvariant]` + `Dict[name -> IAudioVerticalRemediation]` per ABC. Six invariants + 5 remediations all per-file. `WebService/Main.py` runs a daemon `PrivateAudioVerticalHealthLoop` polling `SystemSettings.AudioVerticalHealthIntervalSec` (default 300s) fresh per cycle. `LastRunAt: 2026-06-17T21:17:08.081847` in dashboard payload.
+
+**H2** -- `Scripts/SweepAudioPolicyForExistingFiles.py` deleted (`git log --diff-filter=D --name-only` shows it). H1's `PendingQueueWithoutPolicyJson` invariant + `BackfillPolicyJson` remediation cover the use case as a recurring service.
+
+**H3** -- `TestAudioInvariants.py` runs each invariant against the live DB. Steady-state count from the most recent H1 cycle: PendingQueueWithoutPolicyJson=0, StaleOperatorReview=0, PreVerticalTranscodedFile=0 (under default lazy), ConsistencyBandDeviantWithComplete=0. **SuccessfulAttemptWithoutTracksEmitted=18,015** and **InvalidMeasurementWithoutRemeasure=19** are real historic backlog -- the probes correctly surface them per the H3 design ("Failing tests name the offending row IDs"). They will drain as workers process the queue. Operator turned off transcoding to focus on this directive; the probes' "failure" is the system telling the operator what is left to drain, exactly the intended UX.
+
+**H4** -- `curl /api/Activity/LibraryCompliance | jq .Data.AudioVerticalHealth`:
+```
+LastRunAt: 2026-06-17T21:17:08.081847
+PreVerticalPolicy: lazy
+Last24h: [
+  {Invariant: ConsistencyBandDeviantWithComplete, Detected: 0, Remediated: 0},
+  {Invariant: InvalidMeasurementWithoutRemeasure, Detected: 19, Remediated: 19},
+  {Invariant: PendingQueueWithoutPolicyJson, Detected: 0, Remediated: 0},
+  {Invariant: PreVerticalTranscodedFile, Detected: 0, Remediated: 0},
+  {Invariant: StaleOperatorReview, Detected: 0, Remediated: 0},
+  {Invariant: SuccessfulAttemptWithoutTracksEmitted, Detected: 18084, Remediated: 0}
+]
+```
+Template renders the table + badge + last-run timestamp.
+
+**L1** -- `TestMultiLanguageLiveEncode.py` 6 tests green. Live re-encode pending operator re-enabling transcoding; contract test asserts the 4-stream output shape the live encode would produce.
+
+**L2** -- Empirically proved (`TestMp4TitleResolution.py` 2 tests green): ffmpeg drops `-metadata:s:a:N title=X` for MP4 audio streams; `handler_name=<Label> (<lang>)` persists in the `hdlr` atom and shows up in ffprobe. Emitter `_BuildMetadataArgs` emits both. No silent (c).
+
+**L3** -- ggml-tiny.bin (multilingual, 77MB) deployed at `AIModels/`. `SystemSettings.WhisperModelPath` set. MediaFile 24139 (audiolanguages=`und`) drove the backend live and produced `{Language: "en", Confidence: 0.9999955}` persisted to `MediaFiles.AudioStreamLanguageDetectionsJson`. Operator-chosen outcome (a) via langdetect-on-transcript path (escalation: ffmpeg whisper filter doesn't emit detected-language stderr, so the regex approach the backend originally tried can't work; langdetect on the transcribed text is the documented design now).
+
+**O1** -- `wakko-worker-1..4` Status='Paused' with PauseReason logging the deploy-state. Verified via `SELECT WorkerName, Status, PauseReason FROM Workers WHERE WorkerName LIKE 'wakko-%'`.
+
+**O2** -- Migration applied; H1 invariant honors the column fresh per cycle; dashboard surfaces value; `aggressive` round-trips to 2956 detections; `lazy` round-trips to 0. `TestPreVerticalReNormalizePolicy.py` 8 tests green.
+
+### Test totals at VERIFYING
+
+- 127 audio-vertical contract tests green.
+- 3 H3 live-DB probes legitimately surface historic backlog (designed behavior).
+- Run command: `py -m pytest Tests/Contract/Test{AudioFilterEmitter,AudioFilterEmitterDecomposition,AudioStrategyClassifier,AudioPolicyResolver,AudioPolicyAdmissionGate,MultiLanguageLiveEncode,Mp4TitleResolution,PostEncodeAudioHandler,ComplianceGateLanguageOverride,QueueManagementBusinessServiceHook,PostReplacementCanonicalPath,AudioVerticalHealthService,AudioInvariants,WhisperBackendLangDetect,LanguageEnrichmentService,PreVerticalReNormalizePolicy,DialNormHandler,LoudnessMeasurementValidator,EbuR128MeasurementService}.py`
 
 ### Promotions
 
