@@ -234,8 +234,14 @@ class ActivityRepository(BaseRepository):
                 "SELECT MAX(Timestamp) AS LastRunAt FROM AudioVerticalHealthRuns"
             )
             LastRunAt = LastRows[0]['lastrunat'] if LastRows and LastRows[0].get('lastrunat') else None
+            PolicyRows = self.DatabaseService.ExecuteQuery(
+                "SELECT COALESCE(PreVerticalReNormalizePolicy, 'lazy') AS Pol "
+                "FROM AudioNormalizationConfig WHERE Scope = 'global' LIMIT 1"
+            )
+            PreVerticalPolicy = (PolicyRows[0]['pol'] if PolicyRows else 'lazy') or 'lazy'
             return {
                 'LastRunAt': LastRunAt.isoformat() if LastRunAt else None,
+                'PreVerticalPolicy': PreVerticalPolicy,
                 'Last24h': [
                     {
                         'Invariant': R['invariantname'],
@@ -246,7 +252,7 @@ class ActivityRepository(BaseRepository):
                 ],
             }
         except Exception:
-            return {'LastRunAt': None, 'Last24h': []}
+            return {'LastRunAt': None, 'PreVerticalPolicy': 'lazy', 'Last24h': []}
 
     # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C15
     def GetAudioConsistencyBands(self) -> List[Dict]:

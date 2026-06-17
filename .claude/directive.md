@@ -312,6 +312,7 @@ Promotions + close + memory entry on the bar-lowering pattern.
 - [x] Stage 9: L1 multi-language live encode contract test (6 tests green; live re-encode pending transcoding re-enable -- contract test asserts emitter output shape that the live encode would observe)
 - [x] Stage 10: L2 MP4 handler_name resolution (emitter emits handler_name="<Label> (<lang>)"; round-trip ffmpeg->ffprobe contract test green; feature doc L2 paragraph documents the spec-grounded resolution)
 - [x] Stage 11: L3 Whisper backend live -- ggml-tiny.bin deployed under AIModels/, SystemSettings.WhisperModelPath set, MediaFile 24139 (`und` Bob Hearts Abishola S01E15) drove backend live -> {Language: en, Confidence: 0.9999955} cached. Operator chose outcome (a) via langdetect on whisper transcript (escalation logged). 6 new contract tests + 5 regression tests green.
+- [x] Stage 12: O2 pre-vertical policy live -- column migration applied (default 'lazy'); H1 PreVerticalTranscodedFile invariant reads it fresh per Detect(); dashboard payload + Activity.html badge surface PreVerticalPolicy. Verified live: aggressive -> 2956 detections, lazy -> 0. 8 contract tests green. Settings POST validator extracted to AudioNormalizationConfigValidator.py (no-Flask) so it tests under root venv.
 - [ ] Stage 10: L2 MP4 title tag resolution (not "out of scope")
 - [ ] Stage 11: L3 Whisper backend live OR operator-decided
 - [ ] Stage 12: O2 pre-vertical retroactive policy

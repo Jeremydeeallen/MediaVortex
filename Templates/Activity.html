@@ -177,6 +177,7 @@
                 <div class="col-md-6">
                     <h6 class="text-muted small text-uppercase mb-2">Self-healing (last 24h)
                         <small class="text-muted" id="AudioVerticalHealthLastRun"></small>
+                        <span class="badge bg-secondary ms-2" id="AudioVerticalPolicyBadge" title="AudioNormalizationConfig.PreVerticalReNormalizePolicy"></span>
                     </h6>
                     <table class="table table-sm mb-0">
                         <thead><tr><th>Invariant</th><th class="text-end">Detected</th><th class="text-end">Remediated</th></tr></thead>
@@ -1091,8 +1092,14 @@ var ActivityPage = (function() {
         var health = D.AudioVerticalHealth || {};
         var healthBody = document.getElementById('AudioVerticalHealthBody');
         var healthLast = document.getElementById('AudioVerticalHealthLastRun');
+        var policyBadge = document.getElementById('AudioVerticalPolicyBadge');
         if (healthLast) {
             healthLast.textContent = health.LastRunAt ? ('last run ' + new Date(health.LastRunAt).toLocaleString()) : '';
+        }
+        if (policyBadge) {
+            var pol = health.PreVerticalPolicy || 'lazy';
+            policyBadge.textContent = 'pre-vertical: ' + pol;
+            policyBadge.className = 'badge ms-2 ' + (pol === 'aggressive' ? 'bg-warning text-dark' : (pol === 'none' ? 'bg-secondary' : 'bg-info text-dark'));
         }
         if (healthBody) {
             var entries = health.Last24h || [];

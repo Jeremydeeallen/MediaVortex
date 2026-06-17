@@ -6,7 +6,7 @@ SELECT_ALL_COLUMNS = (
     "TargetIntegratedLufs, TargetTruePeakDbtp, TargetLra, LoudnessTolerance, "
     "EmitTracks, UngainablePolicy, LanguageKeepPolicy, "
     "KeepCommentaryTracks, EnableSpeechLanguageDetection, AudioDelayMs, "
-    "LanguageDefault, LastUpdated"
+    "LanguageDefault, PreVerticalReNormalizePolicy, LastUpdated"
 )
 
 

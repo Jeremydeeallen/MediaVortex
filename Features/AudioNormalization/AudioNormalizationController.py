@@ -26,8 +26,9 @@ UPSERT_POLICY_SQL = (
     "INSERT INTO AudioNormalizationConfig ("
     "Scope, ScopeKey, Enabled, TargetIntegratedLufs, TargetTruePeakDbtp, TargetLra, "
     "LoudnessTolerance, EmitTracks, UngainablePolicy, LanguageKeepPolicy, "
-    "KeepCommentaryTracks, EnableSpeechLanguageDetection, AudioDelayMs, LastUpdated"
-    ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s::jsonb, %s, %s, %s, NOW()) "
+    "KeepCommentaryTracks, EnableSpeechLanguageDetection, AudioDelayMs, "
+    "PreVerticalReNormalizePolicy, LastUpdated"
+    ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s::jsonb, %s, %s, %s, %s, NOW()) "
     "ON CONFLICT (Scope, COALESCE(ScopeKey, '')) DO UPDATE SET "
     "Enabled = EXCLUDED.Enabled, "
     "TargetIntegratedLufs = EXCLUDED.TargetIntegratedLufs, "
@@ -40,7 +41,14 @@ UPSERT_POLICY_SQL = (
     "KeepCommentaryTracks = EXCLUDED.KeepCommentaryTracks, "
     "EnableSpeechLanguageDetection = EXCLUDED.EnableSpeechLanguageDetection, "
     "AudioDelayMs = EXCLUDED.AudioDelayMs, "
+    "PreVerticalReNormalizePolicy = EXCLUDED.PreVerticalReNormalizePolicy, "
     "LastUpdated = NOW()"
+)
+
+
+from Features.AudioNormalization.AudioNormalizationConfigValidator import (
+    PRE_VERTICAL_POLICY_VALUES,
+    ValidatePreVerticalPolicy,
 )
 
 
@@ -102,6 +110,7 @@ class AudioNormalizationController:
                     bool(Body.get('KeepCommentaryTracks', True)),
                     bool(Body.get('EnableSpeechLanguageDetection', False)),
                     int(Body.get('AudioDelayMs', 0)),
+                    ValidatePreVerticalPolicy(Body.get('PreVerticalReNormalizePolicy', 'lazy')),
                 )
                 DatabaseService().ExecuteNonQuery(UPSERT_POLICY_SQL, Args)
                 return jsonify({'Success': True, 'Message': 'Saved', 'Data': {}})
