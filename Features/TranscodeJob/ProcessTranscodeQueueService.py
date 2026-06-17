@@ -121,6 +121,13 @@ class ProcessTranscodeQueueService:
         # directive: perfect-solid-transcode-pipeline-phase3 -- compose AFTER FFprobePath resolved
         self.EncodeShapeRegistry = self._BuildDefaultEncodeShapeRegistry()
 
+        # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S3
+        from Features.AudioNormalization.Workers.PostEncodeAudioHandler import PostEncodeAudioHandler
+        self.PostEncodeAudioHandler = PostEncodeAudioHandler(
+            FFmpegPath=self.FFmpegPath,
+            FFprobePath=self.FFprobePath,
+        )
+
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C16
     def _BuildDefaultEncodeShapeRegistry(self) -> EncodeShapeRegistry:
         """Compose the default EncodeShapeRegistry; Phase 3 lifts this to WorkerCompositionRoot."""
@@ -590,7 +597,7 @@ class ProcessTranscodeQueueService:
 
             self.DispatchDisposition(TranscodeAttemptId, Job, OutputFilePath)
 
-            self._RunPostEncodeAudioProbe(TranscodeAttemptId, self._PostReplacementCanonicalPath(Job.MediaFileId))
+            self.PostEncodeAudioHandler.HandlePostEncode(TranscodeAttemptId, Job.MediaFileId)
 
             # Delete job from queue
             self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
@@ -862,41 +869,6 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception getting transcoding settings", e, "ProcessTranscodeQueueService", "GetTranscodingSettings")
             return None
 
-    # directive: audio-vertical-live-encode-gaps | # see audio-normalization.C15
-    def _PostReplacementCanonicalPath(self, MediaFileId):
-        """Resolve the post-replacement canonical worker-local path from MediaFiles + StorageRoots."""
-        try:
-            from Core.Database.DatabaseService import DatabaseService
-            Rows = DatabaseService().ExecuteQuery(
-                "SELECT sr.CanonicalPrefix, mf.RelativePath "
-                "FROM MediaFiles mf JOIN StorageRoots sr ON sr.Id = mf.StorageRootId "
-                "WHERE mf.Id = %s",
-                (MediaFileId,),
-            )
-            if not Rows:
-                return None
-            Prefix = (Rows[0].get('canonicalprefix') or '').rstrip('/\\')
-            Rel = Rows[0].get('relativepath') or ''
-            return Prefix + ('\\' if '\\' in Prefix or ':' in Prefix else '/') + Rel
-        except Exception:
-            return None
-
-    # directive: audio-vertical-live-encode-gaps | # see audio-normalization.C15
-    def _RunPostEncodeAudioProbe(self, TranscodeAttemptId, OutputFilePath):
-        """Per-track ebur128 against the encoded output; failure never blocks the encode."""
-        try:
-            from Features.AudioNormalization.Services.PostEncodeMeasurementService import (
-                PostEncodeMeasurementService,
-            )
-            PostEncodeMeasurementService(
-                FFmpegPath=self.FFmpegPath,
-                FFprobePath=self.FFprobePath,
-            ).Probe(TranscodeAttemptId, OutputFilePath)
-        except Exception as Ex:
-            LoggingService.LogException(
-                f"Post-encode audio probe skipped for AttemptId={TranscodeAttemptId}",
-                Ex, "ProcessTranscodeQueueService", "_RunPostEncodeAudioProbe",
-            )
 
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
     def BuildTranscodeCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel,
@@ -1109,7 +1081,7 @@ class ProcessTranscodeQueueService:
 
                 self.DispatchDisposition(TranscodeAttemptId, Job, OutputFilePath)
 
-                self._RunPostEncodeAudioProbe(TranscodeAttemptId, self._PostReplacementCanonicalPath(Job.MediaFileId))
+                self.PostEncodeAudioHandler.HandlePostEncode(TranscodeAttemptId, Job.MediaFileId)
 
                 # Delete job from queue (successful completion)
                 self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
