@@ -113,6 +113,16 @@ class ComplianceGate:
             except Exception:
                 pass
 
+            # directive: audio-vertical-live-encode-gaps | # see audio-normalization.C11
+            try:
+                import re as _ReAVC
+                EmittedLangs = _ReAVC.findall(r'-metadata:s:a:\d+\s+"?language=([a-z]{2,3})"?', FFmpegCommand or '')
+                if EmittedLangs:
+                    CandidateRow['AudioLanguages'] = ','.join(EmittedLangs)
+                    CandidateRow['HasExplicitEnglishAudio'] = any(L.lower() in ('eng', 'en') for L in EmittedLangs)
+            except Exception:
+                pass
+
             Eval = QueueManagementBusinessService().EvaluateCandidateCompliance(CandidateRow)
 
             if Eval.get('IsCompliant') is True and Eval.get('WorkBucket') is None:

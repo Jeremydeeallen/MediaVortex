@@ -869,9 +869,10 @@ class ProcessTranscodeQueueService:
             from Features.AudioNormalization.Services.PostEncodeMeasurementService import (
                 PostEncodeMeasurementService,
             )
-            PostEncodeMeasurementService(FFprobePath=self.FFprobePath).Probe(
-                TranscodeAttemptId, OutputFilePath,
-            )
+            PostEncodeMeasurementService(
+                FFmpegPath=self.FFmpegPath,
+                FFprobePath=self.FFprobePath,
+            ).Probe(TranscodeAttemptId, OutputFilePath)
         except Exception as Ex:
             LoggingService.LogException(
                 f"Post-encode audio probe skipped for AttemptId={TranscodeAttemptId}",
