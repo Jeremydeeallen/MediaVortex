@@ -216,6 +216,38 @@ class ActivityRepository(BaseRepository):
         )
         return dict(Rows[0]) if Rows else {}
 
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.H4
+    def GetAudioVerticalHealth(self) -> Dict:
+        """Return the most recent AudioVerticalHealthRuns rows aggregated to last-24h per invariant."""
+        try:
+            Rows = self.DatabaseService.ExecuteQuery(
+                "SELECT InvariantName, "
+                "SUM(DetectedCount)::int AS Detected, "
+                "SUM(RemediatedCount)::int AS Remediated, "
+                "MAX(Timestamp) AS LastRun "
+                "FROM AudioVerticalHealthRuns "
+                "WHERE Timestamp > NOW() - INTERVAL '24 hours' "
+                "GROUP BY InvariantName "
+                "ORDER BY InvariantName"
+            )
+            LastRows = self.DatabaseService.ExecuteQuery(
+                "SELECT MAX(Timestamp) AS LastRunAt FROM AudioVerticalHealthRuns"
+            )
+            LastRunAt = LastRows[0]['lastrunat'] if LastRows and LastRows[0].get('lastrunat') else None
+            return {
+                'LastRunAt': LastRunAt.isoformat() if LastRunAt else None,
+                'Last24h': [
+                    {
+                        'Invariant': R['invariantname'],
+                        'Detected': int(R['detected'] or 0),
+                        'Remediated': int(R['remediated'] or 0),
+                    }
+                    for R in (Rows or [])
+                ],
+            }
+        except Exception:
+            return {'LastRunAt': None, 'Last24h': []}
+
     # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C15
     def GetAudioConsistencyBands(self) -> List[Dict]:
         """Return v_audio_consistency_summary rows for the Activity dashboard."""

@@ -173,6 +173,16 @@
                         <tbody id="AudioConsistencyBody"><tr><td colspan="5" class="text-muted">No measured outputs yet</td></tr></tbody>
                     </table>
                 </div>
+                <!-- Audio vertical self-healing sub-section -->
+                <div class="col-md-6">
+                    <h6 class="text-muted small text-uppercase mb-2">Self-healing (last 24h)
+                        <small class="text-muted" id="AudioVerticalHealthLastRun"></small>
+                    </h6>
+                    <table class="table table-sm mb-0">
+                        <thead><tr><th>Invariant</th><th class="text-end">Detected</th><th class="text-end">Remediated</th></tr></thead>
+                        <tbody id="AudioVerticalHealthBody"><tr><td colspan="3" class="text-muted">No runs recorded yet</td></tr></tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -1074,6 +1084,25 @@ var ActivityPage = (function() {
                            '</td><td class="text-end">' + (b.AcceptableCount || 0) +
                            '</td><td class="text-end">' + (b.DeviantCount || 0) +
                            '</td><td class="text-end">' + (b.TotalCount || 0) + '</td></tr>';
+                }).join('');
+            }
+        }
+
+        var health = D.AudioVerticalHealth || {};
+        var healthBody = document.getElementById('AudioVerticalHealthBody');
+        var healthLast = document.getElementById('AudioVerticalHealthLastRun');
+        if (healthLast) {
+            healthLast.textContent = health.LastRunAt ? ('last run ' + new Date(health.LastRunAt).toLocaleString()) : '';
+        }
+        if (healthBody) {
+            var entries = health.Last24h || [];
+            if (entries.length === 0) {
+                healthBody.innerHTML = '<tr><td colspan="3" class="text-muted">No runs recorded yet</td></tr>';
+            } else {
+                healthBody.innerHTML = entries.map(function(e) {
+                    return '<tr><td>' + e.Invariant +
+                           '</td><td class="text-end">' + (e.Detected || 0) +
+                           '</td><td class="text-end">' + (e.Remediated || 0) + '</td></tr>';
                 }).join('');
             }
         }
