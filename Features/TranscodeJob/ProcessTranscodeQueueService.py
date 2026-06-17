@@ -862,17 +862,27 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception getting transcoding settings", e, "ProcessTranscodeQueueService", "GetTranscodingSettings")
             return None
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C15
+    # directive: audio-vertical-live-encode-gaps | # see audio-normalization.C15
     def _RunPostEncodeAudioProbe(self, TranscodeAttemptId, OutputFilePath):
-        """Fire-and-forget per-track ebur128 against the encoded output; failure never blocks the encode."""
+        """Per-track ebur128 against the encoded output; failure never blocks the encode."""
+        from Core.Path.LocalPath import LocalExists
+        Exists = LocalExists(OutputFilePath)
+        LoggingService.LogInfo(
+            f"PostEncodeAudioProbe AttemptId={TranscodeAttemptId} Path={OutputFilePath!r} Exists={Exists}",
+            "ProcessTranscodeQueueService", "_RunPostEncodeAudioProbe",
+        )
         try:
             from Features.AudioNormalization.Services.PostEncodeMeasurementService import (
                 PostEncodeMeasurementService,
             )
-            PostEncodeMeasurementService(
+            Ok = PostEncodeMeasurementService(
                 FFmpegPath=self.FFmpegPath,
                 FFprobePath=self.FFprobePath,
             ).Probe(TranscodeAttemptId, OutputFilePath)
+            LoggingService.LogInfo(
+                f"PostEncodeAudioProbe completed AttemptId={TranscodeAttemptId} Ok={Ok}",
+                "ProcessTranscodeQueueService", "_RunPostEncodeAudioProbe",
+            )
         except Exception as Ex:
             LoggingService.LogException(
                 f"Post-encode audio probe skipped for AttemptId={TranscodeAttemptId}",
