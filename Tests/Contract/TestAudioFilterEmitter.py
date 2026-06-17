@@ -199,6 +199,9 @@ class TestAudioFilterEmitter(unittest.TestCase):
         self.assertEqual(len(Blocks), 1)
         Cd = ' '.join(Blocks[0].CodecArgs)
         self.assertIn('-dialnorm:0', Cd)
+        Idx = Blocks[0].CodecArgs.index('-dialnorm:0')
+        self.assertTrue(int(Blocks[0].CodecArgs[Idx + 1]) < 0,
+                        f"dialnorm value must be negative (ffmpeg [-31,-1]); got {Blocks[0].CodecArgs[Idx + 1]}")
         Md = ' '.join(Blocks[0].MetadataArgs)
         self.assertNotIn('dialnorm', Md)
 

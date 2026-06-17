@@ -211,7 +211,7 @@ class AudioFilterEmitter:
         IsOriginalCopy = StreamCopy and Label.lower().startswith('original')
         DialNorm = self.DialNormHandler.ResolveForTrack(Strategy, SourceDialNorm, IsOriginalCopy)
         if DialNorm is not None and IsAc3Family and not StreamCopy:
-            Block.CodecArgs += [f'-dialnorm:{OutputIndex}', str(int(DialNorm))]
+            Block.CodecArgs += [f'-dialnorm:{OutputIndex}', str(-int(DialNorm))]
 
         if bool(TrackConfig.get('IsDefaultTrack')):
             Block.DispositionArgs = [f'-disposition:a:{OutputIndex}', 'default']

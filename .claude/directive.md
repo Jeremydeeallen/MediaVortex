@@ -2,6 +2,70 @@
 
 **Set:** 2026-06-17
 **Status:** Active -- phase: IMPLEMENTING
+
+## Verification
+
+Offline verification recorded 2026-06-17. Live encode evidence pending the
+next emitter-driven Transcode through the I9 / larry / dot fleet on 8add6a6.
+
+- **L1 [D]** `AudioPolicyAdmissionGate.BackfillAllPending` exists; replaces
+  `BackfillRecentInserts` in `QueueManagementBusinessService._SnapshotAudioPolicies
+  OnRecentInserts`. Smoke against live DB: `BackfillAllPending` ran without
+  exception (queue was 0 Pending at smoke time, so no rows updated). The
+  next Pending row inserted post-deploy will have its `AudioPolicyJson`
+  snapshotted by the same admission cycle.
+- **L2 [D]** `ProcessTranscodeQueueService.HandleTranscodingResult` (the
+  Transcode-result success branch around line 1085) now invokes the same
+  `_RunPostEncodeAudioProbe(TranscodeAttemptId, OutputFilePath)` that
+  `HandleRemuxResult` uses. Both success paths populate
+  `TranscodeAttempts.AudioTracksEmittedJson`.
+- **L3 [D]** `AudioFilterEmitter._BuildBlockForTrack`: when codec is ac3
+  or eac3 and the strategy is not stream-copy, `Block.CodecArgs` now
+  appends `-dialnorm:N <int>`. The dropped `-metadata:s:a:N dialnorm=X`
+  emission is removed. `TestAudioFilterEmitter.test_h2_dialnorm_emitted_
+  as_codec_option_on_reencode` asserts the codec-option path; `test_h_
+  source_dialnorm_preserved_on_original_stream_copy` updated to assert
+  the stream-copy path emits `-c:a copy` with no explicit `-dialnorm`
+  (bitstream preserves it).
+- **L4 [D]** `AudioNormalizationConfig.LanguageDefault TEXT NOT NULL
+  DEFAULT 'eng'` column added via
+  `Scripts/SQLScripts/AddAudioNormalizationLanguageDefault.py`; global
+  row has `LanguageDefault='eng'`. Repository SELECT extended.
+  `AudioFilterEmitter` falls back to `Policy.LanguageDefault` when caller
+  doesn't pass `LibraryDefault`. `LanguageDetector._GetTagsLanguage`
+  treats `'und'` / `'undef'` / `'undetermined'` as not-detected so layers
+  (b)-(e) fire. New `test_und_falls_through_to_policy_language_default`
+  + parent `test_layer_iso_tag` updates verify both paths.
+
+43 contract tests green across the changed suites (TestAudioFilterEmitter,
+TestDialNormHandler, TestLanguageDetector, TestAudioPolicyResolver,
+TestAudioPolicyAdmissionGate).
+
+Live smoke pending: queue any future episode of 'Love Island USA - S08E*'
+(or any 1080p WEBDL h264 source whose audio is `und`-tagged) through the
+TranscodeQueue. Expected outcome on completion:
+- ffprobe of the output shows `tags.language=eng` on both audio streams
+  (the `und` fallback fired and used the global `LanguageDefault`)
+- ffprobe shows the dialnorm value embedded in the eac3 bitstream
+  (via `-dialnorm:N` codec option)
+- `SELECT AudioTracksEmittedJson FROM TranscodeAttempts WHERE Id=<latest>`
+  returns a non-NULL JSON array with per-track achieved measurements
+- `SELECT AudioPolicyJson FROM TranscodeQueue WHERE Status='Pending'` is
+  non-NULL on every row
+- `POST /api/Compliance/Recompute` for the file returns no `EnglishAudio`
+  gate block (post-replacement re-probe sees `language=eng` on both
+  streams -> `HasExplicitEnglishAudio=True`)
+
+## Status (updated)
+
+### Progress
+
+- [x] L1: BackfillAllPending replaces BackfillRecentInserts in QMBS
+- [x] L2: post-encode probe hook on Transcode success
+- [x] L3: -dialnorm:N codec option (not metadata)
+- [x] L4: LanguageDefault column + fallback when source `und`
+- [ ] Live smoke (next queued encode through I9 / larry / dot fleet
+      on 8add6a6 -- operator queue action required)
 **Slug:** audio-vertical-live-encode-gaps
 
 ## Outcome
