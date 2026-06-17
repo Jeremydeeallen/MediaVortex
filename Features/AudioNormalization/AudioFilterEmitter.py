@@ -166,56 +166,85 @@ class AudioFilterEmitter:
 
         return Blocks
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C2
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
     def _BuildBlockForTrack(self, MediaFile, TrackConfig, Strategy, Stream, Language, OutputIndex, NumEmitTracks):
-        """Build the four-slot TrackBlock argv for a single Track x Stream pair."""
+        """Thin orchestrator: delegates each per-concern slot of the TrackBlock argv to its own helper (SRP)."""
         StreamIdx = Stream.get('index', 0)
         Label = TrackConfig.get('Label') or 'Track'
-        StreamCopy = _ShouldStreamCopy(MediaFile, TrackConfig, Strategy)
+        Mode = self._DecideStreamCopyOrReencode(MediaFile, TrackConfig, Strategy)
+        Codec = (TrackConfig.get('Codec') or 'eac3').lower()
+        IsAc3Family = Codec in ('eac3', 'ac3')
 
         Block = TrackBlock(
             Label=Label,
             Language=Language,
-            Strategy='stream_copy' if StreamCopy else Strategy.Strategy,
+            Strategy=Mode if Mode != 'reencode' else Strategy.Strategy,
             MapArgs=['-map', f'0:a:{StreamIdx}'],
         )
 
-        Codec = (TrackConfig.get('Codec') or 'eac3').lower()
-        IsAc3Family = Codec in ('eac3', 'ac3')
+        Block.CodecArgs = self._BuildCodecArgs(TrackConfig, Mode, Codec, OutputIndex)
+        if Mode == 'reencode':
+            Block.FilterArgs = self._BuildFilterArgs(MediaFile, Strategy, OutputIndex)
+        Block.MetadataArgs = self._BuildMetadataArgs(Language, Label, OutputIndex)
+        Block.CodecArgs += self._BuildDialNormArgs(Strategy, Stream, Mode, IsAc3Family, Label, OutputIndex)
+        Block.DispositionArgs = self._BuildDispositionArgs(TrackConfig, OutputIndex)
+        return Block
 
-        if StreamCopy:
-            Block.CodecArgs = [f'-c:a:{OutputIndex}', 'copy']
-        elif Strategy.Strategy == STRATEGY_SKIP:
-            Block.CodecArgs = [f'-c:a:{OutputIndex}', 'copy']
-            Block.Strategy = 'stream_copy_fallback'
-        else:
-            Bitrate = TrackConfig.get('Bitrate')
-            SampleRate = TrackConfig.get('SampleRateHz')
-            Channels = TrackConfig.get('Channels')
-            Block.CodecArgs = [f'-c:a:{OutputIndex}', Codec]
-            if Bitrate:
-                Block.CodecArgs += [f'-b:a:{OutputIndex}', f'{int(Bitrate)}k']
-            if SampleRate:
-                Block.CodecArgs += [f'-ar:{OutputIndex}', str(int(SampleRate))]
-            if Channels not in (None, 'source'):
-                Block.CodecArgs += [f'-ac:{OutputIndex}', str(int(Channels))]
-            Filter = _BuildLoudnormFilter(MediaFile, Strategy)
-            Block.FilterArgs = [f'-filter:a:{OutputIndex}', Filter]
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
+    def _DecideStreamCopyOrReencode(self, MediaFile, TrackConfig, Strategy):
+        """Return 'stream_copy' / 'stream_copy_fallback' / 'reencode' for the per-track output."""
+        if _ShouldStreamCopy(MediaFile, TrackConfig, Strategy):
+            return 'stream_copy'
+        if Strategy.Strategy == STRATEGY_SKIP:
+            return 'stream_copy_fallback'
+        return 'reencode'
 
-        Block.MetadataArgs = [
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
+    def _BuildCodecArgs(self, TrackConfig, Mode, Codec, OutputIndex):
+        """Codec + bitrate + sample rate + channel-count argv for the output index."""
+        if Mode in ('stream_copy', 'stream_copy_fallback'):
+            return [f'-c:a:{OutputIndex}', 'copy']
+        Args = [f'-c:a:{OutputIndex}', Codec]
+        Bitrate = TrackConfig.get('Bitrate')
+        SampleRate = TrackConfig.get('SampleRateHz')
+        Channels = TrackConfig.get('Channels')
+        if Bitrate:
+            Args += [f'-b:a:{OutputIndex}', f'{int(Bitrate)}k']
+        if SampleRate:
+            Args += [f'-ar:{OutputIndex}', str(int(SampleRate))]
+        if Channels not in (None, 'source'):
+            Args += [f'-ac:{OutputIndex}', str(int(Channels))]
+        return Args
+
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
+    def _BuildFilterArgs(self, MediaFile, Strategy, OutputIndex):
+        """loudnorm filter argv for the per-output-track re-encode."""
+        Filter = _BuildLoudnormFilter(MediaFile, Strategy)
+        return [f'-filter:a:{OutputIndex}', Filter]
+
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
+    def _BuildMetadataArgs(self, Language, Label, OutputIndex):
+        """Quoted language + title metadata for the output stream."""
+        return [
             f'-metadata:s:a:{OutputIndex}', f'"language={Language}"',
             f'-metadata:s:a:{OutputIndex}', f'"title={Label}"',
         ]
 
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
+    def _BuildDialNormArgs(self, Strategy, Stream, Mode, IsAc3Family, Label, OutputIndex):
+        """Signed-dB dialnorm codec option for ac3/eac3 re-encodes; empty list otherwise."""
         SourceDialNorm = self.DialNormHandler.GetSourceDialNorm(Stream)
-        IsOriginalCopy = StreamCopy and Label.lower().startswith('original')
+        IsOriginalCopy = Mode == 'stream_copy' and (Label or '').lower().startswith('original')
         DialNorm = self.DialNormHandler.ResolveForTrack(Strategy, SourceDialNorm, IsOriginalCopy)
-        if DialNorm is not None and IsAc3Family and not StreamCopy:
-            Block.CodecArgs += [f'-dialnorm:{OutputIndex}', str(-int(DialNorm))]
+        if DialNorm is None or not IsAc3Family or Mode != 'reencode':
+            return []
+        return [f'-dialnorm:{OutputIndex}', str(-int(DialNorm))]
 
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
+    def _BuildDispositionArgs(self, TrackConfig, OutputIndex):
+        """Default-flag disposition argv -- 'default' on the default track, '0' otherwise."""
         if bool(TrackConfig.get('IsDefaultTrack')):
-            Block.DispositionArgs = [f'-disposition:a:{OutputIndex}', 'default']
-        else:
-            Block.DispositionArgs = [f'-disposition:a:{OutputIndex}', '0']
+            return [f'-disposition:a:{OutputIndex}', 'default']
+        return [f'-disposition:a:{OutputIndex}', '0']
 
         return Block
