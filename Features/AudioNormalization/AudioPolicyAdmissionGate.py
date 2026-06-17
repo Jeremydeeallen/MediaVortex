@@ -49,6 +49,22 @@ BACKFILL_POST_INSERT_SQL = (
 )
 
 
+BACKFILL_ALL_PENDING_SQL = (
+    "UPDATE TranscodeQueue tq SET AudioPolicyJson = ("
+    "  SELECT to_jsonb(c.*) FROM AudioNormalizationConfig c "
+    "  WHERE (c.Scope = 'item' AND c.ScopeKey = tq.MediaFileId::TEXT) "
+    "     OR (c.Scope = 'library' AND c.ScopeKey IN ("
+    "         SELECT mf.StorageRootId::TEXT FROM MediaFiles mf WHERE mf.Id = tq.MediaFileId"
+    "     )) "
+    "     OR (c.Scope = 'global' AND c.ScopeKey IS NULL) "
+    "  ORDER BY CASE c.Scope "
+    "    WHEN 'item' THEN 1 WHEN 'folder' THEN 2 WHEN 'library' THEN 3 ELSE 4 "
+    "  END LIMIT 1"
+    ") "
+    "WHERE tq.AudioPolicyJson IS NULL"
+)
+
+
 # directive: perfect-audio-vertical | # see perfect-audio-vertical.C12
 @dataclass
 class AdmissionDecision:
@@ -148,6 +164,11 @@ class AudioPolicyAdmissionGate:
     def BackfillRecentInserts(self):
         """Snapshot the resolved policy onto every TranscodeQueue row inserted in the last 60 seconds."""
         DatabaseService().ExecuteNonQuery(BACKFILL_POST_INSERT_SQL)
+
+    # directive: audio-vertical-live-encode-gaps | # see audio-normalization.C12
+    def BackfillAllPending(self):
+        """Snapshot the resolved policy onto every Pending TranscodeQueue row with NULL AudioPolicyJson, regardless of DateAdded."""
+        DatabaseService().ExecuteNonQuery(BACKFILL_ALL_PENDING_SQL)
 
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C12
     def _PolicyToDict(self, Policy):

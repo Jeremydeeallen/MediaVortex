@@ -5,7 +5,8 @@ SELECT_ALL_COLUMNS = (
     "Id, Scope, ScopeKey, Enabled, "
     "TargetIntegratedLufs, TargetTruePeakDbtp, TargetLra, LoudnessTolerance, "
     "EmitTracks, UngainablePolicy, LanguageKeepPolicy, "
-    "KeepCommentaryTracks, EnableSpeechLanguageDetection, AudioDelayMs, LastUpdated"
+    "KeepCommentaryTracks, EnableSpeechLanguageDetection, AudioDelayMs, "
+    "LanguageDefault, LastUpdated"
 )
 
 

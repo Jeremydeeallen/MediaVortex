@@ -749,12 +749,12 @@ class QueueManagementBusinessService:
             LoggingService.LogException(ErrorMsg, Ex, "QueueManagementBusinessService", "QueueAllMatching")
             return {"Success": False, "ErrorMessage": ErrorMsg, "ItemsAdded": 0}
 
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C12
+    # directive: audio-vertical-live-encode-gaps | # see audio-normalization.C12
     def _SnapshotAudioPoliciesOnRecentInserts(self):
-        """Backfill TranscodeQueue.AudioPolicyJson on rows inserted in the last 60s via the admission gate; failure never breaks queue admission."""
+        """Backfill AudioPolicyJson on every Pending TranscodeQueue row with NULL snapshot; failure never breaks queue admission."""
         try:
             from Features.AudioNormalization.AudioPolicyAdmissionGate import AudioPolicyAdmissionGate
-            AudioPolicyAdmissionGate().BackfillRecentInserts()
+            AudioPolicyAdmissionGate().BackfillAllPending()
         except Exception as Ex:
             LoggingService.LogException(
                 "Audio policy snapshot backfill failed -- queue rows may have NULL AudioPolicyJson",

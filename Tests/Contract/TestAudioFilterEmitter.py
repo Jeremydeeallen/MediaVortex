@@ -180,8 +180,43 @@ class TestAudioFilterEmitter(unittest.TestCase):
         Mf = _Mf(AudioCodec='eac3')
         Blocks = Emitter.EmitTracks(Mf, Pol, AudioStreams=[Stream])
         self.assertEqual(len(Blocks), 1)
+        Cd = ' '.join(Blocks[0].CodecArgs)
+        self.assertIn('copy', Cd)
+        self.assertNotIn('-dialnorm', Cd)
+
+    # directive: audio-vertical-live-encode-gaps | # see audio-normalization.C20
+    def test_h2_dialnorm_emitted_as_codec_option_on_reencode(self):
+        Emitter = AudioFilterEmitter()
+        Stream = _Stream(Index=0, Language='eng')
+        Stream['tags']['DialNorm'] = '24'
+        Pol = _Policy(EmitTracks=[
+            {'Label': 'Original', 'TargetLufs': -23.0, 'TargetLra': None,
+             'Channels': 'source', 'Codec': 'eac3', 'Bitrate': 384,
+             'SampleRateHz': 48000, 'BitDepth': 16,
+             'LanguageFilter': 'keep-all', 'IsDefaultTrack': True},
+        ])
+        Blocks = Emitter.EmitTracks(_Mf(), Pol, AudioStreams=[Stream])
+        self.assertEqual(len(Blocks), 1)
+        Cd = ' '.join(Blocks[0].CodecArgs)
+        self.assertIn('-dialnorm:0', Cd)
         Md = ' '.join(Blocks[0].MetadataArgs)
-        self.assertIn('dialnorm=24', Md)
+        self.assertNotIn('dialnorm', Md)
+
+    # directive: audio-vertical-live-encode-gaps | # see audio-normalization.C11
+    def test_und_falls_through_to_policy_language_default(self):
+        Emitter = AudioFilterEmitter()
+        Stream = _Stream(Index=0, Language='und')
+        Pol = _Policy(EmitTracks=[
+            {'Label': 'Original', 'TargetLufs': -23.0, 'TargetLra': None,
+             'Channels': 'source', 'Codec': 'eac3', 'Bitrate': 384,
+             'SampleRateHz': 48000, 'BitDepth': 16,
+             'LanguageFilter': 'keep-all', 'IsDefaultTrack': True},
+        ])
+        Pol['LanguageDefault'] = 'eng'
+        Blocks = Emitter.EmitTracks(_Mf(), Pol, AudioStreams=[Stream])
+        self.assertEqual(len(Blocks), 1)
+        Md = ' '.join(Blocks[0].MetadataArgs)
+        self.assertIn('language=eng', Md)
 
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C23
     def test_i_commentary_filtered_when_keep_commentary_false(self):

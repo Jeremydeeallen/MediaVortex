@@ -34,13 +34,16 @@ class DetectionResult:
     KeepPolicy: str
 
 
-# directive: perfect-audio-vertical | # see perfect-audio-vertical.C11
+# directive: audio-vertical-live-encode-gaps | # see audio-normalization.C11
 def _GetTagsLanguage(Stream):
-    """Layer (a): ISO 639-2 tags.language; returns lowercase 3-letter code or None."""
+    """Layer (a): ISO 639-2 tags.language; returns lowercase 3-letter code or None ('und' / empty are treated as not-detected so library default fires)."""
     Tags = Stream.get('tags') or {}
     Lang = Tags.get('language')
     if Lang and isinstance(Lang, str) and len(Lang.strip()) >= 2:
-        return Lang.strip().lower()
+        Normalized = Lang.strip().lower()
+        if Normalized in ('und', 'undef', 'undetermined'):
+            return None
+        return Normalized
     return None
 
 

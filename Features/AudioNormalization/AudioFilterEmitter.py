@@ -132,9 +132,10 @@ class AudioFilterEmitter:
 
         EnableSpeech = bool(_GetField(Policy, 'EnableSpeechLanguageDetection'))
         SpeechCache = _GetField(MediaFile, 'AudioStreamLanguageDetectionsJson')
+        EffectiveDefault = LibraryDefault or _GetField(Policy, 'LanguageDefault')
         Detection = self.LanguageDetector.Detect(
             AudioStreams,
-            LibraryDefault=LibraryDefault,
+            LibraryDefault=EffectiveDefault,
             SpeechCache=SpeechCache,
             EnableSpeechLayer=EnableSpeech,
         )
@@ -179,13 +180,15 @@ class AudioFilterEmitter:
             MapArgs=['-map', f'0:a:{StreamIdx}'],
         )
 
+        Codec = (TrackConfig.get('Codec') or 'eac3').lower()
+        IsAc3Family = Codec in ('eac3', 'ac3')
+
         if StreamCopy:
             Block.CodecArgs = [f'-c:a:{OutputIndex}', 'copy']
         elif Strategy.Strategy == STRATEGY_SKIP:
             Block.CodecArgs = [f'-c:a:{OutputIndex}', 'copy']
             Block.Strategy = 'stream_copy_fallback'
         else:
-            Codec = (TrackConfig.get('Codec') or 'eac3').lower()
             Bitrate = TrackConfig.get('Bitrate')
             SampleRate = TrackConfig.get('SampleRateHz')
             Channels = TrackConfig.get('Channels')
@@ -207,10 +210,8 @@ class AudioFilterEmitter:
         SourceDialNorm = self.DialNormHandler.GetSourceDialNorm(Stream)
         IsOriginalCopy = StreamCopy and Label.lower().startswith('original')
         DialNorm = self.DialNormHandler.ResolveForTrack(Strategy, SourceDialNorm, IsOriginalCopy)
-        if DialNorm is not None:
-            Block.MetadataArgs += [
-                f'-metadata:s:a:{OutputIndex}', f'"dialnorm={DialNorm}"',
-            ]
+        if DialNorm is not None and IsAc3Family and not StreamCopy:
+            Block.CodecArgs += [f'-dialnorm:{OutputIndex}', str(int(DialNorm))]
 
         if bool(TrackConfig.get('IsDefaultTrack')):
             Block.DispositionArgs = [f'-disposition:a:{OutputIndex}', 'default']

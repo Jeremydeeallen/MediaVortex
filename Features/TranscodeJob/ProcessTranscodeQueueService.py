@@ -1082,6 +1082,8 @@ class ProcessTranscodeQueueService:
                     'QualityTestRequired': True  # Disposition function decides at post-flight
                 })
 
+                self._RunPostEncodeAudioProbe(TranscodeAttemptId, OutputFilePath)
+
                 # Update TranscodeFiles record for overall file status
                 self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes, MediaFileId=Job.MediaFileId)
 
