@@ -585,12 +585,12 @@ class ProcessTranscodeQueueService:
                 'QualityTestRequired': False
             })
 
-            self._RunPostEncodeAudioProbe(TranscodeAttemptId, OutputFilePath + '.inprogress')
-
             # Update TranscodeFiles record
             self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes, MediaFileId=Job.MediaFileId)
 
             self.DispatchDisposition(TranscodeAttemptId, Job, OutputFilePath)
+
+            self._RunPostEncodeAudioProbe(TranscodeAttemptId, self._PostReplacementCanonicalPath(Job.MediaFileId))
 
             # Delete job from queue
             self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
@@ -863,6 +863,25 @@ class ProcessTranscodeQueueService:
             return None
 
     # directive: audio-vertical-live-encode-gaps | # see audio-normalization.C15
+    def _PostReplacementCanonicalPath(self, MediaFileId):
+        """Resolve the post-replacement canonical worker-local path from MediaFiles + StorageRoots."""
+        try:
+            from Core.Database.DatabaseService import DatabaseService
+            Rows = DatabaseService().ExecuteQuery(
+                "SELECT sr.CanonicalPrefix, mf.RelativePath "
+                "FROM MediaFiles mf JOIN StorageRoots sr ON sr.Id = mf.StorageRootId "
+                "WHERE mf.Id = %s",
+                (MediaFileId,),
+            )
+            if not Rows:
+                return None
+            Prefix = (Rows[0].get('canonicalprefix') or '').rstrip('/\\')
+            Rel = Rows[0].get('relativepath') or ''
+            return Prefix + ('\\' if '\\' in Prefix or ':' in Prefix else '/') + Rel
+        except Exception:
+            return None
+
+    # directive: audio-vertical-live-encode-gaps | # see audio-normalization.C15
     def _RunPostEncodeAudioProbe(self, TranscodeAttemptId, OutputFilePath):
         """Per-track ebur128 against the encoded output; failure never blocks the encode."""
         from Core.Path.LocalPath import LocalExists
@@ -1093,14 +1112,14 @@ class ProcessTranscodeQueueService:
                     'QualityTestRequired': True  # Disposition function decides at post-flight
                 })
 
-                self._RunPostEncodeAudioProbe(TranscodeAttemptId, OutputFilePath + '.inprogress')
-
                 # Update TranscodeFiles record for overall file status
                 self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes, MediaFileId=Job.MediaFileId)
 
                 # LocalOutputPath was already set during command building (single source of truth)
 
                 self.DispatchDisposition(TranscodeAttemptId, Job, OutputFilePath)
+
+                self._RunPostEncodeAudioProbe(TranscodeAttemptId, self._PostReplacementCanonicalPath(Job.MediaFileId))
 
                 # Delete job from queue (successful completion)
                 self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
