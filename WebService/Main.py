@@ -155,6 +155,7 @@ class WebServiceApp:
         
         # Start status polling for service control
         self.PrivateStartStatusPolling()
+        self.PrivateStartAudioVerticalHealth()
         
         # Update service status to Running immediately after startup
         self.PrivateUpdateServiceStatus()
@@ -499,6 +500,39 @@ class WebServiceApp:
             print("Status polling started")
         except Exception as e:
             LoggingService.LogException("Failed to start status polling", e, "WebService", "PrivateStartStatusPolling")
+
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.H1
+    def PrivateStartAudioVerticalHealth(self):
+        """Start the AudioVerticalHealthService recurring loop in a background daemon thread."""
+        try:
+            self.AudioVerticalHealthThread = threading.Thread(
+                target=self.PrivateAudioVerticalHealthLoop,
+                daemon=True,
+                name="AudioVerticalHealth",
+            )
+            self.AudioVerticalHealthThread.start()
+            print("AudioVerticalHealthService started")
+        except Exception as Ex:
+            LoggingService.LogException("Failed to start AudioVerticalHealthService", Ex, "WebService", "PrivateStartAudioVerticalHealth")
+
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.H1
+    def PrivateAudioVerticalHealthLoop(self):
+        """Background loop that runs the health service every SystemSettings.AudioVerticalHealthIntervalSec (default 300)."""
+        from Features.AudioNormalization.SelfHealing.AudioVerticalHealthComposition import BuildAudioVerticalHealthService
+        from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+        Svc = BuildAudioVerticalHealthService()
+        Repo = SystemSettingsRepository()
+        while True:
+            try:
+                IntervalRaw = Repo.GetSystemSetting('AudioVerticalHealthIntervalSec') or '300'
+                Interval = max(60, int(float(IntervalRaw or 300)))
+            except Exception:
+                Interval = 300
+            try:
+                Svc.RunCycle()
+            except Exception as Ex:
+                LoggingService.LogException("AudioVerticalHealthService cycle raised", Ex, "WebService", "PrivateAudioVerticalHealthLoop")
+            time.sleep(Interval)
     
     def PrivateServiceStatusLoop(self):
         """Background thread to update service status."""
