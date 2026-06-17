@@ -222,12 +222,13 @@ class AudioFilterEmitter:
         Filter = _BuildLoudnormFilter(MediaFile, Strategy)
         return [f'-filter:a:{OutputIndex}', Filter]
 
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
+    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.L2
     def _BuildMetadataArgs(self, Language, Label, OutputIndex):
-        """Quoted language + title metadata for the output stream."""
+        """Language + title + MP4-persistent handler_name (L2: title is dropped by MP4 muxer; handler_name survives)."""
         return [
             f'-metadata:s:a:{OutputIndex}', f'"language={Language}"',
             f'-metadata:s:a:{OutputIndex}', f'"title={Label}"',
+            f'-metadata:s:a:{OutputIndex}', f'"handler_name={Label} ({Language})"',
         ]
 
     # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
@@ -246,5 +247,3 @@ class AudioFilterEmitter:
         if bool(TrackConfig.get('IsDefaultTrack')):
             return [f'-disposition:a:{OutputIndex}', 'default']
         return [f'-disposition:a:{OutputIndex}', '0']
-
-        return Block

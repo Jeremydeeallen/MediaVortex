@@ -165,12 +165,19 @@ language. Contract test `TestMultiLanguageLiveEncode.py` asserts ffprobe
 output shape; live run on a real 2-language source recorded in directive
 verification.
 
-L2. MP4 title-tag fidelity -- ffprobe of an emitter-produced output
-either shows `tags.title=Original` / `tags.title=Dialog Boost` on the
-two audio streams, OR criterion C1 is amended in writing here to identify
-Dialog Boost by `disposition.default=1` + stream-index convention (with
-the spec reference for why MP4 cannot carry per-audio-stream title).
-No silent deferral.
+L2. MP4 audio-track naming -- the MP4 muxer in ffmpeg silently drops
+`-metadata:s:a:N title=X` for audio streams (confirmed empirically:
+`title` does not appear in `ffprobe -show_entries stream_tags` output
+on an MP4 with that flag set; only `language` and `handler_name`
+survive). The MP4 spec's per-track name lives in the `hdlr` atom,
+which ffmpeg writes from the `handler_name` metadata key. The emitter
+emits `-metadata:s:a:N handler_name="<Label> (<lang>)"` per output
+stream (resolution outcome (a) in the L2 directive). Contract test
+`TestMp4TitleResolution.py` proves the round-trip: title is dropped,
+handler_name persists, and ffprobe shows e.g. `handler_name=Dialog
+Boost (eng)`. Operator-facing identification of the Dialog Boost
+track is the per-stream `handler_name` value AND
+`disposition.default=1`.
 
 L3. Whisper backend live verified -- a synthetic file with no language
 tag, scope-configured with `EnableSpeechLanguageDetection=true` and

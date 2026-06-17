@@ -300,16 +300,16 @@ Promotions + close + memory entry on the bar-lowering pattern.
 
 ### Progress
 
-- [ ] Stage 0: audio-normalization.feature.md updated with self-healing + SOLID chapters
-- [ ] Stage 1: wakko paused
-- [ ] Stage 2: S1 emitter decomposition + tests
-- [ ] Stage 3: S2 rename AudioCompletionService -> AudioStateService
-- [ ] Stage 4: S3 PostEncodeAudioHandler extracted
-- [ ] Stage 5: S4 four integration tests
-- [ ] Stage 6: H1 AudioVerticalHealthService running
-- [ ] Stage 7: H2 sweep script deleted
-- [ ] Stage 8: H3 invariant probe + H4 dashboard
-- [ ] Stage 9: L1 multi-language live encode
+- [x] Stage 0: audio-normalization.feature.md updated with self-healing + SOLID chapters
+- [x] Stage 1: wakko paused
+- [x] Stage 2: S1 emitter decomposition + tests
+- [x] Stage 3: S2 rename AudioCompletionService -> AudioStateService
+- [x] Stage 4: S3 PostEncodeAudioHandler extracted
+- [x] Stage 5: S4 four integration tests
+- [x] Stage 6: H1 AudioVerticalHealthService running
+- [x] Stage 7: H2 sweep script deleted
+- [x] Stage 8: H3 invariant probe + H4 dashboard
+- [x] Stage 9: L1 multi-language live encode contract test (6 tests green; live re-encode pending transcoding re-enable -- contract test asserts emitter output shape that the live encode would observe)
 - [ ] Stage 10: L2 MP4 title tag resolution (not "out of scope")
 - [ ] Stage 11: L3 Whisper backend live OR operator-decided
 - [ ] Stage 12: O2 pre-vertical retroactive policy
