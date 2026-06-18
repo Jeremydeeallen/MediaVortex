@@ -115,7 +115,8 @@ class PostEncodeMeasurementService:
         for Stream in Streams:
             Idx = Stream.get('index')
             Tags = Stream.get('tags') or {}
-            Label = Tags.get('title') or 'Track'
+            Handler = (Tags.get('handler_name') or '').strip()
+            Label = Tags.get('title') or (Handler.split(' (')[0] if Handler and Handler != 'SoundHandler' else 'Track')
             Language = Tags.get('language') or 'und'
             Measure = self.MeasureStream(Ffmpeg, OutputFilePath, len(Results))
             if Measure is not None:
