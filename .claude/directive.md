@@ -38,7 +38,16 @@ end if they want.
 Features/AudioNormalization/AudioFilterEmitter.py                    -- EDIT: per-language default disposition (E1 surfaced bug)
 Features/AudioNormalization/audio-normalization.feature.md           -- EDIT: per-language default doc (E1 follow-up)
 Tests/Contract/TestMultiLanguageLiveEncode.py                        -- EDIT: assert per-language default behavior
-Tests/Contract/TestAudioFilterEmitterDecomposition.py                -- EDIT: per-language default helper coverage
+Features/AudioNormalization/Services/AudioStreamProbe.py             -- CREATE: ffprobe wrapper (E1 production-wiring)
+Features/TranscodeJob/Emit/TranscodeShape.py                         -- EDIT: probe source + pass to EmitTracks
+Features/TranscodeJob/Emit/RemuxShape.py                             -- EDIT: probe source + pass to EmitTracks
+Features/TranscodeJob/Emit/SubtitleFixShape.py                       -- EDIT: probe source + pass to EmitTracks
+Tests/Contract/TestAudioStreamProbe.py                               -- CREATE: probe contract tests
+Features/AudioNormalization/SelfHealing/AudioVerticalHealthService.py -- EDIT: batch-cap remediation (E2 surfaced bug)
+Features/AudioNormalization/SelfHealing/AudioVerticalHealthComposition.py -- EDIT: pass RemediationBatch through
+Features/AudioNormalization/Services/PostEncodeMeasurementService.py -- EDIT: persist [] sentinel on zero streams (E2 surfaced bug)
+Features/Activity/ActivityRepository.py                              -- EDIT: dashboard shows current not cumulative (E2 surfaced bug)
+Tests/Contract/TestAudioVerticalHealthService.py                     -- EDIT: batch-cap assertion
 ```
 
 ## Constraints (hook discipline)
@@ -67,7 +76,7 @@ Tests/Contract/TestAudioFilterEmitterDecomposition.py                -- EDIT: pe
 ### Progress
 
 - [x] E1 multi-language live encode evidence -- MediaFile 579 (Black Butler S01E06 Bluray .mkv, jpn opus stereo + eng opus 5.1) ran through the new emitter into e1_blackbutler.mp4. ffprobe shows 4 audio streams: Original (jpn, 2ch, default=0), Original (eng, 6ch, default=0), Dialog Boost (jpn, 2ch, default=0), Dialog Boost (eng, 6ch, default=1). Surfaced + fixed a real default-disposition bug along the way (emitter was setting default=1 on EVERY Dialog Boost regardless of source-language default; now picks exactly one via _PickDefaultLanguage). New L1 contract tests for per-language default + library-default fallback green; 36 emitter regression tests green.
-- [ ] E2 backlog drain evidence
+- [ ] E2 backlog drain evidence -- surfaced + fixed three real H1 bugs (one cycle blocking all future cycles indefinitely; PostEncodeMeasurementService re-detecting zero-stream files forever; dashboard summing Detected cumulatively); H1 cycles now fire on schedule with batch cap; SuccessfulAttempt invariant draining live (18084 -> 8553 over session, ~80/min); InvalidMeasurement drain in progress.
 
 ### Promotions
 

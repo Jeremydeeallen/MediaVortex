@@ -109,11 +109,15 @@ H1. `AudioVerticalHealthService` (`Features/AudioNormalization/SelfHealing/
 AudioVerticalHealthService.py`) runs every
 `SystemSettings.AudioVerticalHealthIntervalSec` seconds (default 300) on
 the WebService background-thread cadence. Constructor injects
-`List[IAudioVerticalInvariant]` and a per-invariant
-`Dict[invariant_name -> IAudioVerticalRemediation]`. Each cycle: for each
+`List[IAudioVerticalInvariant]`, a per-invariant
+`Dict[invariant_name -> IAudioVerticalRemediation]`, and a
+`RemediationBatch` cap (default 100). Each cycle: for each
 invariant -> `Detect()` returns offending row ids -> matched
-`Remediation.Apply()` runs per id -> result written to
-`AudioVerticalHealthRuns` table (one row per cycle x invariant).
+`Remediation.Apply()` runs against the FIRST `RemediationBatch` ids ->
+result + `capped X->N` note written to `AudioVerticalHealthRuns` table
+(one row per cycle x invariant). The batch cap protects cycle time:
+without it, a single invariant with 18k+ detected rows blocks every
+subsequent cycle for many hours.
 
 Six invariants ship in the initial composition:
 - `PendingQueueWithoutPolicyJson` -> `BackfillPolicyJson` remediation
@@ -137,10 +141,13 @@ Each test instantiates the matching `IAudioVerticalInvariant` and asserts
 This is the canonical "is the vertical healthy" probe -- same code path
 as H1 detection (DRY).
 
-H4. `/api/Activity/LibraryCompliance` payload carries `AudioVerticalHealth:
-{LastRunAt, ActionsLast24h: {<invariant>: count}}`. `Templates/Activity.html`
-Library Compliance card has a `Self-healing (last 24h)` sub-section
-rendering the counts.
+H4. `/api/Activity/LibraryCompliance` payload carries
+`AudioVerticalHealth: {LastRunAt, PreVerticalPolicy, Last24h: [{Invariant,
+Detected, Remediated}]}`. `Detected` is the count from the most-recent
+cycle per invariant (current backlog); `Remediated` is the sum across
+all cycles in the last 24h (throughput). The template's
+`Self-healing (last 24h)` sub-section renders the table plus the
+`PreVerticalPolicy` badge.
 
 ## Operational (added 2026-06-17)
 
@@ -171,6 +178,17 @@ MediaFile 579 (Black Butler S01E06 Bluray-1080p.mkv, source: jpn opus
 stereo + eng opus 5.1; eng marked default): output had Original (jpn,
 default=0) / Original (eng, default=0) / Dialog Boost (jpn, default=0) /
 Dialog Boost (eng, default=1).
+
+Production wiring (so live transcode flow actually triggers the
+multi-language path): `TranscodeShape`, `RemuxShape`, and
+`SubtitleFixShape` each constructor-inject an
+`AudioStreamProbe` (`Features/AudioNormalization/Services/
+AudioStreamProbe.py`) and call `Probe(CommandData.InputPath)` before
+`EmitTracks`. The probe returns an audio-only-indexed list (sequential
+0, 1, 2 to match ffmpeg's `-map 0:a:N` convention) with per-stream
+language and disposition. When the probe returns `[]` (path missing,
+ffprobe unavailable) `EmitTracks` falls back to its single-stream
+placeholder behavior.
 
 L2. MP4 audio-track naming -- the MP4 muxer in ffmpeg silently drops
 `-metadata:s:a:N title=X` for audio streams (confirmed empirically:
