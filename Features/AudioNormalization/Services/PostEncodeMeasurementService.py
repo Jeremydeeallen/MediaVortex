@@ -101,7 +101,15 @@ class PostEncodeMeasurementService:
             return False
         Streams = self.ListAudioStreams(Ffprobe, OutputFilePath)
         if not Streams:
-            return False
+            try:
+                DatabaseService().ExecuteNonQuery(WRITE_TRACKS_EMITTED_SQL, ('[]', TranscodeAttemptId))
+                return True
+            except Exception as Ex:
+                LoggingService.LogException(
+                    f"PostEncodeMeasurement.Probe no-streams sentinel persist failed for AttemptId={TranscodeAttemptId}",
+                    Ex, "PostEncodeMeasurementService", "Probe",
+                )
+                return False
 
         Results = []
         for Stream in Streams:

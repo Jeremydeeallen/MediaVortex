@@ -88,6 +88,22 @@ class TestAudioVerticalHealthService(unittest.TestCase):
             Outcomes = Svc.RunCycle()
         self.assertEqual(Outcomes[0]['Detected'], 0)
 
+    # directive: audio-vertical-live-evidence | # see audio-normalization.H1
+    def test_remediation_batch_cap_protects_cycle_time(self):
+        I1 = _StubInvariant('A', list(range(500)))
+        R1 = _StubRemediation('A')
+        Svc = AudioVerticalHealthService([I1], {'A': R1}, RemediationBatch=50)
+        with patch(
+            'Features.AudioNormalization.SelfHealing.AudioVerticalHealthService.DatabaseService'
+        ) as MockDb:
+            Instance = MagicMock()
+            MockDb.return_value = Instance
+            Outcomes = Svc.RunCycle()
+        self.assertEqual(len(R1.Calls[0]), 50)
+        self.assertEqual(Outcomes[0]['Detected'], 500)
+        self.assertEqual(Outcomes[0]['Remediated'], 50)
+        self.assertIn('capped', (Outcomes[0]['Notes'] or ''))
+
     # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.H1
     def test_composition_root_returns_runnable_service(self):
         Svc = BuildAudioVerticalHealthService()
