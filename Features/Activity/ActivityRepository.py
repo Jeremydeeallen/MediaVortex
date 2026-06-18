@@ -216,19 +216,27 @@ class ActivityRepository(BaseRepository):
         )
         return dict(Rows[0]) if Rows else {}
 
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.H4
+    # directive: audio-vertical-live-evidence | # see audio-normalization.H4
     def GetAudioVerticalHealth(self) -> Dict:
-        """Return the most recent AudioVerticalHealthRuns rows aggregated to last-24h per invariant."""
+        """Return the most-recent-per-invariant AudioVerticalHealthRuns row + 24h remediation sum."""
         try:
             Rows = self.DatabaseService.ExecuteQuery(
-                "SELECT InvariantName, "
-                "SUM(DetectedCount)::int AS Detected, "
-                "SUM(RemediatedCount)::int AS Remediated, "
-                "MAX(Timestamp) AS LastRun "
-                "FROM AudioVerticalHealthRuns "
-                "WHERE Timestamp > NOW() - INTERVAL '24 hours' "
-                "GROUP BY InvariantName "
-                "ORDER BY InvariantName"
+                "WITH latest AS ("
+                "  SELECT DISTINCT ON (InvariantName) "
+                "    InvariantName, DetectedCount, RemediatedCount, Timestamp "
+                "  FROM AudioVerticalHealthRuns "
+                "  WHERE Timestamp > NOW() - INTERVAL '24 hours' "
+                "  ORDER BY InvariantName, Timestamp DESC"
+                "), summed AS ("
+                "  SELECT InvariantName, SUM(RemediatedCount)::int AS RemediatedSum "
+                "  FROM AudioVerticalHealthRuns "
+                "  WHERE Timestamp > NOW() - INTERVAL '24 hours' "
+                "  GROUP BY InvariantName"
+                ") "
+                "SELECT l.InvariantName, l.DetectedCount AS Detected, "
+                "       s.RemediatedSum AS RemediatedLast24h "
+                "FROM latest l JOIN summed s ON s.InvariantName = l.InvariantName "
+                "ORDER BY l.InvariantName"
             )
             LastRows = self.DatabaseService.ExecuteQuery(
                 "SELECT MAX(Timestamp) AS LastRunAt FROM AudioVerticalHealthRuns"
@@ -246,7 +254,7 @@ class ActivityRepository(BaseRepository):
                     {
                         'Invariant': R['invariantname'],
                         'Detected': int(R['detected'] or 0),
-                        'Remediated': int(R['remediated'] or 0),
+                        'Remediated': int(R['remediatedlast24h'] or 0),
                     }
                     for R in (Rows or [])
                 ],
