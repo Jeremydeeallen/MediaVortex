@@ -141,6 +141,8 @@ class AudioFilterEmitter:
         )
         StreamLanguageMap = {Sl.StreamIndex: Sl.Language for Sl in Detection.StreamLanguages}
 
+        DefaultLanguage = self._PickDefaultLanguage(AudioStreams, StreamLanguageMap, EffectiveDefault)
+
         EmitTrackConfigs = _GetField(Policy, 'EmitTracks') or []
         Blocks = []
         OutputIndex = 0
@@ -159,6 +161,7 @@ class AudioFilterEmitter:
                 Block = self._BuildBlockForTrack(
                     MediaFile, TrackConfig, Strategy, Stream, StreamLanguage,
                     OutputIndex, len(EmitTrackConfigs),
+                    IsDefaultLanguage=(StreamLanguage == DefaultLanguage),
                 )
                 if Block is not None:
                     Blocks.append(Block)
@@ -166,8 +169,27 @@ class AudioFilterEmitter:
 
         return Blocks
 
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
-    def _BuildBlockForTrack(self, MediaFile, TrackConfig, Strategy, Stream, Language, OutputIndex, NumEmitTracks):
+    # directive: audio-vertical-live-evidence | # see audio-normalization.L1
+    def _PickDefaultLanguage(self, AudioStreams, StreamLanguageMap, LibraryDefault):
+        """Pick exactly one default language across the source: prefer per-stream default disposition, fall back to library default, fall back to first language present."""
+        for S in AudioStreams:
+            Disp = S.get('disposition') or {}
+            if Disp.get('default') in (1, True, '1'):
+                Lang = StreamLanguageMap.get(S.get('index'), 'und')
+                if Lang and Lang != 'und':
+                    return Lang
+        if LibraryDefault:
+            Present = {StreamLanguageMap.get(S.get('index'), 'und') for S in AudioStreams}
+            if LibraryDefault in Present:
+                return LibraryDefault
+        for S in AudioStreams:
+            Lang = StreamLanguageMap.get(S.get('index'), 'und')
+            if Lang and Lang != 'und':
+                return Lang
+        return None
+
+    # directive: audio-vertical-live-evidence | # see audio-normalization.L1
+    def _BuildBlockForTrack(self, MediaFile, TrackConfig, Strategy, Stream, Language, OutputIndex, NumEmitTracks, IsDefaultLanguage=True):
         """Thin orchestrator: delegates each per-concern slot of the TrackBlock argv to its own helper (SRP)."""
         StreamIdx = Stream.get('index', 0)
         Label = TrackConfig.get('Label') or 'Track'
@@ -187,7 +209,7 @@ class AudioFilterEmitter:
             Block.FilterArgs = self._BuildFilterArgs(MediaFile, Strategy, OutputIndex)
         Block.MetadataArgs = self._BuildMetadataArgs(Language, Label, OutputIndex)
         Block.CodecArgs += self._BuildDialNormArgs(Strategy, Stream, Mode, IsAc3Family, Label, OutputIndex)
-        Block.DispositionArgs = self._BuildDispositionArgs(TrackConfig, OutputIndex)
+        Block.DispositionArgs = self._BuildDispositionArgs(TrackConfig, OutputIndex, IsDefaultLanguage=IsDefaultLanguage)
         return Block
 
     # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
@@ -241,9 +263,9 @@ class AudioFilterEmitter:
             return []
         return [f'-dialnorm:{OutputIndex}', str(-int(DialNorm))]
 
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
-    def _BuildDispositionArgs(self, TrackConfig, OutputIndex):
-        """Default-flag disposition argv -- 'default' on the default track, '0' otherwise."""
-        if bool(TrackConfig.get('IsDefaultTrack')):
+    # directive: audio-vertical-live-evidence | # see audio-normalization.L1
+    def _BuildDispositionArgs(self, TrackConfig, OutputIndex, IsDefaultLanguage=True):
+        """Default-flag iff TrackConfig.IsDefaultTrack AND this output corresponds to the source's default-language stream."""
+        if bool(TrackConfig.get('IsDefaultTrack')) and IsDefaultLanguage:
             return [f'-disposition:a:{OutputIndex}', 'default']
         return [f'-disposition:a:{OutputIndex}', '0']

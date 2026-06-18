@@ -76,13 +76,22 @@ class TestMultiLanguageLiveEncode(unittest.TestCase):
              ('Original', 'eng'), ('Original', 'jpn')],
         )
 
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.L1
-    def test_dialog_boost_default_flag_per_language(self):
-        Streams = [_Stream(0, 'eng'), _Stream(1, 'jpn')]
-        Blocks = AudioFilterEmitter().EmitTracks(_Mf(), _DualTrackPolicy(), AudioStreams=Streams)
-        DefaultBoosts = [B for B in Blocks if B.Label == 'Dialog Boost'
-                         and 'default' in ' '.join(B.DispositionArgs)]
-        self.assertEqual(len(DefaultBoosts), 2)
+    # directive: audio-vertical-live-evidence | # see audio-normalization.L1
+    def test_default_disposition_only_on_default_language_dialog_boost(self):
+        Streams = [_Stream(0, 'eng', Default=True), _Stream(1, 'jpn')]
+        Blocks = AudioFilterEmitter().EmitTracks(_Mf(), _DualTrackPolicy(), AudioStreams=Streams, LibraryDefault='eng')
+        Defaults = [B for B in Blocks if 'default' in ' '.join(B.DispositionArgs)]
+        self.assertEqual(len(Defaults), 1)
+        self.assertEqual(Defaults[0].Label, 'Dialog Boost')
+        self.assertEqual(Defaults[0].Language, 'eng')
+
+    # directive: audio-vertical-live-evidence | # see audio-normalization.L1
+    def test_library_default_picks_default_when_source_has_no_default(self):
+        Streams = [_Stream(0, 'jpn'), _Stream(1, 'eng')]
+        Blocks = AudioFilterEmitter().EmitTracks(_Mf(), _DualTrackPolicy(), AudioStreams=Streams, LibraryDefault='eng')
+        Defaults = [B for B in Blocks if 'default' in ' '.join(B.DispositionArgs)]
+        self.assertEqual(len(Defaults), 1)
+        self.assertEqual(Defaults[0].Language, 'eng')
 
     # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.L1
     def test_language_metadata_per_output_stream(self):

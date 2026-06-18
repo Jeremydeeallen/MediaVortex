@@ -161,9 +161,16 @@ L1. Multi-language live encode -- a source MediaFile with 2 distinct
 language audio streams encodes through the emitter and produces 4 output
 streams (2 emit-tracks x 2 source languages). Each Original output tagged
 with its source language; each Dialog Boost output tagged with its source
-language. Contract test `TestMultiLanguageLiveEncode.py` asserts ffprobe
-output shape; live run on a real 2-language source recorded in directive
-verification.
+language. Exactly ONE output track carries `disposition.default=1`: the
+Dialog Boost in the source's per-stream default-language, falling back to
+library default, falling back to first present language. `EmitTracks`
+calls `_PickDefaultLanguage(AudioStreams, StreamLanguageMap,
+LibraryDefault)` once per emission and passes the per-track
+`IsDefaultLanguage` flag into `_BuildDispositionArgs`. Verified live on
+MediaFile 579 (Black Butler S01E06 Bluray-1080p.mkv, source: jpn opus
+stereo + eng opus 5.1; eng marked default): output had Original (jpn,
+default=0) / Original (eng, default=0) / Dialog Boost (jpn, default=0) /
+Dialog Boost (eng, default=1).
 
 L2. MP4 audio-track naming -- the MP4 muxer in ffmpeg silently drops
 `-metadata:s:a:N title=X` for audio streams (confirmed empirically:

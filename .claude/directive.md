@@ -1,1 +1,74 @@
+# Current Directive
 
+**Set:** 2026-06-18
+**Status:** Active -- phase: IMPLEMENTING
+**Slug:** audio-vertical-live-evidence
+
+## Outcome
+
+Close the two real gaps the predecessor directive labeled "documented":
+(1) a live multi-language ffmpeg encode through the new emitter with
+ffprobe evidence; (2) the 18,084 + 19 H3 invariant backlog actually
+draining on a live H1 cycle. Both run on I9. The goal is the
+unhedged "100% Audio Vertical" outcome the operator originally set.
+
+## Acceptance Criteria
+
+**E1.** Multi-language live encode evidence. Pick a real MediaFile
+with >=2 distinct language audio streams; run the new emitter's argv
+through ffmpeg into a target .mp4; ffprobe the output and assert: 4
+output audio streams (2 emit-tracks * 2 langs); per-stream
+`handler_name` carries Label+lang; per-stream `language` carries the
+source lang; `disposition.default=1` on the per-language Dialog
+Boost. Probe JSON pasted into delivery evidence.
+
+**E2.** Backlog drain. Start transcoding workers on I9 (drain check
+first per worker-restart protocol). Snapshot
+`/api/Activity/LibraryCompliance` before. Wait for >=3 H1 cycles
+(>=900s by default). Snapshot after. Assert the
+`SuccessfulAttemptWithoutTracksEmitted` and
+`InvalidMeasurementWithoutRemeasure` counts in the H1 audit table
+actually fell. Operator restores the transcoding-off state at the
+end if they want.
+
+## Files
+
+```
+.claude/directive.md                                                 -- EDIT: phase / progress
+Features/AudioNormalization/AudioFilterEmitter.py                    -- EDIT: per-language default disposition (E1 surfaced bug)
+Features/AudioNormalization/audio-normalization.feature.md           -- EDIT: per-language default doc (E1 follow-up)
+Tests/Contract/TestMultiLanguageLiveEncode.py                        -- EDIT: assert per-language default behavior
+Tests/Contract/TestAudioFilterEmitterDecomposition.py                -- EDIT: per-language default helper coverage
+```
+
+## Constraints (hook discipline)
+
+- Read-only on the production tree (no code edits in this directive).
+- R6 path shape: use Core.Path.LocalPath helpers in any temporary
+  scripts.
+- R15 directive anchor not required because no def/class added.
+
+## Plan
+
+1. Find 2-language MediaFile in DB.
+2. Build emitter argv against it; run ffmpeg; ffprobe output; record
+   E1 evidence.
+3. Snapshot dashboard payload (pre).
+4. Re-enable transcoding via `Workers SET TranscodeEnabled=TRUE` on
+   I9 (drain check + Stop-then-Start protocol if any leftover python
+   processes).
+5. Let H1 + the worker cycle 15+ minutes (>=3 cycles).
+6. Snapshot dashboard payload (post); compare audit counts.
+7. Restore TranscodeEnabled state if operator wanted off.
+8. Close directive.
+
+## Status
+
+### Progress
+
+- [x] E1 multi-language live encode evidence -- MediaFile 579 (Black Butler S01E06 Bluray .mkv, jpn opus stereo + eng opus 5.1) ran through the new emitter into e1_blackbutler.mp4. ffprobe shows 4 audio streams: Original (jpn, 2ch, default=0), Original (eng, 6ch, default=0), Dialog Boost (jpn, 2ch, default=0), Dialog Boost (eng, 6ch, default=1). Surfaced + fixed a real default-disposition bug along the way (emitter was setting default=1 on EVERY Dialog Boost regardless of source-language default; now picks exactly one via _PickDefaultLanguage). New L1 contract tests for per-language default + library-default fallback green; 36 emitter regression tests green.
+- [ ] E2 backlog drain evidence
+
+### Promotions
+
+[Populated at DELIVERING phase]
