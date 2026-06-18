@@ -115,5 +115,7 @@ e2_pre.json
 e2_post.json
 drain_e2.py
 drain_e2.log
+drain_invalid_measurement.py
+drain_invalid_measurement.log
 web-startup.log
 web-startup.err
