@@ -46,6 +46,13 @@
         </div>
         <div class="col-md-1"><label>Commentary</label><input name="KeepCommentaryTracks" type="checkbox" checked class="form-check-input"></div>
         <div class="col-md-1"><label>SpeechDetect</label><input name="EnableSpeechLanguageDetection" type="checkbox" class="form-check-input"></div>
+        <div class="col-md-2"><label title="How H1 treats files transcoded by MediaVortex before this vertical shipped">Pre-vertical re-normalize</label>
+          <select name="PreVerticalReNormalizePolicy" class="form-select">
+            <option value="lazy" selected>lazy (no action)</option>
+            <option value="aggressive">aggressive (re-transcode)</option>
+            <option value="none">none (exclude entirely)</option>
+          </select>
+        </div>
         <div class="col-12"><label>EmitTracks (JSON array)</label>
           <textarea name="EmitTracks" class="form-control" rows="4">[{"Label":"Original","TargetLufs":-23,"TargetLra":null,"Channels":"source","Codec":"eac3","Bitrate":384,"SampleRateHz":48000,"BitDepth":16,"LanguageFilter":"keep-all","IsDefaultTrack":false},{"Label":"Dialog Boost","TargetLufs":-23,"TargetLra":11,"Channels":"source","Codec":"eac3","Bitrate":384,"SampleRateHz":48000,"BitDepth":16,"LanguageFilter":"keep-all","IsDefaultTrack":true}]</textarea>
         </div>
