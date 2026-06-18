@@ -4,6 +4,7 @@ from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalDirname
 from Features.AudioNormalization.AudioFilterEmitter import AudioFilterEmitter
 from Features.AudioNormalization.AudioPolicyResolver import AudioPolicyResolver
+from Features.AudioNormalization.Services.AudioStreamProbe import AudioStreamProbe
 from Features.TranscodeJob.Emit.CommandSpec import CommandSpec
 from Features.TranscodeJob.Emit.EncodeShape import EncodeShape
 
@@ -15,8 +16,8 @@ class TranscodeShape(EncodeShape):
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
     def __init__(self, ResolutionCalculator, OutputFilenameBuilder, CodecParameterAssembler,
                  AudioCodecArgsBuilder, VideoFilterBuilder, MediaProbeAdapter,
-                 Resolver=None, Emitter=None):
-        """Inject collaborators; audio path goes through Resolver + Emitter."""
+                 Resolver=None, Emitter=None, StreamProbe=None):
+        """Inject collaborators; audio path goes through Resolver + Emitter; StreamProbe enumerates per-language audio streams."""
         self.ResolutionCalculator = ResolutionCalculator
         self.OutputFilenameBuilder = OutputFilenameBuilder
         self.CodecParameterAssembler = CodecParameterAssembler
@@ -25,6 +26,7 @@ class TranscodeShape(EncodeShape):
         self.MediaProbeAdapter = MediaProbeAdapter
         self.Resolver = Resolver or AudioPolicyResolver()
         self.Emitter = Emitter or AudioFilterEmitter()
+        self.StreamProbe = StreamProbe or AudioStreamProbe()
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C12
     def Build(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[CommandSpec]:
@@ -78,7 +80,8 @@ class TranscodeShape(EncodeShape):
             self.CodecParameterAssembler.AddCodecParameters(CommandParts, CodecParameters, ProfileSettings)
 
             Policy = self.Resolver.GetEffectivePolicy(MediaFile)
-            Blocks = self.Emitter.EmitTracks(MediaFile, Policy) if Policy else []
+            SourceStreams = self.StreamProbe.Probe(CommandData.get('InputPath')) or None
+            Blocks = self.Emitter.EmitTracks(MediaFile, Policy, AudioStreams=SourceStreams) if Policy else []
             if not Blocks:
                 CommandParts.extend(['-map', f'0:a:{AudioStreamIndex}', '-c:a', 'copy'])
             else:
