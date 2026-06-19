@@ -81,18 +81,19 @@ async function loadPage(){
     return;
   }
   document.getElementById('WorkBucketBody').innerHTML = rows.map(r => {
-    const state = r.inqueue ? '<span class="badge bg-info text-dark">in queue</span>' : '<span class="badge bg-secondary">idle</span>';
-    const action = r.inqueue
+    const inQueue = r.InQueue ?? r.inqueue;
+    const state = inQueue ? '<span class="badge bg-info text-dark">in queue</span>' : '<span class="badge bg-secondary">idle</span>';
+    const action = inQueue
       ? '<button class="btn btn-sm btn-outline-secondary" disabled>Queued</button>'
-      : `<button class="btn btn-sm btn-outline-success" onclick="queueOne(${r.id})">Queue now</button>`;
+      : `<button class="btn btn-sm btn-outline-success" onclick="queueOne(${r.Id})">Queue now</button>`;
     return `<tr>
-      <td>${r.id}</td>
-      <td><code class="small">${_esc(r.filename)}</code></td>
-      <td>${_esc(r.resolution||'')}</td>
-      <td>${_esc(r.audiocodec||'')} <span class="text-muted small">${_esc(r.audiolanguages||'')}</span></td>
-      <td class="text-end">${r.sourceintegratedlufs==null?'':r.sourceintegratedlufs}</td>
-      <td class="text-end">${r.sourcetruepeakdbtp==null?'':r.sourcetruepeakdbtp}</td>
-      <td><code class="small">${_esc(r.operationsneededcsv||'')}</code></td>
+      <td>${r.Id}</td>
+      <td><code class="small">${_esc(r.FileName)}</code></td>
+      <td>${_esc(r.Resolution||'')}</td>
+      <td>${_esc(r.AudioCodec||'')} <span class="text-muted small">${_esc(r.AudioLanguages||'')}</span></td>
+      <td class="text-end">${r.SourceIntegratedLufs==null?'':r.SourceIntegratedLufs}</td>
+      <td class="text-end">${r.SourceTruePeakDbtp==null?'':r.SourceTruePeakDbtp}</td>
+      <td><code class="small">${_esc(r.OperationsNeededCsv||'')}</code></td>
       <td>${state}</td>
       <td>${action}</td>
     </tr>`;
