@@ -105,19 +105,31 @@ The vertical detects and heals its own DB-state discrepancies via an
 in-system recurring service. Operator does not run scripts to fix
 vertical state.
 
-H1. `AudioVerticalHealthService` (`Features/AudioNormalization/SelfHealing/
-AudioVerticalHealthService.py`) runs every
-`SystemSettings.AudioVerticalHealthIntervalSec` seconds (default 300) on
-the WebService background-thread cadence. Constructor injects
-`List[IAudioVerticalInvariant]`, a per-invariant
-`Dict[invariant_name -> IAudioVerticalRemediation]`, and a
-`RemediationBatch` cap (default 100). Each cycle: for each
-invariant -> `Detect()` returns offending row ids -> matched
-`Remediation.Apply()` runs against the FIRST `RemediationBatch` ids ->
-result + `capped X->N` note written to `AudioVerticalHealthRuns` table
-(one row per cycle x invariant). The batch cap protects cycle time:
-without it, a single invariant with 18k+ detected rows blocks every
-subsequent cycle for many hours.
+H1. `AudioVerticalHealthService`
+(`Features/AudioNormalization/SelfHealing/AudioVerticalHealthService.py`)
+is one row in the shared `Scanners` orchestrator table
+(see `Features/FileScanning/scanners.feature.md`). The row carries
+`ScannerName='AudioVerticalHealth'`, `Enabled BOOL`, `IntervalSec INT`,
+`BatchSize INT`, `DryRun BOOL`, `LastRunAt TIMESTAMP`. The WebService
+background-thread loop reads the row fresh per cycle (`db-is-authority`)
+and stamps `LastRunAt` via `ScannersRepository.RecordRun` on every
+successful cycle. Operator controls everything via `/Admin/Scanners`;
+no SQL needed; no WebService restart needed to flip switches.
+
+Constructor injects `List[IAudioVerticalInvariant]`, a per-invariant
+`Dict[invariant_name -> IAudioVerticalRemediation]`, a
+`RemediationBatch` cap (default 100), and a `DryRun BOOL` (default
+False). Each cycle: for each invariant -> `Detect()` returns
+offending row ids -> matched `Remediation.Apply()` runs against the
+FIRST `RemediationBatch` ids (UNLESS `DryRun=True`, in which case
+`Apply` is skipped and the audit row carries
+`DRY_RUN: would have remediated N`) -> result + `capped X->N` note
+written to `AudioVerticalHealthRuns` table. The batch cap protects
+cycle time: without it, a single invariant with 18k+ detected rows
+blocks every subsequent cycle for many hours. DryRun is the safety
+net: when an invariant or remediation regresses (it has, twice), the
+operator can re-enable H1 in DryRun first and watch the audit table
+to confirm what it WOULD do before flipping DryRun off.
 
 Six invariants ship in the initial composition:
 - `PendingQueueWithoutPolicyJson` -> `BackfillPolicyJson` remediation
