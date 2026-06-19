@@ -82,6 +82,27 @@ class WorkBucketController:
                 LoggingService.LogException(f"WorkBucket list failed for {url_key}", Ex, "WorkBucketController", "list_files")
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
 
+        # directive: h1-operator-control | # see directive.md H1G3
+        @self.Blueprint.route('/api/Work/<url_key>/QueueNext', methods=['POST'])
+        def queue_next(url_key):
+            """Bulk-queue up to {limit} idle MediaFiles in the bucket. Body: {Limit: int up to 1000}."""
+            try:
+                Labels = URL_LABELS.get(url_key)
+                if Labels is None:
+                    return jsonify({'Success': False, 'Message': f"Unknown bucket: {url_key}", 'Data': {}}), 404
+                Body = request.get_json(force=True, silent=True) or {}
+                Limit = int(Body.get('Limit', 200) or 200)
+                Mode = BUCKET_TO_PROCESSING_MODE[Labels['Bucket']]
+                Result = self.Repository.QueueNext(Labels['Bucket'], Mode, Limit=Limit)
+                return jsonify({
+                    'Success': True,
+                    'Message': f"Queued {Result['Inserted']}",
+                    'Data': Result,
+                })
+            except Exception as Ex:
+                LoggingService.LogException(f"WorkBucket QueueNext failed for {url_key}", Ex, "WorkBucketController", "queue_next")
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
+
         # directive: work-bucket-landing-pages | # see directive.md C2
         @self.Blueprint.route('/api/Work/<url_key>/Queue/<int:media_file_id>', methods=['POST'])
         def queue_one(url_key, media_file_id):

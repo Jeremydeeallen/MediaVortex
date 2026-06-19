@@ -28,6 +28,15 @@
         <div class="h4 mb-0" id="WorkBucketRemaining">--</div>
       </div></div>
     </div>
+    <div class="col-md-3">
+      <div class="card"><div class="card-body py-2">
+        <div class="text-muted small">Bulk queue</div>
+        <div class="input-group input-group-sm">
+          <input type="number" id="WorkBucketBulkLimit" class="form-control" value="200" min="1" max="1000">
+          <button class="btn btn-success" id="WorkBucketBulkQueueBtn">Queue next N</button>
+        </div>
+      </div></div>
+    </div>
   </div>
 
   <div class="table-responsive">
@@ -116,6 +125,15 @@ document.getElementById('WorkBucketPrev').addEventListener('click', () => {
 });
 document.getElementById('WorkBucketNext').addEventListener('click', () => {
   Offset += Limit; loadPage();
+});
+document.getElementById('WorkBucketBulkQueueBtn').addEventListener('click', async () => {
+  const limit = parseInt(document.getElementById('WorkBucketBulkLimit').value, 10) || 200;
+  if (!confirm(`Queue next ${limit.toLocaleString()} idle ${URL_KEY} files?`)) return;
+  const r = await fetch(`/api/Work/${URL_KEY}/QueueNext`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({Limit: limit})});
+  const j = await r.json();
+  if (!j.Success) { alert('Failed: ' + (j.Message||'')); return; }
+  alert(`Inserted ${j.Data.Inserted.toLocaleString()} rows. ${j.Data.RemainingCandidates.toLocaleString()} idle files remain.`);
+  loadPage();
 });
 
 loadPage();

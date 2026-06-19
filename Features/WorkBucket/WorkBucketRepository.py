@@ -41,6 +41,30 @@ EXISTING_PENDING_SQL = (
 )
 
 
+BULK_INSERT_QUEUE_SQL = (
+    "INSERT INTO TranscodeQueue ("
+    "  FileName, Directory, SizeBytes, SizeMB, MediaFileId, StorageRootId, RelativePath, "
+    "  ProcessingMode, Status, Priority, DateAdded"
+    ") "
+    "SELECT mf.FileName, '', COALESCE(mf.FileSize, 0), COALESCE(mf.SizeMB, 0), mf.Id, "
+    "  mf.StorageRootId, mf.RelativePath, %s, 'Pending', 100, NOW() "
+    "FROM MediaFiles mf WHERE mf.WorkBucket = %s "
+    "AND NOT EXISTS ("
+    "  SELECT 1 FROM TranscodeQueue tq WHERE tq.MediaFileId = mf.Id AND tq.Status = 'Pending'"
+    ") "
+    "ORDER BY mf.Id LIMIT %s"
+)
+
+
+COUNT_BULK_INSERT_TARGETS_SQL = (
+    "SELECT COUNT(*)::int AS c FROM MediaFiles mf "
+    "WHERE mf.WorkBucket = %s "
+    "AND NOT EXISTS ("
+    "  SELECT 1 FROM TranscodeQueue tq WHERE tq.MediaFileId = mf.Id AND tq.Status = 'Pending'"
+    ")"
+)
+
+
 INSERT_QUEUE_SQL = (
     "INSERT INTO TranscodeQueue ("
     "  FileName, Directory, SizeBytes, SizeMB, MediaFileId, StorageRootId, RelativePath, "
@@ -72,6 +96,20 @@ class WorkBucketRepository:
         Limit = max(1, min(int(Limit), 200))
         Rows = DatabaseService().ExecuteQuery(LIST_BY_BUCKET_SQL, (Bucket, Limit, Offset))
         return Rows or []
+
+    # directive: h1-operator-control | # see directive.md H1G3
+    def QueueNext(self, Bucket, ProcessingMode, Limit=200):
+        """Bulk-insert Pending rows for up to Limit idle MediaFiles in the bucket; idempotent via NOT EXISTS guard. Returns {Inserted: N, RemainingCandidates: M}."""
+        Limit = max(1, min(int(Limit), 1000))
+        Db = DatabaseService()
+        Before = Db.ExecuteQuery(COUNT_BULK_INSERT_TARGETS_SQL, (Bucket,))
+        BeforeCount = int(Before[0]['c']) if Before else 0
+        if BeforeCount == 0:
+            return {'Inserted': 0, 'RemainingCandidates': 0}
+        Db.ExecuteNonQuery(BULK_INSERT_QUEUE_SQL, (ProcessingMode, Bucket, Limit))
+        After = Db.ExecuteQuery(COUNT_BULK_INSERT_TARGETS_SQL, (Bucket,))
+        AfterCount = int(After[0]['c']) if After else 0
+        return {'Inserted': max(0, BeforeCount - AfterCount), 'RemainingCandidates': AfterCount}
 
     # directive: work-bucket-landing-pages | # see directive.md C2
     def QueueOne(self, MediaFileId, ProcessingMode):
