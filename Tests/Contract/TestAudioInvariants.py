@@ -64,6 +64,30 @@ class TestAudioInvariantsLive(unittest.TestCase):
             f"MediaFiles.Id deviant-with-AudioComplete violations: {Violations[:20]}",
         )
 
+    # directive: audio-vertical-converge-to-zero | # see directive.md Z7
+    def test_consistency_band_uses_latest_attempt_only(self):
+        """A file whose LATEST attempt is on-target must not appear even if an OLD attempt was deviant."""
+        import os
+        os.environ.setdefault('MEDIAVORTEX_DB_HOST', '10.0.0.15')
+        from Core.Database.DatabaseService import DatabaseService
+        Rows = DatabaseService().ExecuteQuery(
+            "SELECT mf.Id FROM MediaFiles mf "
+            "WHERE mf.AudioComplete = TRUE "
+            "AND mf.IsCompliant = TRUE "
+            "AND EXISTS (SELECT 1 FROM TranscodeAttempts t1 WHERE t1.MediaFileId = mf.Id "
+            "  AND t1.Success = TRUE) "
+            "LIMIT 1"
+        )
+        if not Rows:
+            self.skipTest('no AudioComplete+compliant MediaFile with attempts in DB')
+        Mid = Rows[0]['id']
+        Violations = ConsistencyBandDeviantWithComplete().Detect()
+        if Mid in Violations:
+            self.fail(
+                f"MediaFile {Mid} is AudioComplete+IsCompliant but is flagged deviant -- "
+                f"SQL is likely scanning all attempts not just the latest."
+            )
+
 
 if __name__ == '__main__':
     unittest.main()

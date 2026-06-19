@@ -4,13 +4,19 @@ from Features.AudioNormalization.SelfHealing.IAudioVerticalInvariant import IAud
 
 
 DETECT_SQL = (
+    "WITH latest_attempt AS ("
+    "  SELECT DISTINCT ON (ta.MediaFileId) "
+    "    ta.MediaFileId, ta.AudioTracksEmittedJson, ta.AudioPolicyJson "
+    "  FROM TranscodeAttempts ta "
+    "  WHERE ta.Success = TRUE "
+    "  ORDER BY ta.MediaFileId, ta.CompletedDate DESC NULLS LAST, ta.Id DESC"
+    ") "
     "SELECT DISTINCT mf.Id FROM MediaFiles mf "
-    "JOIN TranscodeAttempts ta ON ta.MediaFileId = mf.Id "
-    "CROSS JOIN LATERAL jsonb_array_elements(COALESCE(ta.AudioTracksEmittedJson, '[]'::jsonb)) AS track "
+    "JOIN latest_attempt la ON la.MediaFileId = mf.Id "
+    "CROSS JOIN LATERAL jsonb_array_elements(COALESCE(la.AudioTracksEmittedJson, '[]'::jsonb)) AS track "
     "WHERE mf.AudioComplete = TRUE "
-    "AND ta.Success = TRUE "
     "AND ABS((track->>'AchievedIntegratedLufs')::REAL - COALESCE("
-    "(ta.AudioPolicyJson->>'TargetIntegratedLufs')::REAL, -23.0)) > 4.0"
+    "(la.AudioPolicyJson->>'TargetIntegratedLufs')::REAL, -23.0)) > 4.0"
 )
 
 

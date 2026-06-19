@@ -90,12 +90,12 @@ function _esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','
 async function loadSettings(){
   const r=await fetch('/api/AudioNormalization/Settings'); const j=await r.json();
   const rows=(j.Data&&j.Data.Rows)||[];
-  document.getElementById('settings-body').innerHTML=rows.map(r=>`<tr><td>${_esc(r.scope)}</td><td>${_esc(r.scopekey)}</td><td>${r.enabled}</td><td>${r.targetintegratedlufs}</td><td>${r.targettruepeakdbtp}</td><td>${r.loudnesstolerance}</td><td>${_esc(r.ungainablepolicy)}</td><td>${r.keepcommentarytracks}</td><td>${r.enablespeechlanguagedetection}</td></tr>`).join('');
+  document.getElementById('settings-body').innerHTML=rows.map(r=>`<tr><td>${_esc(r.Scope)}</td><td>${_esc(r.ScopeKey)}</td><td>${r.Enabled}</td><td>${r.TargetIntegratedLufs}</td><td>${r.TargetTruePeakDbtp}</td><td>${r.LoudnessTolerance}</td><td>${_esc(r.UngainablePolicy)}</td><td>${r.KeepCommentaryTracks}</td><td>${r.EnableSpeechLanguageDetection}</td></tr>`).join('');
 }
 async function loadDashboard(){
   const r=await fetch('/api/AudioNormalization/Dashboard'); const j=await r.json();
   const rows=(j.Data&&j.Data.Libraries)||[];
-  document.getElementById('dashboard-body').innerHTML=rows.length?rows.map(r=>`<tr><td>${_esc(r.libraryid)}</td><td>${r.uniformcount}</td><td>${r.acceptablecount}</td><td>${r.deviantcount}</td><td>${r.totalcount}</td></tr>`).join(''):'<tr><td colspan="5" class="text-muted">No measured outputs yet</td></tr>';
+  document.getElementById('dashboard-body').innerHTML=rows.length?rows.map(r=>`<tr><td>${_esc(r.LibraryId)}</td><td>${r.UniformCount}</td><td>${r.AcceptableCount}</td><td>${r.DeviantCount}</td><td>${r.TotalCount}</td></tr>`).join(''):'<tr><td colspan="5" class="text-muted">No measured outputs yet</td></tr>';
 }
 async function loadReview(){
   const r=await fetch('/api/AudioNormalization/Review'); const j=await r.json();

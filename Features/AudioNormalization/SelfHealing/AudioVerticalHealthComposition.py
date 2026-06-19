@@ -29,6 +29,6 @@ def BuildAudioVerticalHealthService(RemediationBatch=None):
         StaleOperatorReview.Name: AlertOperatorReview(),
         InvalidMeasurementWithoutRemeasure.Name: EnqueueRemeasurement(),
         PreVerticalTranscodedFile.Name: EnqueueRetranscode(),
-        ConsistencyBandDeviantWithComplete.Name: EnqueueRemeasurement(),
+        ConsistencyBandDeviantWithComplete.Name: EnqueueRetranscode(),
     }
     return AudioVerticalHealthService(Invariants, Remediations, RemediationBatch=RemediationBatch)
