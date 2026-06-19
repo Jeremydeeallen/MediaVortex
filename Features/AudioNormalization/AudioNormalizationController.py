@@ -66,6 +66,20 @@ class AudioNormalizationController:
         self.Blueprint = Blueprint('audio_normalization', __name__)
         self._RegisterRoutes()
 
+    # directive: audio-review-queue-grouping | # see audio-normalization.C6
+    def _TriggerRecompute(self, MediaFileIds):
+        """Hand the cleared MediaFile ids to QueueManagementBusinessService.RecomputeForFiles so each lands in its correct WorkBucket."""
+        if not MediaFileIds:
+            return
+        try:
+            from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+            QueueManagementBusinessService().RecomputeForFiles(list(MediaFileIds))
+        except Exception as Ex:
+            LoggingService.LogException(
+                "Recompute trigger post-review-resolve failed", Ex,
+                "AudioNormalizationController", "_TriggerRecompute",
+            )
+
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C10
     def _RegisterRoutes(self):
         """Wire GET /AudioNormalization, GET/POST API endpoints."""
@@ -131,14 +145,15 @@ class AudioNormalizationController:
                                             "AudioNormalizationController", "dashboard")
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
 
-        # directive: perfect-audio-vertical | # see perfect-audio-vertical.C6
+        # directive: audio-review-queue-grouping | # see audio-normalization.C6
         @self.Blueprint.route('/api/AudioNormalization/Review', methods=['GET'])
         def review_queue():
-            """Return MediaFiles currently held for operator review."""
+            """Return grouped review queue: one group per AdmissionDeferReason with counts + samples."""
             try:
-                Rows = self.Review.ListReviewQueue()
+                Groups = self.Review.GroupedSummary()
+                Total = sum(int(G.get('Total') or 0) for G in Groups)
                 return jsonify({'Success': True, 'Message': 'OK',
-                                'Data': {'Count': len(Rows), 'Rows': Rows}})
+                                'Data': {'Count': Total, 'Groups': Groups}})
             except Exception as Ex:
                 LoggingService.LogException("Failed review queue", Ex,
                                             "AudioNormalizationController", "review_queue")
@@ -147,13 +162,31 @@ class AudioNormalizationController:
         # directive: perfect-audio-vertical | # see perfect-audio-vertical.C6
         @self.Blueprint.route('/api/AudioNormalization/Review/<int:media_file_id>/Resolve', methods=['POST'])
         def resolve_review(media_file_id):
-            """Clear AdmissionDeferReason for a held-for-review MediaFile."""
+            """Clear AdmissionDeferReason for a held-for-review MediaFile + trigger recompute."""
             try:
                 self.Review.ResolveReview(media_file_id)
+                self._TriggerRecompute([media_file_id])
                 return jsonify({'Success': True, 'Message': 'Resolved', 'Data': {}})
             except Exception as Ex:
                 LoggingService.LogException("Failed resolving review", Ex,
                                             "AudioNormalizationController", "resolve_review")
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
+
+        # directive: audio-review-queue-grouping | # see audio-normalization.C6
+        @self.Blueprint.route('/api/AudioNormalization/Review/Resolve', methods=['POST'])
+        def bulk_resolve_review():
+            """Bulk-clear AdmissionDeferReason for every MediaFile carrying the supplied reason + trigger recompute."""
+            try:
+                Body = request.get_json(force=True, silent=True) or {}
+                Reason = (Body.get('AdmissionDeferReason') or '').strip()
+                Result = self.Review.BulkClearByReason(Reason)
+                self._TriggerRecompute(Result.get('Ids') or [])
+                return jsonify({'Success': True, 'Message': f"Cleared {Result['Cleared']}", 'Data': Result})
+            except ValueError as Ex:
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 400
+            except Exception as Ex:
+                LoggingService.LogException("Failed bulk resolve review", Ex,
+                                            "AudioNormalizationController", "bulk_resolve_review")
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
 
         # directive: perfect-audio-vertical | # see perfect-audio-vertical.C19

@@ -74,10 +74,12 @@
     <div class="tab-pane fade" id="review-pane">
       <h4>Operator Review Queue</h4>
       <p id="review-count" class="text-muted"></p>
-      <table class="table table-sm table-striped">
-        <thead><tr><th>Id</th><th>FileName</th><th>Reason</th><th>Source LUFS</th><th>Source TP</th><th>Action</th></tr></thead>
-        <tbody id="review-body"></tbody>
-      </table>
+      <div id="review-groups"></div>
+      <p class="text-muted small mt-3">
+        <strong>Bulk Resolve</strong> clears the audio defer reason. ComplianceGate then re-routes each file to its
+        smallest-applicable WorkBucket (Transcode &#8835; Remux &#8835; AudioFix). It does NOT mark files compliant
+        directly.
+      </p>
     </div>
   </div>
 </div>
@@ -96,9 +98,45 @@ async function loadDashboard(){
 }
 async function loadReview(){
   const r=await fetch('/api/AudioNormalization/Review'); const j=await r.json();
-  const rows=(j.Data&&j.Data.Rows)||[];
-  document.getElementById('review-count').textContent=`${(j.Data&&j.Data.Count)||0} files held for review`;
-  document.getElementById('review-body').innerHTML=rows.length?rows.map(r=>`<tr><td>${r.Id}</td><td>${_esc(r.FileName)}</td><td>${_esc(r.AdmissionDeferReason)}</td><td>${_esc(r.SourceIntegratedLufs)}</td><td>${_esc(r.SourceTruePeakDbtp)}</td><td><button class="btn btn-sm btn-outline-success" onclick="resolveReview(${r.Id})">Resolve</button></td></tr>`).join(''):'<tr><td colspan="6" class="text-muted">Queue empty</td></tr>';
+  const groups=(j.Data&&j.Data.Groups)||[];
+  const total=(j.Data&&j.Data.Count)||0;
+  document.getElementById('review-count').textContent=`${total.toLocaleString()} files held for review across ${groups.length} group${groups.length===1?'':'s'}`;
+  const container=document.getElementById('review-groups');
+  if(!groups.length){container.innerHTML='<div class="alert alert-info">Queue empty.</div>';return}
+  container.innerHTML=groups.map((g,i)=>{
+    const samples=(g.Samples||[]).map(s=>`<tr><td>${s.Id}</td><td><code class="small">${_esc(s.FileName)}</code></td><td class="text-end">${_esc(s.SourceIntegratedLufs)}</td><td class="text-end">${_esc(s.SourceTruePeakDbtp)}</td><td><span class="badge bg-secondary">${_esc(s.WorkBucket||'(none)')}</span></td></tr>`).join('');
+    return `<div class="card mb-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <div>
+          <strong>${_esc(g.AdmissionDeferReason)}</strong>
+          <span class="badge bg-primary ms-2">${g.Total.toLocaleString()} files</span>
+          ${g.AudioOnly?`<span class="badge bg-info text-dark ms-1" title="Audio is the only blocker">audio-only: ${g.AudioOnly.toLocaleString()}</span>`:''}
+          ${g.NeedsTranscode?`<span class="badge bg-warning text-dark ms-1" title="ComplianceGate also flags Transcode">+ Transcode: ${g.NeedsTranscode.toLocaleString()}</span>`:''}
+          ${g.NeedsRemux?`<span class="badge bg-warning text-dark ms-1" title="ComplianceGate also flags Remux">+ Remux: ${g.NeedsRemux.toLocaleString()}</span>`:''}
+          ${g.NoBucket?`<span class="badge bg-success ms-1" title="Already compliant on container + transcode">no further bucket: ${g.NoBucket.toLocaleString()}</span>`:''}
+        </div>
+        <div>
+          <button class="btn btn-sm btn-outline-secondary me-2" data-bs-toggle="collapse" data-bs-target="#review-samples-${i}">Preview</button>
+          <button class="btn btn-sm btn-outline-success" onclick="bulkResolveReason('${_esc(g.AdmissionDeferReason)}', ${g.Total})">Resolve all ${g.Total.toLocaleString()}</button>
+        </div>
+      </div>
+      <div class="collapse" id="review-samples-${i}">
+        <div class="card-body p-0">
+          <table class="table table-sm mb-0">
+            <thead><tr><th>Id</th><th>FileName (first 5)</th><th class="text-end">LUFS</th><th class="text-end">TP</th><th>WorkBucket</th></tr></thead>
+            <tbody>${samples}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function bulkResolveReason(reason, total){
+  if(!confirm(`Clear AdmissionDeferReason='${reason}' on ${total.toLocaleString()} MediaFiles?\\n\\nThis does NOT mark them compliant; ComplianceGate will re-route each to its correct WorkBucket.`))return;
+  const r=await fetch('/api/AudioNormalization/Review/Resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({AdmissionDeferReason:reason})});
+  const j=await r.json();
+  alert(j.Success?`Cleared ${j.Data.Cleared}.`:`Failed: ${j.Message}`);
+  loadReview();
 }
 async function resolveReview(id){
   await fetch(`/api/AudioNormalization/Review/${id}/Resolve`,{method:'POST'});

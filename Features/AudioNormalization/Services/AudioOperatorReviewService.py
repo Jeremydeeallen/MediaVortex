@@ -58,3 +58,56 @@ class AudioOperatorReviewService:
     def ResolveReview(self, MediaFileId):
         """Clear AdmissionDeferReason so the file becomes admittable again on the next gate pass."""
         DatabaseService().ExecuteNonQuery(CLEAR_REVIEW_REASON_SQL, (MediaFileId,))
+
+    # directive: audio-review-queue-grouping | # see audio-normalization.C6
+    def GroupedSummary(self):
+        """Return per-reason groups with counts, work-bucket breakdown chips, and up-to-5 preview samples."""
+        Db = DatabaseService()
+        Groups = Db.ExecuteQuery(
+            "SELECT AdmissionDeferReason AS reason, "
+            "COUNT(*)::int AS total, "
+            "COUNT(*) FILTER (WHERE WorkBucket = 'AudioFixOnly')::int AS audio_only, "
+            "COUNT(*) FILTER (WHERE 'Transcode' = ANY(string_to_array(COALESCE(OperationsNeededCsv, ''), ',')))::int AS needs_transcode, "
+            "COUNT(*) FILTER (WHERE 'Remux' = ANY(string_to_array(COALESCE(OperationsNeededCsv, ''), ',')))::int AS needs_remux, "
+            "COUNT(*) FILTER (WHERE WorkBucket IS NULL)::int AS no_bucket "
+            "FROM MediaFiles "
+            "WHERE AdmissionDeferReason = ANY(%s) "
+            "GROUP BY AdmissionDeferReason "
+            "ORDER BY total DESC",
+            (list(REVIEW_REASONS),),
+        )
+        Out = []
+        for G in (Groups or []):
+            Samples = Db.ExecuteQuery(
+                "SELECT Id, FileName, SourceIntegratedLufs, SourceTruePeakDbtp, WorkBucket "
+                "FROM MediaFiles WHERE AdmissionDeferReason = %s "
+                "ORDER BY Id LIMIT 5",
+                (G['reason'],),
+            )
+            Out.append({
+                'AdmissionDeferReason': G['reason'],
+                'Total': int(G['total']),
+                'AudioOnly': int(G['audio_only']),
+                'NeedsTranscode': int(G['needs_transcode']),
+                'NeedsRemux': int(G['needs_remux']),
+                'NoBucket': int(G['no_bucket']),
+                'Samples': Samples or [],
+            })
+        return Out
+
+    # directive: audio-review-queue-grouping | # see audio-normalization.C6
+    def BulkClearByReason(self, Reason):
+        """Clear AdmissionDeferReason for every MediaFile carrying the given reason; return cleared count + ids."""
+        if Reason not in REVIEW_REASONS:
+            raise ValueError(f"Reason must be one of {REVIEW_REASONS}; got {Reason!r}")
+        Db = DatabaseService()
+        Ids = [R['id'] for R in (Db.ExecuteQuery(
+            "SELECT Id FROM MediaFiles WHERE AdmissionDeferReason = %s", (Reason,),
+        ) or [])]
+        if not Ids:
+            return {'Cleared': 0, 'Ids': []}
+        Db.ExecuteNonQuery(
+            "UPDATE MediaFiles SET AdmissionDeferReason = NULL WHERE AdmissionDeferReason = %s",
+            (Reason,),
+        )
+        return {'Cleared': len(Ids), 'Ids': Ids}
