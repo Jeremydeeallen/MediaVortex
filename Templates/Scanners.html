@@ -1,0 +1,84 @@
+{% extends "Base.html" %}
+
+{% block title %}Scanners{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+    {% include '_admin_subnav.html' %}
+  <div class="d-flex align-items-center mb-3">
+    <h2 class="mb-0"><i class="fas fa-radar me-2"></i>Scanners</h2>
+    <span class="ms-3 text-muted small">Periodic scan services. Each row controls one daemon-cadence loop. Master "Pause all" disables every scanner immediately.</span>
+  </div>
+
+  <div class="mb-3">
+    <button class="btn btn-danger" id="ScannersPauseAllBtn"><i class="fas fa-pause-circle me-1"></i>Pause all</button>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Enabled</th>
+          <th>IntervalSec</th>
+          <th>BatchSize</th>
+          <th>DryRun</th>
+          <th>LastRunAt</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="ScannersBody"><tr><td colspan="7" class="text-muted">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+function _esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'})[c])}
+
+async function loadScanners(){
+  const r = await fetch('/api/Scanners');
+  const j = await r.json();
+  const rows = (j && j.Data && j.Data.Rows) || [];
+  if (!rows.length) {
+    document.getElementById('ScannersBody').innerHTML = '<tr><td colspan="7" class="text-muted">No scanners seeded.</td></tr>';
+    return;
+  }
+  document.getElementById('ScannersBody').innerHTML = rows.map(r => {
+    const name = _esc(r.ScannerName);
+    const last = r.LastRunAt ? new Date(r.LastRunAt).toLocaleString() : '(never)';
+    return `<tr data-name="${name}">
+      <td><strong>${name}</strong></td>
+      <td><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="sc-en-${name}" ${r.Enabled?'checked':''}></div></td>
+      <td><input type="number" min="60" class="form-control form-control-sm" id="sc-int-${name}" value="${r.IntervalSec||300}" style="max-width:110px"></td>
+      <td><input type="number" min="1" class="form-control form-control-sm" id="sc-bat-${name}" value="${r.BatchSize||100}" style="max-width:110px"></td>
+      <td><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="sc-dry-${name}" ${r.DryRun?'checked':''}></div></td>
+      <td class="text-muted small">${last}</td>
+      <td><button class="btn btn-sm btn-primary" onclick="saveScanner('${name}')">Save</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function saveScanner(name){
+  const body = {
+    Enabled: document.getElementById('sc-en-'+name).checked,
+    IntervalSec: parseInt(document.getElementById('sc-int-'+name).value, 10) || 300,
+    BatchSize: parseInt(document.getElementById('sc-bat-'+name).value, 10) || 100,
+    DryRun: document.getElementById('sc-dry-'+name).checked,
+  };
+  const r = await fetch('/api/Scanners/'+encodeURIComponent(name), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const j = await r.json();
+  if (!j.Success) { alert('Save failed: '+(j.Message||'')); return; }
+  loadScanners();
+}
+
+document.getElementById('ScannersPauseAllBtn').addEventListener('click', async () => {
+  if (!confirm('Disable every scanner immediately?')) return;
+  const r = await fetch('/api/Scanners/PauseAll', {method:'POST'});
+  const j = await r.json();
+  alert(j.Success ? `Paused ${j.Data.Paused}` : 'Pause-all failed: '+(j.Message||''));
+  loadScanners();
+});
+
+loadScanners();
+</script>
+{% endblock %}

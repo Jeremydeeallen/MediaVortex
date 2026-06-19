@@ -511,14 +511,22 @@ class WorkerServiceApp:
             from Features.FileScanning.ContinuousScanService import ContinuousScanService
             self.ContinuousScanService = ContinuousScanService()
 
-            # Read scan interval from SystemSettings
+            # directive: audio-vertical-phase-1-completion | # see directive.md P3
             IntervalMinutes = 60
             try:
-                IntervalSetting = self.SystemSettingsRepository.GetSystemSetting('ContinuousScanIntervalMinutes')
-                if IntervalSetting:
-                    IntervalMinutes = int(IntervalSetting)
+                from Features.FileScanning.ScannersRepository import ScannersRepository
+                Row = ScannersRepository().Get('ContinuousScan') or {}
+                if not Row.get('enabled'):
+                    LoggingService.LogInfo("Scanners.ContinuousScan.Enabled is FALSE; skipping continuous scan startup", "WorkerService", "_StartScanCapability")
+                    return
+                IntervalMinutes = max(1, int(int(Row.get('intervalsec') or 3600) / 60))
             except Exception:
-                pass
+                try:
+                    IntervalSetting = self.SystemSettingsRepository.GetSystemSetting('ContinuousScanIntervalMinutes')
+                    if IntervalSetting:
+                        IntervalMinutes = int(IntervalSetting)
+                except Exception:
+                    pass
 
             Result = self.ContinuousScanService.StartContinuousScanning(IntervalMinutes)
             if Result.get('Success'):

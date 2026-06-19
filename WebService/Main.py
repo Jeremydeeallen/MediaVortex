@@ -451,6 +451,8 @@ class WebServiceApp:
         from Features.FailureAccounting.FailedJobsController import FailedJobsBlueprint
         # directive: work-bucket-landing-pages | # see directive.md C1
         from Features.WorkBucket.WorkBucketController import WorkBucketController
+        # directive: audio-vertical-phase-1-completion | # see directive.md P3
+        from Features.FileScanning.ScannersController import ScannersBlueprint
 
         # Register all blueprints
         self.App.register_blueprint(ShowSettingsBlueprint)
@@ -478,6 +480,8 @@ class WebServiceApp:
         self.App.register_blueprint(FailedJobsBlueprint)
         # directive: work-bucket-landing-pages | # see directive.md C1
         self.App.register_blueprint(WorkBucketController().Blueprint)
+        # directive: audio-vertical-phase-1-completion | # see directive.md P3
+        self.App.register_blueprint(ScannersBlueprint)
     
     def PrivateStartServiceStatusTracking(self):
         """Start service status tracking thread."""
@@ -519,26 +523,30 @@ class WebServiceApp:
         except Exception as Ex:
             LoggingService.LogException("Failed to start AudioVerticalHealthService", Ex, "WebService", "PrivateStartAudioVerticalHealth")
 
-    # directive: audio-vertical-phase-1-completion | # see directive.md P2
+    # directive: audio-vertical-phase-1-completion | # see directive.md P3
     def PrivateAudioVerticalHealthLoop(self):
-        """Background loop. Reads SystemSettings.AudioVerticalHealthEnabled / Interval / DryRun fresh per cycle (default Enabled='false', DryRun='false'). When Enabled='true', runs cycle; when DryRun='true', Detect runs but Remediation.Apply does not. Operator toggles without restart."""
+        """Background loop. Reads the `AudioVerticalHealth` row of the Scanners config table fresh per cycle (db-is-authority). When Enabled=TRUE, runs the cycle; when DryRun=TRUE, Detect runs but Remediation.Apply does not. Operator toggles via /Admin/Scanners without restart. Stamps LastRunAt on every successful cycle."""
         from Features.AudioNormalization.SelfHealing.AudioVerticalHealthComposition import BuildAudioVerticalHealthService
-        from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
-        Repo = SystemSettingsRepository()
+        from Features.FileScanning.ScannersRepository import ScannersRepository
+        Repo = ScannersRepository()
+        Name = 'AudioVerticalHealth'
         while True:
             try:
-                EnabledRaw = (Repo.GetSystemSetting('AudioVerticalHealthEnabled') or 'false').strip().lower()
-                DryRunRaw = (Repo.GetSystemSetting('AudioVerticalHealthDryRun') or 'false').strip().lower()
-                IntervalRaw = Repo.GetSystemSetting('AudioVerticalHealthIntervalSec') or '300'
-                Interval = max(60, int(float(IntervalRaw or 300)))
+                Row = Repo.Get(Name) or {}
+                Enabled = bool(Row.get('enabled'))
+                DryRun = bool(Row.get('dryrun'))
+                Interval = max(60, int(Row.get('intervalsec') or 300))
+                Batch = max(1, int(Row.get('batchsize') or 100))
             except Exception:
-                EnabledRaw = 'false'
-                DryRunRaw = 'false'
+                Enabled = False
+                DryRun = False
                 Interval = 300
-            if EnabledRaw == 'true':
+                Batch = 100
+            if Enabled:
                 try:
-                    Svc = BuildAudioVerticalHealthService(DryRun=(DryRunRaw == 'true'))
+                    Svc = BuildAudioVerticalHealthService(RemediationBatch=Batch, DryRun=DryRun)
                     Svc.RunCycle()
+                    Repo.RecordRun(Name)
                 except Exception as Ex:
                     LoggingService.LogException("AudioVerticalHealthService cycle raised", Ex, "WebService", "PrivateAudioVerticalHealthLoop")
             time.sleep(Interval)
