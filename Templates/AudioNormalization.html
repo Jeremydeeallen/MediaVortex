@@ -98,7 +98,7 @@ async function loadReview(){
   const r=await fetch('/api/AudioNormalization/Review'); const j=await r.json();
   const rows=(j.Data&&j.Data.Rows)||[];
   document.getElementById('review-count').textContent=`${(j.Data&&j.Data.Count)||0} files held for review`;
-  document.getElementById('review-body').innerHTML=rows.length?rows.map(r=>`<tr><td>${r.id}</td><td>${_esc(r.filename)}</td><td>${_esc(r.admissiondeferreason)}</td><td>${_esc(r.sourceintegratedlufs)}</td><td>${_esc(r.sourcetruepeakdbtp)}</td><td><button class="btn btn-sm btn-outline-success" onclick="resolveReview(${r.id})">Resolve</button></td></tr>`).join(''):'<tr><td colspan="6" class="text-muted">Queue empty</td></tr>';
+  document.getElementById('review-body').innerHTML=rows.length?rows.map(r=>`<tr><td>${r.Id}</td><td>${_esc(r.FileName)}</td><td>${_esc(r.AdmissionDeferReason)}</td><td>${_esc(r.SourceIntegratedLufs)}</td><td>${_esc(r.SourceTruePeakDbtp)}</td><td><button class="btn btn-sm btn-outline-success" onclick="resolveReview(${r.Id})">Resolve</button></td></tr>`).join(''):'<tr><td colspan="6" class="text-muted">Queue empty</td></tr>';
 }
 async function resolveReview(id){
   await fetch(`/api/AudioNormalization/Review/${id}/Resolve`,{method:'POST'});
