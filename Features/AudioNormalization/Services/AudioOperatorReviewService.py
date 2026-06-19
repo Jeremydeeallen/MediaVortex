@@ -3,8 +3,18 @@ from Core.Database.DatabaseService import DatabaseService
 
 REASON_OPERATOR_REVIEW_PENDING = 'operator_review_pending'
 REASON_UNGAINABLE_ALL_STREAMS = 'ungainable_all_streams'
+REASON_INVALID_LOUDNESS_MEASUREMENT = 'invalid_loudness_measurement'
+REASON_LOUDNESS_MEASUREMENTS = 'LoudnessMeasurements'
+REASON_AWAITING_SPEECH_ENRICHMENT = 'awaiting_speech_enrichment'
 
-REVIEW_REASONS = (REASON_OPERATOR_REVIEW_PENDING, REASON_UNGAINABLE_ALL_STREAMS)
+WRITABLE_REVIEW_REASONS = (REASON_OPERATOR_REVIEW_PENDING, REASON_UNGAINABLE_ALL_STREAMS)
+REVIEW_REASONS = (
+    REASON_OPERATOR_REVIEW_PENDING,
+    REASON_UNGAINABLE_ALL_STREAMS,
+    REASON_INVALID_LOUDNESS_MEASUREMENT,
+    REASON_LOUDNESS_MEASUREMENTS,
+    REASON_AWAITING_SPEECH_ENRICHMENT,
+)
 
 
 SET_REVIEW_REASON_SQL = (
@@ -39,8 +49,8 @@ class AudioOperatorReviewService:
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C6
     def AddToReviewQueue(self, MediaFileId, Reason=REASON_OPERATOR_REVIEW_PENDING):
         """Mark a MediaFile for operator review by writing AdmissionDeferReason."""
-        if Reason not in REVIEW_REASONS:
-            raise ValueError(f"Reason must be one of {REVIEW_REASONS}; got {Reason!r}")
+        if Reason not in WRITABLE_REVIEW_REASONS:
+            raise ValueError(f"Reason must be one of {WRITABLE_REVIEW_REASONS}; got {Reason!r}")
         DatabaseService().ExecuteNonQuery(SET_REVIEW_REASON_SQL, (Reason, MediaFileId))
 
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C6
