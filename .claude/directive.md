@@ -2,57 +2,61 @@
 
 **Set:** 2026-06-18
 **Status:** Active -- phase: IMPLEMENTING
-**Slug:** audio-review-queue-grouping
+**Slug:** work-bucket-landing-pages
 
 ## Outcome
 
-`/AudioNormalization` Review tab currently renders 1,896 individual rows
-with one Resolve button each -- unusable. Group them by
-`AdmissionDeferReason`, show counts, and offer a bulk Resolve per group
-that clears the audio defer reason (NOT IsCompliant) so ComplianceGate
-re-routes the file to whatever WorkBucket applies (Transcode / Remux /
-AudioFixOnly / None).
+The three top-nav items (Transcode | Remux | Audio) currently dump to
+the same `/TranscodeQueue` page. They need distinct landing pages
+showing files needing each specific WorkBucket.
 
 ## Acceptance Criteria
 
-**G1.** `GET /api/AudioNormalization/Review` returns
-`{Groups: [{AdmissionDeferReason, Count, AuditOnlyAudio, AlsoNeedsTranscode, AlsoNeedsRemux, Samples:[Id,FileName,SourceIntegratedLufs]}], Total}`.
-Samples cap at 5 per group for drill-down preview. The flat `Rows` array
-is removed.
+**W1.** Three distinct routes exist:
+  - `/Work/Transcode` -> files with WorkBucket='Transcode'
+  - `/Work/Remux` -> files with WorkBucket='Remux'
+  - `/Work/Audio` -> files with WorkBucket='AudioFixOnly'
 
-**G2.** `POST /api/AudioNormalization/Review/Resolve` accepts
-`{AdmissionDeferReason: <reason>}` and clears the column for every
-MediaFile carrying that reason. Returns `{Cleared: N}`. ComplianceGate
-re-evaluation is triggered for affected rows.
+**W2.** Each page renders a single shared `WorkBucket.html` template
+with WorkBucket-specific title + helper text. The template shows:
+  - Total count + a hint of how many are already queued
+  - Paginated list (50 per page) of MediaFiles: Id, FileName, Resolution,
+    AudioCodec, AudioLanguages, SourceIntegratedLufs, OperationsNeededCsv
+  - One Action button per row: "Queue now" (inserts a transcodequeue row
+    with the matching ProcessingMode if not already queued).
 
-**G3.** Review tab UI renders one row per group: reason text, total,
-breakdown chips (audio-only / +Transcode / +Remux), expand toggle that
-fetches samples, single Resolve-all button per group.
+**W3.** Backend API:
+  - `GET /api/Work/<bucket>?offset=N&limit=M` returns
+    `{Total, AlreadyQueued, Rows:[...]}`.
+  - `POST /api/Work/<bucket>/Queue/<id>` inserts a transcodequeue row
+    for that MediaFile with the corresponding ProcessingMode; idempotent
+    (returns 200 + "already queued" if a Pending row already exists).
 
-**G4.** Bulk Resolve flips no IsCompliant bits directly -- it only
-clears AdmissionDeferReason. The compliance recompute is triggered
-through the existing `QueueManagementBusinessService.RecomputeForFiles`
-chain so each file lands in the correct WorkBucket.
+**W4.** Top-nav links point to the three new routes (not to
+`/TranscodeQueue`).
 
 ## Files
 
 ```
-.claude/directive.md                                                 -- EDIT: progress
-Features/AudioNormalization/AudioNormalizationController.py          -- EDIT: rewrite /Review GET + add /Review/Resolve bulk POST
-Features/AudioNormalization/Services/AudioOperatorReviewService.py   -- EDIT: GroupedSummary() + BulkClearByReason() methods
-Templates/AudioNormalization.html                                    -- EDIT: replace flat Review table with grouped collapsible rows
-Tests/Contract/TestAudioOperatorReviewServiceGrouping.py             -- CREATE: grouping + bulk clear contracts
+.claude/directive.md                                                 -- EDIT
+Features/WorkBucket/__init__.py                                      -- CREATE
+Features/WorkBucket/WorkBucketController.py                          -- CREATE: routes + API
+Features/WorkBucket/WorkBucketRepository.py                          -- CREATE: SELECT by WorkBucket + queue-insert
+Features/WorkBucket/workbucket.feature.md                            -- CREATE
+Templates/WorkBucket.html                                            -- CREATE: single template per bucket
+Templates/Base.html                                                  -- EDIT: nav links point to /Work/<bucket>
+WebService/Main.py                                                   -- EDIT: register the blueprint
+Tests/Contract/TestWorkBucketRepository.py                           -- CREATE
 ```
 
 ## Status
 
 ### Progress
 
-- [ ] G1 API grouping
-- [ ] G2 bulk resolve endpoint
-- [ ] G3 grouped UI
-- [ ] G4 recompute trigger on bulk
-- [ ] verify live (1896 -> grouped -> bulk resolve smoke)
+- [ ] W1 routes
+- [ ] W2 template
+- [ ] W3 API
+- [ ] W4 nav links
 
 ### Promotions
 

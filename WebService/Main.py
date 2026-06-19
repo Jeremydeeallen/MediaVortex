@@ -449,6 +449,8 @@ class WebServiceApp:
         from Features.Compliance.ComplianceController import ComplianceBlueprint
         # directive: failure-accounting | # see failure-accounting.C8
         from Features.FailureAccounting.FailedJobsController import FailedJobsBlueprint
+        # directive: work-bucket-landing-pages | # see directive.md C1
+        from Features.WorkBucket.WorkBucketController import WorkBucketController
 
         # Register all blueprints
         self.App.register_blueprint(ShowSettingsBlueprint)
@@ -474,6 +476,8 @@ class WebServiceApp:
         self.App.register_blueprint(ComplianceBlueprint)
         # directive: failure-accounting | # see failure-accounting.C8
         self.App.register_blueprint(FailedJobsBlueprint)
+        # directive: work-bucket-landing-pages | # see directive.md C1
+        self.App.register_blueprint(WorkBucketController().Blueprint)
     
     def PrivateStartServiceStatusTracking(self):
         """Start service status tracking thread."""

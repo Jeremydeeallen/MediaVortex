@@ -42,7 +42,7 @@
                               style="position: absolute; top: 2px; right: -6px; font-size: 0.65em; padding: 3px 6px; pointer-events: none;"></span>
                     </li>
                     <li class="nav-item" style="position: relative;">
-                        <a class="nav-link" href="/TranscodeQueue" data-bs-toggle="tooltip" data-bs-placement="bottom"
+                        <a class="nav-link {% if request.endpoint == 'work_bucket.render_page' and request.view_args and request.view_args.get('url_key') == 'Transcode' %}active{% endif %}" href="/Work/Transcode" data-bs-toggle="tooltip" data-bs-placement="bottom"
                            title="All 3 when transcode is required (video + audio + container)">
                             <i class="fas fa-film"></i> Transcode
                         </a>
@@ -51,7 +51,7 @@
                               title="Files needing Transcode WorkBucket"></span>
                     </li>
                     <li class="nav-item" style="position: relative;">
-                        <a class="nav-link" href="/TranscodeQueue" data-bs-toggle="tooltip" data-bs-placement="bottom"
+                        <a class="nav-link {% if request.endpoint == 'work_bucket.render_page' and request.view_args and request.view_args.get('url_key') == 'Remux' %}active{% endif %}" href="/Work/Remux" data-bs-toggle="tooltip" data-bs-placement="bottom"
                            title="Container fix + audio normalization">
                             <i class="fas fa-box"></i> Remux
                         </a>
@@ -60,7 +60,7 @@
                               title="Files needing Remux WorkBucket"></span>
                     </li>
                     <li class="nav-item" style="position: relative;">
-                        <a class="nav-link" href="/TranscodeQueue" data-bs-toggle="tooltip" data-bs-placement="bottom"
+                        <a class="nav-link {% if request.endpoint == 'work_bucket.render_page' and request.view_args and request.view_args.get('url_key') == 'Audio' %}active{% endif %}" href="/Work/Audio" data-bs-toggle="tooltip" data-bs-placement="bottom"
                            title="Only audio is non-compliant">
                             <i class="fas fa-volume-up"></i> Audio
                         </a>

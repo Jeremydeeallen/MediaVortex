@@ -1,0 +1,118 @@
+{% extends "Base.html" %}
+
+{% block title %}{{ Labels.Title }}{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+  <div class="d-flex align-items-center mb-2">
+    <h2 class="mb-0"><i class="{{ Labels.Icon }} me-2"></i>{{ Labels.Title }}</h2>
+    <span class="ms-3 text-muted small">{{ Labels.Subtitle }}</span>
+  </div>
+
+  <div class="row mb-3">
+    <div class="col-md-3">
+      <div class="card"><div class="card-body py-2">
+        <div class="text-muted small">Total in {{ Labels.Title }}</div>
+        <div class="h4 mb-0" id="WorkBucketTotal">--</div>
+      </div></div>
+    </div>
+    <div class="col-md-3">
+      <div class="card"><div class="card-body py-2">
+        <div class="text-muted small">Already in queue</div>
+        <div class="h4 mb-0" id="WorkBucketAlreadyQueued">--</div>
+      </div></div>
+    </div>
+    <div class="col-md-3">
+      <div class="card"><div class="card-body py-2">
+        <div class="text-muted small">Not yet queued</div>
+        <div class="h4 mb-0" id="WorkBucketRemaining">--</div>
+      </div></div>
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-striped">
+      <thead>
+        <tr>
+          <th>Id</th>
+          <th>FileName</th>
+          <th>Resolution</th>
+          <th>Audio</th>
+          <th class="text-end">LUFS</th>
+          <th class="text-end">TP</th>
+          <th>OperationsNeeded</th>
+          <th>State</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="WorkBucketBody"><tr><td colspan="9" class="text-muted">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="d-flex justify-content-between align-items-center">
+    <span class="text-muted small" id="WorkBucketPageInfo"></span>
+    <div>
+      <button class="btn btn-outline-secondary btn-sm" id="WorkBucketPrev">Prev</button>
+      <button class="btn btn-outline-secondary btn-sm" id="WorkBucketNext">Next</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const URL_KEY = {{ UrlKey|tojson }};
+let Offset = 0;
+const Limit = 50;
+
+function _esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'})[c])}
+
+async function loadPage(){
+  const r = await fetch(`/api/Work/${URL_KEY}?offset=${Offset}&limit=${Limit}`);
+  const j = await r.json();
+  const d = (j && j.Data) || {};
+  document.getElementById('WorkBucketTotal').textContent = (d.Total||0).toLocaleString();
+  document.getElementById('WorkBucketAlreadyQueued').textContent = (d.AlreadyQueued||0).toLocaleString();
+  document.getElementById('WorkBucketRemaining').textContent = Math.max(0, (d.Total||0) - (d.AlreadyQueued||0)).toLocaleString();
+  const rows = d.Rows || [];
+  const start = (d.Offset||0) + 1;
+  const end = (d.Offset||0) + rows.length;
+  document.getElementById('WorkBucketPageInfo').textContent = `Showing ${start.toLocaleString()}-${end.toLocaleString()} of ${(d.Total||0).toLocaleString()}`;
+  if (!rows.length) {
+    document.getElementById('WorkBucketBody').innerHTML = '<tr><td colspan="9" class="text-muted">Nothing here.</td></tr>';
+    return;
+  }
+  document.getElementById('WorkBucketBody').innerHTML = rows.map(r => {
+    const state = r.inqueue ? '<span class="badge bg-info text-dark">in queue</span>' : '<span class="badge bg-secondary">idle</span>';
+    const action = r.inqueue
+      ? '<button class="btn btn-sm btn-outline-secondary" disabled>Queued</button>'
+      : `<button class="btn btn-sm btn-outline-success" onclick="queueOne(${r.id})">Queue now</button>`;
+    return `<tr>
+      <td>${r.id}</td>
+      <td><code class="small">${_esc(r.filename)}</code></td>
+      <td>${_esc(r.resolution||'')}</td>
+      <td>${_esc(r.audiocodec||'')} <span class="text-muted small">${_esc(r.audiolanguages||'')}</span></td>
+      <td class="text-end">${r.sourceintegratedlufs==null?'':r.sourceintegratedlufs}</td>
+      <td class="text-end">${r.sourcetruepeakdbtp==null?'':r.sourcetruepeakdbtp}</td>
+      <td><code class="small">${_esc(r.operationsneededcsv||'')}</code></td>
+      <td>${state}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function queueOne(id){
+  const r = await fetch(`/api/Work/${URL_KEY}/Queue/${id}`, {method:'POST'});
+  const j = await r.json();
+  if (!j.Success) { alert('Failed: '+(j.Message||'')); return; }
+  loadPage();
+}
+
+document.getElementById('WorkBucketPrev').addEventListener('click', () => {
+  if (Offset >= Limit) { Offset -= Limit; loadPage(); }
+});
+document.getElementById('WorkBucketNext').addEventListener('click', () => {
+  Offset += Limit; loadPage();
+});
+
+loadPage();
+</script>
+{% endblock %}
