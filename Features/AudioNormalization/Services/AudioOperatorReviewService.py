@@ -17,6 +17,21 @@ REVIEW_REASONS = (
 )
 
 
+ACTION_CLEAR_AND_RECOMPUTE = 'clear_and_recompute'
+ACTION_MARK_FOR_REMEASUREMENT = 'mark_for_remeasurement'
+ACTION_REENRICH_SPEECH_LANG = 'reenrich_speech_lang'
+
+
+# directive: audio-vertical-converge-to-zero | # see directive.md Z1
+ACTION_FOR_REASON = {
+    REASON_OPERATOR_REVIEW_PENDING: ('Resolve all', ACTION_CLEAR_AND_RECOMPUTE),
+    REASON_UNGAINABLE_ALL_STREAMS: ('Resolve all', ACTION_CLEAR_AND_RECOMPUTE),
+    REASON_INVALID_LOUDNESS_MEASUREMENT: ('Re-measure all', ACTION_MARK_FOR_REMEASUREMENT),
+    REASON_LOUDNESS_MEASUREMENTS: ('Re-measure all', ACTION_MARK_FOR_REMEASUREMENT),
+    REASON_AWAITING_SPEECH_ENRICHMENT: ('Re-run detection', ACTION_REENRICH_SPEECH_LANG),
+}
+
+
 SET_REVIEW_REASON_SQL = (
     "UPDATE MediaFiles SET AdmissionDeferReason = %s WHERE Id = %s"
 )
@@ -94,6 +109,7 @@ class AudioOperatorReviewService:
                 "ORDER BY Id LIMIT 5",
                 (G['reason'],),
             )
+            ActionLabel, ActionVerb = ACTION_FOR_REASON.get(G['reason'], ('Resolve all', ACTION_CLEAR_AND_RECOMPUTE))
             Out.append({
                 'AdmissionDeferReason': G['reason'],
                 'Total': int(G['total']),
@@ -102,6 +118,8 @@ class AudioOperatorReviewService:
                 'NeedsRemux': int(G['needs_remux']),
                 'NoBucket': int(G['no_bucket']),
                 'Samples': Samples or [],
+                'ActionLabel': ActionLabel,
+                'ActionVerb': ActionVerb,
             })
         return Out
 
@@ -121,3 +139,58 @@ class AudioOperatorReviewService:
             (Reason,),
         )
         return {'Cleared': len(Ids), 'Ids': Ids}
+
+    # directive: audio-vertical-converge-to-zero | # see directive.md Z1
+    def BulkRemeasureByReason(self, Reason):
+        """Mark every MediaFile carrying the given reason for re-measurement; LoudnessMeasuredAt back-dated so AudioRemeasurementService picks them up."""
+        if Reason not in REVIEW_REASONS:
+            raise ValueError(f"Reason must be one of {REVIEW_REASONS}; got {Reason!r}")
+        Db = DatabaseService()
+        Ids = [R['id'] for R in (Db.ExecuteQuery(
+            "SELECT Id FROM MediaFiles WHERE AdmissionDeferReason = %s", (Reason,),
+        ) or [])]
+        if not Ids:
+            return {'Marked': 0, 'Ids': []}
+        Db.ExecuteNonQuery(
+            "UPDATE MediaFiles "
+            "SET AdmissionDeferReason = %s, LoudnessMeasuredAt = NOW() - INTERVAL '25 hours' "
+            "WHERE AdmissionDeferReason = %s",
+            (REASON_INVALID_LOUDNESS_MEASUREMENT, Reason),
+        )
+        return {'Marked': len(Ids), 'Ids': Ids}
+
+    # directive: audio-vertical-converge-to-zero | # see directive.md Z1
+    def BulkClearSpeechEnrichmentCache(self, Reason=REASON_AWAITING_SPEECH_ENRICHMENT):
+        """Clear AudioStreamLanguageDetectionsJson so LanguageEnrichmentService re-runs Whisper detection on next pass."""
+        if Reason not in REVIEW_REASONS:
+            raise ValueError(f"Reason must be one of {REVIEW_REASONS}; got {Reason!r}")
+        Db = DatabaseService()
+        Ids = [R['id'] for R in (Db.ExecuteQuery(
+            "SELECT Id FROM MediaFiles WHERE AdmissionDeferReason = %s", (Reason,),
+        ) or [])]
+        if not Ids:
+            return {'Cleared': 0, 'Ids': []}
+        Db.ExecuteNonQuery(
+            "UPDATE MediaFiles "
+            "SET AudioStreamLanguageDetectionsJson = NULL, AdmissionDeferReason = NULL "
+            "WHERE AdmissionDeferReason = %s",
+            (Reason,),
+        )
+        return {'Cleared': len(Ids), 'Ids': Ids}
+
+    # directive: audio-vertical-converge-to-zero | # see directive.md Z1
+    def BulkActionByReason(self, Reason):
+        """Dispatch the correct action per reason: clear vs re-measure vs re-enrich; idempotent."""
+        ActionLabel, ActionVerb = ACTION_FOR_REASON.get(Reason, (None, None))
+        if ActionVerb is None:
+            raise ValueError(f"Unknown reason {Reason!r}")
+        if ActionVerb == ACTION_CLEAR_AND_RECOMPUTE:
+            Result = self.BulkClearByReason(Reason)
+            return {'ActionVerb': ActionVerb, **Result}
+        if ActionVerb == ACTION_MARK_FOR_REMEASUREMENT:
+            Result = self.BulkRemeasureByReason(Reason)
+            return {'ActionVerb': ActionVerb, **Result}
+        if ActionVerb == ACTION_REENRICH_SPEECH_LANG:
+            Result = self.BulkClearSpeechEnrichmentCache(Reason)
+            return {'ActionVerb': ActionVerb, **Result}
+        raise ValueError(f"Unhandled ActionVerb {ActionVerb!r}")

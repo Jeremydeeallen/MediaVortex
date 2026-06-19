@@ -77,7 +77,11 @@ async function loadPage(){
   const end = (d.Offset||0) + rows.length;
   document.getElementById('WorkBucketPageInfo').textContent = `Showing ${start.toLocaleString()}-${end.toLocaleString()} of ${(d.Total||0).toLocaleString()}`;
   if (!rows.length) {
-    document.getElementById('WorkBucketBody').innerHTML = '<tr><td colspan="9" class="text-muted">Nothing here.</td></tr>';
+    let emptyNote = 'Nothing here.';
+    if (URL_KEY === 'Audio' && (d.Total||0) === 0) {
+      emptyNote = 'Empty by design. ComplianceGate routes a file to AudioFixOnly only when audio is the SOLE blocker -- almost every audio-non-compliant source also needs a container remux to MP4, so it lands in Remux first. As Remux drains, watch this number rise.';
+    }
+    document.getElementById('WorkBucketBody').innerHTML = `<tr><td colspan="9" class="text-muted">${emptyNote}</td></tr>`;
     return;
   }
   document.getElementById('WorkBucketBody').innerHTML = rows.map(r => {

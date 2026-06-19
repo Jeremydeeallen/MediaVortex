@@ -1,62 +1,79 @@
 # Current Directive
 
-**Set:** 2026-06-18
+**Set:** 2026-06-19
 **Status:** Active -- phase: IMPLEMENTING
-**Slug:** work-bucket-landing-pages
+**Slug:** audio-vertical-converge-to-zero
 
 ## Outcome
 
-The three top-nav items (Transcode | Remux | Audio) currently dump to
-the same `/TranscodeQueue` page. They need distinct landing pages
-showing files needing each specific WorkBucket.
+Move the AUDIO VERTICAL from "mechanism done" to "library converged + every
+operator-facing surface tells the truth." Zero gaps that need operator
+input -- I own all decisions below per CEO mode + bar-lowering memory.
 
 ## Acceptance Criteria
 
-**W1.** Three distinct routes exist:
-  - `/Work/Transcode` -> files with WorkBucket='Transcode'
-  - `/Work/Remux` -> files with WorkBucket='Remux'
-  - `/Work/Audio` -> files with WorkBucket='AudioFixOnly'
+**Z1.** Bulk Resolve action is correct-per-reason. The Review tab's
+group action button picks an action that ACTUALLY resolves the
+underlying state, not a misleading uniform "clear":
+  - `ungainable_all_streams` -> "Resolve all" clears defer reason +
+    triggers Recompute (current behavior; keep)
+  - `operator_review_pending` -> "Resolve all" clears defer reason +
+    triggers Recompute (current behavior; keep)
+  - `invalid_loudness_measurement` -> "Re-measure all" calls
+    AudioRemeasurementService.MarkForRemeasurement (already triggered
+    by H1 but exposed for operator)
+  - `LoudnessMeasurements` -> "Re-measure all" same path
+  - `awaiting_speech_enrichment` -> "Re-run detection" enqueues
+    speech enrichment
 
-**W2.** Each page renders a single shared `WorkBucket.html` template
-with WorkBucket-specific title + helper text. The template shows:
-  - Total count + a hint of how many are already queued
-  - Paginated list (50 per page) of MediaFiles: Id, FileName, Resolution,
-    AudioCodec, AudioLanguages, SourceIntegratedLufs, OperationsNeededCsv
-  - One Action button per row: "Queue now" (inserts a transcodequeue row
-    with the matching ProcessingMode if not already queued).
+**Z2.** Three top-nav landing pages have contract tests:
+TestWorkBucketRepository (counts + pagination + idempotent QueueOne).
 
-**W3.** Backend API:
-  - `GET /api/Work/<bucket>?offset=N&limit=M` returns
-    `{Total, AlreadyQueued, Rows:[...]}`.
-  - `POST /api/Work/<bucket>/Queue/<id>` inserts a transcodequeue row
-    for that MediaFile with the corresponding ProcessingMode; idempotent
-    (returns 200 + "already queued" if a Pending row already exists).
+**Z3.** Drain-rate measurement: capture detected counts at T0 and
+T+N minutes; compute drain rate per invariant. If a rate is divergent
+(new violations > drains), shorten interval OR raise batch.
 
-**W4.** Top-nav links point to the three new routes (not to
-`/TranscodeQueue`).
+**Z4.** "Audio" nav landing page renders a one-liner explaining
+structural rarity when Total=0 -- nav stops lying about why it's empty.
+
+**Z5.** `Workers.RemuxEnabled=TRUE` on I9 so the 11,338 Remux-bucket
+files can actually flow.
+
+**Z6.** Codebase casing sweep: every audio-vertical jsonify response
+returns PascalCase keys at the envelope layer (matches CLAUDE.md
+"PascalCase everywhere") OR lowercase consistently. Pick one,
+normalize. Update consuming JS in same commit.
+
+**Z7.** Library converges: SuccessfulAttempt + InvalidMeasurement +
+ConsistencyBand H1 counts at zero in steady state OR documented
+structural reason if non-zero is correct.
 
 ## Files
 
 ```
-.claude/directive.md                                                 -- EDIT
-Features/WorkBucket/__init__.py                                      -- CREATE
-Features/WorkBucket/WorkBucketController.py                          -- CREATE: routes + API
-Features/WorkBucket/WorkBucketRepository.py                          -- CREATE: SELECT by WorkBucket + queue-insert
-Features/WorkBucket/workbucket.feature.md                            -- CREATE
-Templates/WorkBucket.html                                            -- CREATE: single template per bucket
-Templates/Base.html                                                  -- EDIT: nav links point to /Work/<bucket>
-WebService/Main.py                                                   -- EDIT: register the blueprint
-Tests/Contract/TestWorkBucketRepository.py                           -- CREATE
+.claude/directive.md
+Features/AudioNormalization/Services/AudioOperatorReviewService.py     -- Z1 per-reason action
+Features/AudioNormalization/AudioNormalizationController.py            -- Z1 action endpoint variants
+Templates/AudioNormalization.html                                      -- Z1 per-group button label/action
+Templates/WorkBucket.html                                              -- Z4 empty-state note
+Tests/Contract/TestWorkBucketRepository.py                             -- Z2
+Tests/Contract/TestWorkBucketController.py                             -- Z2
+(Z3 measurement: ad-hoc snapshot, no code persist)
+(Z5: SQL UPDATE via QueryDatabase, no code change)
+(Z6: jsonify normalization across the AN controllers)
 ```
 
 ## Status
 
 ### Progress
 
-- [ ] W1 routes
-- [ ] W2 template
-- [ ] W3 API
-- [ ] W4 nav links
+- [ ] Z1 per-reason bulk action
+- [ ] Z2 work-bucket contract tests
+- [ ] Z3 drain-rate measurement
+- [ ] Z4 nav-empty truth
+- [ ] Z5 RemuxEnabled flip
+- [ ] Z6 casing sweep
+- [ ] Z7 converge to zero (verify)
 
 ### Promotions
 

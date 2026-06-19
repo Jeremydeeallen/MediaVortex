@@ -118,7 +118,7 @@ async function loadReview(){
         </div>
         <div>
           <button class="btn btn-sm btn-outline-secondary me-2" data-bs-toggle="collapse" data-bs-target="#review-samples-${i}">Preview</button>
-          <button class="btn btn-sm btn-outline-success" onclick="bulkResolveReason('${_esc(g.AdmissionDeferReason)}', ${g.Total})">Resolve all ${g.Total.toLocaleString()}</button>
+          <button class="btn btn-sm btn-outline-success" onclick="bulkResolveReason('${_esc(g.AdmissionDeferReason)}', ${g.Total}, '${_esc(g.ActionLabel||'Resolve all')}', '${_esc(g.ActionVerb||'clear_and_recompute')}')">${_esc(g.ActionLabel||'Resolve all')} ${g.Total.toLocaleString()}</button>
         </div>
       </div>
       <div class="collapse" id="review-samples-${i}">
@@ -132,11 +132,17 @@ async function loadReview(){
     </div>`;
   }).join('');
 }
-async function bulkResolveReason(reason, total){
-  if(!confirm(`Clear AdmissionDeferReason='${reason}' on ${total.toLocaleString()} MediaFiles?\\n\\nThis does NOT mark them compliant; ComplianceGate will re-route each to its correct WorkBucket.`))return;
+async function bulkResolveReason(reason, total, label, verb){
+  const verbCopy = {
+    'clear_and_recompute': 'clear the defer reason and re-route through ComplianceGate',
+    'mark_for_remeasurement': 'mark for re-measurement (ebur128 will re-run on next worker pass)',
+    'reenrich_speech_lang': 'clear the Whisper cache so language detection re-runs',
+  }[verb] || 'clear the defer reason';
+  if(!confirm(`${label} on ${total.toLocaleString()} MediaFiles for reason='${reason}'?\\n\\nAction: ${verbCopy}.`))return;
   const r=await fetch('/api/AudioNormalization/Review/Resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({AdmissionDeferReason:reason})});
   const j=await r.json();
-  alert(j.Success?`Cleared ${j.Data.Cleared}.`:`Failed: ${j.Message}`);
+  const count=(j.Data && (j.Data.Cleared||j.Data.Marked||0))||0;
+  alert(j.Success?`${label}: ${count}.`:`Failed: ${j.Message}`);
   loadReview();
 }
 async function resolveReview(id){

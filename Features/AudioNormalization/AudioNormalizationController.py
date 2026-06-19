@@ -172,16 +172,20 @@ class AudioNormalizationController:
                                             "AudioNormalizationController", "resolve_review")
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
 
-        # directive: audio-review-queue-grouping | # see audio-normalization.C6
+        # directive: audio-vertical-converge-to-zero | # see directive.md Z1
         @self.Blueprint.route('/api/AudioNormalization/Review/Resolve', methods=['POST'])
         def bulk_resolve_review():
-            """Bulk-clear AdmissionDeferReason for every MediaFile carrying the supplied reason + trigger recompute."""
+            """Dispatch the correct bulk action per defer reason: clear / re-measure / re-enrich. Recompute fires when the file becomes admittable again."""
             try:
                 Body = request.get_json(force=True, silent=True) or {}
                 Reason = (Body.get('AdmissionDeferReason') or '').strip()
-                Result = self.Review.BulkClearByReason(Reason)
-                self._TriggerRecompute(Result.get('Ids') or [])
-                return jsonify({'Success': True, 'Message': f"Cleared {Result['Cleared']}", 'Data': Result})
+                Result = self.Review.BulkActionByReason(Reason)
+                Ids = Result.get('Ids') or []
+                ActionVerb = Result.get('ActionVerb')
+                if ActionVerb == 'clear_and_recompute':
+                    self._TriggerRecompute(Ids)
+                Count = Result.get('Cleared') or Result.get('Marked') or 0
+                return jsonify({'Success': True, 'Message': f"{ActionVerb}: {Count}", 'Data': Result})
             except ValueError as Ex:
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 400
             except Exception as Ex:
