@@ -233,7 +233,123 @@ documented design; the regex-on-stderr approach the original backend
 attempted does not work because ffmpeg's whisper filter does not
 emit a detected-language stderr line.
 
-## Seams
+## Cross-Vertical Contract (added 2026-06-19)
+
+This section locks the audio vertical's public surface. Any other vertical
+(Compliance, Self-Healing, Scanning, TranscodeJob, FileReplacement, etc.)
+interacts with the audio vertical ONLY through what is listed below. Other
+verticals MUST NOT open any audio-vertical source file or import from any
+class not enumerated here. The audio vertical reserves the right to change
+anything not in this contract -- without notice -- because nothing outside
+should depend on it.
+
+### Columns the audio vertical WRITES
+
+Consumers (other verticals + downstream services) may SELECT these. They
+MUST NOT write them.
+
+| Column | Written by |
+|---|---|
+| `MediaFiles.SourceIntegratedLufs` | `EbuR128MeasurementService.MeasureAndPersist` |
+| `MediaFiles.SourceLoudnessRangeLU` | `EbuR128MeasurementService.MeasureAndPersist` |
+| `MediaFiles.SourceTruePeakDbtp` | `EbuR128MeasurementService.MeasureAndPersist` |
+| `MediaFiles.SourceIntegratedThresholdLufs` | `EbuR128MeasurementService.MeasureAndPersist` |
+| `MediaFiles.LoudnessMeasuredAt` | `EbuR128MeasurementService.MeasureAndPersist`, `AudioRemeasurementService.MarkForRemeasurement` (back-dates) |
+| `MediaFiles.AudioComplete` | `AudioStateService.MarkAudioComplete` / `ResetAudioComplete` |
+| `MediaFiles.AudioCompletedAt` | `AudioStateService.MarkAudioComplete` |
+| `MediaFiles.AudioCorruptSuspect` | `AudioStateService.MarkAudioCorruptSuspect` |
+| `MediaFiles.AudioCorruptReason` | `AudioStateService.MarkAudioCorruptSuspect` |
+| `MediaFiles.AudioLanguages` | `ComplianceGate.Evaluate` -- written by Compliance vertical based on emitted-language seam (S13); the AUDIO vertical only EMITS the metadata tags |
+| `MediaFiles.AdmissionDeferReason` | `AudioPolicyAdmissionGate.AdmitOrDefer` (set), `AudioOperatorReviewService.{AddToReviewQueue,BulkClearByReason,BulkRemeasureByReason,BulkClearSpeechEnrichmentCache,ResolveReview}` (set/clear) |
+| `MediaFiles.AudioStreamLanguageDetectionsJson` | `LanguageEnrichmentService.Enrich` |
+| `TranscodeQueue.AudioPolicyJson` | `AudioPolicyAdmissionGate.BackfillRecentInserts` / `BackfillAllPending` |
+| `TranscodeAttempts.AudioTracksEmittedJson` | `PostEncodeMeasurementService.Probe` |
+| `TranscodeAttempts.AudioPolicyJson` | written by TranscodeJob vertical at attempt creation, copied FROM `TranscodeQueue.AudioPolicyJson` -- consumed by audio vertical's post-encode probe |
+| `AudioNormalizationConfig.*` (all columns) | `AudioNormalizationController.upsert_settings` (via the Settings UI) |
+
+### Columns the audio vertical READS from external tables
+
+These are config or context the audio vertical consumes. The audio vertical
+NEVER writes these. Other verticals own them.
+
+| Column | Read by | Owner |
+|---|---|---|
+| `AudioNormalizationConfig.*` (all columns) | `AudioPolicyResolver.GetEffectivePolicy` | Operator-edited via Settings UI; the audio vertical reads fresh per evaluation (`db-is-authority`) |
+| `SystemSettings.WhisperModelPath` | `LanguageEnrichmentService._ResolveWhisperModelPath` | Operator/deploy-time setting |
+| `Workers.FFmpegPath` / `FFprobePath` | `WhisperFfmpegBackend._ResolveFFmpegPath`, `PostEncodeMeasurementService._ResolveBinaries` | Workers vertical |
+| `MediaFiles.StorageRootId` / `RelativePath` / `FileName` / `Resolution` / `AudioCodec` / etc. | every audio-vertical service that needs MediaFile context | FileScanning + Probe verticals |
+
+### Stable function entry points (cross-vertical callers)
+
+The classes + signatures below have actual callers OUTSIDE
+`Features/AudioNormalization/` today. Their signatures are contract;
+constructor injection is allowed (any class listed accepts collaborator
+injection for tests). Adding a new keyword argument with a default is
+non-breaking; removing or renaming a parameter is a contract change that
+requires a directive.
+
+| Class.method | External caller(s) |
+|---|---|
+| `AudioFilterEmitter.EmitTracks(MediaFile, Policy, AudioStreams=None, LibraryDefault=None) -> List[TrackBlock]` | `Features/TranscodeJob/Emit/{Transcode,Remux,SubtitleFix}Shape.py` |
+| `AudioPolicyResolver.GetEffectivePolicy(MediaFile) -> dict` | same three shapes |
+| `AudioStreamProbe.Probe(LocalSourcePath: str) -> list[dict]` (audio-only-indexed) | same three shapes |
+| `AudioPolicyAdmissionGate.AdmitOrDefer(MediaFile, IntendedProcessingMode=None) -> AdmissionDecision` | `Features/TranscodeQueue/QueueManagementBusinessService` |
+| `AudioPolicyAdmissionGate.BackfillAllPending() -> int` | same |
+| `AudioStateService.MarkAudioComplete(MediaFileId) -> None` | `Features/FileReplacement/TranscodedOutputPlacement` |
+| `PostEncodeMeasurementService.Probe(TranscodeAttemptId, OutputFilePath) -> bool` | `Features/AudioNormalization/Workers/PostEncodeAudioHandler` (which is itself called by TranscodeJob's worker dispatch) |
+
+Everything else under `Features/AudioNormalization/` is INTERNAL. That
+includes (non-exhaustive): `AudioStrategyClassifier`, `DialNormHandler`,
+`LanguageDetector`, `_BuildBlockForTrack`, the `TrackBlock` dataclass
+internals, every helper prefixed with `_`, every Repository, every test
+fixture. Other verticals MUST NOT import these.
+
+### HTTP API surface
+
+The blueprint registered at `Features/AudioNormalization/
+AudioNormalizationController.py` exposes the routes below. These are the
+operator-facing contract; UI templates + external scripts may call them.
+
+| Method + URL | Purpose |
+|---|---|
+| `GET  /AudioNormalization` | Render the Settings + Dashboard + Review tabbed page |
+| `GET  /api/AudioNormalization/Settings` | List every `AudioNormalizationConfig` row |
+| `POST /api/AudioNormalization/Settings` | Upsert one row at any scope |
+| `GET  /api/AudioNormalization/Dashboard` | `v_audio_consistency_summary` band breakdown per library |
+| `GET  /api/AudioNormalization/Review` | Grouped review queue: per-reason counts + 5-sample preview + ActionLabel/ActionVerb |
+| `POST /api/AudioNormalization/Review/<int:media_file_id>/Resolve` | Single-file clear + recompute |
+| `POST /api/AudioNormalization/Review/Resolve` | Bulk per-reason dispatch: clear / re-measure / re-enrich |
+| `GET  /api/AudioNormalization/EnrichmentQueue/Status` | Count of MediaFiles waiting on speech enrichment |
+| `POST /api/AudioNormalization/SnapshotPolicies` | Trigger `BackfillAllPending` manually |
+
+### What is EXPLICITLY NOT a contract
+
+Other verticals MUST NOT depend on any of the following. The audio
+vertical changes these freely:
+
+- Internal class names of helpers, dataclasses (`TrackBlock`), and the
+  shape of `_BuildBlockForTrack`'s six per-concern slots
+- SQL clauses inside repositories
+- Regex patterns inside the language detector / Whisper parser
+- Internal directory structure under `Features/AudioNormalization/`
+- The `Strategy` enum strings (`'linear'` / `'adaptive'` / `'limiter'` /
+  `'skip'` / `'review'`) emitted by `AudioStrategyClassifier` -- they
+  are recorded inside `AudioPolicyJson` but consumers MUST NOT switch
+  on these strings; treat `AudioPolicyJson` as opaque
+- Anything prefixed with `_` (private by Python convention)
+
+### Cross-vertical relationships (where audio fits in the larger system)
+
+| Other vertical | Direction | Through |
+|---|---|---|
+| Compliance | Compliance READS audio-vertical columns to evaluate `IsCompliant` | Columns listed above |
+| Self-Healing | Self-Healing invariants READ audio-vertical columns + call SELECT-only repository methods | Columns + future `IAudioVerticalInvariant` registry (currently lives inside audio dir; will MOVE to self-healing vertical when that vertical is properly factored) |
+| Scanning | Scanning writes new `MediaFiles` rows; audio vertical's admission gate then sees them on next admit | New MediaFiles flow through normal admission |
+| TranscodeJob | TranscodeJob's shape classes CALL audio vertical's three public functions to build argv | `EmitTracks` + `GetEffectivePolicy` + `Probe` |
+| FileReplacement | FileReplacement CALLS `MarkAudioComplete` after a successful audio-touching transcode replaces the file | `AudioStateService.MarkAudioComplete` |
+| Workers | Workers' DB row supplies the FFmpeg paths the audio vertical resolves at runtime | `WorkerContext.Current()` |
+
+## Seams (intra-feature; producer + consumer both inside audio vertical)
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
 |---|---|---|---|---|---|
@@ -245,12 +361,7 @@ emit a detected-language stderr line.
 | S6 | Measurement Service -> Validator | `EbuR128MeasurementService.MeasureAndPersist` -> `MediaFiles.SourceIntegratedLufs` / LRA / TP / Threshold | `LoudnessMeasurementValidator.IsValid` reads the four columns + silence floor predicate | `TestEbuR128MeasurementService` 6 tests + `TestLoudnessMeasurementValidator` 8 tests |
 | S7 | Enrichment Service -> Detector Cache | `LanguageEnrichmentService.Enrich` writes `MediaFiles.AudioStreamLanguageDetectionsJson` | `LanguageDetector.Detect` 6th layer reads cache when `EnableSpeechLayer=True` | `TestLanguageEnrichmentService` 5 tests + `TestLanguageDetector.test_layer_speech_cache_when_enabled` |
 | S8 | Post-Encode Probe -> Dashboard | `PostEncodeMeasurementService.Probe` writes `TranscodeAttempts.AudioTracksEmittedJson` | `v_audio_consistency_summary` view aggregates per-StorageRootId bands; dashboard renders | `TestPostEncodeMeasurementService` 4 tests + live `SELECT * FROM v_audio_consistency_summary` |
-| S9 | Invariant Detector -> Remediation | `IAudioVerticalInvariant.Detect()` returns `List[<offending_row_id>]` per invariant kind | `IAudioVerticalRemediation.Apply(row_id)` -> structured outcome (Acted / NoOp / Error) | `TestAudioInvariants` against live DB + per-invariant unit tests with fixture seeds |
-| S10 | HealthService -> Audit | `AudioVerticalHealthService` writes per-cycle results | `AudioVerticalHealthRuns` row (`Timestamp`, `InvariantName`, `DetectedCount`, `RemediatedCount`, `DurationMs`) | `SELECT * FROM AudioVerticalHealthRuns ORDER BY Timestamp DESC LIMIT N` per `/api/Activity/LibraryCompliance` consumer |
-| S11 | Worker version -> Pause | WebService startup compares `Workers.Version` vs `HEAD` SHA at code root | Mismatched workers -> `UPDATE Workers SET Status='Paused', PauseReason='version drift: <sha> vs <HEAD>'` | Boot-time check + Activity dashboard worker tile shows the pause reason |
-| S12 | PostEncodeAudioHandler -> Probe | `PostEncodeAudioHandler.HandlePostEncode(AttemptId, MediaFileId)` resolves canonical path -> invokes `PostEncodeMeasurementService.Probe` | `TranscodeAttempts.AudioTracksEmittedJson` row updated | `TestPostEncodeAudioHandler` with mocked probe |
-| S13 | ComplianceGate -> Emitted Language Tags | `FFmpegCommand` carries `-metadata:s:a:N "language=eng"` | `ComplianceGate.Evaluate` overrides candidate row's `AudioLanguages` + `HasExplicitEnglishAudio` from parsed emitted tags before evaluating | `TestComplianceGateLanguageOverride` |
-| S14 | QMBS Post-INSERT -> Gate | Bulk-INSERT commits land Pending rows | `_SnapshotAudioPoliciesOnRecentInserts` -> `AudioPolicyAdmissionGate.BackfillAllPending` updates the new rows' `AudioPolicyJson` | `TestQueueManagementBusinessServiceHook` |
+| S9 | PostEncodeAudioHandler -> Probe | `PostEncodeAudioHandler.HandlePostEncode(AttemptId, MediaFileId)` resolves canonical path -> invokes `PostEncodeMeasurementService.Probe` | `TranscodeAttempts.AudioTracksEmittedJson` row updated | `TestPostEncodeAudioHandler` with mocked probe |
 
 ## Status
 
