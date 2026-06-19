@@ -217,7 +217,7 @@ class FileReplacementBusinessService:
             self._ArchiveOriginalFileDetails(OriginalPath, TranscodeAttemptId)
 
             AttemptProfileName = (transcode_attempt.ProfileName or '')
-            ReplacementMode = 'Remux' if AttemptProfileName in ('Remux', 'SubtitleFix') else 'Transcode'
+            ReplacementMode = 'Remux' if AttemptProfileName in ('Remux', 'SubtitleFix', 'AudioFix', 'Quick') else 'Transcode'
             from Features.FileReplacement.TranscodedOutputPlacement import TranscodedOutputPlacement
             replacement_result = TranscodedOutputPlacement(
                 self.DatabaseManager, self.FileManager, WorkerName=self.WorkerName

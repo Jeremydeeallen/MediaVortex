@@ -519,23 +519,25 @@ class WebServiceApp:
         except Exception as Ex:
             LoggingService.LogException("Failed to start AudioVerticalHealthService", Ex, "WebService", "PrivateStartAudioVerticalHealth")
 
-    # directive: h1-operator-control | # see directive.md H1G2
+    # directive: audio-vertical-phase-1-completion | # see directive.md P2
     def PrivateAudioVerticalHealthLoop(self):
-        """Background loop. Reads SystemSettings.AudioVerticalHealthEnabled fresh per cycle (default 'false' -- off). When 'true', runs every AudioVerticalHealthIntervalSec (default 300, min 60). Operator can toggle without restart."""
+        """Background loop. Reads SystemSettings.AudioVerticalHealthEnabled / Interval / DryRun fresh per cycle (default Enabled='false', DryRun='false'). When Enabled='true', runs cycle; when DryRun='true', Detect runs but Remediation.Apply does not. Operator toggles without restart."""
         from Features.AudioNormalization.SelfHealing.AudioVerticalHealthComposition import BuildAudioVerticalHealthService
         from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
-        Svc = BuildAudioVerticalHealthService()
         Repo = SystemSettingsRepository()
         while True:
             try:
                 EnabledRaw = (Repo.GetSystemSetting('AudioVerticalHealthEnabled') or 'false').strip().lower()
+                DryRunRaw = (Repo.GetSystemSetting('AudioVerticalHealthDryRun') or 'false').strip().lower()
                 IntervalRaw = Repo.GetSystemSetting('AudioVerticalHealthIntervalSec') or '300'
                 Interval = max(60, int(float(IntervalRaw or 300)))
             except Exception:
                 EnabledRaw = 'false'
+                DryRunRaw = 'false'
                 Interval = 300
             if EnabledRaw == 'true':
                 try:
+                    Svc = BuildAudioVerticalHealthService(DryRun=(DryRunRaw == 'true'))
                     Svc.RunCycle()
                 except Exception as Ex:
                     LoggingService.LogException("AudioVerticalHealthService cycle raised", Ex, "WebService", "PrivateAudioVerticalHealthLoop")

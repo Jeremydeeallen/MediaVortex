@@ -19,12 +19,13 @@ DEFAULT_REMEDIATION_BATCH = 100
 class AudioVerticalHealthService:
     """Recurring scan + remediation orchestrator; constructor injects List[invariant] + Dict[name -> remediation]."""
 
-    # directive: audio-vertical-live-evidence | # see audio-normalization.H1
-    def __init__(self, Invariants, Remediations, RemediationBatch=None):
-        """Inject the list of invariants and the matched remediations dict (keyed by invariant Name)."""
+    # directive: audio-vertical-phase-1-completion | # see directive.md P2
+    def __init__(self, Invariants, Remediations, RemediationBatch=None, DryRun=False):
+        """Inject the list of invariants and the matched remediations dict (keyed by invariant Name). DryRun runs Detect but never Remediation.Apply; audit row carries DRY_RUN prefix."""
         self.Invariants = list(Invariants or [])
         self.Remediations = dict(Remediations or {})
         self.RemediationBatch = int(RemediationBatch or DEFAULT_REMEDIATION_BATCH)
+        self.DryRun = bool(DryRun)
 
     # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.H1
     def RunCycle(self):
@@ -47,13 +48,16 @@ class AudioVerticalHealthService:
                 Batch = Detected[:self.RemediationBatch]
                 if len(Detected) > self.RemediationBatch:
                     Notes = f"capped {len(Detected)}->{self.RemediationBatch}"
-                try:
-                    Remediated = Remediation.Apply(Batch) or 0
-                except Exception as Ex:
-                    LoggingService.LogException(
-                        f"Remediation.Apply raised for {Invariant.Name}",
-                        Ex, "AudioVerticalHealthService", "RunCycle",
-                    )
+                if self.DryRun:
+                    Notes = f"DRY_RUN: would have remediated {len(Batch)}" + (f" ({Notes})" if Notes else "")
+                else:
+                    try:
+                        Remediated = Remediation.Apply(Batch) or 0
+                    except Exception as Ex:
+                        LoggingService.LogException(
+                            f"Remediation.Apply raised for {Invariant.Name}",
+                            Ex, "AudioVerticalHealthService", "RunCycle",
+                        )
             DurationMs = int((time.perf_counter() - Start) * 1000)
             Outcomes.append({
                 'Invariant': Invariant.Name,

@@ -12,9 +12,9 @@ from Features.AudioNormalization.SelfHealing.Remediations.EnqueueRemeasurement i
 from Features.AudioNormalization.SelfHealing.Remediations.EnqueueRetranscode import EnqueueRetranscode
 
 
-# directive: audio-vertical-live-evidence | # see audio-normalization.H1
-def BuildAudioVerticalHealthService(RemediationBatch=None):
-    """Composition root: wires 6 invariants + 5 remediations into a ready-to-run AudioVerticalHealthService."""
+# directive: audio-vertical-phase-1-completion | # see directive.md P2
+def BuildAudioVerticalHealthService(RemediationBatch=None, DryRun=False):
+    """Composition root: wires 6 invariants + 5 remediations into a ready-to-run AudioVerticalHealthService. DryRun runs Detect but never Remediation.Apply."""
     Invariants = [
         PendingQueueWithoutPolicyJson(),
         SuccessfulAttemptWithoutTracksEmitted(),
@@ -31,4 +31,4 @@ def BuildAudioVerticalHealthService(RemediationBatch=None):
         PreVerticalTranscodedFile.Name: EnqueueRetranscode(),
         ConsistencyBandDeviantWithComplete.Name: EnqueueRetranscode(),
     }
-    return AudioVerticalHealthService(Invariants, Remediations, RemediationBatch=RemediationBatch)
+    return AudioVerticalHealthService(Invariants, Remediations, RemediationBatch=RemediationBatch, DryRun=DryRun)
