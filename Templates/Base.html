@@ -42,12 +42,31 @@
                               style="position: absolute; top: 2px; right: -6px; font-size: 0.65em; padding: 3px 6px; pointer-events: none;"></span>
                     </li>
                     <li class="nav-item" style="position: relative;">
-                        <a class="nav-link {% if request.endpoint == 'audio_normalization.render_page' %}active{% endif %}" href="/AudioNormalization">
+                        <a class="nav-link" href="/TranscodeQueue" data-bs-toggle="tooltip" data-bs-placement="bottom"
+                           title="All 3 when transcode is required (video + audio + container)">
+                            <i class="fas fa-film"></i> Transcode
+                        </a>
+                        <span class="badge rounded-pill bg-warning d-none" id="NavTranscodeCount"
+                              style="position: absolute; top: 2px; right: -6px; font-size: 0.65em; padding: 3px 6px; pointer-events: none;"
+                              title="Files needing Transcode WorkBucket"></span>
+                    </li>
+                    <li class="nav-item" style="position: relative;">
+                        <a class="nav-link" href="/TranscodeQueue" data-bs-toggle="tooltip" data-bs-placement="bottom"
+                           title="Container fix + audio normalization">
+                            <i class="fas fa-box"></i> Remux
+                        </a>
+                        <span class="badge rounded-pill bg-warning d-none" id="NavRemuxCount"
+                              style="position: absolute; top: 2px; right: -6px; font-size: 0.65em; padding: 3px 6px; pointer-events: none;"
+                              title="Files needing Remux WorkBucket"></span>
+                    </li>
+                    <li class="nav-item" style="position: relative;">
+                        <a class="nav-link" href="/TranscodeQueue" data-bs-toggle="tooltip" data-bs-placement="bottom"
+                           title="Only audio is non-compliant">
                             <i class="fas fa-volume-up"></i> Audio
                         </a>
-                        <span class="badge rounded-pill bg-warning d-none" id="NavAudioReviewCount"
+                        <span class="badge rounded-pill bg-warning d-none" id="NavAudioCount"
                               style="position: absolute; top: 2px; right: -6px; font-size: 0.65em; padding: 3px 6px; pointer-events: none;"
-                              title="Files held for operator review"></span>
+                              title="Files needing AudioFixOnly WorkBucket"></span>
                     </li>
                     <li class="nav-item" style="position: relative;">
                         <a class="nav-link {% if request.endpoint and 'FailedJobs' in request.endpoint %}active{% endif %}" href="/FailedJobs">
@@ -58,7 +77,7 @@
                               title="Files at or above the FailureBudgetConfig cap"></span>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint in ['status', 'sql_queries', 'optimization', 'settings'] %}active{% endif %}" href="/settings">
+                        <a class="nav-link {% if request.endpoint in ['status', 'sql_queries', 'optimization', 'settings'] or (request.endpoint and request.endpoint.startswith('audio_normalization.')) %}active{% endif %}" href="/settings">
                             <i class="fas fa-tools"></i> Admin
                         </a>
                     </li>
@@ -226,19 +245,27 @@
     updateNavFailedJobsCount();
     setInterval(updateNavFailedJobsCount, 30000);
 
-    function updateNavAudioReviewCount() {
-        fetch('/api/AudioNormalization/Review')
+    function updateNavWorkBucketCounts() {
+        fetch('/api/Activity/LibraryCompliance')
             .then(r => r.json())
             .then(d => {
-                const badge = document.getElementById('NavAudioReviewCount');
-                const count = (d && d.Data && d.Data.Count) || 0;
-                if (count > 0) { badge.textContent = count; badge.classList.remove('d-none'); }
-                else { badge.classList.add('d-none'); }
+                const mode = (d && d.Mode) || {};
+                const setBadge = (id, count) => {
+                    const badge = document.getElementById(id);
+                    if (!badge) return;
+                    if (count > 0) { badge.textContent = count.toLocaleString(); badge.classList.remove('d-none'); }
+                    else { badge.classList.add('d-none'); }
+                };
+                setBadge('NavTranscodeCount', mode.Transcode || 0);
+                setBadge('NavRemuxCount', mode.Remux || 0);
+                setBadge('NavAudioCount', mode.AudioFix || 0);
             })
             .catch(() => {});
     }
-    updateNavAudioReviewCount();
-    setInterval(updateNavAudioReviewCount, 30000);
+    updateNavWorkBucketCounts();
+    setInterval(updateNavWorkBucketCounts, 30000);
+    // Activate Bootstrap tooltips so the nav-item title attributes pop on hover.
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
     // Global client-side error reporting
     (function() {
         var ErrorQueue = [];
