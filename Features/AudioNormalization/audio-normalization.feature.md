@@ -262,6 +262,8 @@ MUST NOT write them.
 | `MediaFiles.AudioLanguages` | `ComplianceGate.Evaluate` -- written by Compliance vertical based on emitted-language seam (S13); the AUDIO vertical only EMITS the metadata tags |
 | `MediaFiles.AdmissionDeferReason` | `AudioPolicyAdmissionGate.AdmitOrDefer` (set), `AudioOperatorReviewService.{AddToReviewQueue,BulkClearByReason,BulkRemeasureByReason,BulkClearSpeechEnrichmentCache,ResolveReview}` (set/clear) |
 | `MediaFiles.AudioStreamLanguageDetectionsJson` | `LanguageEnrichmentService.Enrich` |
+| `MediaFiles.AudioCompliant` | `AudioVertical.RecomputeFor` |
+| `MediaFiles.AudioCompliantReason` | `AudioVertical.RecomputeFor` |
 | `TranscodeQueue.AudioPolicyJson` | `AudioPolicyAdmissionGate.BackfillRecentInserts` / `BackfillAllPending` |
 | `TranscodeAttempts.AudioTracksEmittedJson` | `PostEncodeMeasurementService.Probe` |
 | `TranscodeAttempts.AudioPolicyJson` | written by TranscodeJob vertical at attempt creation, copied FROM `TranscodeQueue.AudioPolicyJson` -- consumed by audio vertical's post-encode probe |
