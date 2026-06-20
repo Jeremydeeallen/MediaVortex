@@ -4,6 +4,7 @@ MediaVortex: Python/Flask media transcoding system. Scans files, runs FFmpeg, in
 
 ## Where everything lives
 
+- **Target architecture:** `ARCHITECTURE.md` (target-state vertical roster, cross-cutting concerns, data flow, deprecated/dying — every directive is a delta against this)
 - **Framework rules:** `.claude/rules/*.md` (auto-loaded; invariants only — details in `.claude/rules-details/`)
 - **Mechanically enforced standards:** `.claude/standards/index.md` (phase gates + R-rules)
 - **Current directive:** `.claude/directive.md` (auto-loaded; empty + no marker = hook refuses code edits)
@@ -71,9 +72,10 @@ Started/stopped via `ServiceLifecycleManager` from `StartMediaVortex.py`. Archit
 ## Reading order when context-limited
 
 1. `.claude/rules/*.md` (auto-loaded — invariants)
-2. `.claude/directive.md` (the current ask)
-3. Colocated `*.flow.md` first (nav hub) -> partial Read of the relevant `ST<N>` section; colocated `*.feature.md` only when stage scope is insufficient (R18 caps it at limit<=50)
-4. Source code (last resort, targeted reads)
+2. `ARCHITECTURE.md` (target state — which verticals exist, what each owns)
+3. `.claude/directive.md` (the current ask)
+4. Colocated `*.flow.md` first (nav hub) -> partial Read of the relevant `ST<N>` section; colocated `*.feature.md` only when stage scope is insufficient (R18 caps it at limit<=50)
+5. Source code (last resort, targeted reads)
 
 For pipeline-shaped code: add `# see <flow-slug>.ST<N>` anchor inline on the def/class line; R1 then accepts the partial flow-doc Read in lieu of colocated feature-md preread.
 
