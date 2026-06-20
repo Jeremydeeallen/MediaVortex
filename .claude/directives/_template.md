@@ -35,9 +35,7 @@ One paragraph describing the operator-observable end state. What is true after t
 
 ## Status
 
-Active YYYY-MM-DD -- phase: NEEDS_STANDARDS_REVIEW -- next step.
-
-Phases advance by editing this Status line: `**Status:** Active -- phase: <NEXT>`. The PreToolUse hook reads this line to gate tool calls. See `.claude/standards/index.md` for the phase machine.
+Phases advance by editing the `**Status:**` header line at the top of this file: `**Status:** Active -- phase: <NEXT>`. The PreToolUse hook reads ONLY that header line (NOT this section). See `.claude/standards/index.md` for the phase machine.
 
 ### Files
 

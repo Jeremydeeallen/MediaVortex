@@ -63,7 +63,7 @@ from Core.Path.LocalPath import LocalExists, LocalBasename, LocalDirname, LocalJ
 - **WebService** (Flask + UI, port 5000)
 - **WorkerService** (unified: transcoding + VMAF + scanning; reads capability flags from `Workers` table)
 
-Started/stopped via `ServiceLifecycleManager` from `StartMediaVortex.py`. Architecture (MVVM + feature verticals) documented per-feature in `Features/<Name>/*.feature.md`; pipeline detail in `transcode.flow.md`.
+Started/stopped via `ServiceLifecycleManager` from `StartMediaVortex.py`. Architecture documented in `ARCHITECTURE.md` (vertical roster, cross-cutting concerns, data flow); per-feature contracts in `Features/<Name>/*.feature.md`; pipeline detail in `transcode.flow.md`.
 
 ## Python environment
 

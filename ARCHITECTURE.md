@@ -72,6 +72,8 @@ Each domain vertical answers ONE compliance question about a file and writes ONE
 | SQLQueries | `/SQLQueries` | Ad-hoc DB query interface; quick-query buttons; custom SQL execution. |
 | ClipBuilder | `/ClipBuilder` | Independent tool: clip extraction + compilation export. Not part of the transcoding pipeline. |
 | Compliance (tabbed shell) | `/Compliance` | Layout-only page with three tabs (Audio / Video / Container) -- each tab is rendered by its vertical's controller. No logic; pure UI shell. |
+| WorkBucket | `/Work/<bucket>` (`/Work/Transcode`, `/Work/Remux`, `/Work/Audio`) | Per-bucket landing pages: paginated MediaFiles list filtered by `MediaFiles.WorkBucket`; single-row queue endpoint for one-off admission. Pure UI consumer of the trigger-derived column. |
+| FailureTracking | `/api/FailureTracking/RecentFailures` | Recent service-failure history surface across `Transcode` / `Quality` services. Distinct from `FailureAccounting` (which enforces the per-MediaFile budget at `/FailedJobs`). |
 
 ### Infrastructure
 
@@ -83,7 +85,7 @@ Each domain vertical answers ONE compliance question about a file and writes ONE
 
 ### Sub-components (final non-verticals)
 
-These directories contain only a repository or controller and act as data accessors used by other verticals. They are NOT verticals; they have no domain.
+These directories contain only a repository (or pure data-access wrapper) and act as data accessors used by other verticals. They are NOT verticals; they have no domain.
 
 | Path | Role |
 |---|---|
@@ -264,27 +266,12 @@ Each row owns one of: a directive (existing or new), a feature-doc creation, or 
 | `chk_compliance_consistency` CHECK constraint | Exists (BUG-0062 3-layer defense). | Drop constraint (trigger is deterministic; defense is dead weight). | Phase 8 of paused `vertical-owned-compliance` |
 | `SubtitleFixRules`, `ComplianceGates`, `AudioFixRules`, `TranscodeRules`, `RemuxRules` tables | Exist (owned by dying Compliance). | Drop tables; per-vertical rule tables replace `AudioFixRules` / `TranscodeRules` / `RemuxRules`; `SubtitleFixRules` and `ComplianceGates` have no replacement (deleted). | Phase 8 of paused `vertical-owned-compliance` |
 
-## Sub-component cleanup
-
-| Item | Current state | Closing work |
-|---|---|---|
-| `Features/FailureTracking/` | Exists as controller-only stub. No callers (orphan from failure-accounting consolidation). | Delete directory. |
-| `Features/WorkBucket/` | Exists as controller + repository scaffold. In target, bucket is trigger-only -- no Python module needed. Migration script lives in `Scripts/SQLScripts/`. | Delete directory. |
-
 ## Operator surfaces not yet at target
 
 | Item | Current state | Closing work | Tracking |
 |---|---|---|---|
 | `/Compliance` tabbed page (Audio / Video / Container) | Does not exist. Settings.html has a "Compliance rules" card that edits the dying rule tables. | Build `/Compliance` tabbed page (shell + three per-vertical tab includes); remove the "Compliance rules" card from `Settings.html`. | Phase 6 of paused `vertical-owned-compliance` |
 | `/api/Compliance/*` routes | Exist (10 routes from dying Compliance vertical). | Routes return 404; controller deleted. | Phase 7-8 of paused `vertical-owned-compliance` |
-
-## Documentation cleanup
-
-| Item | Current state | Closing work |
-|---|---|---|
-| `CLAUDE.md` line 65 | References "MVVM + feature verticals" -- MVVM is not part of the target architecture. | Edit line to drop MVVM reference. |
-| `Docs/SystemOrchestration.md` | Stale -- references `TranscodeService` and `QualityTestService` directories that no longer exist (merged into `WorkerService` long ago). | Rewrite to match current `WorkerService` reality, or delete if `CLAUDE.md` + `ARCHITECTURE.md` cover the same ground. |
-| Directive template `_template.md` `## Status` section | Format does not match the phase-machine hook regex. The hook reads the `**Status:**` header line; the `## Status` section line is decorative. | Either drop the `## Status` section from the template, or fix the hook regex to read it. |
 
 ## Closing work that doesn't fit elsewhere
 
