@@ -1,0 +1,152 @@
+{% extends "Base.html" %}
+
+{% block title %}Compliance &mdash; MediaVortex{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2><i class="fas fa-shield-alt me-2"></i>Compliance</h2>
+    <p class="text-muted">
+        Each vertical answers one question about every MediaFile. Audio = "is audio compliant?",
+        Video = "is video compliant?", Container = "is container compliant?".
+        The bucket trigger composes the three answers into the final WorkBucket.
+        Edits here take effect on the next per-vertical recompute (no service restart).
+    </p>
+
+    <ul class="nav nav-tabs" id="ComplianceTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="audio-tab" data-bs-toggle="tab" data-bs-target="#audio-pane" type="button" role="tab">
+                <i class="fas fa-volume-up me-1"></i> Audio
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="video-tab" data-bs-toggle="tab" data-bs-target="#video-pane" type="button" role="tab">
+                <i class="fas fa-film me-1"></i> Video
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="container-tab" data-bs-toggle="tab" data-bs-target="#container-pane" type="button" role="tab">
+                <i class="fas fa-box me-1"></i> Container
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content border border-top-0 p-3" id="ComplianceTabContent">
+
+        <div class="tab-pane fade show active" id="audio-pane" role="tabpanel">
+            <p>Audio compliance policy is managed at the full Audio Normalization settings page.</p>
+            <a href="/AudioNormalization" class="btn btn-primary">
+                <i class="fas fa-external-link-alt me-1"></i> Open /AudioNormalization
+            </a>
+            <p class="text-muted mt-3 small">
+                Scope-cascade policy, dialog-boost tracks, language detection, operator review queue
+                all live on the dedicated page. The audio vertical writes `AudioCompliant` +
+                `AudioCompliantReason` on every MediaFile post-policy-evaluation.
+            </p>
+        </div>
+
+        <div class="tab-pane fade" id="video-pane" role="tabpanel">
+            <h5>Video Compliance Rules</h5>
+            <table class="table">
+                <tbody>
+                    <tr>
+                        <th style="width: 40%;">Acceptable video codecs (CSV)<br><small class="text-muted">Files with codec NOT in this list -> needs transcode</small></th>
+                        <td><input type="text" id="Vc_Codecs" class="form-control form-control-sm" style="max-width: 340px;"></td>
+                    </tr>
+                    <tr>
+                        <th>Estimated savings threshold (MB)<br><small class="text-muted">Predicted savings >= threshold -> needs transcode (overridden by MinSourceBpp if source already efficient)</small></th>
+                        <td><input type="number" id="Vc_SavingsThreshold" class="form-control form-control-sm" min="0" style="max-width: 140px;"></td>
+                    </tr>
+                    <tr>
+                        <th>MinSourceBpp<br><small class="text-muted">If source bits-per-pixel-per-second is below this, skip transcode (already efficient). Default 0.04.</small></th>
+                        <td><input type="number" step="0.001" id="Vc_MinBpp" class="form-control form-control-sm" min="0" style="max-width: 140px;"></td>
+                    </tr>
+                    <tr>
+                        <th>Prevent upscale<br><small class="text-muted">When source resolution &lt; profile target, never propose transcode</small></th>
+                        <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Vc_PreventUpscale"></div></td>
+                    </tr>
+                    <tr>
+                        <th>Block when source resolution exceeds profile target<br><small class="text-muted">Triggers transcode for downscale candidates</small></th>
+                        <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Vc_ResExceeds"></div></td>
+                    </tr>
+                    <tr>
+                        <th></th>
+                        <td><button class="btn btn-sm btn-primary" id="Vc_Save">Save Video rules</button> <span id="Vc_Msg" class="ms-2 small"></span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="tab-pane fade" id="container-pane" role="tabpanel">
+            <h5>Container Compliance Rules</h5>
+            <table class="table">
+                <tbody>
+                    <tr>
+                        <th style="width: 40%;">Acceptable containers (CSV)<br><small class="text-muted">Files whose container is NOT in this list -> needs remux</small></th>
+                        <td><input type="text" id="Cc_Containers" class="form-control form-control-sm" style="max-width: 340px;"></td>
+                    </tr>
+                    <tr>
+                        <th>Acceptable audio codecs (CSV)<br><small class="text-muted">Files whose audio codec is NOT in this list -> needs remux to re-encode audio into container</small></th>
+                        <td><input type="text" id="Cc_AudioCodecs" class="form-control form-control-sm" style="max-width: 340px;"></td>
+                    </tr>
+                    <tr>
+                        <th></th>
+                        <td><button class="btn btn-sm btn-primary" id="Cc_Save">Save Container rules</button> <span id="Cc_Msg" class="ms-2 small"></span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+async function LoadVideo() {
+    const R = await fetch('/api/VideoEncoding/Rules');
+    const J = await R.json();
+    if (!J.Success) { document.getElementById('Vc_Msg').textContent = 'Load failed: ' + J.Message; return; }
+    const D = J.Data;
+    document.getElementById('Vc_Codecs').value = D.AcceptableVideoCodecsCsv || '';
+    document.getElementById('Vc_SavingsThreshold').value = D.EstimatedSavingsMBThreshold;
+    document.getElementById('Vc_MinBpp').value = D.MinSourceBpp;
+    document.getElementById('Vc_PreventUpscale').checked = !!D.PreventUpscale;
+    document.getElementById('Vc_ResExceeds').checked = !!D.ResolutionExceedsProfileTarget;
+}
+async function SaveVideo() {
+    const Body = {
+        AcceptableVideoCodecsCsv: document.getElementById('Vc_Codecs').value,
+        EstimatedSavingsMBThreshold: parseInt(document.getElementById('Vc_SavingsThreshold').value, 10),
+        MinSourceBpp: parseFloat(document.getElementById('Vc_MinBpp').value),
+        PreventUpscale: document.getElementById('Vc_PreventUpscale').checked,
+        ResolutionExceedsProfileTarget: document.getElementById('Vc_ResExceeds').checked,
+    };
+    const R = await fetch('/api/VideoEncoding/Rules', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(Body) });
+    const J = await R.json();
+    document.getElementById('Vc_Msg').textContent = J.Success ? 'Saved.' : 'Save failed: ' + J.Message;
+    document.getElementById('Vc_Msg').className = 'ms-2 small ' + (J.Success ? 'text-success' : 'text-danger');
+}
+async function LoadContainer() {
+    const R = await fetch('/api/ContainerFormat/Rules');
+    const J = await R.json();
+    if (!J.Success) { document.getElementById('Cc_Msg').textContent = 'Load failed: ' + J.Message; return; }
+    const D = J.Data;
+    document.getElementById('Cc_Containers').value = D.AcceptableContainersCsv || '';
+    document.getElementById('Cc_AudioCodecs').value = D.AcceptableAudioCodecsCsv || '';
+}
+async function SaveContainer() {
+    const Body = {
+        AcceptableContainersCsv: document.getElementById('Cc_Containers').value,
+        AcceptableAudioCodecsCsv: document.getElementById('Cc_AudioCodecs').value,
+    };
+    const R = await fetch('/api/ContainerFormat/Rules', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(Body) });
+    const J = await R.json();
+    document.getElementById('Cc_Msg').textContent = J.Success ? 'Saved.' : 'Save failed: ' + J.Message;
+    document.getElementById('Cc_Msg').className = 'ms-2 small ' + (J.Success ? 'text-success' : 'text-danger');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    LoadVideo();
+    LoadContainer();
+    document.getElementById('Vc_Save').addEventListener('click', SaveVideo);
+    document.getElementById('Cc_Save').addEventListener('click', SaveContainer);
+});
+</script>
+{% endblock %}

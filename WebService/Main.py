@@ -482,7 +482,18 @@ class WebServiceApp:
         self.App.register_blueprint(WorkBucketController().Blueprint)
         # directive: audio-vertical-phase-1-completion | # see directive.md P3
         self.App.register_blueprint(ScannersBlueprint)
-    
+        # directive: compliance-tabbed-ui | # see startup.ST5
+        from Features.VideoEncoding.VideoEncodingController import VideoEncodingBlueprint
+        from Features.ContainerFormat.ContainerFormatController import ContainerFormatBlueprint
+        self.App.register_blueprint(VideoEncodingBlueprint)
+        self.App.register_blueprint(ContainerFormatBlueprint)
+
+        # directive: compliance-tabbed-ui | # see startup.ST5
+        @self.App.route('/Compliance')
+        def render_compliance_tabbed_page():
+            from flask import render_template
+            return render_template('Compliance.html')
+
     def PrivateStartServiceStatusTracking(self):
         """Start service status tracking thread."""
         try:
