@@ -446,7 +446,6 @@ class WebServiceApp:
         from Features.AudioNormalization.AudioNormalizationController import BuildBlueprint as BuildAudioNormalizationBlueprint
         from Features.Activity.ActivityController import ActivityBlueprint
         from Features.TranscodeQueue.AudioFixPriorityHintsController import AudioFixPriorityHintsBlueprint
-        from Features.Compliance.ComplianceController import ComplianceBlueprint
         # directive: failure-accounting | # see failure-accounting.C8
         from Features.FailureAccounting.FailedJobsController import FailedJobsBlueprint
         # directive: work-bucket-landing-pages | # see directive.md C1
@@ -475,7 +474,6 @@ class WebServiceApp:
         self.App.register_blueprint(TeamStatusBlueprint)
         self.App.register_blueprint(MediaProbeBlueprint)
         self.App.register_blueprint(FailureTrackingBlueprint, url_prefix='/api/FailureTracking')
-        self.App.register_blueprint(ComplianceBlueprint)
         # directive: failure-accounting | # see failure-accounting.C8
         self.App.register_blueprint(FailedJobsBlueprint)
         # directive: work-bucket-landing-pages | # see directive.md C1

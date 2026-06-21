@@ -1587,21 +1587,28 @@ class QueueManagementBusinessService:
         return DefaultProfileName
 
 
-    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
+    # directive: compliance-rip
     def EvaluateCandidateCompliance(self, CandidateRow: Dict[str, Any], EffectiveProfile: Optional[str] = None) -> Dict[str, Any]:
-        """Public wrapper over ComplianceEvaluator -- returns {IsCompliant, WorkBucket, RefusalReason} dict shape for ComplianceGate.Evaluate (compliance-gated-rename.C1) and other dict-shaped callers."""
-        from Features.Compliance.ComplianceComposition import BuildEvaluator, BuildRuleCache
-        Lookup = self._LoadPriorityLookupTable()
-        if EffectiveProfile is None:
-            DefaultProfile = self._LoadDefaultProfileName()
-            ShowOverrides = self._LoadShowProfileOverrides()
-            EffectiveProfile = self._GetEffectiveProfileFromCache(CandidateRow.get('FilePath'), ShowOverrides, DefaultProfile)
+        """Pre-rename compliance check via three pure vertical Evaluate calls. Returns {IsCompliant, WorkBucket, RefusalReason} for ComplianceGate.Evaluate."""
+        from Features.AudioNormalization.AudioVertical import AudioVertical
+        from Features.VideoEncoding.VideoVertical import VideoVertical
+        from Features.ContainerFormat.ContainerVertical import ContainerVertical
         Mf = self._RowToMediaFileForCompliance(CandidateRow)
-        Profile = self._BuildEffectiveProfileObj(EffectiveProfile, Mf.ResolutionCategory, Lookup, VideoBitrateKbps=Mf.VideoBitrateKbps)
-        Decision = BuildEvaluator().Evaluate(Mf, Profile, BuildRuleCache())
-        RefusalReason = self._LegacyRefusalReasonFromDecision(Decision)
+        AudioOk, AudioReason = AudioVertical().Evaluate(Mf)
+        VideoOk, VideoReason = VideoVertical().Evaluate(Mf)
+        ContainerOk, ContainerReason = ContainerVertical().Evaluate(Mf)
+        if AudioOk is None or VideoOk is None or ContainerOk is None:
+            WorkBucket, IsCompliant, RefusalReason = None, None, (AudioReason or VideoReason or ContainerReason)
+        elif not VideoOk:
+            WorkBucket, IsCompliant, RefusalReason = 'Transcode', False, VideoReason
+        elif not ContainerOk:
+            WorkBucket, IsCompliant, RefusalReason = 'Remux', False, ContainerReason
+        elif not AudioOk:
+            WorkBucket, IsCompliant, RefusalReason = 'AudioFixOnly', False, AudioReason
+        else:
+            WorkBucket, IsCompliant, RefusalReason = None, True, None
         CandidateRow['_RefusalReason'] = RefusalReason
-        return {'IsCompliant': Decision.IsCompliant, 'WorkBucket': Decision.WorkBucket, 'RefusalReason': RefusalReason}
+        return {'IsCompliant': IsCompliant, 'WorkBucket': WorkBucket, 'RefusalReason': RefusalReason}
 
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
     def _RowToMediaFileForCompliance(self, Row: Dict[str, Any]):
@@ -1881,21 +1888,23 @@ class QueueManagementBusinessService:
             return None
 
     def RecomputeForFiles(self, MediaFileIds: List[int]) -> int:
-        """Bulk-recompute AssignedProfile + PriorityScore + IsCompliant + WorkBucket + OperationsNeededCsv + ComplianceGateBlocked for the given IDs; one round-trip + one bulk UPDATE; returns rows updated; per-row failures do not abort the batch."""
+        """Recompute compliance + AssignedProfile + PriorityScore for the given ids. Phase 1: three verticals write booleans (trigger derives WorkBucket). Phase 2: re-fetch + compute profile + priority + AudioFix folder pin + bulk UPDATE. Returns rows updated."""
         if not MediaFileIds:
             return 0
         try:
             from Core.Database.DatabaseService import DatabaseService
             db = DatabaseService()
+            # directive: compliance-rip
+            from Features.AudioNormalization.AudioVertical import AudioVertical
+            from Features.VideoEncoding.VideoVertical import VideoVertical
+            from Features.ContainerFormat.ContainerVertical import ContainerVertical
+            AudioVertical().RecomputeFor(MediaFileIds)
+            VideoVertical().RecomputeFor(MediaFileIds)
+            ContainerVertical().RecomputeFor(MediaFileIds)
 
-            # Load all caches once per call.
             Lookup = self._LoadPriorityLookupTable()
             DefaultProfile = self._LoadDefaultProfileName()
             ShowOverrides = self._LoadShowProfileOverrides()
-            # directive: compliance-solid-refactor | # see compliance-solid-refactor.C12
-            from Features.Compliance.ComplianceComposition import BuildEvaluator, BuildRuleCache
-            ComplianceEval = BuildEvaluator()
-            ComplianceCache = BuildRuleCache()
 
             # AudioFix folder pins (media-tabs-and-loudness.feature.md C22): boost PriorityScore when WorkBucket='AudioFixOnly' and FilePath matches a hint pattern.
             AudioFixPins = []
@@ -1918,7 +1927,8 @@ class QueueManagementBusinessService:
                 "AudioComplete, AudioCorruptSuspect, AudioBitrateKbps, AudioChannels, "
                 "SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, "
                 "SourceIntegratedThresholdLufs, LoudnessMeasuredAt, "
-                "LoudnessMeasurementFailureReason, TranscodedByMediaVortex "
+                "LoudnessMeasurementFailureReason, TranscodedByMediaVortex, "
+                "WorkBucket "
                 "FROM MediaFiles WHERE Id IN (" + placeholders + ")",
                 tuple(MediaFileIds)
             )
@@ -1971,22 +1981,10 @@ class QueueManagementBusinessService:
                         SuppressFallbackWarning=True,
                     )
 
-                    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
-                    MfModel = self._RowToMediaFileForCompliance(r)
-                    ProfileObj = self._BuildEffectiveProfileObj(EffectiveProfile, MfModel.ResolutionCategory, Lookup, VideoBitrateKbps=MfModel.VideoBitrateKbps)
-                    Decision = ComplianceEval.Evaluate(MfModel, ProfileObj, ComplianceCache)
-                    IsCompliant = Decision.IsCompliant
-                    WorkBucket = Decision.WorkBucket
-                    OperationsNeededCsv = ','.join(sorted(Decision.OperationsNeeded)) if Decision.OperationsNeeded else None
-                    GateBlocked = Decision.GateBlocked
-                    r['_RefusalReason'] = self._LegacyRefusalReasonFromDecision(Decision)
-                    r['_DeferReason'] = GateBlocked if GateBlocked in ('LoudnessMeasurements',) else None
+                    # directive: compliance-rip -- WorkBucket comes from the GENERATED column, up-to-date because the three verticals ran above
+                    WorkBucket = r.get('WorkBucket')
 
-                    # AudioFix folder-pin boost: when the cascade routes a
-                    # file to 'AudioFix' AND its FilePath matches a pinned
-                    # folder pattern, override PriorityScore with the max of
-                    # (computed score, BoostedPriority). All downstream queue
-                    # inserts read m.PriorityScore so the boost propagates.
+                    # AudioFix folder-pin boost: see media-tabs-and-loudness.feature.md C22
                     FinalScore = int(Score)
                     if WorkBucket == 'AudioFixOnly' and AudioFixPins:
                         FilePathLower = (r.get('FilePath') or '').lower()
@@ -1994,18 +1992,9 @@ class QueueManagementBusinessService:
                             if Pattern and Pattern in FilePathLower:
                                 if Boost > FinalScore:
                                     FinalScore = Boost
-                                break  # first matching pin wins
+                                break
 
-                    updates.append((
-                        int(r['Id']),
-                        EffectiveProfile,
-                        FinalScore,
-                        IsCompliant,
-                        r.get('_DeferReason'),
-                        WorkBucket,
-                        OperationsNeededCsv,
-                        GateBlocked,
-                    ))
+                    updates.append((int(r['Id']), EffectiveProfile, FinalScore))
 
                     # Detect probed files with no audio stream (possibly corrupt).
                     # HasExplicitEnglishAudio != None means audio probe ran.
@@ -2036,15 +2025,22 @@ class QueueManagementBusinessService:
             if not updates:
                 return 0
 
-            # directive: compliance-writeback-invariant | # see compliance.C8
-            from Features.Compliance.Repositories.ComplianceWriteRepository import ComplianceWriteRepository
-            Written, Refused = ComplianceWriteRepository().BulkWriteRecomputeResults(updates)
-            if Refused:
-                LoggingService.LogWarning(
-                    "ComplianceWriteRepository refused " + str(Refused) + " contradictory tuple(s) of " + str(len(updates)) + " submitted in RecomputeForFiles batch. see compliance.C8",
-                    "QueueManagementBusinessService", "RecomputeForFiles"
-                )
-            return Written
+            # directive: compliance-rip -- bulk UPDATE for AssignedProfile + PriorityScore (WorkBucket is GENERATED, IsCompliant flows from it)
+            def _SqlText(V):
+                if V is None:
+                    return 'NULL'
+                return "'" + str(V).replace("'", "''") + "'"
+            ValuesClause = ','.join(
+                f"({int(Id)},{_SqlText(P)},{int(S)})" for Id, P, S in updates
+            )
+            db.ExecuteNonQuery(
+                "UPDATE MediaFiles "
+                "SET AssignedProfile = v.profile, PriorityScore = v.score "
+                "FROM (VALUES " + ValuesClause + ") "
+                "AS v(id, profile, score) "
+                "WHERE MediaFiles.Id = v.id"
+            )
+            return len(updates)
         except Exception as Ex:
             LoggingService.LogException(
                 f"RecomputeForFiles failed for {len(MediaFileIds)} ids",

@@ -247,28 +247,7 @@ Each row owns one of: a directive (existing or new), a feature-doc creation, or 
 
 | Vertical | Current state | Closing work | Tracking |
 |---|---|---|---|
-| VideoEncoding | Does not exist as a vertical. Logic lives as predicates inside `Features/Compliance/Operations/TranscodeOperation.py`. | Create `Features/VideoEncoding/` with feature doc + Cross-Vertical Contract + `RecomputeFor` + `VideoComplianceRules` table + settings UI tab + `MinSourceBpp` rule (fixes 30 Rock S01E01 BPP-0.09 routing). | Phase 4 of paused `vertical-owned-compliance` directive |
-| ContainerFormat | Does not exist as a vertical. Logic lives as predicates inside `Features/Compliance/Operations/RemuxOperation.py`. | Create `Features/ContainerFormat/` with feature doc + Cross-Vertical Contract + `RecomputeFor` + `ContainerComplianceRules` table + settings UI tab. | Phase 3 of paused `vertical-owned-compliance` |
-| AudioNormalization | Exists with full vertical shape including Cross-Vertical Contract section. Does NOT yet write `AudioCompliant` / `AudioCompliantReason` columns. | Add `AudioVertical.RecomputeFor(ids)` wrapping existing `AudioPolicyAdmissionGate`; backfill all files. | Phase 2 of paused `vertical-owned-compliance` |
-| `Features/Compliance/` (must not exist) | Exists -- 35+ files (4 rule tables, 9 gate classes, evaluator, gate chain, rule engine, bucket resolver, write repo, decision dataclass, controller, composition root, GUI card). | Delete entirely. | Phase 8 (Rip) of paused `vertical-owned-compliance` |
-| Every non-Audio vertical | Lacks a Cross-Vertical Contract section (only AudioNormalization has one, added 2026-06-19). | Add a Cross-Vertical Contract section to each vertical's top-level `*.feature.md` -- WRITES, READS, public function entry points, HTTP routes, explicit NOT-a-contract items. | Per-vertical directives (~17 verticals) |
-
-## Database schema not yet at target
-
-| Item | Current state | Closing work | Tracking |
-|---|---|---|---|
-| `AudioCompliant`, `AudioCompliantReason`, `VideoCompliant`, `VideoCompliantReason`, `ContainerCompliant`, `ContainerCompliantReason` columns on `MediaFiles` | Do not exist. | Migration adds six columns. | Phase 1 of paused `vertical-owned-compliance` |
-| `WorkBucket` as generated column | Does not exist. `WorkBucket` is a regular column written by Python in `Features/Compliance/ComplianceBucketResolver`. | DROP existing column; ADD COLUMN `WorkBucket TEXT GENERATED ALWAYS AS (CASE ...) STORED`. Postgres then refuses any direct write. | Phase 7 (Cutover) of paused `compliance-cutover-and-rip` |
-| `MediaFiles.OperationsNeededCsv`, `ComplianceGateBlocked`, `ComplianceEvaluatedAt` columns | Exist. | Drop columns. | Phase 8 of paused `vertical-owned-compliance` |
-| `chk_compliance_consistency` CHECK constraint | Exists (BUG-0062 3-layer defense). | Drop constraint (the generated column is deterministic by construction; defense is dead weight). | Phase 8 of paused `compliance-cutover-and-rip` |
-| `SubtitleFixRules`, `ComplianceGates`, `AudioFixRules`, `TranscodeRules`, `RemuxRules` tables | Exist (owned by dying Compliance). | Drop tables; per-vertical rule tables replace `AudioFixRules` / `TranscodeRules` / `RemuxRules`; `SubtitleFixRules` and `ComplianceGates` have no replacement (deleted). | Phase 8 of paused `vertical-owned-compliance` |
-
-## Operator surfaces not yet at target
-
-| Item | Current state | Closing work | Tracking |
-|---|---|---|---|
-| `/Compliance` tabbed page (Audio / Video / Container) | Does not exist. Settings.html has a "Compliance rules" card that edits the dying rule tables. | Build `/Compliance` tabbed page (shell + three per-vertical tab includes); remove the "Compliance rules" card from `Settings.html`. | Phase 6 of paused `vertical-owned-compliance` |
-| `/api/Compliance/*` routes | Exist (10 routes from dying Compliance vertical). | Routes return 404; controller deleted. | Phase 7-8 of paused `vertical-owned-compliance` |
+| Every non-Audio vertical | Lacks a Cross-Vertical Contract section (only AudioNormalization has one, added 2026-06-19; MediaProbe added 2026-06-20). | Add a Cross-Vertical Contract section to each vertical's top-level `*.feature.md` -- WRITES, READS, public function entry points, HTTP routes, explicit NOT-a-contract items. | Per-vertical directives (~15 remaining verticals) |
 
 ## Closing work that doesn't fit elsewhere
 

@@ -9,11 +9,13 @@ from Core.Database.DatabaseService import DatabaseService
 # directive: compliance-cutover
 def IsAlreadyGenerated(Cur) -> bool:
     Cur.execute(
-        "SELECT is_generated FROM information_schema.columns "
+        "SELECT is_generated, generation_expression FROM information_schema.columns "
         "WHERE table_name = 'mediafiles' AND column_name = 'workbucket'"
     )
     Row = Cur.fetchone()
-    return Row is not None and str(Row[0]).upper() == 'ALWAYS'
+    if Row is None or str(Row[0]).upper() != 'ALWAYS':
+        return False
+    return 'AudioFixOnly' in (Row[1] or '')
 
 
 # directive: compliance-cutover
@@ -56,7 +58,7 @@ def RunMigration():
             "WHEN AudioCompliant IS NULL OR VideoCompliant IS NULL OR ContainerCompliant IS NULL THEN NULL "
             "WHEN NOT VideoCompliant THEN 'Transcode' "
             "WHEN NOT ContainerCompliant THEN 'Remux' "
-            "WHEN NOT AudioCompliant THEN 'AudioFix' "
+            "WHEN NOT AudioCompliant THEN 'AudioFixOnly' "
             "ELSE NULL "
             "END"
             ") STORED"

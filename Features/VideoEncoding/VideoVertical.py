@@ -18,28 +18,36 @@ _PIXEL_COUNTS = {
 _ASSUMED_FPS = 24
 
 
-# directive: video-vertical-inline
+# directive: compliance-rip
 class VideoVertical:
-    """Video compliance vertical -- self-contained. Evaluates codec acceptable, resolution exceeds target, savings meaningful, no upscale + MinSourceBpp override. Writes (VideoCompliant, VideoCompliantReason). Reads VideoComplianceRules fresh per call."""
+    """Video compliance vertical -- self-contained. Pure `Evaluate(mf)` returns the verdict without writing; `RecomputeFor(ids)` evaluates + writes. Inlined predicates: codec acceptable, resolution exceeds target, savings meaningful, no upscale + MinSourceBpp override."""
 
-    # directive: video-vertical-inline
+    # directive: compliance-rip
     def __init__(self, Db: Optional[DatabaseService] = None, RepoMgr: Optional[DatabaseManager] = None, ProfileResolver: Optional[EffectiveProfileResolver] = None, TierRegistry: Optional[ResolutionTierRegistry] = None):
         self._Db = Db or DatabaseService()
         self._RepoMgr = RepoMgr or DatabaseManager()
         self._Resolver = ProfileResolver or EffectiveProfileResolver()
         self._TierRegistry = TierRegistry or ResolutionTierRegistry()
 
-    # directive: video-vertical-inline
+    # directive: compliance-rip
+    def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
+        """Pure verdict: (Compliant, Reason). No DB write."""
+        Rules = self._LoadRules()
+        return self._EvaluateInternal(Mf, Rules)
+
+    # directive: compliance-rip
     def RecomputeFor(self, MediaFileIds: List[int]) -> None:
-        """Per-id: evaluate predicates + apply MinSourceBpp override + write columns."""
         Rules = self._LoadRules()
         for Id in MediaFileIds:
-            Compliant, Reason = self._EvaluateOne(Id, Rules)
+            Mf = self._RepoMgr.GetMediaFileById(Id)
+            if Mf is None:
+                raise ValueError(f"MediaFileId {Id} not found")
+            Compliant, Reason = self._EvaluateInternal(Mf, Rules)
             self._WriteResult(Id, Compliant, Reason)
 
-    # directive: video-vertical-inline
+    # directive: compliance-rip
     def _LoadRules(self) -> dict:
-        """Fresh DB read per call (db-is-authority)."""
+        """Fresh DB read per call."""
         Rows = self._Db.ExecuteQuery(
             "SELECT AcceptableVideoCodecsCsv, EstimatedSavingsMBThreshold, PreventUpscale, ResolutionExceedsProfileTarget, MinSourceBpp "
             "FROM VideoComplianceRules ORDER BY Id LIMIT 1"
@@ -55,11 +63,8 @@ class VideoVertical:
             'MinSourceBpp': float(R['MinSourceBpp']),
         }
 
-    # directive: video-vertical-inline
-    def _EvaluateOne(self, MediaFileId: int, Rules: dict):
-        Mf = self._RepoMgr.GetMediaFileById(MediaFileId)
-        if Mf is None:
-            raise ValueError(f"MediaFileId {MediaFileId} not found")
+    # directive: compliance-rip
+    def _EvaluateInternal(self, Mf, Rules: dict) -> Tuple[Optional[bool], Optional[str]]:
         Profile = self._Resolver.Resolve(Mf)
         if Profile is None:
             return (None, 'no_effective_profile')
@@ -99,7 +104,7 @@ class VideoVertical:
         return (False, Reason or 'unspecified')
 
     @staticmethod
-    # directive: video-vertical-inline
+    # directive: compliance-rip
     def _EstimatedSavingsMB(Mf, Profile: EffectiveProfile) -> Optional[float]:
         TargetVk = Profile.TargetVideoKbps
         if not TargetVk:
@@ -112,9 +117,8 @@ class VideoVertical:
         SrcSize = getattr(Mf, 'SizeMB', None) or 0.0
         return max(0.0, SrcSize - TargetSizeMB)
 
-    # directive: video-vertical-inline
+    # directive: compliance-rip
     def _IsAlreadyEfficient(self, Mf, MinBpp: float) -> bool:
-        """BPP = (VideoBitrateKbps * 1000) / (Pixels * 24fps); True if source already at-or-below MinBpp."""
         Bitrate = getattr(Mf, 'VideoBitrateKbps', None)
         Tier = (getattr(Mf, 'ResolutionCategory', None) or '').lower()
         if not Bitrate or Tier not in _PIXEL_COUNTS:
@@ -124,13 +128,13 @@ class VideoVertical:
         return Bpp < MinBpp
 
     @staticmethod
-    # directive: video-vertical-inline
+    # directive: compliance-rip
     def _ParseCsv(Csv: Optional[str]) -> set:
         if not Csv:
             return set()
         return {Tok.strip().lower() for Tok in Csv.split(',') if Tok.strip()}
 
-    # directive: video-vertical-inline
+    # directive: compliance-rip
     def _WriteResult(self, MediaFileId: int, Compliant, Reason):
         self._Db.ExecuteNonQuery(
             "UPDATE MediaFiles SET VideoCompliant = %s, VideoCompliantReason = %s WHERE Id = %s",
