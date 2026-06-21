@@ -2,7 +2,8 @@
 
 **Slug:** harness-drift-fixes
 **Set:** 2026-06-21
-**Status:** Active -- phase: DELIVERING
+**Closed:** 2026-06-21
+**Status:** Closed -- Success
 
 ## Outcome
 
