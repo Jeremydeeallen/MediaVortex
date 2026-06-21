@@ -12,7 +12,7 @@ from Tests.Pipeline.Harness import Fixtures
 from Tests.Pipeline.Harness import PermanentFixtures
 from Tests.Pipeline.Harness.Backup import BackupMediaFile, RestoreMediaFile
 from Tests.Pipeline.Harness.HarnessPathResolver import ResolveLocalPathForMediaFile
-from Tests.Pipeline.Harness.Invocation import InvokeQuickFix, InvokeTranscode, GetAttemptDetails
+from Tests.Pipeline.Harness.Invocation import InvokeQuickFix, InvokeTranscode, GetAttemptDetails, WaitForLocalFile
 from Tests.Pipeline.Harness.Assertions import (
     AssertDbState,
     AssertNoQueueRows,
@@ -118,6 +118,7 @@ def test_audiofixonly_bucket_e2e():
         assert AttemptId > 0
         _RequireReplacingDisposition(AttemptId)
         PostLocalPath = ResolveLocalPathForMediaFile(MediaFileId)
+        WaitForLocalFile(PostLocalPath, TimeoutSec=30)
         AssertIntegratedLoudnessNear(PostLocalPath, TargetLufs=-23.0, ToleranceLU=1.0)
         AssertDbState(
             MediaFileId,

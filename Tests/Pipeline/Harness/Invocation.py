@@ -104,26 +104,16 @@ def _InsertQueueRow(MediaFileId: int, ProcessingMode: str) -> int:
     M = dict(M)
     M['FilePath'] = _SynthesizedFilePath
 
-    # MediaFiles.FileSize is often NULL on rows the probe never populated.
-    # ProcessJob propagates Job.SizeBytes to TranscodeAttempts.OldSizeBytes,
-    # which then drives the post-transcode defense-in-depth size check. A 0
-    # there causes "refusing to replace because new >= 0". Stat the local
-    # file to get a real value.
+    from Core.Path.LocalPath import LocalExists, LocalGetSize
     SizeBytes = int(M.get('SizeBytes') or 0)
+    SizeMB = float(M.get('SizeMB') or 0.0)
     if SizeBytes <= 0:
-        try:
-            # directive: path-schema-migration | # see path.S8
-            from Core.Path.Path import Path
-            from Core.Path.PathStorageRoots import GetStorageRoots
-            from Core.WorkerContext import WorkerContext
-            P = Path.FromLegacyString(M.get('FilePath') or '', GetStorageRoots())
-            Ctx = WorkerContext.Current()
-            LocalP = P.Resolve(Ctx) if Ctx else None
-            if LocalP and os.path.exists(LocalP):
-                SizeBytes = os.path.getsize(LocalP)
-        except Exception:
-            pass
-    SizeMB = float(M.get('SizeMB') or 0.0) or (SizeBytes / 1024.0 / 1024.0)
+        if LocalExists(_SynthesizedFilePath):
+            SizeBytes = LocalGetSize(_SynthesizedFilePath)
+        elif SizeMB > 0:
+            SizeBytes = int(SizeMB * 1024 * 1024)
+    if SizeMB <= 0 and SizeBytes > 0:
+        SizeMB = SizeBytes / 1024.0 / 1024.0
 
     Now = datetime.now(timezone.utc)
     # Use ExecuteNonQuery so the INSERT commits; ExecuteQuery does not commit
@@ -247,6 +237,17 @@ def GetAttemptDetails(AttemptId: int) -> dict:
     if not Rows:
         raise ValueError(f"TranscodeAttempt {AttemptId} not found")
     return dict(Rows[0])
+
+
+def WaitForLocalFile(LocalPath: str, TimeoutSec: int = 30) -> None:
+    """Poll until the local file exists on disk; cross-host writes via NFS may take a moment to land on the harness host's SMB mount."""
+    from Core.Path.LocalPath import LocalExists
+    Deadline = time.time() + TimeoutSec
+    while time.time() < Deadline:
+        if LocalExists(LocalPath):
+            return
+        time.sleep(1)
+    raise AssertionError(f"File did not become visible to harness host within {TimeoutSec}s: {LocalPath}")
 
 
 def InvokeQuickFix(MediaFileId: int) -> int:
