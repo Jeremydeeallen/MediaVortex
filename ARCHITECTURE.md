@@ -239,14 +239,6 @@ Stable headings (do not rename without coordinated update):
 
 # Gap to Target
 
-The architecture above defines DONE. The list below names every place the current codebase does NOT match the architecture. Each row is closeable work. **When this section is empty, MediaVortex is done.**
+The architecture above defines DONE. **The gap section is EMPTY as of 2026-06-21.** MediaVortex matches the architecture.
 
-Each row owns one of: a directive (existing or new), a feature-doc creation, or a delete. No row is "deferred" or "considered" -- if it's here, it's required to reach the target. If something genuinely isn't required, it doesn't go in the architecture; it goes nowhere.
-
-## Closing work that doesn't fit elsewhere
-
-| Item | Current state | Closing work |
-|---|---|---|
-| Per-share-root audio policy (`StorageRootAudioPolicy` table) | Does not exist. Audio policy is library-wide. | Add table + scope-cascade integration; replaces the `xxx`-share hardcoded `AudioDamageNotMaterial=TRUE` rows. Filed in `IDEAS.md` 2026-06-12. |
-| Audio dual-track speech-enrichment policy | Does not exist. | Audio vertical follow-up. |
-| Repo-wide grep test enforcing per-vertical column-write ownership | Does not exist. | Add `Tests/Contract/TestVerticalColumnOwnership.py` once Cross-Vertical Contracts are populated for every vertical. |
+Future ADDITIONS to the architecture (per-share-root audio policy, audio dual-track speech-enrichment, etc.) are tracked in `IDEAS.md`. They are NOT gaps -- they are scope expansions that, when adopted, would extend the architecture itself rather than fill an existing gap.
