@@ -53,3 +53,40 @@ Features/FileReplacement/**
 | Features/FileReplacement/ComplianceGate.py | Pre-rename cascade gate (see compliance-gated-rename.feature.md) |
 | Features/FileReplacement/TranscodedOutputPlacement.py | .inprogress rename, MediaFiles refresh, original delete (see transcoded-output-placement.feature.md) |
 | Features/FileReplacement/FileReplacementRepository.py | MediaFilesArchive and MediaFiles update queries |
+## Cross-Vertical Contract
+
+### Columns the FileReplacement vertical WRITES
+
+| Column | Written by |
+|---|---|
+| MediaFilesArchive row INSERT | FileReplacementBusinessService._ArchiveOriginal (pre-replace) |
+| MediaFiles.{TranscodedByMediaVortex, RemuxedByMediaVortex} | _UpdateMediaFilesAfterReplacement |
+| MediaFiles.{FileSize, LastModifiedDate, Codec, AudioCodec, AudioComplete, ResolutionCategory, IsInterlaced, AudioLanguages, HasExplicitEnglishAudio} | Post-replace re-probe write (via MediaProbe) |
+| TranscodeAttempts.{Disposition, DispositionReason} | On gate-refused renames |
+| Source file on disk | shutil.move (replace) / rename .inprogress |
+
+### Columns the FileReplacement vertical READS from external tables
+
+| Column | Read by | Owner |
+|---|---|---|
+| TranscodeAttempts.{Id, MediaFileId, OutputFilePath, Success, VmafScore} | Replacement candidate selection | TranscodeJob + QualityTesting |
+| MediaFiles.{Id, FilePath, StorageRootId, RelativePath} | Source path resolution | FileScanning |
+| PostTranscodeGateConfig.* | Disposition decision | QualityTesting |
+
+### Stable function entry points
+
+| Class.method | External caller(s) |
+|---|---|
+| FileReplacementBusinessService.ProcessFileReplacement(TranscodeAttemptId) -> ReplacementResult | Worker post-encode / post-QT path |
+| ComplianceGate.Evaluate(staged_path, source_id, ffmpeg_cmd) -> GateResult | Pre-rename refusal point |
+
+### HTTP API surface
+
+None. Internal worker pipeline.
+
+### What is EXPLICITLY NOT a contract
+
+- The internal staging-path layout (.inprogress filename pattern) -- changes with the workflow
+- Whether re-probe is invoked synchronously or queued -- today synchronous
+- The exact archive payload columns -- MediaFilesArchive schema evolves with MediaFiles
+- Cross-OS path math (ntpath.dirname vs os.path.dirname) -- the invariant is canonical-path math succeeds on any host

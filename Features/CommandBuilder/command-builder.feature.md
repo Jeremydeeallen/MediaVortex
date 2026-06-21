@@ -120,3 +120,37 @@ SubtitleFix, and TestVariant dispatch paths). Placing the doc under
 `Features/CommandBuilder/` rather than per-feature is the same shape as
 `Features/AudioCompletion/` and `Features/LoudnessAnalysis/` -- shared
 services that own a cross-cutting concern get their own feature dir.
+
+## Cross-Vertical Contract
+
+### Columns the CommandBuilder vertical WRITES
+
+| Column | Written by |
+|---|---|
+| (none) | CommandBuilder emits argv strings; no DB writes |
+
+### Columns the CommandBuilder vertical READS from external tables
+
+| Column | Read by | Owner |
+|---|---|---|
+| MediaFiles.{Codec, AudioCodec, AudioComplete, Resolution, ResolutionCategory, IsInterlaced, ContainerFormat, FilePath, DurationMinutes, AudioBitrateKbps} | BuildCommand per-mode dispatch | MediaProbe + AudioNormalization |
+| Profiles.* + ProfileThresholds.* | BuildCommand reads target encoder knobs | Profiles |
+| TranscodeQueue.{ProcessingMode, AudioPolicyJson} | BuildCommand reads operation type + snapshot | TranscodeQueue + AudioNormalization |
+| Workers.{FFmpegPath, FFprobePath} | Path resolution at command-emit time | Workers |
+
+### Stable function entry points
+
+| Class.method | External caller(s) |
+|---|---|
+| CommandBuilder.BuildCommand(MediaFile, Job) -> List[str] | TranscodeJob worker dispatch |
+
+### HTTP API surface
+
+None. Internal service.
+
+### What is EXPLICITLY NOT a contract
+
+- The exact ffmpeg flag ordering -- tunable per FFmpeg version
+- The internal mode-dispatch implementation -- single decision tree is the invariant
+- Per-vertical emitter slot internals -- those have their own contracts
+- The -f mp4 / output-format flag set per shape -- BUG-0005-era invariant

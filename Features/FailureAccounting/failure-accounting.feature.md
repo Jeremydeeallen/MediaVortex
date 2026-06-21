@@ -81,3 +81,43 @@ ACTIVE -- shipped 2026-06-13 (commit pending). Cluster A of 3.
 - `Features/TranscodeQueue/next-batch-per-drive.feature.md` C12 -- the Next-Batch exclusion requirement (this vertical implements it).
 - `Features/TranscodeJob/TranscodeJob.feature.md` BUG-0061 line -- the INSERT-discipline + cleanup + NOT NULL requirement (this vertical implements it).
 - `failure-accounting.flow.md` -- pipeline detail: stages + cross-stage seams.
+
+## Cross-Vertical Contract
+
+### Columns the FailureAccounting vertical WRITES
+
+| Column | Written by |
+|---|---|
+| FailureBudgetResets row INSERT | FailedJobsRepository.ResetFailureBudget |
+| MediaFiles.LastFailureResetAt | Same |
+
+### Columns the FailureAccounting vertical READS from external tables
+
+| Column | Read by | Owner |
+|---|---|---|
+| TranscodeAttempts.{Id, MediaFileId, Success, AttemptDate, ErrorMessage, AssignedProfile, WorkerName} | /FailedJobs page + cap predicate | TranscodeJob |
+| MediaFiles.{Id, FilePath, LastFailureResetAt} | Cap query exclusion | FileScanning + this vertical |
+| PostTranscodeGateConfig.MaxRequeueAttempts | Cap threshold | QualityTesting |
+
+### Stable function entry points
+
+| Class.method | External caller(s) |
+|---|---|
+| Core.Database.FailureBudgetPredicate.BuildCapPredicate(...) -> str (SQL fragment) | Every claim + recompute + Next-Batch query |
+| FailedJobsRepository.ResetFailureBudget(MediaFileId) | UI button + admin script |
+| FailureBudgetService.HasExceededCap(MediaFileId) -> bool | Pre-claim check |
+
+### HTTP API surface
+
+| Method + URL | Purpose |
+|---|---|
+| GET /FailedJobs | Render the failed-jobs page |
+| GET /api/FailedJobs/<MediaFileId>/Attempts | Per-file attempt history |
+| POST /api/FailedJobs/<MediaFileId>/Reset | Reset failure budget |
+
+### What is EXPLICITLY NOT a contract
+
+- The SQL inside BuildCapPredicate -- single source; consumers append it via the helper
+- The consecutive-failures-since-last-reset counting semantics may extend to include time-window filters
+- Whether ResetFailureBudget writes a synthetic Success row -- today no, may change
+- Internal class names (FailedJobsRepository, FailureBudgetService) -- may be split

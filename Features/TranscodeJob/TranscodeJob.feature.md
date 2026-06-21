@@ -58,3 +58,46 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - [x] VMAF toggle: add QualityTestEnabled global setting (default OFF) and per-worker column
 - [x] Per-worker FFprobe: WorkerContext singleton provides FFprobePath to FFmpegService automatically, no explicit threading needed
 - [ ] Fix: concurrent job progress isolation (see memory/KNOWN-ISSUES.md)
+
+## Cross-Vertical Contract
+
+### Columns the TranscodeJob vertical WRITES
+
+| Column | Written by |
+|---|---|
+| TranscodeAttempts row INSERT/UPDATE | ProcessTranscodeQueueService.ProcessJob |
+| TranscodeAttempts.{Success, FfpmpegCommand, OutputFileSize, ErrorMessage, Disposition, VmafScore} | Per-attempt updates |
+| ActiveJobs row INSERT/DELETE | Claim + completion path |
+| TranscodeProgress.{CurrentFPS, CurrentSpeed, CurrentFrame, TotalFrames, LastUpdated} | FFmpeg progress parser |
+| Output file on disk (.inprogress then renamed by FileReplacement) | FFmpeg subprocess |
+| TranscodeQueue.{Status, ClaimedBy, ClaimedAt, DateStarted} | Claim + completion |
+
+### Columns the TranscodeJob vertical READS from external tables
+
+| Column | Read by | Owner |
+|---|---|---|
+| TranscodeQueue.* | ClaimNextPendingTranscodeJob | TranscodeQueue vertical |
+| MediaFiles.* | CommandBuilder + worker context | MediaProbe + others |
+| Profiles.* + ProfileThresholds.* | CommandBuilder | Profiles |
+| Workers.{FFmpegPath, FFprobePath, MaxConcurrentJobs, ProfileAllowlist} | Claim + execute | Workers |
+
+### Stable function entry points
+
+| Class.method | External caller(s) |
+|---|---|
+| ProcessTranscodeQueueService.ProcessJob(QueueId) -> TranscodeAttempt | Worker main loop |
+| ClaimNextPendingTranscodeJob() -> Optional[Job] | Worker claim cycle |
+| ClaimNextPendingRemuxJob() -> Optional[Job] | Same |
+
+### HTTP API surface
+
+| Method + URL | Purpose |
+|---|---|
+| GET /api/TranscodeJob/Progress | Read live progress for active attempts |
+
+### What is EXPLICITLY NOT a contract
+
+- The internal claim SQL -- routes through WorkerCapabilityPredicate.BuildClaimPredicate
+- Per-mode dispatch internals -- single decision tree per command-builder.feature.md
+- The .inprogress filename suffix -- file-replacement seam owns the rename
+- The TranscodeAttempts.ffpmpegcommand typo (double p) -- known invariant

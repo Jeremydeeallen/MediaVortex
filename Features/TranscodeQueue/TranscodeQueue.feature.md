@@ -37,3 +37,45 @@ Features/TranscodeQueue/**
 | Features/TranscodeQueue/TranscodeQueueBusinessService.py | Queue population logic, safety guards |
 | Features/TranscodeQueue/TranscodeQueueRepository.py | TranscodeQueue database queries |
 | Templates/Queue.html | Queue UI page |
+
+## Cross-Vertical Contract
+
+### Columns the TranscodeQueue vertical WRITES
+
+| Column | Written by |
+|---|---|
+| TranscodeQueue row INSERT/DELETE/UPDATE | QueueManagementBusinessService.PopulateQueue + AddSuggestionsToQueue + claim path |
+| MediaFiles.PriorityScore | RecomputeForFiles writes the materialized priority |
+| AudioFixPriorityHints.* | PinAudioFixFolder |
+
+### Columns the TranscodeQueue vertical READS from external tables
+
+| Column | Read by | Owner |
+|---|---|---|
+| MediaFiles.{WorkBucket, IsCompliant, AssignedProfile, AudioCompliant, VideoCompliant, ContainerCompliant} | Queue admission + claim path | per-vertical writes; WorkBucket+IsCompliant are GENERATED |
+| Profiles.* + ProfileThresholds.* | _LoadPriorityLookupTable | Profiles vertical |
+| Workers.{TranscodeEnabled, Status, ProfileAllowlist} | Claim query | Workers data accessor |
+
+### Stable function entry points
+
+| Class.method | External caller(s) |
+|---|---|
+| QueueManagementBusinessService.RecomputeForFiles(ids) -> int | MediaProbe post-flight; FileReplacement post-rename re-probe |
+| QueueManagementBusinessService.EvaluateCandidateCompliance(row) -> dict | FileReplacement.ComplianceGate.Evaluate |
+| QueueManagementBusinessService.PopulateQueue / NextTranscodeBatch / SmartPopulateQueue | Operator UI buttons |
+
+### HTTP API surface
+
+| Method + URL | Purpose |
+|---|---|
+| GET /api/TranscodeQueue/GetQueue | Paginated queue list |
+| POST /api/TranscodeQueue/Clear | Clear queue |
+| POST /api/TranscodeQueue/AudioFix/PinFolder | Pin AudioFix folder |
+| POST /api/ShowSettings/NextTranscodeBatch | Smart batch admission |
+
+### What is EXPLICITLY NOT a contract
+
+- The internal SQL of PopulateQueue / NextTranscodeBatch -- changes freely
+- _GetEffectiveProfileFromCache cache invalidation -- internal
+- Priority-score formula coefficients -- tunable; defined in queue-priority.feature.md
+- The exact set of admission predicates -- documented in companion feature docs

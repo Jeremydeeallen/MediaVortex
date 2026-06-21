@@ -88,3 +88,44 @@ Restored 2026-06-05 by `vmaf-restoration` directive after the path-perfect-imple
 | Lifecycle close | `QualityTestingQueue` row removed via `DeleteQualityTestQueueItem` in `StartQualityTest`'s `finally` (revolving-door pattern; see `Features/QualityTesting/qt-queue-visibility-and-override.feature.md` for the surface that makes queue history visible). | Worker-side. |
 
 Verified end-to-end 2026-06-05: i9 NVENC transcode 29484 -> dot-worker-1 claim 1405 -> VMAF=96.25 -> `Disposition=NoReplace/VmafAboveMax`. Parallel: larry-worker-2 claim 1408 + dot-worker-1 claim 1409 processed concurrently. All paths POSIX on Linux workers; identity typed pair throughout.
+
+## Cross-Vertical Contract
+
+### Columns the QualityTesting vertical WRITES
+
+| Column | Written by |
+|---|---|
+| QualityTestResults row INSERT | QualityTestService.RunQualityTest |
+| TranscodeAttempts.{VmafScore, QualityTestResult, Disposition, DispositionReason, AutoReplaceDecision} | Post-test write |
+| PostTranscodeGateConfig.* | Operator via /settings |
+
+### Columns the QualityTesting vertical READS from external tables
+
+| Column | Read by | Owner |
+|---|---|---|
+| TranscodeAttempts.{Id, MediaFileId, OutputFilePath, Success} | Claim quality-test rows | TranscodeJob |
+| MediaFiles.{Id, FilePath, Resolution, DurationMinutes} | Source for VMAF comparison | MediaProbe + FileScanning |
+| Workers.{QualityTestEnabled, FFmpegPath} | Claim + execute | Workers |
+
+### Stable function entry points
+
+| Class.method | External caller(s) |
+|---|---|
+| QualityTestService.RunQualityTest(TranscodeAttemptId) -> QualityTestResult | Worker main loop |
+| ClaimQualityTestJob() -> Optional[QtJob] | Worker claim cycle |
+| PostTranscodeDispositionService.DecideDisposition(attempt) -> Disposition | Post-encode + post-VMAF |
+
+### HTTP API surface
+
+| Method + URL | Purpose |
+|---|---|
+| GET /api/QualityTesting/Progress | Live QT progress |
+| GET /api/QualityTesting/Queue | QT queue list |
+| POST /api/QualityTesting/Override/<id> | Manual operator override |
+
+### What is EXPLICITLY NOT a contract
+
+- The libvmaf model + flags -- model is operator-tunable
+- Held-frame detection threshold + motion-filter pooling math -- internal heuristics
+- The shape of QualityTestResult.MetricsJson (frame-level details) -- consumers should use top-level fields only
+- Whether the test runs on the same worker that did the encode -- runtime detail
