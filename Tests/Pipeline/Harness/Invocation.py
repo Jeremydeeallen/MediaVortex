@@ -239,7 +239,7 @@ def GetAttemptDetails(AttemptId: int) -> dict:
     return dict(Rows[0])
 
 
-def WaitForLocalFile(LocalPath: str, TimeoutSec: int = 30) -> None:
+def WaitForLocalFile(LocalPath: str, TimeoutSec: int = 120) -> None:
     """Poll until the local file exists on disk; cross-host writes via NFS may take a moment to land on the harness host's SMB mount."""
     from Core.Path.LocalPath import LocalExists
     Deadline = time.time() + TimeoutSec

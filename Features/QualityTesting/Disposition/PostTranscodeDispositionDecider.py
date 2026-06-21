@@ -13,6 +13,9 @@ class PostTranscodeDispositionDecider:
         if not Success:
             return Disposition(Action='Discard', Reason='TranscodeFailed')
 
+        if not bool(Attempt.get('QualityTestRequired')):
+            return Disposition(Action='BypassReplace', Reason='QualityTestNotRequired')
+
         OldSize = Attempt.get('OldSize') or 0
         NewSize = Attempt.get('NewSize') or 0
         if NewSize and OldSize and NewSize >= OldSize:
@@ -20,9 +23,6 @@ class PostTranscodeDispositionDecider:
 
         if not GateConfig.get('QualityTestEnabled', True):
             return Disposition(Action='BypassReplace', Reason='QualityTestingGloballyDisabled')
-
-        if not bool(Attempt.get('QualityTestRequired')):
-            return Disposition(Action='BypassReplace', Reason='QualityTestNotRequired')
 
         VmafScore = Attempt.get('VmafScore')
         if VmafScore is not None:
