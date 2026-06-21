@@ -8,7 +8,7 @@
 
 ## The System in One Paragraph
 
-MediaVortex is a self-hosted media library transcoder. A discovery layer (FileScanning + MediaProbe + ContentSignals) builds an inventory of `MediaFiles` rows with extracted metadata and content characterization. Three per-domain verticals each answer ONE question about a file -- is its audio compliant, its video compliant, its container compliant -- and each writes one boolean column on `MediaFiles`. A SQL trigger composes those three booleans into a single `WorkBucket`. A queue vertical (TranscodeQueue) populates a per-worker job queue from `WorkBucket`. An execution vertical (TranscodeJob) runs FFmpeg; a verification vertical (QualityTesting) confirms the result via VMAF; a swap vertical (FileReplacement) installs it. Operator-facing surfaces render the data and accept policy edits. Two services run: WebService (Flask UI on port 5000) and WorkerService (transcoding / VMAF / scanning, capability-flagged per row in the `Workers` table). PostgreSQL is the only data store.
+MediaVortex is a self-hosted media library transcoder. A discovery layer (FileScanning + MediaProbe + ContentSignals) builds an inventory of `MediaFiles` rows with extracted metadata and content characterization. Three per-domain verticals each answer ONE question about a file -- is its audio compliant, its video compliant, its container compliant -- and each writes one boolean column on `MediaFiles`. A `GENERATED ALWAYS AS ... STORED` column composes those three booleans into a single `WorkBucket`. A queue vertical (TranscodeQueue) populates a per-worker job queue from `WorkBucket`. An execution vertical (TranscodeJob) runs FFmpeg; a verification vertical (QualityTesting) confirms the result via VMAF; a swap vertical (FileReplacement) installs it. Operator-facing surfaces render the data and accept policy edits. Two services run: WebService (Flask UI on port 5000) and WorkerService (transcoding / VMAF / scanning, capability-flagged per row in the `Workers` table). PostgreSQL is the only data store.
 
 ## Topology
 
@@ -35,7 +35,7 @@ Verticals are organized by what they own. Six categories. Internal vertical name
 
 ### Compliance (per-domain, no orchestrator)
 
-Each domain vertical answers ONE compliance question about a file and writes ONE boolean column + ONE reason column. A SQL trigger derives `WorkBucket` from the three booleans. **There is no Compliance vertical.** Compliance is a question each domain answers about itself; bucket derivation is a deterministic SQL expression.
+Each domain vertical answers ONE compliance question about a file and writes ONE boolean column + ONE reason column. A `GENERATED ALWAYS AS ... STORED` column on `MediaFiles` derives `WorkBucket` from the three booleans. **There is no Compliance vertical.** Compliance is a question each domain answers about itself; bucket derivation is a deterministic SQL expression living in the column definition.
 
 | Vertical | Question answered | Primary writes |
 |---|---|---|
@@ -72,7 +72,7 @@ Each domain vertical answers ONE compliance question about a file and writes ONE
 | SQLQueries | `/SQLQueries` | Ad-hoc DB query interface; quick-query buttons; custom SQL execution. |
 | ClipBuilder | `/ClipBuilder` | Independent tool: clip extraction + compilation export. Not part of the transcoding pipeline. |
 | Compliance (tabbed shell) | `/Compliance` | Layout-only page with three tabs (Audio / Video / Container) -- each tab is rendered by its vertical's controller. No logic; pure UI shell. |
-| WorkBucket | `/Work/<bucket>` (`/Work/Transcode`, `/Work/Remux`, `/Work/Audio`) | Per-bucket landing pages: paginated MediaFiles list filtered by `MediaFiles.WorkBucket`; single-row queue endpoint for one-off admission. Pure UI consumer of the trigger-derived column. |
+| WorkBucket | `/Work/<bucket>` (`/Work/Transcode`, `/Work/Remux`, `/Work/Audio`) | Per-bucket landing pages: paginated MediaFiles list filtered by `MediaFiles.WorkBucket`; single-row queue endpoint for one-off admission. Pure UI consumer of the generated column. |
 | FailureTracking | `/api/FailureTracking/RecentFailures` | Recent service-failure history surface across `Transcode` / `Quality` services. Distinct from `FailureAccounting` (which enforces the per-MediaFile budget at `/FailedJobs`). |
 
 ### Infrastructure
@@ -99,7 +99,7 @@ Each lives in code or in SQL. They are organizing forces that touch every vertic
 
 | Concern | Home | Notes |
 |---|---|---|
-| `WorkBucket` derivation | SQL trigger on `MediaFiles` | Reads `AudioCompliant` + `VideoCompliant` + `ContainerCompliant`; writes `WorkBucket`. Precedence: `!VideoCompliant` -> `Transcode`, else `!ContainerCompliant` -> `Remux`, else `!AudioCompliant` -> `AudioFix`, else `NULL`. Deterministic CASE; no Python orchestrator; no defense layers. |
+| `WorkBucket` derivation | `MediaFiles.WorkBucket` declared `GENERATED ALWAYS AS (CASE ...) STORED` | Reads `AudioCompliant` + `VideoCompliant` + `ContainerCompliant`; writes `WorkBucket`. Precedence: `!VideoCompliant` -> `Transcode`, else `!ContainerCompliant` -> `Remux`, else `!AudioCompliant` -> `AudioFix`, else `NULL`. Deterministic CASE in the column definition; Postgres refuses any INSERT/UPDATE that tries to set the column directly; no Python orchestrator; no defense layers. |
 | FFmpeg command composition | `Features/CommandBuilder/` + per-vertical emitters (`AudioFilterEmitter`, `VideoCommandEmitter`, `ContainerCommandEmitter`) | One entry point; one decision tree. Per-vertical emitter slots concatenated by shape. |
 | DB session | `Core/Database/DatabaseService` | `RealDictCursor` + `CaseInsensitiveDict` adapter. `ExecuteQuery` (reads) vs `ExecuteNonQuery` (auto-commits). |
 | Logging | `Core/Logging/LoggingService` | Writes `Logs` table with component + method context. Per `.claude/rules/error-ux.md`. |
@@ -124,7 +124,7 @@ ContentSignals -- update --------> (signal columns: MotionFraction, ...)
                                    +-- VideoEncoding --------- update --> VideoCompliant
                                    +-- ContainerFormat ------- update --> ContainerCompliant
                                                    |
-                                              [SQL trigger]
+                                              [GENERATED column]
                                                    |
                                                    v
                                           MediaFiles.WorkBucket
@@ -149,7 +149,7 @@ ContentSignals -- update --------> (signal columns: MotionFraction, ...)
                                                    v
                               AudioNormalization / VideoEncoding / ContainerFormat
                               re-evaluate their respective *Compliant columns
-                              (loops back through trigger -> new WorkBucket)
+                              (column auto-recomputes -> new WorkBucket)
 ```
 
 ### Cross-vertical reads (asymmetric -- only the legitimate ones)
@@ -170,7 +170,7 @@ ContentSignals -- update --------> (signal columns: MotionFraction, ...)
 | Any vertical | Write a column owned by another vertical (enforced by repo-wide grep test). |
 | Any vertical | Cache DB-tunable config at boot (`db-is-authority`). |
 | Any vertical | Open another vertical's internal helpers (`_` prefix, internal dataclasses). Public contract = entries listed in the vertical's Cross-Vertical Contract section. |
-| Any Python code | Write `MediaFiles.WorkBucket` (column is trigger-derived; Python attempts raise). |
+| Any Python code | Write `MediaFiles.WorkBucket` (column is `GENERATED ALWAYS`; Postgres refuses the write). |
 
 ## Database Invariants
 
@@ -182,8 +182,8 @@ ContentSignals -- update --------> (signal columns: MotionFraction, ...)
 | `AudioCompliant` is written only by the Audio vertical | Repo-wide grep test |
 | `VideoCompliant` is written only by VideoEncoding | Repo-wide grep test |
 | `ContainerCompliant` is written only by ContainerFormat | Repo-wide grep test |
-| `WorkBucket` is written only by the SQL trigger | Trigger ownership; no Python write path; revoked from app role |
-| Bucket derivation is deterministic | Trigger CASE; no validators, no defense layers, no fallbacks |
+| `WorkBucket` is computed by the `GENERATED ALWAYS AS ... STORED` definition | Column declaration; no Python write path possible (Postgres refuses) |
+| Bucket derivation is deterministic | CASE in the column definition; no validators, no defense layers, no fallbacks |
 | All paths in `MediaFiles.FilePath` stored as canonical (Windows-flavored) regardless of writing host | `Core/PathStorage` discipline + R6 hook |
 | Mid-flight config edits observed by next claim/decision/recompute | `db-is-authority`; per-call repo `Get()`; no instance caching |
 | Postgres `ENCODING 'UTF8' LC_COLLATE='en_US.UTF-8' LC_CTYPE='en_US.UTF-8' TEMPLATE=template0` | Migration scripts |
@@ -196,7 +196,7 @@ ContentSignals -- update --------> (signal columns: MotionFraction, ...)
 |---|---|
 | Vertical's `RecomputeFor` raises (missing probe data, invalid policy, DB error) | Exception propagates to scanner post-probe handler; handler fails loudly; no `try/except` swallows. |
 | `*Compliant` column is `NULL` for a file | File does not appear in `WorkBucket`; remains unrouted until the owning vertical writes a non-`NULL` value. No defensive defaults. |
-| Bucket trigger detects all three columns `NULL` | Writes `WorkBucket = NULL` (file isn't ready); no exception, no warning. |
+| Generated column with all three booleans `NULL` | Evaluates `WorkBucket = NULL` (file isn't ready); no exception, no warning. |
 | Operator edits a rule mid-flight | Next claim / next recompute reads fresh per `db-is-authority`. No restart needed. |
 | Operator deletes a column owned by another vertical | DB raises; the change is refused at schema-edit time. |
 
@@ -259,9 +259,9 @@ Each row owns one of: a directive (existing or new), a feature-doc creation, or 
 | Item | Current state | Closing work | Tracking |
 |---|---|---|---|
 | `AudioCompliant`, `AudioCompliantReason`, `VideoCompliant`, `VideoCompliantReason`, `ContainerCompliant`, `ContainerCompliantReason` columns on `MediaFiles` | Do not exist. | Migration adds six columns. | Phase 1 of paused `vertical-owned-compliance` |
-| `WorkBucket` trigger | Does not exist. `WorkBucket` is written by Python in `Features/Compliance/ComplianceBucketResolver`. | Install trigger; revoke `WorkBucket` UPDATE from app role. | Phase 7 (Cutover) of paused `vertical-owned-compliance` |
+| `WorkBucket` as generated column | Does not exist. `WorkBucket` is a regular column written by Python in `Features/Compliance/ComplianceBucketResolver`. | DROP existing column; ADD COLUMN `WorkBucket TEXT GENERATED ALWAYS AS (CASE ...) STORED`. Postgres then refuses any direct write. | Phase 7 (Cutover) of paused `compliance-cutover-and-rip` |
 | `MediaFiles.OperationsNeededCsv`, `ComplianceGateBlocked`, `ComplianceEvaluatedAt` columns | Exist. | Drop columns. | Phase 8 of paused `vertical-owned-compliance` |
-| `chk_compliance_consistency` CHECK constraint | Exists (BUG-0062 3-layer defense). | Drop constraint (trigger is deterministic; defense is dead weight). | Phase 8 of paused `vertical-owned-compliance` |
+| `chk_compliance_consistency` CHECK constraint | Exists (BUG-0062 3-layer defense). | Drop constraint (the generated column is deterministic by construction; defense is dead weight). | Phase 8 of paused `compliance-cutover-and-rip` |
 | `SubtitleFixRules`, `ComplianceGates`, `AudioFixRules`, `TranscodeRules`, `RemuxRules` tables | Exist (owned by dying Compliance). | Drop tables; per-vertical rule tables replace `AudioFixRules` / `TranscodeRules` / `RemuxRules`; `SubtitleFixRules` and `ComplianceGates` have no replacement (deleted). | Phase 8 of paused `vertical-owned-compliance` |
 
 ## Operator surfaces not yet at target

@@ -6,7 +6,7 @@
 
 ## Outcome
 
-Install the SQL trigger that derives `MediaFiles.WorkBucket` from the three per-vertical booleans. Build the `/Compliance` tabbed page (Audio / Video / Container tabs). Delete `Features/Compliance/` entirely; drop the old rule tables, columns, and CHECK constraint; `/api/Compliance/*` routes return 404. Empties ~12 gap rows from `ARCHITECTURE.md` in one shot. **Irreversible cutover.**
+Convert `MediaFiles.WorkBucket` to a `GENERATED ALWAYS AS (CASE ...) STORED` column that derives from the three per-vertical booleans. Build the `/Compliance` tabbed page (Audio / Video / Container tabs). Delete `Features/Compliance/` entirely; drop the old rule tables, columns, and CHECK constraint; `/api/Compliance/*` routes return 404. Empties ~12 gap rows from `ARCHITECTURE.md` in one shot. **Cutover is reversible with pg_dump backup + RENAME (instead of DROP) of dying tables.**
 
 ## Why Paused
 
@@ -23,7 +23,7 @@ Equivalence diff at 2026-06-20 showed 76% match (target was ≥99%) between new 
 | (null) → Remux | 116 | New container-incompliant. |
 | (null) → AudioFix | 18 | New audio-incompliant. |
 
-Three classes of mismatches: (a) architectural corrections (intended), (b) possible bugs (needs investigation), (c) edge cases (small counts). Going past trigger install + Compliance delete is irreversible.
+Three classes of mismatches: (a) architectural corrections (intended), (b) possible bugs (needs investigation), (c) edge cases (small counts). Going past generated-column install + Compliance delete is reversible via pg_dump backup + RENAME-not-DROP for the dying tables.
 
 ## Resume Conditions
 
@@ -34,8 +34,8 @@ Before resuming, operator should:
 
 ## Acceptance Criteria (drafted)
 
-C1. Migration `InstallWorkBucketTrigger.py` creates a Postgres trigger on `MediaFiles` that derives `WorkBucket` from `(VideoCompliant, ContainerCompliant, AudioCompliant)` via the CASE: `!Video -> Transcode`, `!Container -> Remux`, `!Audio -> AudioFix`, else NULL. Idempotent.
-C2. After trigger install, `WorkBucket` distribution matches the diff above (within rounding).
+C1. Migration `ConvertWorkBucketToGenerated.py` (a) `pg_dump` the live DB to a timestamped file under `Scripts/SQLScripts/backups/`, (b) DROP existing `MediaFiles.WorkBucket` column, (c) ADD COLUMN `WorkBucket TEXT GENERATED ALWAYS AS (CASE WHEN VideoCompliant IS NULL OR ContainerCompliant IS NULL OR AudioCompliant IS NULL THEN NULL WHEN NOT VideoCompliant THEN 'Transcode' WHEN NOT ContainerCompliant THEN 'Remux' WHEN NOT AudioCompliant THEN 'AudioFix' ELSE NULL END) STORED`, (d) CREATE INDEX on the new column. Idempotent (skips if `WorkBucket` is already generated; detected via `information_schema.columns.is_generated`).
+C2. After conversion, `WorkBucket` distribution matches the diff above (within rounding). Postgres refuses any Python attempt to INSERT/UPDATE `WorkBucket` directly (`cannot assign to generated column`).
 C3. `/Compliance` tabbed page exists at `Templates/Compliance.html` with three tabs (Audio / Video / Container) served by per-vertical controllers.
 C4. `Features/Compliance/` directory deleted in its entirety.
 C5. Drop tables: `TranscodeRules`, `RemuxRules`, `AudioFixRules`, `SubtitleFixRules`, `ComplianceGates`.
@@ -49,7 +49,7 @@ C11. EffectiveProfileResolver moves from `Features/Compliance/Services/` to `Fea
 ## Files (drafted)
 
 ```
-Scripts/SQLScripts/InstallWorkBucketTrigger.py     -- CREATE: trigger install
+Scripts/SQLScripts/ConvertWorkBucketToGenerated.py -- CREATE: pg_dump backup + DROP/ADD column as GENERATED
 Scripts/SQLScripts/DropComplianceArtifacts.py      -- CREATE: drop tables/columns/CHECK
 Templates/Compliance.html                          -- CREATE: tabbed shell
 Features/AudioNormalization/AudioNormalizationController.py -- EDIT: add /Compliance Audio tab endpoint
