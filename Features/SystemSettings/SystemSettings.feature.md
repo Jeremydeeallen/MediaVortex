@@ -39,3 +39,38 @@ Features/SystemSettings/**
 | Features/SystemSettings/SystemSettingsController.py | Flask Blueprint -- settings endpoints |
 | Features/SystemSettings/SystemSettingsRepository.py | SystemSettings table queries |
 | Templates/Settings.html | Settings UI page |
+
+## Cross-Vertical Contract
+
+### Columns the SystemSettings vertical WRITES
+
+| Column | Written by |
+|---|---|
+| SystemSettings.* (all rows) | /Settings page upsert endpoints |
+
+### Columns READS
+
+| Column | Read by | Owner |
+|---|---|---|
+| (none externally) | SystemSettings is the read source for every other vertical's config | self |
+
+### Stable function entry points
+
+| Class.method | External caller(s) |
+|---|---|
+| SystemSettingsRepository.GetSystemSetting(Key) -> Optional[str] | Every vertical (db-is-authority; fresh read per call) |
+| SystemSettingsRepository.UpsertSetting(Key, Value, DataType) -> None | UI + admin scripts |
+
+### HTTP API surface
+
+| Method + URL | Purpose |
+|---|---|
+| GET /Settings | Render settings page |
+| POST /api/Settings/{Key} | Upsert one setting |
+| GET /api/Settings | List all settings (admin) |
+
+### What is EXPLICITLY NOT a contract
+
+- The DataType column's allowed enum values -- expanding over time
+- The /settings page UI layout per known-key -- per-vertical sections evolve
+- Whether settings are cached -- consumers MUST treat reads as fresh

@@ -243,12 +243,6 @@ The architecture above defines DONE. The list below names every place the curren
 
 Each row owns one of: a directive (existing or new), a feature-doc creation, or a delete. No row is "deferred" or "considered" -- if it's here, it's required to reach the target. If something genuinely isn't required, it doesn't go in the architecture; it goes nowhere.
 
-## Verticals not yet at target
-
-| Vertical | Current state | Closing work | Tracking |
-|---|---|---|---|
-| Remaining ~9 verticals lack Cross-Vertical Contract sections | Today: Audio, MediaProbe, Profiles, ContentSignals, ContentClassifier, FileScanning, Video, Container, TranscodeQueue, CommandBuilder, TranscodeJob, QualityTesting, FileReplacement, FailureAccounting all have CVCs. | Add a Cross-Vertical Contract section to each remaining vertical's top-level `*.feature.md`. | Per-vertical directives (Activity, ShowSettings, TeamStatus, SystemSettings, SQLQueries, ClipBuilder, ServiceControl, Optimization, SharedTable, WorkBucket, FailureTracking) |
-
 ## Closing work that doesn't fit elsewhere
 
 | Item | Current state | Closing work |

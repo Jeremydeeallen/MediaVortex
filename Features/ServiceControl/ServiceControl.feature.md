@@ -36,3 +36,44 @@ Features/ServiceControl/**
 | Features/ServiceControl/StuckJobDetectionService.py | Stuck job detection and reset |
 | StartMediaVortex.py | Launch all services |
 | StopMediaVortex.py | Graceful shutdown |
+
+## Cross-Vertical Contract
+
+### Columns the ServiceControl vertical WRITES
+
+| Column | Written by |
+|---|---|
+| ServiceStatus.* (Status, LastHeartbeat, ProcessId) | ServiceStatusService.RegisterServiceStartup + heartbeat tracker |
+| ServiceCommands.* | Inter-service command queueing |
+| (resets TranscodeQueue.Status for crash recovery) | StuckJobDetectionService |
+
+### Columns READS
+
+| Column | Read by | Owner |
+|---|---|---|
+| TranscodeQueue.{Status, ClaimedBy, DateStarted, ProcessingMode} | Stuck-job detection | TranscodeJob |
+| Workers.{Status, LastHeartbeat} | Worker liveness | Workers data accessor |
+| SystemSettings.{StuckJobThresholdSec, ...} | Detection thresholds | SystemSettings |
+
+### Stable function entry points
+
+| Class.method | External caller(s) |
+|---|---|
+| ServiceStatusService.RegisterServiceStartup(name, MaxConcurrentJobs) | WebService + WorkerService bootstrap |
+| StuckJobDetectionService.DetectAndCleanStuckJobs() | Background thread |
+
+### HTTP API surface
+
+| Method + URL | Purpose |
+|---|---|
+| GET /Status | Render status page |
+| POST /api/Services/Start | Start a service (via ServiceCommands) |
+| POST /api/Services/Stop | Stop a service |
+| POST /api/Services/Pause | Pause |
+| POST /api/Services/Resume | Resume |
+
+### What is EXPLICITLY NOT a contract
+
+- StuckJobThresholdSec default (5 min) -- SystemSettings-driven
+- The temperature monitoring backend (LibreHardwareMonitor vs WMI) -- swappable per Docs
+- Whether ServiceCommands are polled or pushed -- today polled

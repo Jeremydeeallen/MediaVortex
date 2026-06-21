@@ -94,3 +94,38 @@ The Media page (`/ShowSettings`) lets users browse all discovered media (shows, 
 - **Inline profile picker** -- in each card's header, no modal. Click `+` and it queues immediately using the selected profile
 - **No decorative icons in card headers** -- plain text titles with Bootstrap badges for counts
 - **Consistent card header styling** -- all three cards use colored bg with white text, matching visual weight
+
+## Cross-Vertical Contract
+
+### Columns the ShowSettings vertical WRITES
+
+| Column | Written by |
+|---|---|
+| (none) | UI consumer; queue admission happens via TranscodeQueue endpoints |
+
+### Columns READS
+
+| Column | Read by | Owner |
+|---|---|---|
+| MediaFiles.{Id, FilePath, SizeMB, ResolutionCategory, Codec, AudioCodec, WorkBucket, AssignedProfile, TranscodedByMediaVortex} | Library + search + Next Batch cards | per-vertical |
+| Profiles.ProfileName | Profile dropdowns | Profiles |
+
+### Stable function entry points
+
+| Class.method | External caller(s) |
+|---|---|
+| (page-only; uses TranscodeQueue and Profiles vertical endpoints) | -- |
+
+### HTTP API surface
+
+| Method + URL | Purpose |
+|---|---|
+| GET /ShowSettings | Render the Media page |
+| GET /api/ShowSettings/Shows | Paginated library |
+| POST /api/ShowSettings/NextTranscodeBatch | Smart batch admission |
+
+### What is EXPLICITLY NOT a contract
+
+- The exact column set in the library table -- adjustable
+- Search query parsing -- internal
+- Sort default order -- tunable

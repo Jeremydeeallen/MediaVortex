@@ -63,3 +63,42 @@ Templates/Status.html
 |------|--------|
 | Features/TeamStatus/TeamStatusController.py | Add ClaimedBy to active jobs query, add Workers endpoint, add ResetStuckJob endpoint |
 | Templates/Status.html | Add Worker column to jobs table, stuck job indicators, Reset button, Workers cards in Services section |
+
+## Cross-Vertical Contract
+
+### Columns the TeamStatus vertical WRITES
+
+| Column | Written by |
+|---|---|
+| Workers.Status | BulkStatus endpoint |
+| TranscodeQueue.{Status, ClaimedBy, ClaimedAt, DateStarted} | ResetStuckJob endpoint |
+
+### Columns READS
+
+| Column | Read by | Owner |
+|---|---|---|
+| Workers.* | Per-worker cards | Workers data accessor |
+| TranscodeQueue + TranscodeAttempts + ActiveJobs | Active jobs panel | TranscodeJob |
+| ServiceStatus | Service health cards | ServiceControl |
+
+### Stable function entry points
+
+| Class.method | External caller(s) |
+|---|---|
+| TeamStatusController.* (HTTP routes) | UI poll endpoints |
+
+### HTTP API surface
+
+| Method + URL | Purpose |
+|---|---|
+| GET /Stats | Render stats page |
+| GET /api/TeamStatus/Overview | Live worker/job snapshot |
+| POST /api/TeamStatus/Workers/BulkStatus | Bulk Online/Drain/Stop |
+| POST /api/TeamStatus/ResetStuckJob | Reset stuck claim |
+| GET /api/TeamStatus/SavingsByVolume | Per-volume savings card |
+
+### What is EXPLICITLY NOT a contract
+
+- Internal claim-stuck detection threshold (5 min) -- tunable via SystemSettings
+- BulkStatus per-worker error envelope -- consumers should treat Summary as canonical
+- Worker badge color/label table -- in activity-dashboard-improvements.feature.md

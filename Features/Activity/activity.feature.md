@@ -68,3 +68,43 @@ ACTIVE. Created 2026-06-20 to fill the ARCHITECTURE.md gap row "Create top-level
 - `active-jobs-filter-sort.feature.md` -- Active Jobs table filter + sort behaviors
 - `activity-dashboard-improvements.feature.md` -- worker badge + lifecycle + dead-button cleanup
 - `activity-dashboard.flow.md` -- snapshot assembly pipeline (ST1-ST7 + S1-S6 seams)
+
+## Cross-Vertical Contract
+
+### Columns the Activity vertical WRITES
+
+| Column | Written by |
+|---|---|
+| (none) | Activity is a pure consumer; reads everything, writes nothing to MediaFiles |
+
+### Columns the Activity vertical READS from external tables
+
+| Column | Read by | Owner |
+|---|---|---|
+| Workers.* (Status, LastHeartbeat, capability flags) | _BuildWorkers | Workers data accessor |
+| ActiveJobs + TranscodeQueue + TranscodeAttempts + TranscodeProgress | _BuildActiveJobs | TranscodeJob |
+| ScanJobs.* | Active scans panel | FileScanning |
+| MediaFiles.WorkBucket aggregations | Library compliance card | per-vertical (WorkBucket is GENERATED) |
+| SystemSettings.{StaleProgressThresholdSec, HeartbeatStaleThresholdSec} | _GetIntSetting | SystemSettings |
+
+### Stable function entry points
+
+| Class.method | External caller(s) |
+|---|---|
+| DashboardSnapshotService.BuildSnapshot() -> dict | Activity page poll endpoint |
+| ProgressSmoothingService.SmoothForAttempt(AttemptId) -> tuple | Snapshot per-row smoothing |
+
+### HTTP API surface
+
+| Method + URL | Purpose |
+|---|---|
+| GET /Activity | Render the page |
+| GET /api/Activity/Snapshot | Live snapshot (5s poll) |
+| GET /api/Activity/LibraryCompliance | Library compliance card |
+
+### What is EXPLICITLY NOT a contract
+
+- Rolling-window size of smoothing (10 samples / 30s) -- tunable
+- The per-tile JS rendering (handled by SharedTable; Activity owns the data, SharedTable owns the rendering)
+- Threshold values (StaleProgressThresholdSec etc.) -- SystemSettings-driven
+- Sub-feature doc internals -- see colocated active-jobs-filter-sort + activity-dashboard-improvements

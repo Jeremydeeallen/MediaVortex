@@ -35,3 +35,41 @@ Features/Optimization/**
 | Features/Optimization/OptimizationBusinessService.py | Log analysis, categorization, recommendations |
 | Features/Optimization/OptimizationRepository.py | JellyfinOperations database queries |
 | Templates/Optimization.html | Optimization UI page |
+
+## Cross-Vertical Contract
+
+### Columns the Optimization vertical WRITES
+
+| Column | Written by |
+|---|---|
+| JellyfinOperations.* | SSH log import |
+
+### Columns READS
+
+| Column | Read by | Owner |
+|---|---|---|
+| JellyfinOperations.* | Page rendering | self |
+| MediaFiles.{Id, FilePath, Codec, Resolution} | Recommendation matching | FileScanning + MediaProbe |
+| SystemSettings.{Jellyfin*} | Connection config | SystemSettings |
+
+### Stable function entry points
+
+| Class.method | External caller(s) |
+|---|---|
+| JellyfinRepository.SSHImportLogs() -> ImportSummary | /Optimization page sync button |
+| OptimizationService.RecommendPreTranscodes() -> List[Recommendation] | UI |
+
+### HTTP API surface
+
+| Method + URL | Purpose |
+|---|---|
+| GET /Optimization | Render the page |
+| POST /api/Optimization/SyncJellyfin | Trigger SSH log import |
+| POST /api/Optimization/TestConnection | Validate SSH connection |
+| GET /api/Optimization/Recommendations | Per-device recommendations |
+
+### What is EXPLICITLY NOT a contract
+
+- Internal log-parsing regex -- Jellyfin log format evolves
+- Per-device transcode-reason categorization -- heuristic
+- The SSH client library (paramiko) -- swappable

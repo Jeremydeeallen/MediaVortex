@@ -34,3 +34,37 @@ Features/ClipBuilder/**
 | Features/ClipBuilder/ClipBuilderController.py | Flask Blueprint -- clip builder endpoints |
 | Features/ClipBuilder/ClipBuilderBusinessService.py | Clip extraction and compilation logic |
 | Templates/ClipBuilder.html | Clip builder UI page |
+
+## Cross-Vertical Contract
+
+### Columns the ClipBuilder vertical WRITES
+
+| Column | Written by |
+|---|---|
+| (none) | Output is a compilation file on disk; not tracked in MediaFiles |
+
+### Columns READS
+
+| Column | Read by | Owner |
+|---|---|---|
+| MediaFiles.{Id, FilePath, FileName, DurationMinutes} | Search + preview | FileScanning + MediaProbe |
+| Workers.FFmpegPath | Compilation export shell-out | Workers data accessor |
+
+### Stable function entry points
+
+None for external callers. Self-contained tool.
+
+### HTTP API surface
+
+| Method + URL | Purpose |
+|---|---|
+| GET /ClipBuilder | Render the page |
+| POST /api/ClipBuilder/Export | Build compilation file |
+| GET /api/ClipBuilder/Presets | List saved clip presets |
+| POST /api/ClipBuilder/Presets | Save a preset |
+
+### What is EXPLICITLY NOT a contract
+
+- The compilation output directory -- operator-configurable
+- The 30/60/120 second compilation length presets -- expandable
+- The internal ffmpeg concat filter implementation -- swappable

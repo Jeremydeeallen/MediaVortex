@@ -100,3 +100,37 @@ C20. **Controllers are unit-testable in isolation.** Each controller's construct
 - Form rendering, modal rendering, notification UI, single-row status panels (separate backlog directives).
 - Multi-field sort (single `{Key, Direction}` for v1; multi-field deferred to a future minor version per C19 stability).
 - Charting (Status.html savings chart stays Chart.js-based; not a tabular surface).
+
+## Cross-Vertical Contract
+
+### Columns the SharedTable vertical WRITES
+
+| Column | Written by |
+|---|---|
+| (none) | Pure rendering service; no persistence |
+
+### Columns READS
+
+| Column | Read by | Owner |
+|---|---|---|
+| (none) | Receives row data from the calling page; no DB access | -- |
+
+### Stable function entry points (JavaScript surface)
+
+| Class.method | External caller(s) |
+|---|---|
+| TableRenderer(config) -> instance | Every page with a tabular surface |
+| ServerPagedDataSource(endpoint) | Pages with server-side pagination |
+| ClientArrayDataSource() + .SetRows(rows) + Table.Refresh() | Pages with client-side data |
+| Virtualizer (auto-enabled above 500 rows) | Internal opt-in |
+
+### HTTP API surface
+
+None. Pure client-side service.
+
+### What is EXPLICITLY NOT a contract
+
+- Internal DOM structure of rendered rows -- consumers should not target with selectors
+- Virtualization threshold (500 rows) -- tunable
+- Animation timings -- cosmetic
+- Sort comparator details per column type -- the contract is sort stability, not the algorithm
