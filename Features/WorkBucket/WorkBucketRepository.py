@@ -26,7 +26,8 @@ COUNT_BY_BUCKET_SQL = (
 
 LIST_BY_BUCKET_SQL = (
     "SELECT mf.Id, mf.FileName, mf.Resolution, mf.AudioCodec, mf.AudioLanguages, "
-    "mf.SourceIntegratedLufs, mf.SourceTruePeakDbtp, mf.OperationsNeededCsv, "
+    "mf.SourceIntegratedLufs, mf.SourceTruePeakDbtp, mf.WorkBucket, "
+    "mf.VideoCompliantReason, mf.ContainerCompliantReason, mf.AudioCompliantReason, "
     "EXISTS ("
     "  SELECT 1 FROM TranscodeQueue tq WHERE tq.MediaFileId = mf.Id AND tq.Status = 'Pending'"
     ") AS InQueue "
