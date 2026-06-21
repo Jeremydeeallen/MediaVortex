@@ -63,3 +63,50 @@ Features/Profiles/**
 | AssignedProfile → TranscodeQueue | Folder-assignment UI writes `MediaFiles.AssignedProfile TEXT` (profile name string) | `MediaFiles.AssignedProfile TEXT` matched by string equality to `Profiles.ProfileName` | `TranscodeQueue` JOINs `Profiles ON ProfileName = AssignedProfile` to find profile settings | `SELECT mf.AssignedProfile FROM MediaFiles mf LEFT JOIN Profiles p ON p.ProfileName = mf.AssignedProfile WHERE mf.AssignedProfile IS NOT NULL AND p.Id IS NULL` → 0 rows |
 | Profiles + ProfileThresholds → CommandBuilder | `EncoderKnobRepository.GetEncoderKnobsForProfile(ProfileName, SourceResolution)` JOIN on name + resolution tier | `EncoderKnobs` dataclass `.ToDict()` dict; `ProcessTranscodeQueueService.GetTranscodingSettings` injects `SourceVideoBitrateKbps` from `MediaFile.VideoBitrateKbps` | `CommandBuilder` reads `ProfileSettings` dict keys directly | Smoke: `py /tmp/smoke_legacy.py` (SVT); `py /tmp/smoke_canary.py` (NVENC VBR) |
 | ProfileThresholds.TranscodeDownTo → queue filter | `ProfileThresholds.transcodedownto TEXT NOT NULL` (values: '480p', '720p', '1080p', '2160p', 'No downscaling') | String resolved by `ResolutionService.CompareResolutions` | `TranscodeQueue.PopulateQueue` filters source resolutions eligible for queuing per profile assignment | `SELECT * FROM ProfileThresholds WHERE transcodedownto NOT IN ('480p','720p','1080p','2160p','No downscaling')` → 0 rows |
+
+## Cross-Vertical Contract
+
+This section locks the Profiles vertical's public surface. Other verticals interact ONLY through what is listed below.
+
+### Columns the Profiles vertical WRITES
+
+| Column | Written by |
+|---|---|
+| `Profiles.*` (all columns) | `ProfileController` PATCH endpoints + admin SQL |
+| `ProfileThresholds.*` (all columns) | `ProfileController` POST/PUT/DELETE endpoints |
+| `MediaFiles.AssignedProfile` | `ProfileRepository.UpdateMediaFilesProfileByRootFolder` (manual operator pin via /Scanning page) -- ContentClassifier also writes this when NULL |
+
+### Columns the Profiles vertical READS from external tables
+
+| Column | Read by | Owner |
+|---|---|---|
+| `MediaFiles.{Id, FilePath, ResolutionCategory, AssignedProfile}` | `EffectiveProfileResolver.Resolve` (used by every other compliance vertical) | FileScanning + MediaProbe |
+| `RootFolders.{Id, FolderPath}` | `ProfileController.assign_profile_to_root_folder` | FileScanning |
+| `CrfBitrateEstimates.*` | `EffectiveProfileResolver` (CRF strategy) | Optional sub-component for CRF profiles |
+
+### Stable function entry points (cross-vertical callers)
+
+| Class.method | External caller(s) |
+|---|---|
+| `EffectiveProfileResolver.Resolve(MediaFile) -> Optional[EffectiveProfile]` | VideoVertical, future Container/Audio verticals |
+| `EncoderKnobRepository.GetEncoderKnobsForProfile(ProfileName, SourceResolution) -> EncoderKnobs` | CommandBuilder, TranscodeJob |
+| `ProfileService.CopyProfile / DeleteProfile / AddThreshold` | (operator UI) |
+
+### HTTP API surface
+
+| Method + URL | Purpose |
+|---|---|
+| `GET /api/profiles` | List profiles |
+| `PATCH /api/profiles/<id>/knobs` | Edit profile + thresholds |
+| `POST /api/profiles/<id>/copy` | Duplicate |
+| `DELETE /api/profiles/<id>` | Delete (blocked if assigned) |
+| `POST /api/profiles/reorder` | Reorder |
+| `POST/PUT/DELETE /api/profiles/<id>/thresholds[/<tid>]` | CRUD thresholds |
+| `POST /api/profiles/assign-to-root-folder` | Pin profile to folder |
+
+### What is EXPLICITLY NOT a contract
+
+- Internal SQL inside `ProfileRepository` -- changes freely
+- The exact set of encoder-knob columns (`Profiles.preset`, `tune`, etc.) -- these expand over time
+- `EncoderKnobs` dataclass field set (queryable via `.ToDict()` for stable access)
+- Letterbox-bucketing heuristic in `_NormalizeResolution` (implementation detail; long-edge bucketing is the invariant, the math may change)

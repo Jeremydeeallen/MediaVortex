@@ -130,3 +130,39 @@ transcode.flow.md                                       -- Stage 2 note about th
 ## Deviation from conventions
 
 None. Mirrors existing single-responsibility verticals: dedicated `Features/X/` directory with its own service + repository + model + docs. Compute service is reusable in test harnesses (the encoder shootout could call it to characterize sources without going through the probe pipeline).
+
+## Cross-Vertical Contract
+
+This section locks the ContentSignals vertical's public surface. Other verticals interact ONLY through what is listed below.
+
+### Columns the ContentSignals vertical WRITES
+
+| Column | Written by |
+|---|---|
+| `MediaFiles.MotionFraction` | `ContentSignalsService.ComputeSignals` + persistence at the probe-pipeline call site |
+| `MediaFiles.SceneChangeRatePerMin` | Same |
+| `MediaFiles.LumaVariance` | Same |
+
+### Columns the ContentSignals vertical READS from external tables
+
+| Column | Read by | Owner |
+|---|---|---|
+| Source file at probe-time local path | `ContentSignalsService.ComputeSignals` | (filesystem; path translated by probe-pipeline caller per content-signals.C7) |
+| `Workers.FFmpegPath` | `ContentSignalsService` shell-out to ffmpeg signalstats | Workers data accessor |
+
+### Stable function entry points (cross-vertical callers)
+
+| Class.method | External caller(s) |
+|---|---|
+| `ContentSignalsService.ComputeSignals(LocalFilePath: str) -> Optional[ContentSignalsModel]` | Probe-pipeline hook in MediaProbe vertical; ContentClassifier backfill scripts |
+
+### HTTP API surface
+
+None today. Operator views signals via `/SQLQueries` or future tile.
+
+### What is EXPLICITLY NOT a contract
+
+- The specific `ffmpeg signalstats` flags / PySceneDetect threshold values -- tunable internally
+- The `ContentSignalsModel` field set (today: 3 fields; may grow)
+- The exact threshold used to compute `MotionFraction` (integer_motion score cutoff) -- implementation detail
+- Whether ContentSignals runs synchronously in the probe hook or asynchronously in a background job (today: synchronous; may change)

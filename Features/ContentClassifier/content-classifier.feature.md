@@ -177,3 +177,40 @@ None. Vertical-slice feature directory. Data-driven via the rules table (no hard
 - `Features/Profiles/nvenc-profiles.feature.md` and `nvenc-rate-anchored.feature.md` -- provide the profiles that rules assign.
 - `Features/TranscodeQueue/marginal-savings-gate.feature.md` -- the downstream gate that further filters classifier-assigned files at queue-population time.
 - `Features/Profiles/` folder-pin path -- the operator override that wins over the classifier.
+
+## Cross-Vertical Contract
+
+This section locks the ContentClassifier vertical's public surface. Other verticals interact ONLY through what is listed below.
+
+### Columns the ContentClassifier vertical WRITES
+
+| Column | Written by |
+|---|---|
+| `MediaFiles.AssignedProfile` | `ContentClassifierService.ClassifyAndAssign` -- ONLY when source value is NULL |
+| `MediaFiles.AssignedProfileSource` | Same; values: `'classifier'` (when classifier writes), `'operator'` (when manual pin), `'manual_sql'` (when SQL pin) |
+| `ContentClassificationRules.*` (all columns) | Operator via SQL / future `/settings` UI |
+
+### Columns the ContentClassifier vertical READS from external tables
+
+| Column | Read by | Owner |
+|---|---|---|
+| `MediaFiles.{Id, FilePath, VideoBitrateKbps, ResolutionCategory, Codec, MotionFraction, SceneChangeRatePerMin, LumaVariance, AssignedProfile}` | `ContentClassifierService.ClassifyAndAssign` | FileScanning + MediaProbe + ContentSignals |
+| `Profiles.ProfileName` | classifier validates rule's `AssignProfileName` exists before writing | Profiles |
+
+### Stable function entry points (cross-vertical callers)
+
+| Class.method | External caller(s) |
+|---|---|
+| `ContentClassifierService.ClassifyAndAssign(MediaFileId: int) -> Optional[str]` (returns assigned profile name or None) | MediaProbe probe-hook (after ContentSignals writes); backfill scripts |
+| `ContentClassifierService.ClassifyOnly(MediaFile) -> Optional[str]` (no write; for preview) | Future preview UI |
+
+### HTTP API surface
+
+None today. Operator edits rules via `/SQLQueries` or future `/settings` "Classifier Rules" card.
+
+### What is EXPLICITLY NOT a contract
+
+- The order of predicate checks in `ClassifyAndAssign` -- rules table ordering is the operator contract; internal walk is implementation
+- Whether classifier runs synchronously per-probe or asynchronously batch -- today synchronous; may change
+- The `ContentClassificationRules` column set beyond the documented filterable fields (may add new signal columns later)
+- The shape of the `Logs` line emitted on classification -- internal observability

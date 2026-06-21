@@ -247,7 +247,7 @@ Each row owns one of: a directive (existing or new), a feature-doc creation, or 
 
 | Vertical | Current state | Closing work | Tracking |
 |---|---|---|---|
-| Every non-Audio vertical | Lacks a Cross-Vertical Contract section (only AudioNormalization has one, added 2026-06-19; MediaProbe added 2026-06-20). | Add a Cross-Vertical Contract section to each vertical's top-level `*.feature.md` -- WRITES, READS, public function entry points, HTTP routes, explicit NOT-a-contract items. | Per-vertical directives (~15 remaining verticals) |
+| Remaining ~11 verticals lack Cross-Vertical Contract sections | Today: Audio (2026-06-19), MediaProbe (2026-06-20), Profiles + ContentSignals + ContentClassifier + FileScanning + Video + Container (2026-06-21). | Add a Cross-Vertical Contract section to each remaining vertical's top-level `*.feature.md` -- WRITES, READS, public function entry points, HTTP routes, explicit NOT-a-contract items. | Per-vertical directives (TranscodeQueue, CommandBuilder, TranscodeJob, QualityTesting, FileReplacement, FailureAccounting, Activity, ShowSettings, TeamStatus, SystemSettings, SQLQueries, ClipBuilder, ServiceControl, Optimization, SharedTable, WorkBucket, FailureTracking) |
 
 ## Closing work that doesn't fit elsewhere
 

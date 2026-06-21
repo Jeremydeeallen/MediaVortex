@@ -229,3 +229,52 @@ Features/FileScanning/**
 | Features/FileScanning/FileScanningRepository.py | RootFolders CRUD, scan-state queries (GetRunningScans, etc.), MediaFiles list/lookup queries (GetMediaFilesPaginated, GetMediaFileByFileName, GetTranscodeCandidates*). Does not own per-row MediaFile CRUD -- that lives in MediaFilesRepository. |
 | Features/MediaFiles/MediaFilesRepository.py | Per-row MediaFile CRUD (GetMediaFileById, GetMediaFileByPath, SaveMediaFile, DeleteMediaFile, DeleteMediaFileByPath). Accepts canonical-string paths or Path objects; typed-pair WHERE clauses. |
 | Templates/FileScanning.html | Scanning UI page |
+
+## Cross-Vertical Contract
+
+This section locks the FileScanning vertical's public surface. Other verticals interact ONLY through what is listed below.
+
+### Columns the FileScanning vertical WRITES
+
+| Column | Written by |
+|---|---|
+| `MediaFiles` row INSERT/DELETE | `FileScanningBusinessService.PerformScan` + `CleanupMissingFiles` |
+| `MediaFiles.{FilePath, FileName, SizeMB, LastModifiedDate, RootFolderId, StorageRootId, RelativePath}` | Scan insert; updated on rename-detect + in-place-update |
+| `MediaFiles.FFprobeFailureCount` | `MediaProbe` writes via the failure-tracking path; FileScanning's `CleanupMissingFiles` may reset |
+| `ScanJobs.*` (all columns) | `FileScanningBusinessService.PerformScan` (heartbeat + phase + counts) |
+| `RootFolders.*` | `DatabaseManager.AddRootFolder / DeleteRootFolder` |
+| `MediaFilesArchive` row (read-only audit; preserved on deletion) | `FileReplacement` writes original metadata before swap; FileScanning's `CleanupMissingFiles` does NOT delete these |
+
+### Columns the FileScanning vertical READS from external tables
+
+| Column | Read by | Owner |
+|---|---|---|
+| `SystemSettings.{ContinuousScanIntervalMinutes, ExcludedDirectories, AllowedExtensions}` | `ContinuousScanService` | SystemSettings vertical |
+| `Workers.{ScanEnabled, Status}` | `ContinuousScanService` claim path | Workers data accessor |
+| Filesystem at root paths | Walk + stat | OS |
+
+### Stable function entry points (cross-vertical callers)
+
+| Class.method | External caller(s) |
+|---|---|
+| `FileScanningBusinessService.PerformScan(RootFolderId, WorkerName) -> ScanJob` | Manual UI trigger; ContinuousScanService |
+| `FileScanningRepository.GetMediaFileById(Id) -> Optional[MediaFileModel]` | Every vertical that needs a MediaFile by id (re-exposed via `Repositories.DatabaseManager`) |
+| `Repository.GetRunningScans(RootFolderPath=None) -> List[ScanJob]` | Activity, TeamStatus |
+
+### HTTP API surface
+
+| Method + URL | Purpose |
+|---|---|
+| `POST /api/Scan/Start` | Trigger manual scan |
+| `GET /api/Scan/Status` | Current scan job status |
+| `GET /api/FileScanning/MediaFiles/Corrupt` | Files exceeding FFprobe failure cap |
+| `POST /api/RootFolders` | Add a root folder |
+| `DELETE /api/RootFolders/<id>` | Remove a root folder |
+
+### What is EXPLICITLY NOT a contract
+
+- Internal scan-phase state machine (Walking / Reconciling / Probing / etc.) -- the `ScanJobs.Phase` column is the contract; internal transitions may change
+- Fuzzy-match heuristic (`FindFuzzyFileMatch` parsing + size-tolerance window) -- tunable
+- The exact order of insert vs delete during rename-detection -- atomic from the consumer's perspective
+- Whether `ContinuousScanService` runs in-process or as a separate thread -- runtime detail
+- Internal class names (`FileScanningBusinessService`, etc. may be split as the vertical grows)
