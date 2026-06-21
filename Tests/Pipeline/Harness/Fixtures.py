@@ -89,6 +89,44 @@ def TranscodeCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int = 2
     return Picked
 
 
+# directive: e2e-pipeline-test-framework
+def RemuxCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int = 25) -> int:
+    """A MediaFileId currently in the Remux bucket (container needs work; video acceptable)."""
+    Db = DatabaseService()
+    Sql = (
+        "SELECT m.Id, m.StorageRootId, m.RelativePath FROM MediaFiles m "
+        "WHERE m.WorkBucket = 'Remux' "
+        "AND " + _SHARED_PREDICATE + _ORPHAN_NOT_EXISTS + " "
+        "ORDER BY m.SizeMB ASC LIMIT %s"
+    )
+    Rows = Db.ExecuteQuery(Sql, (MinSizeMB, MaxSizeMB, Limit))
+    Candidates = [(int(R['Id']), R['StorageRootId'], R['RelativePath'] or '') for R in Rows]
+    Picked = _PickReachable(Candidates)
+    if Picked is None:
+        raise NoCandidatesError(f"No reachable Remux candidate with {MinSizeMB} <= SizeMB <= {MaxSizeMB} (checked {len(Candidates)} rows)")
+    LoggingService.LogInfo(f"RemuxCandidate selected: Id={Picked}", "Fixtures", "RemuxCandidate")
+    return Picked
+
+
+# directive: e2e-pipeline-test-framework
+def AudioFixOnlyCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int = 25) -> int:
+    """A MediaFileId currently in AudioFixOnly bucket (only audio needs work; container + video compliant)."""
+    Db = DatabaseService()
+    Sql = (
+        "SELECT m.Id, m.StorageRootId, m.RelativePath FROM MediaFiles m "
+        "WHERE m.WorkBucket = 'AudioFixOnly' "
+        "AND " + _SHARED_PREDICATE + _ORPHAN_NOT_EXISTS + " "
+        "ORDER BY m.SizeMB ASC LIMIT %s"
+    )
+    Rows = Db.ExecuteQuery(Sql, (MinSizeMB, MaxSizeMB, Limit))
+    Candidates = [(int(R['Id']), R['StorageRootId'], R['RelativePath'] or '') for R in Rows]
+    Picked = _PickReachable(Candidates)
+    if Picked is None:
+        raise NoCandidatesError(f"No reachable AudioFixOnly candidate with {MinSizeMB} <= SizeMB <= {MaxSizeMB} (checked {len(Candidates)} rows)")
+    LoggingService.LogInfo(f"AudioFixOnlyCandidate selected: Id={Picked}", "Fixtures", "AudioFixOnlyCandidate")
+    return Picked
+
+
 # directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def AlreadyCompliant(Limit: int = 25) -> int:
     """A MediaFileId that is already compliant (WorkBucket IS NULL, IsCompliant=TRUE); see pipeline-test-harness.feature.md S2."""

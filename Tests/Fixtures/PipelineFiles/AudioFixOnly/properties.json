@@ -1,0 +1,40 @@
+{
+  "CapturedAt": "2026-06-21T17:07:26.487141+00:00",
+  "SourceMediaFileId": 8408,
+  "SourceCanonicalPath": "T:\\The Sopranos\\The Complete Series Bonus + Extras\\Exclusive Interview With The Sopranos.mp4",
+  "FixtureFileName": "Exclusive Interview With The Sopranos.mp4",
+  "FixtureLocalPath": "C:\\Code\\MediaVortex\\Tests\\Fixtures\\PipelineFiles\\AudioFixOnly\\Exclusive Interview With The Sopranos.mp4",
+  "ExpectedBucket": "AudioFixOnly",
+  "ExpectedReasons": {
+    "AudioCompliantReason": "needs_normalization",
+    "VideoCompliantReason": null,
+    "ContainerCompliantReason": null
+  },
+  "Properties": {
+    "Id": 8408,
+    "FileName": "Exclusive Interview With The Sopranos.mp4",
+    "StorageRootId": 1,
+    "RelativePath": "The Sopranos/The Complete Series Bonus + Extras/Exclusive Interview With The Sopranos.mp4",
+    "Codec": "h264",
+    "AudioCodec": "aac",
+    "ContainerFormat": "mov,mp4,m4a,3gp,3g2,mj2",
+    "Resolution": "320x240",
+    "ResolutionCategory": "480p",
+    "VideoBitrateKbps": 279,
+    "DurationMinutes": 3.5391289833333333,
+    "SizeMB": 10.310664176940918,
+    "AssignedProfile": "NVENC AV1 P7 CANARY VBR -720p",
+    "AudioCompliant": false,
+    "VideoCompliant": true,
+    "ContainerCompliant": true,
+    "AudioCompliantReason": "needs_normalization",
+    "VideoCompliantReason": null,
+    "ContainerCompliantReason": null,
+    "WorkBucket": "AudioFixOnly",
+    "IsCompliant": false,
+    "AudioComplete": false,
+    "HasExplicitEnglishAudio": true,
+    "SourceIntegratedLufs": -16.3,
+    "SourceTruePeakDbtp": 0.8
+  }
+}

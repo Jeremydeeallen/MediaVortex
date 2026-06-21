@@ -121,3 +121,16 @@ web-startup.log
 web-startup.err
 .e2e_preservation/
 Scripts/SQLScripts/backups/
+
+# Pipeline test fixture binaries (regenerable via Tests/Fixtures/PipelineFiles/RegenerateFromLive.py)
+Tests/Fixtures/PipelineFiles/**/*.mkv
+Tests/Fixtures/PipelineFiles/**/*.mp4
+Tests/Fixtures/PipelineFiles/**/*.mov
+Tests/Fixtures/PipelineFiles/**/*.m4v
+Tests/Fixtures/PipelineFiles/**/*.avi
+Tests/Fixtures/PipelineFiles/**/*.ts
+Tests/Fixtures/PipelineFiles/**/*.mp3
+Tests/Fixtures/PipelineFiles/**/*.flac
+Tests/Fixtures/PipelineFiles/**/*.wav
+Tests/Fixtures/PipelineFiles/**/*.aac
+Tests/Fixtures/PipelineFiles/**/*.webm

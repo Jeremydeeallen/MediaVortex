@@ -1,0 +1,40 @@
+{
+  "CapturedAt": "2026-06-21T17:07:26.989867+00:00",
+  "SourceMediaFileId": 1981,
+  "SourceCanonicalPath": "T:\\Firefly\\Specials\\Adam Baldwin Sings the Hero of Canton Theme-mv.mp4",
+  "FixtureFileName": "Adam Baldwin Sings the Hero of Canton Theme-mv.mp4",
+  "FixtureLocalPath": "C:\\Code\\MediaVortex\\Tests\\Fixtures\\PipelineFiles\\Compliant\\Adam Baldwin Sings the Hero of Canton Theme-mv.mp4",
+  "ExpectedBucket": null,
+  "ExpectedReasons": {
+    "AudioCompliantReason": null,
+    "VideoCompliantReason": null,
+    "ContainerCompliantReason": null
+  },
+  "Properties": {
+    "Id": 1981,
+    "FileName": "Adam Baldwin Sings the Hero of Canton Theme-mv.mp4",
+    "StorageRootId": 1,
+    "RelativePath": "Firefly/Specials/Adam Baldwin Sings the Hero of Canton Theme-mv.mp4",
+    "Codec": "hevc",
+    "AudioCodec": "aac",
+    "ContainerFormat": "mov,mp4,m4a,3gp,3g2,mj2",
+    "Resolution": "720x480",
+    "ResolutionCategory": "480p",
+    "VideoBitrateKbps": 496,
+    "DurationMinutes": 2.614697216666667,
+    "SizeMB": 10.915913581848145,
+    "AssignedProfile": "NVENC AV1 P7 CANARY VBR -720p",
+    "AudioCompliant": true,
+    "VideoCompliant": true,
+    "ContainerCompliant": true,
+    "AudioCompliantReason": null,
+    "VideoCompliantReason": null,
+    "ContainerCompliantReason": null,
+    "WorkBucket": null,
+    "IsCompliant": true,
+    "AudioComplete": true,
+    "HasExplicitEnglishAudio": true,
+    "SourceIntegratedLufs": -28.6,
+    "SourceTruePeakDbtp": -12.5
+  }
+}

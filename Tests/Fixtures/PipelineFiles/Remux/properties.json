@@ -1,0 +1,40 @@
+{
+  "CapturedAt": "2026-06-21T17:07:26.311956+00:00",
+  "SourceMediaFileId": 1321,
+  "SourceCanonicalPath": "T:\\Crazy Ex-Girlfriend\\Extras\\Soundtrack\\Season 1 [Commentary Album]\\40 - California Christmastime (Commentary).mp3",
+  "FixtureFileName": "40 - California Christmastime (Commentary).mp3",
+  "FixtureLocalPath": "C:\\Code\\MediaVortex\\Tests\\Fixtures\\PipelineFiles\\Remux\\40 - California Christmastime (Commentary).mp3",
+  "ExpectedBucket": "Remux",
+  "ExpectedReasons": {
+    "AudioCompliantReason": "needs_normalization",
+    "VideoCompliantReason": "efficient_bpp_override",
+    "ContainerCompliantReason": "container_not_acceptable:mp3"
+  },
+  "Properties": {
+    "Id": 1321,
+    "FileName": "40 - California Christmastime (Commentary).mp3",
+    "StorageRootId": 1,
+    "RelativePath": "Crazy Ex-Girlfriend/Extras/Soundtrack/Season 1 [Commentary Album]/40 - California Christmastime (Commentary).mp3",
+    "Codec": "mjpeg",
+    "AudioCodec": "mp3",
+    "ContainerFormat": "mp3",
+    "Resolution": "1400x1400",
+    "ResolutionCategory": "720p",
+    "VideoBitrateKbps": 332,
+    "DurationMinutes": 4.33436735,
+    "SizeMB": 10.302163124084473,
+    "AssignedProfile": "NVENC AV1 P7 CANARY VBR -720p",
+    "AudioCompliant": false,
+    "VideoCompliant": true,
+    "ContainerCompliant": false,
+    "AudioCompliantReason": "needs_normalization",
+    "VideoCompliantReason": "efficient_bpp_override",
+    "ContainerCompliantReason": "container_not_acceptable:mp3",
+    "WorkBucket": "Remux",
+    "IsCompliant": false,
+    "AudioComplete": false,
+    "HasExplicitEnglishAudio": true,
+    "SourceIntegratedLufs": -27.3,
+    "SourceTruePeakDbtp": -7.9
+  }
+}

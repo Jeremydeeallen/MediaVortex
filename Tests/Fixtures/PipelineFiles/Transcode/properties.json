@@ -1,0 +1,40 @@
+{
+  "CapturedAt": "2026-06-21T17:07:26.137634+00:00",
+  "SourceMediaFileId": 15212,
+  "SourceCanonicalPath": "T:\\Bones\\Season 7\\Bones - S07E12 - The Suit on the Set SDTV.avi",
+  "FixtureFileName": "Bones - S07E12 - The Suit on the Set SDTV.avi",
+  "FixtureLocalPath": "C:\\Code\\MediaVortex\\Tests\\Fixtures\\PipelineFiles\\Transcode\\Bones - S07E12 - The Suit on the Set SDTV.avi",
+  "ExpectedBucket": "Transcode",
+  "ExpectedReasons": {
+    "AudioCompliantReason": "needs_normalization",
+    "VideoCompliantReason": "AcceptableVideoCodecsCsv:mpeg4",
+    "ContainerCompliantReason": "container_not_acceptable:avi"
+  },
+  "Properties": {
+    "Id": 15212,
+    "FileName": "Bones - S07E12 - The Suit on the Set SDTV.avi",
+    "StorageRootId": 1,
+    "RelativePath": "Bones/Season 7/Bones - S07E12 - The Suit on the Set SDTV.avi",
+    "Codec": "mpeg4",
+    "AudioCodec": "mp3",
+    "ContainerFormat": "avi",
+    "Resolution": "624x352",
+    "ResolutionCategory": "480p",
+    "VideoBitrateKbps": 1467,
+    "DurationMinutes": 0.984,
+    "SizeMB": 11.527706146240234,
+    "AssignedProfile": "NVENC AV1 P7 CANARY VBR -720p",
+    "AudioCompliant": false,
+    "VideoCompliant": false,
+    "ContainerCompliant": false,
+    "AudioCompliantReason": "needs_normalization",
+    "VideoCompliantReason": "AcceptableVideoCodecsCsv:mpeg4",
+    "ContainerCompliantReason": "container_not_acceptable:avi",
+    "WorkBucket": "Transcode",
+    "IsCompliant": false,
+    "AudioComplete": false,
+    "HasExplicitEnglishAudio": true,
+    "SourceIntegratedLufs": -20.7,
+    "SourceTruePeakDbtp": -6.5
+  }
+}
