@@ -27,10 +27,22 @@ Three classes of mismatches: (a) architectural corrections (intended), (b) possi
 
 ## Resume Conditions
 
-Before resuming, operator should:
-1. Confirm the "Remux → AudioFix" reclassification is acceptable. Operator-facing surfaces (`/Compliance`, `/Work/<bucket>`) will route differently.
-2. Investigate the "(null) → Transcode" 1,325 cases. Sample some files; verify the new VideoCompliant=FALSE is correct (or fix the predicate).
-3. Decide on MinSourceBpp default. If 0.04 is right, the "Transcode → (null/Remux)" cases are correct. If too aggressive, raise the threshold.
+Investigation directive `mismatch-investigation` (2026-06-21) classified the 6 mismatch classes as follows:
+
+| Class | Count | Verdict | Action |
+|---|---|---|---|
+| `(null) → Transcode` | 1,325 | GATE_GAP | Fix in next directive: AudioVertical propagates audio gates via AudioCompliant=NULL |
+| `Transcode → (null)` | 944 | CORRECTION | Accept (MinSourceBpp override; 30 Rock pattern) |
+| `Transcode → AudioFix` | 288 | CORRECTION | Accept (per-domain bucketing) |
+| `Remux → (null)` | 273 | STALE_OLD | Accept (old WorkBucket was stale; new reflects current row state) |
+| `(null) → Remux` | 116 | MIXED | Same fix as Class 1 (audio gate propagation; container issue resurfaces post-fix) |
+| `(null) → AudioFix` | 18 | GATE_GAP | Same fix as Class 1 |
+
+**Before resuming:**
+1. Land the AudioVertical gate-propagation fix (next directive: `audio-vertical-gate-propagation`). Resolves 1,459 mismatches. Post-fix equivalence: 78.6% MATCH / 21.4% MISMATCH (with the remaining 21.4% all intentional architectural corrections).
+2. Re-run equivalence diff. Confirm the GATE_GAP classes drop to zero.
+3. Operator signs off in writing (commit message OK) accepting the ~10,776 intentional corrections: per-domain bucketing (Remux→AudioFix), MinSourceBpp override (Transcode→Remux/null/AudioFix), and stale-data refreshes (Remux→null).
+4. Then resume directive 6 (this one): pg_dump backup → GENERATED column install → disable old Compliance → smoke → 48h observation → rip.
 
 ## Acceptance Criteria (drafted)
 
