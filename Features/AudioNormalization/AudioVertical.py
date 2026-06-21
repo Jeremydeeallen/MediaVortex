@@ -23,12 +23,20 @@ class AudioVertical:
             Compliant, Reason = self._EvaluateOne(Id)
             self._WriteResult(Id, Compliant, Reason)
 
-    # directive: compliance-schema-and-audio
+    # directive: audio-vertical-gate-propagation
     def _EvaluateOne(self, MediaFileId: int):
-        """Return (Compliant, Reason) for one MediaFileId. Mapping: admitted + AudioComplete=TRUE -> (TRUE, NULL); admitted + AudioComplete!=TRUE -> (FALSE, 'needs_normalization'); deferred -> (NULL, DeferReason)."""
+        """Return (Compliant, Reason). Order: upstream audio gates -> admission gate -> AudioComplete. Gate-blocked -> (NULL, reason); admitted+complete -> (TRUE, NULL); admitted+incomplete -> (FALSE, 'needs_normalization'); deferred -> (NULL, DeferReason)."""
         Mf = self._RepoMgr.GetMediaFileById(MediaFileId)
         if Mf is None:
             raise ValueError(f"MediaFileId {MediaFileId} not found")
+        if getattr(Mf, 'AudioCorruptSuspect', None) is True:
+            return (None, 'audio_corrupt_suspect')
+        if getattr(Mf, 'HasExplicitEnglishAudio', None) is False:
+            return (None, 'no_english_audio')
+        if not getattr(Mf, 'AudioCodec', None) and getattr(Mf, 'Resolution', None):
+            return (None, 'no_audio_stream')
+        if getattr(Mf, 'LoudnessMeasurementFailureReason', None):
+            return (None, 'loudness_measurement_failed')
         Decision = self._Gate.AdmitOrDefer(Mf)
         if Decision.Outcome != 'admitted':
             return (None, Decision.DeferReason)

@@ -38,11 +38,28 @@ Investigation directive `mismatch-investigation` (2026-06-21) classified the 6 m
 | `(null) → Remux` | 116 | MIXED | Same fix as Class 1 (audio gate propagation; container issue resurfaces post-fix) |
 | `(null) → AudioFix` | 18 | GATE_GAP | Same fix as Class 1 |
 
-**Before resuming:**
-1. Land the AudioVertical gate-propagation fix (next directive: `audio-vertical-gate-propagation`). Resolves 1,459 mismatches. Post-fix equivalence: 78.6% MATCH / 21.4% MISMATCH (with the remaining 21.4% all intentional architectural corrections).
-2. Re-run equivalence diff. Confirm the GATE_GAP classes drop to zero.
-3. Operator signs off in writing (commit message OK) accepting the ~10,776 intentional corrections: per-domain bucketing (Remux→AudioFix), MinSourceBpp override (Transcode→Remux/null/AudioFix), and stale-data refreshes (Remux→null).
-4. Then resume directive 6 (this one): pg_dump backup → GENERATED column install → disable old Compliance → smoke → 48h observation → rip.
+**Status after AudioVertical gate-propagation fix (2026-06-21, directive `audio-vertical-gate-propagation` closed):**
+
+Equivalence diff after fix: 37,001 MATCH / 13,302 MISMATCH. The match count went DOWN from 38,057 because the gate-propagation correctly identified gate-blocked-audio-with-bad-video files (~2,492) that old Compliance was incorrectly auto-routing to Transcode -- those now sit in `(null)` awaiting operator review. ALL 13,302 mismatches are now categorically explained:
+
+| Class | Count | Verdict |
+|---|---|---|
+| Remux -> AudioFix | 6,922 | CORRECTION (per-domain bucketing) |
+| Transcode -> (null) | 3,436 | CORRECTION (efficient_bpp_override OR gate-held audio + bad video) |
+| Transcode -> Remux | 2,318 | CORRECTION (MinSourceBpp override) |
+| Remux -> (null) | 334 | CORRECTION (stale old data OR gate-held audio) |
+| Transcode -> AudioFix | 288 | CORRECTION (per-domain bucketing) |
+| (null) -> Remux | 3 | ProfileThresholds residual (fixed in directive 3) |
+| (null) -> Transcode | 1 | ProfileThresholds residual (fixed in directive 3) |
+| **TOTAL** | **13,302** | 13,298 explained + 4 residuals (resolved by directive 3) |
+
+**Remaining prerequisites before resuming this directive:**
+
+1. Land directive 3 (`effective-profile-to-profiles`): VideoVertical handles `Profile.TargetResolutionCategory IS NULL` -> `(NULL, 'no_profile_thresholds')`. Resolves the 4 residuals.
+2. Land directive 4 (`video-vertical-inline`): inline the TranscodeOperation wrap so VideoVertical no longer depends on dying Compliance.
+3. Land directive 5 (`compliance-tabbed-ui`): build /Compliance shell with three per-vertical settings tabs.
+4. Operator written acceptance of the 13,298 architectural corrections (commit message at directive 5 close suffices).
+5. Then resume this directive: pg_dump backup -> GENERATED column install -> disable old Compliance -> live smoke -> 48h observation -> rip.
 
 ## Acceptance Criteria (drafted)
 
