@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path as _SpoolPath
 from typing import Any, Dict, List
 
+from psycopg2.extras import Json as _PgJson
+
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalExists, LocalIsDir, LocalJoin, LocalSplitExt
@@ -73,7 +75,14 @@ def BackupMediaFile(MediaFileId: int) -> BackupHandle:
     if not Rows:
         raise ValueError(f"MediaFile {MediaFileId} not found")
     MediaFileRow = _Stringify(dict(Rows[0]))
-    CanonicalPath = MediaFileRow.get('FilePath') or MediaFileRow.get('filepath') or ''
+    _Sid = MediaFileRow.get('storagerootid')
+    _Rel = MediaFileRow.get('relativepath') or ''
+    if _Sid is not None:
+        from Core.Path.Path import Path as _CanonPath
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GetPrefixMap
+        CanonicalPath = _CanonPath(int(_Sid), _Rel).CanonicalDisplay(_GetPrefixMap())
+    else:
+        CanonicalPath = ''
     LocalPath = ResolveLocalPathForMediaFile(MediaFileId, Db)
     if not LocalPath or not LocalExists(LocalPath):
         raise FileNotFoundError(f"MediaFile {MediaFileId} local path {LocalPath!r} does not exist; cannot back up. (Canonical: {CanonicalPath!r})")
@@ -157,7 +166,7 @@ def _ReinsertRow(Db: DatabaseService, TableName: str, Row: Dict[str, Any]) -> No
     Cols = list(Row.keys())
     Placeholders = ','.join(['%s'] * len(Cols))
     ColList = ','.join(Cols)
-    Values = tuple(Row[C] for C in Cols)
+    Values = tuple(_PgJson(Row[C]) if isinstance(Row[C], (dict, list)) else Row[C] for C in Cols)
     Db.ExecuteNonQuery(f"INSERT INTO {TableName} ({ColList}) VALUES ({Placeholders})", Values)
 
 

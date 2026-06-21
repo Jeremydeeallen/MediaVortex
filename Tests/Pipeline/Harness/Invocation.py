@@ -216,15 +216,37 @@ def _Invoke(MediaFileId: int, ProcessingMode: str, TimeoutSec: int = 900) -> int
     Db = DatabaseService()
     Deadline = time.time() + TimeoutSec
     AttemptId = None
+    NoReplaceDispositions = {'Discard', 'NoReplace'}
     while time.time() < Deadline:
         AttemptId = _FindLatestAttemptId(MediaFileId, SinceTs)
         if AttemptId is not None:
-            Rows = Db.ExecuteQuery("SELECT Success FROM TranscodeAttempts WHERE Id = %s", (AttemptId,))
-            if Rows and Rows[0].get('Success') is not None:
-                LoggingService.LogInfo(f"Harness saw TranscodeAttempts Success={Rows[0]['Success']} for AttemptId={AttemptId}", "Invocation", "_Invoke")
-                return AttemptId
+            Rows = Db.ExecuteQuery("SELECT Success, ErrorMessage, Disposition, DispositionReason, FileReplaced, TranscodeDurationSeconds, WorkerName FROM TranscodeAttempts WHERE Id = %s", (AttemptId,))
+            if Rows:
+                R = Rows[0]
+                if R.get('Success') is False:
+                    raise RuntimeError(f"TranscodeAttempt {AttemptId} for MediaFile {MediaFileId} completed with Success=False. ErrorMessage={R.get('ErrorMessage')!r} Disposition={R.get('Disposition')!r} DispositionReason={R.get('DispositionReason')!r}")
+                Disp = R.get('Disposition')
+                Replaced = R.get('FileReplaced')
+                if R.get('Success') is True and (Replaced is True or Disp in NoReplaceDispositions):
+                    Msg = f"Harness saw terminal AttemptId={AttemptId} Success={R['Success']} Disposition={Disp!r} DispositionReason={R.get('DispositionReason')!r} FileReplaced={Replaced!r} Worker={R.get('WorkerName')!r} Dur={R.get('TranscodeDurationSeconds')!r}s"
+                    LoggingService.LogInfo(Msg, "Invocation", "_Invoke")
+                    print(f"\n[HARNESS] {Msg}", flush=True)
+                    return AttemptId
         time.sleep(3)
-    raise TimeoutError(f"No completed TranscodeAttempt for MediaFile {MediaFileId} after {TimeoutSec}s. AttemptId observed: {AttemptId}. Check worker logs.")
+    Last = None
+    if AttemptId is not None:
+        Rows = Db.ExecuteQuery("SELECT Success, Disposition, DispositionReason FROM TranscodeAttempts WHERE Id = %s", (AttemptId,))
+        Last = Rows[0] if Rows else None
+    raise TimeoutError(f"No terminal-disposition TranscodeAttempt for MediaFile {MediaFileId} after {TimeoutSec}s. AttemptId observed: {AttemptId}. Last seen: {Last!r}. VMAF worker may be stuck or QualityTesting disabled inconsistently.")
+
+
+def GetAttemptDetails(AttemptId: int) -> dict:
+    """Return Disposition/Reason/FileReplaced/etc for a completed attempt; tests branch on this rather than assuming a codec change."""
+    Db = DatabaseService()
+    Rows = Db.ExecuteQuery("SELECT Success, Disposition, DispositionReason, FileReplaced, ErrorMessage, WorkerName, TranscodeDurationSeconds FROM TranscodeAttempts WHERE Id = %s", (AttemptId,))
+    if not Rows:
+        raise ValueError(f"TranscodeAttempt {AttemptId} not found")
+    return dict(Rows[0])
 
 
 def InvokeQuickFix(MediaFileId: int) -> int:

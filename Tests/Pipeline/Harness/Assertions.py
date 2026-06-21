@@ -156,7 +156,7 @@ def AssertNoQueueRows(MediaFileId: int) -> None:
 def AssertVideoCodecMatchesProfile(MediaFileId: int) -> None:
     """Assert the file's current video codec matches its AssignedProfile codec (with known libsvtav1/libx264/libx265 aliasing)."""
     Db = DatabaseService()
-    Rows = Db.ExecuteQuery("SELECT m.FilePath, m.Codec AS CurrentCodec, m.AssignedProfile, p.Codec AS ProfileCodec FROM MediaFiles m LEFT JOIN Profiles p ON p.ProfileName = m.AssignedProfile WHERE m.Id = %s", (MediaFileId,))
+    Rows = Db.ExecuteQuery("SELECT m.RelativePath, m.Codec AS CurrentCodec, m.AssignedProfile, p.Codec AS ProfileCodec FROM MediaFiles m LEFT JOIN Profiles p ON p.ProfileName = m.AssignedProfile WHERE m.Id = %s", (MediaFileId,))
     if not Rows:
         raise AssertionError(f"MediaFile {MediaFileId} not found")
     R = Rows[0]
@@ -167,4 +167,4 @@ def AssertVideoCodecMatchesProfile(MediaFileId: int) -> None:
     Aliases = {'libsvtav1': 'av1', 'libaom-av1': 'av1', 'av1_nvenc': 'av1', 'libx264': 'h264', 'libx265': 'hevc', 'hevc_nvenc': 'hevc'}
     Normalized = Aliases.get(ProfileCodec, ProfileCodec)
     if CurrentCodec != Normalized:
-        raise AssertionError(f"MediaFile {MediaFileId} video codec mismatch: current={CurrentCodec!r}, profile={ProfileCodec!r} (normalized to {Normalized!r}), file={R.get('FilePath')!r}")
+        raise AssertionError(f"MediaFile {MediaFileId} video codec mismatch: current={CurrentCodec!r}, profile={ProfileCodec!r} (normalized to {Normalized!r}), file={R.get('RelativePath')!r}")

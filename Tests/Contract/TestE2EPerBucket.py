@@ -12,7 +12,7 @@ from Tests.Pipeline.Harness import Fixtures
 from Tests.Pipeline.Harness import PermanentFixtures
 from Tests.Pipeline.Harness.Backup import BackupMediaFile, RestoreMediaFile
 from Tests.Pipeline.Harness.HarnessPathResolver import ResolveLocalPathForMediaFile
-from Tests.Pipeline.Harness.Invocation import InvokeQuickFix, InvokeTranscode
+from Tests.Pipeline.Harness.Invocation import InvokeQuickFix, InvokeTranscode, GetAttemptDetails
 from Tests.Pipeline.Harness.Assertions import (
     AssertDbState,
     AssertNoQueueRows,
@@ -21,10 +21,18 @@ from Tests.Pipeline.Harness.Assertions import (
 )
 
 
-# directive: e2e-pipeline-test-framework
-def _CurrentCanonicalPath(MediaFileId: int) -> str:
-    Rows = DatabaseService().ExecuteQuery("SELECT FilePath FROM MediaFiles WHERE Id = %s", (MediaFileId,))
-    return Rows[0]['FilePath']
+# directive: harness-drift-fixes
+def _RequireReplacingDisposition(AttemptId: int) -> dict:
+    """A transcode test only proves end-to-end pipeline health if disposition led to a file replacement. Fail informatively otherwise."""
+    D = GetAttemptDetails(AttemptId)
+    Disp = D.get('disposition') or D.get('Disposition')
+    Reason = D.get('dispositionreason') or D.get('DispositionReason')
+    Replaced = D.get('filereplaced') or D.get('FileReplaced')
+    if Disp in ('Discard', 'NoReplace'):
+        raise AssertionError(f"Pipeline ran but did not replace the file. AttemptId={AttemptId} Disposition={Disp!r} Reason={Reason!r}. Fixture not suitable for transcode-replacement assertion; choose a higher-bitrate source or accept this terminal state.")
+    if not Replaced:
+        raise AssertionError(f"AttemptId={AttemptId} Disposition={Disp!r} but FileReplaced is falsy ({Replaced!r}). Replacement step did not complete.")
+    return D
 
 
 # directive: e2e-pipeline-test-framework
@@ -49,6 +57,7 @@ def test_transcode_bucket_e2e():
         assert Pre['WorkBucket'] == 'Transcode', f"Pre-state expected Transcode, got {Pre['WorkBucket']}"
         AttemptId = InvokeTranscode(MediaFileId)
         assert AttemptId > 0
+        _RequireReplacingDisposition(AttemptId)
         AssertVideoCodecMatchesProfile(MediaFileId)
         AssertDbState(
             MediaFileId,
@@ -77,6 +86,7 @@ def test_remux_bucket_e2e():
         assert Pre['ContainerCompliant'] is False
         AttemptId = InvokeQuickFix(MediaFileId)
         assert AttemptId > 0
+        _RequireReplacingDisposition(AttemptId)
         AssertDbState(
             MediaFileId,
             WorkBucket=None,
@@ -106,6 +116,7 @@ def test_audiofixonly_bucket_e2e():
         assert Pre['ContainerCompliant'] is True
         AttemptId = InvokeQuickFix(MediaFileId)
         assert AttemptId > 0
+        _RequireReplacingDisposition(AttemptId)
         PostLocalPath = ResolveLocalPathForMediaFile(MediaFileId)
         AssertIntegratedLoudnessNear(PostLocalPath, TargetLufs=-23.0, ToleranceLU=1.0)
         AssertDbState(
