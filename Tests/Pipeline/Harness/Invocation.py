@@ -48,22 +48,14 @@ def _EnsureWorkerContext(WorkerName: str = "I9-2024") -> None:
             f"cannot initialize WorkerContext for the harness"
         )
     R = Rows[0]
-    MountRows = Db.ExecuteQuery(
-        "SELECT DriveLetter, LocalMountPrefix FROM WorkerShareMappings WHERE WorkerName = %s",
-        (WorkerName,),
-    )
-    MountMap = {M['DriveLetter']: M['LocalMountPrefix'] for M in MountRows}
     WorkerContext.Initialize(
         WorkerName=WorkerName,
         Platform=R.get('Platform') or 'windows',
         FFmpegPath=R.get('FFmpegPath'),
         FFprobePath=R.get('FFprobePath'),
-        ShareMappings=MountMap,
     )
     LoggingService.LogInfo(
-        f"Harness initialized WorkerContext for {WorkerName}: "
-        f"FFmpegPath={R.get('FFmpegPath')!r}, "
-        f"ShareMappings={len(MountMap)} drives",
+        f"Harness initialized WorkerContext for {WorkerName}: FFmpegPath={R.get('FFmpegPath')!r}",
         "Invocation", "_EnsureWorkerContext",
     )
 
@@ -97,14 +89,20 @@ def _InsertQueueRow(MediaFileId: int, ProcessingMode: str) -> int:
     """
     Db = DatabaseService()
     Rows = Db.ExecuteQuery(
-        "SELECT StorageRootId, RelativePath, FilePath, FileName, FileSize AS SizeBytes, "
+        "SELECT StorageRootId, RelativePath, FileName, FileSize AS SizeBytes, "
         "SizeMB, AssignedProfile, PriorityScore "
         "FROM MediaFiles WHERE Id = %s",
         (MediaFileId,),
     )
     if not Rows:
         raise ValueError(f"MediaFile {MediaFileId} not found")
-    M = Rows[0]  # CaseInsensitiveDict -- access via M['Anything'] is case-insensitive
+    M = Rows[0]
+    _PrefixMap = {int(R['Id']): R['CanonicalPrefix'] for R in Db.ExecuteQuery("SELECT Id, CanonicalPrefix FROM StorageRoots")}
+    _Sid = M.get('StorageRootId')
+    _Rel = (M.get('RelativePath') or '').replace('/', '\\')
+    _SynthesizedFilePath = (_PrefixMap.get(int(_Sid), '') + _Rel) if _Sid is not None else ''
+    M = dict(M)
+    M['FilePath'] = _SynthesizedFilePath
 
     # MediaFiles.FileSize is often NULL on rows the probe never populated.
     # ProcessJob propagates Job.SizeBytes to TranscodeAttempts.OldSizeBytes,
@@ -131,18 +129,13 @@ def _InsertQueueRow(MediaFileId: int, ProcessingMode: str) -> int:
     # Use ExecuteNonQuery so the INSERT commits; ExecuteQuery does not commit
     # and the RETURNING row would be rolled back on connection close.
     Db.ExecuteNonQuery(
-        """
-        INSERT INTO TranscodeQueue
-          (StorageRootId, RelativePath, FilePath, FileName, Directory,
-           SizeBytes, SizeMB, Priority, Status, DateAdded,
-           ProcessingMode, MediaFileId)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING Id
-        """,
+        "INSERT INTO TranscodeQueue "
+        "(StorageRootId, RelativePath, FileName, Directory, "
+        "SizeBytes, SizeMB, Priority, Status, DateAdded, ProcessingMode, MediaFileId) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING Id",
         (
             M.get('StorageRootId'),
             M.get('RelativePath') or '',
-            M.get('FilePath'),
             M.get('FileName'),
             os.path.dirname(M.get('FilePath') or ''),
             SizeBytes,
@@ -211,39 +204,27 @@ def _FindLatestAttemptId(MediaFileId: int, SinceTs: float) -> Optional[int]:
     return int(Rows[0]['Id'])
 
 
-def _Invoke(MediaFileId: int, ProcessingMode: str) -> int:
-    """Internal: enqueue, drive ProcessJob, return TranscodeAttemptId."""
+def _Invoke(MediaFileId: int, ProcessingMode: str, TimeoutSec: int = 900) -> int:
+    """Enqueue + wait for a real worker to claim + complete. Returns the TranscodeAttempt Id."""
     _EnsureWorkerContext()
     _AssertNoActiveWork(MediaFileId)
 
     SinceTs = time.time()
     QueueId = _InsertQueueRow(MediaFileId, ProcessingMode)
+    LoggingService.LogInfo(f"Harness enqueued QueueId={QueueId}; polling for worker pickup", "Invocation", "_Invoke")
 
-    # Build the QueueModel and invoke the real pipeline. ProcessJob handles
-    # ActiveJobs creation, queue status updates, FFmpeg execution, file
-    # replacement, and queue cleanup. Synchronous; we just call it.
-    from Features.TranscodeJob.ProcessTranscodeQueueService import ProcessTranscodeQueueService
-    Svc = ProcessTranscodeQueueService(WorkerName="I9-2024")
-    Job = _LoadQueueModel(QueueId)
-    LoggingService.LogInfo(
-        f"Harness invoking ProcessJob(QueueId={QueueId}, Mode={ProcessingMode}, "
-        f"MediaFileId={MediaFileId})",
-        "Invocation", "_Invoke",
-    )
-    Svc.ProcessJob(Job)
-    LoggingService.LogInfo(
-        f"Harness ProcessJob returned for QueueId={QueueId}",
-        "Invocation", "_Invoke",
-    )
-
-    AttemptId = _FindLatestAttemptId(MediaFileId, SinceTs)
-    if AttemptId is None:
-        raise RuntimeError(
-            f"ProcessJob ran for MediaFile {MediaFileId} but no TranscodeAttempts "
-            f"row was created with AttemptDate >= {SinceTs}. The pipeline failed "
-            f"before reaching the attempt-record step; check worker logs."
-        )
-    return AttemptId
+    Db = DatabaseService()
+    Deadline = time.time() + TimeoutSec
+    AttemptId = None
+    while time.time() < Deadline:
+        AttemptId = _FindLatestAttemptId(MediaFileId, SinceTs)
+        if AttemptId is not None:
+            Rows = Db.ExecuteQuery("SELECT Success FROM TranscodeAttempts WHERE Id = %s", (AttemptId,))
+            if Rows and Rows[0].get('Success') is not None:
+                LoggingService.LogInfo(f"Harness saw TranscodeAttempts Success={Rows[0]['Success']} for AttemptId={AttemptId}", "Invocation", "_Invoke")
+                return AttemptId
+        time.sleep(3)
+    raise TimeoutError(f"No completed TranscodeAttempt for MediaFile {MediaFileId} after {TimeoutSec}s. AttemptId observed: {AttemptId}. Check worker logs.")
 
 
 def InvokeQuickFix(MediaFileId: int) -> int:

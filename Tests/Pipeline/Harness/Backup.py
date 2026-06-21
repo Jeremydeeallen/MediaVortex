@@ -237,7 +237,8 @@ def RestoreMediaFile(Handle: BackupHandle) -> None:
     _DeleteCurrentRowsFor(Db, Handle.MediaFileId)
 
     MfRow = _ParseTimestamps(Handle.MediaFileRow)
-    SetCols = [C for C in MfRow.keys() if C.lower() != 'id']
+    _GENERATED_COLUMNS = {'workbucket', 'iscompliant'}
+    SetCols = [C for C in MfRow.keys() if C.lower() != 'id' and C.lower() not in _GENERATED_COLUMNS]
     SetClause = ', '.join(f"{C} = %s" for C in SetCols)
     Values = tuple(MfRow[C] for C in SetCols) + (Handle.MediaFileId,)
     Db.ExecuteNonQuery(f"UPDATE MediaFiles SET {SetClause} WHERE Id = %s", Values)
