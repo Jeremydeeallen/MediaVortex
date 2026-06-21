@@ -65,7 +65,6 @@ C5. Failure-loudly: missing rules row -> `RuntimeError`; missing MediaFileId -> 
 ## Known Gap to Target
 
 - BPP override uses 24fps assumption. Real probe of fps would improve accuracy. Filed for future enhancement.
-- VideoVertical depends on `Features/Compliance/` (TranscodeOperation + EffectiveProfileResolver). Dependencies dissolve at directive 7 (Compliance rip + EffectiveProfileResolver rehome to Profiles).
 
 ## Status
 

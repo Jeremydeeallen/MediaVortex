@@ -1,11 +1,12 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
+from Core.Resolution.ResolutionTier import ResolutionTier
+from Core.Resolution.ResolutionTierRegistry import ResolutionTierRegistry
 from Repositories.DatabaseManager import DatabaseManager
-from Features.Compliance.Operations.TranscodeOperation import TranscodeOperation
 from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
-from Features.Compliance.Models.TranscodeRulesModel import TranscodeRulesModel
+from Features.Profiles.EffectiveProfile import EffectiveProfile
 
 
 _PIXEL_COUNTS = {
@@ -17,28 +18,28 @@ _PIXEL_COUNTS = {
 _ASSUMED_FPS = 24
 
 
-# directive: video-vertical-and-bpp
+# directive: video-vertical-inline
 class VideoVertical:
-    """Video compliance vertical: writes (VideoCompliant, VideoCompliantReason). Temporarily wraps Features/Compliance/Operations/TranscodeOperation for equivalence; wrap dies at directive 7."""
+    """Video compliance vertical -- self-contained. Evaluates codec acceptable, resolution exceeds target, savings meaningful, no upscale + MinSourceBpp override. Writes (VideoCompliant, VideoCompliantReason). Reads VideoComplianceRules fresh per call."""
 
-    # directive: video-vertical-and-bpp
-    def __init__(self, Db: Optional[DatabaseService] = None, RepoMgr: Optional[DatabaseManager] = None, ProfileResolver: Optional[EffectiveProfileResolver] = None, Op: Optional[TranscodeOperation] = None):
+    # directive: video-vertical-inline
+    def __init__(self, Db: Optional[DatabaseService] = None, RepoMgr: Optional[DatabaseManager] = None, ProfileResolver: Optional[EffectiveProfileResolver] = None, TierRegistry: Optional[ResolutionTierRegistry] = None):
         self._Db = Db or DatabaseService()
         self._RepoMgr = RepoMgr or DatabaseManager()
         self._Resolver = ProfileResolver or EffectiveProfileResolver()
-        self._Op = Op or TranscodeOperation()
+        self._TierRegistry = TierRegistry or ResolutionTierRegistry()
 
-    # directive: video-vertical-and-bpp
+    # directive: video-vertical-inline
     def RecomputeFor(self, MediaFileIds: List[int]) -> None:
-        """Per-id: wrap TranscodeOperation; apply MinSourceBpp override; write columns."""
+        """Per-id: evaluate predicates + apply MinSourceBpp override + write columns."""
         Rules = self._LoadRules()
         for Id in MediaFileIds:
             Compliant, Reason = self._EvaluateOne(Id, Rules)
             self._WriteResult(Id, Compliant, Reason)
 
-    # directive: video-vertical-and-bpp
+    # directive: video-vertical-inline
     def _LoadRules(self) -> dict:
-        """Fresh DB read per call. Returns dict with TranscodeRulesModel-shaped fields + MinSourceBpp."""
+        """Fresh DB read per call (db-is-authority)."""
         Rows = self._Db.ExecuteQuery(
             "SELECT AcceptableVideoCodecsCsv, EstimatedSavingsMBThreshold, PreventUpscale, ResolutionExceedsProfileTarget, MinSourceBpp "
             "FROM VideoComplianceRules ORDER BY Id LIMIT 1"
@@ -46,16 +47,15 @@ class VideoVertical:
         if not Rows:
             raise RuntimeError("VideoComplianceRules has no rows -- migration not applied")
         R = Rows[0]
-        Wrapped = TranscodeRulesModel(
-            Id=1,
-            AcceptableVideoCodecsCsv=R['AcceptableVideoCodecsCsv'],
-            EstimatedSavingsMBThreshold=R['EstimatedSavingsMBThreshold'],
-            PreventUpscale=R['PreventUpscale'],
-            ResolutionExceedsProfileTarget=R['ResolutionExceedsProfileTarget'],
-        )
-        return {'Wrapped': Wrapped, 'MinSourceBpp': float(R['MinSourceBpp'])}
+        return {
+            'AcceptableCodecs': self._ParseCsv(R['AcceptableVideoCodecsCsv']),
+            'SavingsThreshold': int(R['EstimatedSavingsMBThreshold']),
+            'PreventUpscale': bool(R['PreventUpscale']),
+            'ResolutionExceedsProfileTarget': bool(R['ResolutionExceedsProfileTarget']),
+            'MinSourceBpp': float(R['MinSourceBpp']),
+        }
 
-    # directive: video-vertical-and-bpp
+    # directive: video-vertical-inline
     def _EvaluateOne(self, MediaFileId: int, Rules: dict):
         Mf = self._RepoMgr.GetMediaFileById(MediaFileId)
         if Mf is None:
@@ -65,17 +65,56 @@ class VideoVertical:
             return (None, 'no_effective_profile')
         if Profile.TargetResolutionCategory is None:
             return (None, 'no_profile_thresholds')
-        Result = self._Op.Apply(Mf, Profile, Rules['Wrapped'])
-        if not Result.Applies:
+
+        SrcTier = self._TierRegistry.FromCategory(getattr(Mf, 'ResolutionCategory', None))
+        TgtTier = Profile.TargetResolutionCategory
+
+        if Rules['PreventUpscale'] and SrcTier is not None and SrcTier.Rank < TgtTier.Rank:
+            return (True, 'upscale_prevented')
+
+        Applies = False
+        Reason = None
+
+        if Rules['ResolutionExceedsProfileTarget'] and SrcTier is not None and SrcTier.Rank > TgtTier.Rank:
+            Applies = True
+            Reason = f'ResolutionExceedsProfileTarget:{SrcTier.Name}'
+
+        SrcCodec = (getattr(Mf, 'Codec', None) or '').lower()
+        if SrcCodec and SrcCodec not in Rules['AcceptableCodecs']:
+            Applies = True
+            if Reason is None:
+                Reason = f'AcceptableVideoCodecsCsv:{SrcCodec}'
+
+        MvTrusted = bool(getattr(Mf, 'TranscodedByMediaVortex', False))
+        EstSavings = self._EstimatedSavingsMB(Mf, Profile)
+        if EstSavings is not None and EstSavings >= Rules['SavingsThreshold'] and not MvTrusted:
+            Applies = True
+            if Reason is None:
+                Reason = f'EstimatedSavingsMBThreshold:{round(EstSavings, 1)}'
+
+        if not Applies:
             return (True, None)
         if self._IsAlreadyEfficient(Mf, Rules['MinSourceBpp']):
             return (True, 'efficient_bpp_override')
-        Reason = self._FirstApplyReason(Result.Reasons)
-        return (False, Reason)
+        return (False, Reason or 'unspecified')
 
-    # directive: video-vertical-and-bpp
+    @staticmethod
+    # directive: video-vertical-inline
+    def _EstimatedSavingsMB(Mf, Profile: EffectiveProfile) -> Optional[float]:
+        TargetVk = Profile.TargetVideoKbps
+        if not TargetVk:
+            return None
+        Dur = getattr(Mf, 'DurationMinutes', None)
+        if Dur is None or Dur <= 0:
+            return None
+        TargetAk = Profile.TargetAudioKbps if Profile.TargetAudioKbps else 0
+        TargetSizeMB = ((TargetVk + TargetAk) * Dur * 60.0) / (8 * 1024)
+        SrcSize = getattr(Mf, 'SizeMB', None) or 0.0
+        return max(0.0, SrcSize - TargetSizeMB)
+
+    # directive: video-vertical-inline
     def _IsAlreadyEfficient(self, Mf, MinBpp: float) -> bool:
-        """Compute BPP from VideoBitrateKbps + ResolutionCategory; True if source is already at-or-below MinBpp (no transcode benefit)."""
+        """BPP = (VideoBitrateKbps * 1000) / (Pixels * 24fps); True if source already at-or-below MinBpp."""
         Bitrate = getattr(Mf, 'VideoBitrateKbps', None)
         Tier = (getattr(Mf, 'ResolutionCategory', None) or '').lower()
         if not Bitrate or Tier not in _PIXEL_COUNTS:
@@ -85,14 +124,13 @@ class VideoVertical:
         return Bpp < MinBpp
 
     @staticmethod
-    # directive: video-vertical-and-bpp
-    def _FirstApplyReason(Reasons) -> str:
-        for R in Reasons:
-            if R.get('Outcome') == 'applies':
-                return f"{R.get('Rule', '?')}:{R.get('Actual', '?')}"
-        return 'unspecified'
+    # directive: video-vertical-inline
+    def _ParseCsv(Csv: Optional[str]) -> set:
+        if not Csv:
+            return set()
+        return {Tok.strip().lower() for Tok in Csv.split(',') if Tok.strip()}
 
-    # directive: video-vertical-and-bpp
+    # directive: video-vertical-inline
     def _WriteResult(self, MediaFileId: int, Compliant, Reason):
         self._Db.ExecuteNonQuery(
             "UPDATE MediaFiles SET VideoCompliant = %s, VideoCompliantReason = %s WHERE Id = %s",
