@@ -120,3 +120,4 @@ drain_invalid_measurement.log
 web-startup.log
 web-startup.err
 .e2e_preservation/
+Scripts/SQLScripts/backups/

@@ -28,7 +28,7 @@ CANDIDATE_QUERY = (
 )
 
 CLEAR_COMPLIANCE_SQL = (
-    "UPDATE MediaFiles SET WorkBucket = NULL, OperationsNeededCsv = NULL, "
+    "UPDATE MediaFiles SET OperationsNeededCsv = NULL, "
     "ComplianceGateBlocked = NULL, IsCompliant = NULL, ComplianceEvaluatedAt = NULL "
     "WHERE Id = %s"
 )

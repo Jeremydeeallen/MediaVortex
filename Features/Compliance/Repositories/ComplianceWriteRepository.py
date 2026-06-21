@@ -36,7 +36,6 @@ class ComplianceWriteRepository(BaseRepository):
                 "PriorityScore = v.score, "
                 "IsCompliant = v.compliant::boolean, "
                 "AdmissionDeferReason = v.defer_reason, "
-                "WorkBucket = v.work_bucket, "
                 "OperationsNeededCsv = v.ops_csv, "
                 "ComplianceGateBlocked = v.gate_blocked, "
                 "ComplianceEvaluatedAt = NOW() "
