@@ -1,6 +1,6 @@
 from typing import List, Tuple
 from Models.MediaFileModel import MediaFileModel
-from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
+from Features.Profiles.EffectiveProfile import EffectiveProfile
 from Features.Compliance.Models.OperationResult import OperationResult
 from Features.Compliance.Models.ComplianceRuleCache import ComplianceRuleCache
 from Features.Compliance.Operations.IComplianceOperation import IComplianceOperation

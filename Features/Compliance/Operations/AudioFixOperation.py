@@ -1,5 +1,5 @@
 from Models.MediaFileModel import MediaFileModel
-from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
+from Features.Profiles.EffectiveProfile import EffectiveProfile
 from Features.Compliance.Models.OperationResult import OperationResult
 from Features.Compliance.Models.AudioFixRulesModel import AudioFixRulesModel
 from Features.Compliance.Operations.IComplianceOperation import IComplianceOperation

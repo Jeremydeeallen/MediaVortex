@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from Models.MediaFileModel import MediaFileModel
 from Core.Resolution.ResolutionTier import ResolutionTier
-from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
+from Features.Profiles.EffectiveProfile import EffectiveProfile
 from Features.Compliance.Models.ComplianceRuleCache import ComplianceRuleCache
 from Features.Compliance.Models.ComplianceGatesModel import ComplianceGatesModel
 from Features.Compliance.Models.TranscodeRulesModel import TranscodeRulesModel

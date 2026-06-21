@@ -1,6 +1,6 @@
 from typing import List, Optional
 from Models.MediaFileModel import MediaFileModel
-from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
+from Features.Profiles.EffectiveProfile import EffectiveProfile
 from Features.Compliance.Models.ComplianceGatesModel import ComplianceGatesModel
 from Features.Compliance.Gates.IComplianceGate import IComplianceGate
 

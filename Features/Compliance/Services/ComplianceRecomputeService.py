@@ -3,7 +3,7 @@ from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Models.MediaFileModel import MediaFileModel
 from Features.Compliance.ComplianceComposition import BuildEvaluator, BuildRuleCache
-from Features.Compliance.Services.EffectiveProfileResolver import EffectiveProfileResolver
+from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
 
 
 # directive: compliance-solid-refactor | # see compliance-solid-refactor.C23

@@ -2,7 +2,7 @@ from typing import Optional
 from Models.MediaFileModel import MediaFileModel
 from Core.Resolution.ResolutionTier import ResolutionTier
 from Core.Resolution.ResolutionTierRegistry import ResolutionTierRegistry
-from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
+from Features.Profiles.EffectiveProfile import EffectiveProfile
 from Features.Compliance.Models.OperationResult import OperationResult
 from Features.Compliance.Models.TranscodeRulesModel import TranscodeRulesModel
 from Features.Compliance.Operations.IComplianceOperation import IComplianceOperation

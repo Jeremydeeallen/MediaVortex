@@ -7,10 +7,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from Models.MediaFileModel import MediaFileModel
 from Core.Resolution.ResolutionTier import ResolutionTier
-from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
+from Features.Profiles.EffectiveProfile import EffectiveProfile
 from Features.Compliance.Models.TranscodeRulesModel import TranscodeRulesModel
 from Features.Compliance.Operations.TranscodeOperation import TranscodeOperation
-from Features.Compliance.Services.EffectiveProfileResolver import EffectiveProfileResolver
+from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
 
 
 # directive: resolution-types | # see resolution-types.C5

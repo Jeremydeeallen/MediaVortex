@@ -4,7 +4,7 @@ from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
 from Features.Compliance.Operations.TranscodeOperation import TranscodeOperation
-from Features.Compliance.Services.EffectiveProfileResolver import EffectiveProfileResolver
+from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
 from Features.Compliance.Models.TranscodeRulesModel import TranscodeRulesModel
 
 
@@ -63,6 +63,8 @@ class VideoVertical:
         Profile = self._Resolver.Resolve(Mf)
         if Profile is None:
             return (None, 'no_effective_profile')
+        if Profile.TargetResolutionCategory is None:
+            return (None, 'no_profile_thresholds')
         Result = self._Op.Apply(Mf, Profile, Rules['Wrapped'])
         if not Result.Applies:
             return (True, None)

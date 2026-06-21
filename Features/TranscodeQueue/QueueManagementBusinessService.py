@@ -1638,7 +1638,7 @@ class QueueManagementBusinessService:
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C12
     def _BuildEffectiveProfileObj(self, ProfileName: Optional[str], ResolutionCategory: Optional[str], Lookup: Dict[tuple, tuple], VideoBitrateKbps: Optional[int] = None):
         """Delegate to EffectiveProfileResolver -- profile name + source resolution + optional source video kbps fold into a synthesized MediaFileModel-shaped input; resolver handles fixed/VBR/CRF strategy dispatch."""
-        from Features.Compliance.Services.EffectiveProfileResolver import EffectiveProfileResolver
+        from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
         from Models.MediaFileModel import MediaFileModel
         if not ProfileName:
             return None

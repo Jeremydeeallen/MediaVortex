@@ -4,7 +4,7 @@ from Core.Logging.LoggingService import LoggingService
 from Core.Resolution.ResolutionTier import ResolutionTier
 from Core.Resolution.ResolutionTierRegistry import ResolutionTierRegistry
 from Models.MediaFileModel import MediaFileModel
-from Features.Compliance.Models.EffectiveProfile import EffectiveProfile
+from Features.Profiles.EffectiveProfile import EffectiveProfile
 from Features.TranscodeQueue.CrfBitrateEstimateRepository import CrfBitrateEstimateRepository
 
 
