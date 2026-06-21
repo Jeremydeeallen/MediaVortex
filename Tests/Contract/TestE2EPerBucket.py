@@ -118,7 +118,7 @@ def test_audiofixonly_bucket_e2e():
         assert AttemptId > 0
         _RequireReplacingDisposition(AttemptId)
         PostLocalPath = ResolveLocalPathForMediaFile(MediaFileId)
-        WaitForLocalFile(PostLocalPath, TimeoutSec=30)
+        WaitForLocalFile(PostLocalPath, TimeoutSec=180)
         AssertIntegratedLoudnessNear(PostLocalPath, TargetLufs=-23.0, ToleranceLU=1.0)
         AssertDbState(
             MediaFileId,

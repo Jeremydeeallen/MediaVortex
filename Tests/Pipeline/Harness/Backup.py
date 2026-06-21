@@ -248,10 +248,18 @@ def RestoreMediaFile(Handle: BackupHandle) -> None:
 
     MfRow = _ParseTimestamps(Handle.MediaFileRow)
     _GENERATED_COLUMNS = {'workbucket', 'iscompliant'}
-    SetCols = [C for C in MfRow.keys() if C.lower() != 'id' and C.lower() not in _GENERATED_COLUMNS]
-    SetClause = ', '.join(f"{C} = %s" for C in SetCols)
-    Values = tuple(MfRow[C] for C in SetCols) + (Handle.MediaFileId,)
-    Db.ExecuteNonQuery(f"UPDATE MediaFiles SET {SetClause} WHERE Id = %s", Values)
+    WritableCols = [C for C in MfRow.keys() if C.lower() not in _GENERATED_COLUMNS]
+    Exists = Db.ExecuteQuery("SELECT 1 FROM MediaFiles WHERE Id = %s", (Handle.MediaFileId,))
+    if Exists:
+        SetCols = [C for C in WritableCols if C.lower() != 'id']
+        SetClause = ', '.join(f"{C} = %s" for C in SetCols)
+        Values = tuple(MfRow[C] for C in SetCols) + (Handle.MediaFileId,)
+        Db.ExecuteNonQuery(f"UPDATE MediaFiles SET {SetClause} WHERE Id = %s", Values)
+    else:
+        ColList = ','.join(WritableCols)
+        Placeholders = ','.join(['%s'] * len(WritableCols))
+        Values = tuple(_PgJson(MfRow[C]) if isinstance(MfRow[C], (dict, list)) else MfRow[C] for C in WritableCols)
+        Db.ExecuteNonQuery(f"INSERT INTO MediaFiles ({ColList}) VALUES ({Placeholders})", Values)
 
     for TableName in ('TranscodeAttempts', 'TranscodeQueue', 'MediaFilesArchive'):
         for Row in Handle.RelatedRows.get(TableName, []):

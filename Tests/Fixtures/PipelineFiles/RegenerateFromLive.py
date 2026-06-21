@@ -22,7 +22,8 @@ _BUCKET_WHERE = {
     ),
     'Remux': (
         "WorkBucket = 'Remux' "
-        "AND VideoCompliant = TRUE AND AudioCompliant = TRUE AND ContainerCompliant = FALSE"
+        "AND VideoCompliant = TRUE AND AudioCompliant = TRUE AND ContainerCompliant = FALSE "
+        "AND AudioLanguages IS NOT NULL AND POSITION('eng' IN LOWER(AudioLanguages)) > 0"
     ),
     'AudioFixOnly': (
         "WorkBucket = 'AudioFixOnly' "

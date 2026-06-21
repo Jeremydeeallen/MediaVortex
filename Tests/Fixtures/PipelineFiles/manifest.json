@@ -1,5 +1,5 @@
 {
-  "GeneratedAt": "2026-06-21T18:52:54.113759+00:00",
+  "GeneratedAt": "2026-06-21T19:41:42.186518+00:00",
   "Fixtures": {
     "Transcode": {
       "FixtureLocalPath": "C:\\Code\\MediaVortex\\Tests\\Fixtures\\PipelineFiles\\Transcode\\Animaniacs - S03E35 - Belly Button Blues DVD-mv.mp4",
@@ -7,8 +7,8 @@
       "ExpectedBucket": "Transcode"
     },
     "Remux": {
-      "FixtureLocalPath": "C:\\Code\\MediaVortex\\Tests\\Fixtures\\PipelineFiles\\Remux\\Pok\u00e9mon - S14E76 - A Restoration Confrontation! (2) WEBDL-720p.mkv",
-      "SourceMediaFileId": 34751,
+      "FixtureLocalPath": "C:\\Code\\MediaVortex\\Tests\\Fixtures\\PipelineFiles\\Remux\\Adventure Time - S05E35 - Love Games Bluray-480p.mkv",
+      "SourceMediaFileId": 261,
       "ExpectedBucket": "Remux"
     },
     "AudioFixOnly": {

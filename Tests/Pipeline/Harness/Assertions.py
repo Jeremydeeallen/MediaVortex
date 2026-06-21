@@ -136,13 +136,20 @@ def AssertDbState(MediaFileId: int, **Expected: Any) -> None:
 
 
 # directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
-def AssertNoQueueRows(MediaFileId: int) -> None:
-    """Assert TranscodeQueue is empty for this file AND MediaFiles.WorkBucket IS NULL (file is compliant)."""
+def AssertNoQueueRows(MediaFileId: int, TimeoutSec: int = 30) -> None:
+    """Assert TranscodeQueue is empty for this file AND MediaFiles.WorkBucket IS NULL (file is compliant). Polls because HandleRemuxResult deletes the queue row AFTER setting FileReplaced=True; the harness can race that gap."""
+    import time
     Db = DatabaseService()
-    QueueRows = Db.ExecuteQuery("SELECT Id FROM TranscodeQueue WHERE MediaFileId = %s", (MediaFileId,))
-    if QueueRows:
-        Ids = [int(R['Id']) for R in QueueRows]
-        raise AssertionError(f"MediaFile {MediaFileId} still has TranscodeQueue rows: {Ids}")
+    Deadline = time.time() + TimeoutSec
+    LastIds = []
+    while time.time() < Deadline:
+        QueueRows = Db.ExecuteQuery("SELECT Id FROM TranscodeQueue WHERE MediaFileId = %s", (MediaFileId,))
+        if not QueueRows:
+            break
+        LastIds = [int(R['Id']) for R in QueueRows]
+        time.sleep(1)
+    else:
+        raise AssertionError(f"MediaFile {MediaFileId} still has TranscodeQueue rows after {TimeoutSec}s: {LastIds}")
     Flags = Db.ExecuteQuery("SELECT WorkBucket, IsCompliant FROM MediaFiles WHERE Id = %s", (MediaFileId,))
     if not Flags:
         raise AssertionError(f"MediaFile {MediaFileId} not found")
