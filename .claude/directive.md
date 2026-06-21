@@ -2,12 +2,15 @@
 
 **Slug:** harness-drift-fixes
 **Set:** 2026-06-21
-**Closed:** 2026-06-21
-**Status:** Closed -- Success
+**Status:** Active -- phase: IMPLEMENTING
+
+## Reopened
+
+Closed prematurely 2026-06-21 with 4 KNOWN GAPS / DEFERRED. Operator: "NEVER CLOSE IT UNTIL WE AGREE IT IS 100% COMPLETE." Directive widened to require 4/4 green on `pytest -m slow`; the surfaced pipeline issues are now in scope, not follow-ups.
 
 ## Outcome
 
-`Tests/Contract/TestE2EPerBucket.py::test_transcode_bucket_e2e` runs against the live I9 worker fleet and either passes green OR raises an AssertionError naming the exact failure reason (codec mismatch, queue still populated, TranscodeAttempt failure errormessage, etc.). No `UndefinedColumn` exceptions. No silent fast-failure that the test misinterprets as success.
+`py -m pytest Tests/Contract/TestE2EPerBucket.py -m slow -v` runs all 4 slow E2E tests GREEN against the live worker fleet. No timeouts, no AssertionError, no schema crashes. Each test drives a real MediaFile through its bucket's pipeline (Transcode / Remux / AudioFixOnly / already-Compliant) and verifies post-state via direct DB + ffprobe assertions.
 
 ## Acceptance Criteria
 
@@ -19,7 +22,14 @@ C3. `Tests/Pipeline/Harness/Backup.py` builds `OriginalCanonicalPath` from `Stor
 
 C4. `py -m pytest Tests/Contract/TestE2EPerBucket.py::test_transcode_bucket_e2e -m slow -v` runs to completion (success or assertion-with-reason). Smoke-test exit gate per the worker-restart memory rule.
 
-C5. Remaining 3 slow E2E tests (`test_remux_bucket_e2e`, `test_audiofixonly_bucket_e2e`, `test_already_compliant_no_work_e2e`) are also runnable end-to-end. Each either passes green OR fails with an assertion that names the specific failure reason. No remaining schema-drift exceptions in any of the 4 tests.
+C5. All 4 slow E2E tests pass GREEN: `test_transcode_bucket_e2e`, `test_remux_bucket_e2e`, `test_audiofixonly_bucket_e2e`, `test_already_compliant_no_work_e2e`. Each test asserts post-state matches the bucket's expected pipeline outcome (file replaced, codec updated, all three compliance booleans TRUE, WorkBucket NULL, no leftover queue rows).
+
+C6. Pipeline issues surfaced by the harness are FIXED, not deferred:
+  - `BypassReplace` disposition must result in `FileReplaced=True` within reasonable time (post-disposition FileReplacement step actually runs and updates the attempt)
+  - VMAF queue must drain (QT-enabled workers claim and process pending VMAF jobs; nothing stuck for >15min)
+  - Remux fixture must not trigger `ComplianceGateFailed` — either fixture re-curated to one that passes compliance, OR compliance gate logic for Remux dispositions corrected to match reality
+
+C7. `pytest.mark.slow` registered in `pyproject.toml` so `pytest -m slow` runs without unknown-mark warning.
 
 ## Files
 
@@ -36,7 +46,12 @@ C5. Remaining 3 slow E2E tests (`test_remux_bucket_e2e`, `test_audiofixonly_buck
 - [x] C2: Invocation.py raises on Success=False with full reason (ErrorMessage, Disposition, DispositionReason)
 - [x] C3: Backup.py CanonicalPath synthesized via Path.CanonicalDisplay; jsonb dict adapter wraps with psycopg2.extras.Json
 - [x] C4: TestE2EPerBucket transcode test runs to completion — no schema crashes; harness now polls for terminal FileReplaced state and reports the actual stuck disposition rather than masking it
-- [x] C5: All 4 slow tests exercised; each either passes green or raises with the specific pipeline failure reason
+- [x] C5 (partial): 2/4 green (audiofixonly, compliant); 2/4 fail with clear pipeline reasons (transcode TimeoutError VMAF-stuck, remux NoReplace/ComplianceGateFailed)
+- [ ] C5 (full): all 4 green
+- [ ] C6.1: BypassReplace -> FileReplaced=True consistently within 60s
+- [ ] C6.2: VMAF queue drains (no >15min stuck rows)
+- [ ] C6.3: Remux fixture passes ComplianceGateFailed
+- [ ] C7: pytest.mark.slow registered
 
 ### Verification evidence
 
@@ -53,7 +68,7 @@ C5. Remaining 3 slow E2E tests (`test_remux_bucket_e2e`, `test_audiofixonly_buck
   - `test_remux_bucket_e2e`: AssertionError `Pipeline ran but did not replace the file. AttemptId=39197 Disposition='NoReplace' Reason='ComplianceGateFailed'` — pipeline executed end-to-end; remuxed output failed the post-replace compliance gate. Real pipeline behavior, not harness drift.
   - `test_audiofixonly_bucket_e2e`: **PASSED** — full end-to-end through Quick path on the live worker fleet.
   - `test_already_compliant_no_work_e2e`: **PASSED** — idempotent vertical recomputes.
-- **Honest gap**: 2 of 4 tests reveal real pipeline issues that are out of scope for this directive (harness-drift-fixes). Each is its own follow-up; the harness's job is to surface them, not fix them.
+- **C6/C7**: pending investigation + fix.
 
 ### Decisions Made
 
