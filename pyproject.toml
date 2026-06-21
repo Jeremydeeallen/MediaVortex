@@ -3,3 +3,6 @@ python_files = ["Test*.py", "test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 testpaths = ["Tests"]
+markers = [
+    "slow: end-to-end tests that drive a real worker through the live pipeline (opt-in via -m slow)",
+]

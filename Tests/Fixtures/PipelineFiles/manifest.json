@@ -1,14 +1,14 @@
 {
-  "GeneratedAt": "2026-06-21T17:07:25.866892+00:00",
+  "GeneratedAt": "2026-06-21T18:52:54.113759+00:00",
   "Fixtures": {
     "Transcode": {
-      "FixtureLocalPath": "C:\\Code\\MediaVortex\\Tests\\Fixtures\\PipelineFiles\\Transcode\\Bones - S07E12 - The Suit on the Set SDTV.avi",
-      "SourceMediaFileId": 15212,
+      "FixtureLocalPath": "C:\\Code\\MediaVortex\\Tests\\Fixtures\\PipelineFiles\\Transcode\\Animaniacs - S03E35 - Belly Button Blues DVD-mv.mp4",
+      "SourceMediaFileId": 31898,
       "ExpectedBucket": "Transcode"
     },
     "Remux": {
-      "FixtureLocalPath": "C:\\Code\\MediaVortex\\Tests\\Fixtures\\PipelineFiles\\Remux\\40 - California Christmastime (Commentary).mp3",
-      "SourceMediaFileId": 1321,
+      "FixtureLocalPath": "C:\\Code\\MediaVortex\\Tests\\Fixtures\\PipelineFiles\\Remux\\Pok\u00e9mon - S14E76 - A Restoration Confrontation! (2) WEBDL-720p.mkv",
+      "SourceMediaFileId": 34751,
       "ExpectedBucket": "Remux"
     },
     "AudioFixOnly": {

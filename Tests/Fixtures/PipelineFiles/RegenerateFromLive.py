@@ -13,11 +13,21 @@ from Core.Database.DatabaseService import DatabaseService
 _FIXTURE_DIR = Path(__file__).resolve().parent
 
 
-# directive: e2e-pipeline-test-framework
+# directive: harness-drift-fixes
 _BUCKET_WHERE = {
-    'Transcode': "WorkBucket = 'Transcode'",
-    'Remux': "WorkBucket = 'Remux'",
-    'AudioFixOnly': "WorkBucket = 'AudioFixOnly'",
+    'Transcode': (
+        "WorkBucket = 'Transcode' "
+        "AND VideoCompliant = FALSE AND AudioCompliant = TRUE AND ContainerCompliant = TRUE "
+        "AND VideoBitrateKbps >= 2000"
+    ),
+    'Remux': (
+        "WorkBucket = 'Remux' "
+        "AND VideoCompliant = TRUE AND AudioCompliant = TRUE AND ContainerCompliant = FALSE"
+    ),
+    'AudioFixOnly': (
+        "WorkBucket = 'AudioFixOnly' "
+        "AND VideoCompliant = TRUE AND AudioCompliant = FALSE AND ContainerCompliant = TRUE"
+    ),
     'Compliant': "WorkBucket IS NULL AND IsCompliant = TRUE AND AudioComplete = TRUE",
 }
 

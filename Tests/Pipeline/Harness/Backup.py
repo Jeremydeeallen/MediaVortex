@@ -172,8 +172,9 @@ def _ReinsertRow(Db: DatabaseService, TableName: str, Row: Dict[str, Any]) -> No
 
 # directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def _DeleteCurrentRowsFor(Db: DatabaseService, MediaFileId: int) -> None:
-    """Wipe rows the test added/mutated before reinserting the backup (FK-safe child-then-parent order)."""
+    """Wipe rows the test added/mutated before reinserting the backup (FK-safe child-then-parent order). Includes QualityTestingQueue so orphan VMAF rows don't survive and clog the queue."""
     Db.ExecuteNonQuery("DELETE FROM ActiveJobs WHERE QueueId IN (SELECT Id FROM TranscodeQueue WHERE MediaFileId = %s)", (MediaFileId,))
+    Db.ExecuteNonQuery("DELETE FROM QualityTestingQueue WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s)", (MediaFileId,))
     Db.ExecuteNonQuery("DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s)", (MediaFileId,))
     Db.ExecuteNonQuery("DELETE FROM MediaFilesArchive WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s)", (MediaFileId,))
     Db.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE MediaFileId = %s", (MediaFileId,))
