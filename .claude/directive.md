@@ -2,7 +2,7 @@
 
 **Slug:** harness-drift-fixes
 **Set:** 2026-06-21
-**Status:** Active -- phase: VERIFYING
+**Status:** Active -- phase: DELIVERING
 
 ## Outcome
 
@@ -35,7 +35,7 @@ C5. Remaining 3 slow E2E tests (`test_remux_bucket_e2e`, `test_audiofixonly_buck
 - [x] C2: Invocation.py raises on Success=False with full reason (ErrorMessage, Disposition, DispositionReason)
 - [x] C3: Backup.py CanonicalPath synthesized via Path.CanonicalDisplay; jsonb dict adapter wraps with psycopg2.extras.Json
 - [x] C4: TestE2EPerBucket transcode test runs to completion — no schema crashes; harness now polls for terminal FileReplaced state and reports the actual stuck disposition rather than masking it
-- [ ] C5: Remaining 3 slow tests not yet exercised (deferred follow-up — pipeline FileReplacement plumbing issue surfaced by harness must be diagnosed first)
+- [x] C5: All 4 slow tests exercised; each either passes green or raises with the specific pipeline failure reason
 
 ### Verification evidence
 
@@ -47,7 +47,12 @@ C5. Remaining 3 slow E2E tests (`test_remux_bucket_e2e`, `test_audiofixonly_buck
   2. After C1: 4.52s AssertionError "codec mismatch current='mpeg4'" (test didn't check disposition).
   3. After C2+C4 polling: 4.62s AssertionError "Disposition='BypassReplace' but FileReplaced=False" (real pipeline issue exposed).
   4. After C2 wait-for-FileReplaced + C3 jsonb: test polls for terminal-replacement state. When QualityTestEnabled=False AND FileReplacement worker isn't draining BypassReplace attempts, _Invoke correctly times out with "VMAF worker may be stuck or QualityTesting disabled inconsistently".
-- **C5 (deferred)**: Test surfaces a real downstream issue: BypassReplace attempts on dot-worker-* aren't getting FileReplaced=True flipped. QT queue had 5 pending VMAF jobs (oldest 22 min stale) at directive close. This is a separate pipeline bug; file under follow-up.
+- **C5**: `py -m pytest Tests/Contract/TestE2EPerBucket.py -m slow -v` (15min 11s wall): **2 passed, 2 failed** — zero schema crashes, every failure cites the exact pipeline reason. Concrete observations:
+  - `test_transcode_bucket_e2e`: TimeoutError after 900s with `AttemptId=39196 Last seen: {'Success': True, 'Disposition': 'Pending', 'DispositionReason': 'AwaitingVmaf'}` — real VMAF-queue-stuck pipeline issue.
+  - `test_remux_bucket_e2e`: AssertionError `Pipeline ran but did not replace the file. AttemptId=39197 Disposition='NoReplace' Reason='ComplianceGateFailed'` — pipeline executed end-to-end; remuxed output failed the post-replace compliance gate. Real pipeline behavior, not harness drift.
+  - `test_audiofixonly_bucket_e2e`: **PASSED** — full end-to-end through Quick path on the live worker fleet.
+  - `test_already_compliant_no_work_e2e`: **PASSED** — idempotent vertical recomputes.
+- **Honest gap**: 2 of 4 tests reveal real pipeline issues that are out of scope for this directive (harness-drift-fixes). Each is its own follow-up; the harness's job is to surface them, not fix them.
 
 ### Decisions Made
 
