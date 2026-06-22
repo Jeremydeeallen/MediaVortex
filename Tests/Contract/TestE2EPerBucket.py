@@ -35,12 +35,25 @@ def _RequireReplacingDisposition(AttemptId: int) -> dict:
     return D
 
 
-# directive: e2e-pipeline-test-framework
+# directive: compliance-symmetry
 def _PickFixture(Bucket: str, LivePickerFn):
-    """Use a permanent fixture if present; otherwise fall back to live picker."""
     if PermanentFixtures.IsAvailable(Bucket):
         Props = PermanentFixtures.GetProperties(Bucket)
-        return int(Props['SourceMediaFileId'])
+        PermId = int(Props['SourceMediaFileId'])
+        try:
+            from Features.AudioNormalization.AudioVertical import AudioVertical
+            from Features.VideoEncoding.VideoVertical import VideoVertical
+            from Features.ContainerFormat.ContainerVertical import ContainerVertical
+            AudioVertical().RecomputeFor([PermId])
+            VideoVertical().RecomputeFor([PermId])
+            ContainerVertical().RecomputeFor([PermId])
+            Check = DatabaseService().ExecuteQuery("SELECT WorkBucket FROM MediaFiles WHERE Id = %s", (PermId,))
+            ActualBucket = Check[0]['WorkBucket'] if Check else 'missing'
+            ExpectedBucket = Props.get('ExpectedBucket')
+            if ActualBucket == ExpectedBucket:
+                return PermId
+        except Exception:
+            pass
     return LivePickerFn()
 
 

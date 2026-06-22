@@ -27,20 +27,11 @@ class EffectiveProfileResolver:
         Bar = self._LookupComplianceBarRow(ProfileName)
         if Bar is None:
             return None
-        Row = self._LookupThresholdsRow(ProfileName, Mf.ResolutionCategory)
-        if Row:
-            TargetResolutionStr = Row['TargetResolution']
-            TargetAudioKbps = Row['AudioBitrateKbps'] if Row['AudioBitrateKbps'] else None
-            TargetVideoKbps = self._ResolveTargetVideoKbps(Row, Mf, TargetResolutionStr)
-        else:
-            TargetResolutionStr = Bar.get('targetresolutioncategory')
-            TargetVideoKbps = Bar.get('targetvideokbps')
-            TargetAudioKbps = Bar.get('targetaudiokbps')
-        TargetTier = self.TierRegistry.FromCategory(Bar.get('targetresolutioncategory') or TargetResolutionStr)
+        TargetTier = self.TierRegistry.FromCategory(Bar.get('targetresolutioncategory'))
         return EffectiveProfile(
             ProfileName=ProfileName,
-            TargetVideoKbps=TargetVideoKbps if TargetVideoKbps else Bar.get('targetvideokbps'),
-            TargetAudioKbps=TargetAudioKbps if TargetAudioKbps else Bar.get('targetaudiokbps'),
+            TargetVideoKbps=Bar.get('targetvideokbps'),
+            TargetAudioKbps=Bar.get('targetaudiokbps'),
             TargetResolutionCategory=TargetTier,
             StreamCodecName=Bar.get('streamcodecname'),
             AllowUpscale=bool(Bar.get('allowupscale')),

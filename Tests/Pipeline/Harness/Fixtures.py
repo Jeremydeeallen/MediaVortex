@@ -70,13 +70,26 @@ def QuickFixCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int = 25
     return Picked
 
 
-# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
+# directive: compliance-symmetry
+def _RecomputeAndVerify(MediaFileId: int, ExpectedBucket: str) -> bool:
+    from Features.AudioNormalization.AudioVertical import AudioVertical
+    from Features.VideoEncoding.VideoVertical import VideoVertical
+    from Features.ContainerFormat.ContainerVertical import ContainerVertical
+    AudioVertical().RecomputeFor([MediaFileId])
+    VideoVertical().RecomputeFor([MediaFileId])
+    ContainerVertical().RecomputeFor([MediaFileId])
+    Check = DatabaseService().ExecuteQuery("SELECT WorkBucket FROM MediaFiles WHERE Id = %s", (MediaFileId,))
+    return bool(Check) and Check[0]['workbucket'] == ExpectedBucket
+
+
+# directive: compliance-symmetry
 def TranscodeCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int = 25) -> int:
-    """A MediaFileId that needs Transcode (WorkBucket='Transcode'); see pipeline-test-harness.feature.md S2."""
     Db = DatabaseService()
     Sql = (
         "SELECT m.Id, m.StorageRootId, m.RelativePath FROM MediaFiles m "
-        "WHERE m.WorkBucket = 'Transcode' "
+        "JOIN Profiles p ON p.ProfileName = m.AssignedProfile "
+        "WHERE LOWER(m.Codec) <> LOWER(p.StreamCodecName) "
+        "AND p.Active = TRUE AND p.Draft = FALSE "
         "AND " + _SHARED_PREDICATE + _ORPHAN_NOT_EXISTS + " "
         "ORDER BY m.SizeMB ASC LIMIT %s"
     )
@@ -84,18 +97,23 @@ def TranscodeCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int = 2
     Candidates = [(int(R['Id']), R['StorageRootId'], R['RelativePath'] or '') for R in Rows]
     Picked = _PickReachable(Candidates)
     if Picked is None:
-        raise NoCandidatesError(f"No reachable Transcode candidate with {MinSizeMB} <= SizeMB <= {MaxSizeMB} (checked {len(Candidates)} rows)")
+        raise NoCandidatesError(f"No reachable Transcode candidate (codec mismatch) with {MinSizeMB} <= SizeMB <= {MaxSizeMB} (checked {len(Candidates)} rows)")
+    if not _RecomputeAndVerify(Picked, 'Transcode'):
+        raise NoCandidatesError(f"Picked candidate {Picked} did not settle as Transcode bucket post-recompute")
     LoggingService.LogInfo(f"TranscodeCandidate selected: Id={Picked}", "Fixtures", "TranscodeCandidate")
     return Picked
 
 
-# directive: e2e-pipeline-test-framework
+# directive: compliance-symmetry
 def RemuxCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int = 25) -> int:
-    """A MediaFileId currently in the Remux bucket (container needs work; video acceptable)."""
     Db = DatabaseService()
     Sql = (
         "SELECT m.Id, m.StorageRootId, m.RelativePath FROM MediaFiles m "
-        "WHERE m.WorkBucket = 'Remux' "
+        "JOIN Profiles p ON p.ProfileName = m.AssignedProfile "
+        "WHERE LOWER(m.Codec) = LOWER(p.StreamCodecName) "
+        "AND m.ContainerFormat = 'matroska,webm' "
+        "AND p.Container IN ('mp4','m4v','mov') "
+        "AND p.Active = TRUE AND p.Draft = FALSE "
         "AND " + _SHARED_PREDICATE + _ORPHAN_NOT_EXISTS + " "
         "ORDER BY m.SizeMB ASC LIMIT %s"
     )
@@ -103,18 +121,23 @@ def RemuxCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int = 25) -
     Candidates = [(int(R['Id']), R['StorageRootId'], R['RelativePath'] or '') for R in Rows]
     Picked = _PickReachable(Candidates)
     if Picked is None:
-        raise NoCandidatesError(f"No reachable Remux candidate with {MinSizeMB} <= SizeMB <= {MaxSizeMB} (checked {len(Candidates)} rows)")
+        raise NoCandidatesError(f"No reachable Remux candidate (container mismatch) with {MinSizeMB} <= SizeMB <= {MaxSizeMB} (checked {len(Candidates)} rows)")
+    if not _RecomputeAndVerify(Picked, 'Remux'):
+        raise NoCandidatesError(f"Picked candidate {Picked} did not settle as Remux bucket post-recompute")
     LoggingService.LogInfo(f"RemuxCandidate selected: Id={Picked}", "Fixtures", "RemuxCandidate")
     return Picked
 
 
-# directive: e2e-pipeline-test-framework
+# directive: compliance-symmetry
 def AudioFixOnlyCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int = 25) -> int:
-    """A MediaFileId currently in AudioFixOnly bucket (only audio needs work; container + video compliant)."""
     Db = DatabaseService()
     Sql = (
         "SELECT m.Id, m.StorageRootId, m.RelativePath FROM MediaFiles m "
-        "WHERE m.WorkBucket = 'AudioFixOnly' "
+        "JOIN Profiles p ON p.ProfileName = m.AssignedProfile "
+        "WHERE LOWER(m.Codec) = LOWER(p.StreamCodecName) "
+        "AND m.ContainerFormat ILIKE ('%%' || p.Container || '%%') "
+        "AND (m.AudioComplete IS NULL OR m.AudioComplete = FALSE) "
+        "AND p.Active = TRUE AND p.Draft = FALSE "
         "AND " + _SHARED_PREDICATE + _ORPHAN_NOT_EXISTS + " "
         "ORDER BY m.SizeMB ASC LIMIT %s"
     )
@@ -122,26 +145,43 @@ def AudioFixOnlyCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int 
     Candidates = [(int(R['Id']), R['StorageRootId'], R['RelativePath'] or '') for R in Rows]
     Picked = _PickReachable(Candidates)
     if Picked is None:
-        raise NoCandidatesError(f"No reachable AudioFixOnly candidate with {MinSizeMB} <= SizeMB <= {MaxSizeMB} (checked {len(Candidates)} rows)")
+        raise NoCandidatesError(f"No reachable AudioFixOnly candidate (audio incomplete with codec+container match) with {MinSizeMB} <= SizeMB <= {MaxSizeMB} (checked {len(Candidates)} rows)")
+    if not _RecomputeAndVerify(Picked, 'AudioFixOnly'):
+        raise NoCandidatesError(f"Picked candidate {Picked} did not settle as AudioFixOnly bucket post-recompute")
     LoggingService.LogInfo(f"AudioFixOnlyCandidate selected: Id={Picked}", "Fixtures", "AudioFixOnlyCandidate")
     return Picked
 
 
-# directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
-def AlreadyCompliant(Limit: int = 25) -> int:
-    """A MediaFileId that is already compliant (WorkBucket IS NULL, IsCompliant=TRUE); see pipeline-test-harness.feature.md S2."""
+# directive: compliance-symmetry
+def AlreadyCompliant(Limit: int = 50) -> int:
+    """Pick by raw metadata matching per-profile bar; recompute verticals; verify post-recompute WorkBucket is NULL."""
     Db = DatabaseService()
     Rows = Db.ExecuteQuery(
-        "SELECT Id, StorageRootId, RelativePath FROM MediaFiles "
-        "WHERE IsCompliant = TRUE "
-        "AND AudioComplete = TRUE "
-        "AND WorkBucket IS NULL "
-        "AND HasExplicitEnglishAudio = TRUE "
-        "ORDER BY SizeMB ASC LIMIT %s",
+        "SELECT m.Id, m.StorageRootId, m.RelativePath FROM MediaFiles m "
+        "JOIN Profiles p ON p.ProfileName = m.AssignedProfile "
+        "WHERE LOWER(m.Codec) = LOWER(p.StreamCodecName) "
+        "AND LOWER(m.AudioCodec) = LOWER(p.AudioCodec) "
+        "AND m.AudioComplete = TRUE "
+        "AND m.HasExplicitEnglishAudio = TRUE "
+        "AND (m.AudioCorruptSuspect IS NULL OR m.AudioCorruptSuspect = FALSE) "
+        "AND m.ContainerFormat ILIKE '%%mp4%%' "
+        "AND p.Container = 'mp4' "
+        "AND p.Active = TRUE AND p.Draft = FALSE "
+        "ORDER BY m.SizeMB ASC LIMIT %s",
         (Limit,),
     )
     Candidates = [(int(R['id']), R['storagerootid'], R['relativepath'] or '') for R in Rows]
     Picked = _PickReachable(Candidates)
     if Picked is None:
-        raise NoCandidatesError(f"No reachable already-compliant candidate (checked {len(Candidates)} rows)")
+        raise NoCandidatesError(f"No reachable compliant candidate matching the per-profile bar (checked {len(Candidates)} rows)")
+    from Features.AudioNormalization.AudioVertical import AudioVertical
+    from Features.VideoEncoding.VideoVertical import VideoVertical
+    from Features.ContainerFormat.ContainerVertical import ContainerVertical
+    AudioVertical().RecomputeFor([Picked])
+    VideoVertical().RecomputeFor([Picked])
+    ContainerVertical().RecomputeFor([Picked])
+    Check = Db.ExecuteQuery("SELECT WorkBucket FROM MediaFiles WHERE Id = %s", (Picked,))
+    if Check and Check[0]['workbucket'] is not None:
+        raise NoCandidatesError(f"Picked candidate {Picked} did not settle compliant post-recompute (bucket={Check[0]['workbucket']!r})")
+    LoggingService.LogInfo(f"AlreadyCompliant selected: Id={Picked}", "Fixtures", "AlreadyCompliant")
     return Picked
