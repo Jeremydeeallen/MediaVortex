@@ -2,6 +2,8 @@
 
 **Slug:** profiles
 
+**Profile lifecycle, immutability, retirement:** see `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md` ("Profile Lifecycle: Immutability + Retirement" + "Per-Profile Compliance Bar"). The spec is canonical for which profile fields are locked after first reference, the `Active=FALSE` retirement semantics, and the compliance-bar columns added to this table.
+
 ## What It Does
 
 Defines transcode encoding profiles with per-resolution thresholds. Each profile specifies codec, preset, quality settings, and resolution-specific CRF/bitrate targets. Users assign profiles to folders to control how files are transcoded.

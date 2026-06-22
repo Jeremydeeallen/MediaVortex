@@ -2,6 +2,8 @@
 
 **Slug:** transcode-vs-remux-routing
 
+**Canonical compliance + bucket contract:** see `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md`. This doc retains only the routing-specific concerns (cascade resolution, queue-entry sites, post-flight gate, admin endpoint, visibility widget, Remux audio integrity) that are not duplicated in the spec.
+
 ## What It Does
 
 Replaces the "transcode everything that has an assigned profile" pattern
@@ -82,23 +84,7 @@ User-facing -- two GUI surfaces, two columns visible in any operator query, one 
 
 ### D. IsCompliant materialization
 
-10. `MediaFiles.IsCompliant BOOLEAN` column exists, nullable. Migration `Scripts/SQLScripts/AddIsCompliantColumn.py` is idempotent. NULL means "compliance not yet evaluated" (e.g. probe missing, effective profile cannot be resolved).
-
-11. Compliance evaluation is owned by `Features/Compliance/compliance.feature.md` -- a SOLID-decomposed engine: 8 hard-block gates (one per former undecidable-return path), 4 operations (Transcode/Remux/AudioFix/SubtitleFix), a pure-function bucket resolver. The single public entry is `ComplianceEvaluator.Evaluate(MediaFile, EffectiveProfile, ComplianceRuleCache) -> ComplianceDecision`. `MediaFiles.WorkBucket` (TEXT enum) supersedes `RecommendedMode` as the routing column; readers consume it directly.
-
-12. Verifiable per-clause:
-    - File with HasExplicitEnglishAudio=false: IsCompliant=NULL.
-    - 1080p MKV h264 8000 kbps with effective profile targeting 480p: IsCompliant=false, RecommendedMode='Transcode'.
-    - 720p MP4 h264 935 kbps already at-or-below profile target with normalized audio: IsCompliant=true.
-    - 720p MKV h264 935 kbps with normalized audio: IsCompliant=false, RecommendedMode='Remux' (container-only fix).
-    - 720p MP4 h264 935 kbps with un-normalized audio: IsCompliant=false, RecommendedMode='Remux' (audio-only fix).
-
-13. Audio normalization detection has moved to the **Audio Completion** feature -- this criterion now defers to `audio-completion.feature.md`. The compliance cascade reads `MediaFiles.AudioComplete` (BOOLEAN column, materialized) instead of grepping `TranscodeAttempts.FFpmpegCommand` per evaluation:
-    - `AudioComplete = true` -> treated as normalized (criterion 11d "audio normalized" leg).
-    - `AudioComplete = false` -> treated as un-normalized; the next encode pass (Remux or Transcode) runs the one-shot loudnorm filter (see `Features/LoudnessAnalysis/linear-loudnorm.feature.md`) and post-flight flips the flag to true.
-    - `AudioComplete IS NULL` (not yet evaluated) -> treated as undecidable; the compliance cascade returns `(None, None)` and the file is held out of the queue until the next admin recompute or probe-complete hook resolves the state.
-    - The legacy `_LoadAudioNormalizedSet` per-row grep is removed; `DetectNormalizationInCommand` is retained as the **post-flight** signal that flips the materialized column, and as the input to `BackfillAudioComplete.py`.
-    - Verifiable: `grep -r '_LoadAudioNormalizedSet'` returns no callers; `SELECT AudioComplete FROM MediaFiles WHERE Id=<id>` is the operator's source of truth for "is audio done."
+Criteria 10-13 are consolidated into `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md` (sections "Architectural Model" and "Compliance Evaluation"). The spec is the canonical contract for the three-vertical evaluator, `MediaFiles.IsCompliant` / `WorkBucket` generated-column semantics, and the `AudioComplete` interaction with the audio loudness cascade.
 
 ### E. Pre-flight gate at queue creation
 
@@ -162,27 +148,7 @@ Implementation of criteria 26-28 is owned by `Features/AudioCompletion/audio-com
 
 ### L. Bucket-scoped operations contract
 
-The bucket precedence (`!Video -> Transcode`, `!Container -> Remux`, `!Audio -> AudioFixOnly`) tells the system which bucket OWNS a file. The bucket's worker fixes ONLY the dimensions actually flagged non-compliant -- not all dimensions at or below its level. This keeps each operation minimum-scope so running a bucket's work cannot make the file need MORE work.
-
-Operations per bucket, gated on the three compliance booleans read off the MediaFiles row at command-build time:
-
-| Bucket | Always (the bucket-defining op) | Conditionally (only when the flag is False) |
-|---|---|---|
-| Transcode | video re-encode (per AssignedProfile) | container rewrite (if `!ContainerCompliant`), audio loudnorm (if `!AudioCompliant`) |
-| Remux | container rewrite | audio loudnorm (if `!AudioCompliant`) |
-| AudioFixOnly | audio loudnorm | -- |
-
-Symmetric reads:
-- `!AudioCompliant` -> `-filter:a loudnorm ...` per `linear-loudnorm.feature.md`
-- `AudioCompliant=True` -> `-c:a copy` (do not touch the audio stream)
-- `!ContainerCompliant` -> output container = mp4 (or current target), source basename + `-mv` suffix
-- `ContainerCompliant=True` (in Remux/Transcode bucket reached for other reasons) -> output container matches source container; no rewrite
-
-29. **Bucket-scoped operations invariant.** `Features/CommandBuilder` emits the minimum-scope command per the table above. The three compliance booleans (`VideoCompliant`, `ContainerCompliant`, `AudioCompliant`) on `MediaFiles` are read fresh at command-build time; each False flag adds the corresponding op to the command, each True flag suppresses it. Verifiable: a Transcode-bucket file whose `AudioCompliant=True` produces a command containing `-c:a copy` and no `loudnorm`; an AudioFix-bucket file's output container equals source container when `ContainerCompliant=True`.
-
-30. **Idempotency invariant.** Running a bucket's worker on a file changes ONLY the dimensions the bucket owned. A worker is forbidden from causing any compliance boolean to flip from `True` to `False` post-replacement. Verifiable: post-replacement `RecomputeForFiles` must not produce a higher-cost bucket than the pre-replacement bucket. Surface query: `SELECT COUNT(*) FROM MediaFilesArchive a JOIN MediaFiles m ON m.Id = a.MediaFileId WHERE a.<pre-bucket> = 'AudioFixOnly' AND m.WorkBucket = 'Transcode'` -- 0 in steady state; any non-zero indicates the audio fix poisoned the video verdict (or analogous).
-
-31. **VideoVertical savings calc reads video stream bitrate, not total `SizeMB`.** Audio re-encoding can grow total file size without touching the video stream. The savings estimator must operate on the video bitrate so the verdict is invariant under audio-only changes. Verifiable: an AudioFix-bucket file whose pre-fix `VideoCompliant=True` still has `VideoCompliant=True` post-fix, even when total `SizeMB` grew 2-3x from audio re-encode.
+Criteria 29-31 are consolidated into `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md` (sections "Bucket-Scoped Operations Contract" and "Idempotency Invariant"). The spec replaces the savings-calc + BPP-override + MV-trusted scheme with a single per-profile bitrate comparison, and locks profile compliance fields against post-reference edits so the verdict cannot move under a file.
 
 ## Status
 
