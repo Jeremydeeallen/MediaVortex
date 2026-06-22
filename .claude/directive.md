@@ -2,7 +2,7 @@
 
 **Slug:** compliance-symmetry
 **Set:** 2026-06-22
-**Status:** Active -- phase: NEEDS_PLAN
+**Status:** Active -- phase: NEEDS_DOC_PREREAD
 **Reference:** `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md` (canonical design)
 
 ## Outcome
@@ -21,41 +21,97 @@ The slow E2E suite (`Tests/Contract/TestE2EPerBucket.py -m slow`) is the live ve
 | Remux fixture passes compliance gate (no `ComplianceGateFailed`) | `harness-drift-fixes` C6.3 |
 | `pytest.mark.slow` registered in `pyproject.toml` | `harness-drift-fixes` C7 |
 
-## Acceptance Criteria (placeholder -- finalized at NEEDS_PLAN exit)
+## Acceptance Criteria
 
-Criteria are drafted at NEEDS_PLAN. The spec's "Verification Plan" table names the contract tests; each acceptance criterion will cite one row of that table. Draft outline:
+C1. `Scripts/SQLScripts/AlterProfilesAddComplianceColumns.py` idempotently adds `Draft BOOLEAN DEFAULT TRUE`, `Active BOOLEAN DEFAULT TRUE`, `StreamCodecName VARCHAR(16)`, `TargetResolutionCategory VARCHAR(8)`, `TargetVideoKbps INT NULL`, `AllowUpscale BOOLEAN DEFAULT FALSE`, `AudioCodec VARCHAR(16)`, `TargetAudioKbps INT NULL`, `Container VARCHAR(8)`. Verifiable: `\d Profiles` shows all 9 columns; running twice doesn't fail.
 
-- **Schema**: `ALTER TABLE Profiles` + `ALTER TABLE AudioNormalizationConfig` + redefined `MediaFiles.WorkBucket` generated column all land idempotently; the seeded `_PreMigrationDefault` profile is queryable.
-- **Vertical refactor**: `VideoVertical`, `AudioVertical`, `ContainerVertical` read per-profile columns; no library-wide rules tables consulted; legacy savings/BPP/mvtrust paths deleted.
-- **Lifecycle**: API + GUI honor Draft -> Finalized -> Retired. Locked compliance fields refuse PATCH; "Copy as new draft" produces an editable clone.
-- **GUI**: `/Setup -> Profiles` editor renders Draft vs Finalized states; new `/MediaFile/<id>/ComplianceSummary` view exists; `MaxAudioChannels` moves to `/AudioNormalization`.
-- **Idempotency**: three surface queries return 0 in steady state.
-- **Slow E2E**: all 4 tests in `Tests/Contract/TestE2EPerBucket.py -m slow` pass green against live worker fleet.
-- **Dialog Boost behavior**: existing shipped contract (Original = LRA preserved, Dialog Boost = LRA compressed to <=11.0 LU, both loudnorm'd to `TargetIntegratedLufs`, Dialog Boost `disposition.default=1`). Operator-locked 2026-06-22.
+C2. `Scripts/SQLScripts/AlterAudioNormalizationConfigAddMaxChannels.py` idempotently adds `MaxAudioChannels INT DEFAULT 2`. Verifiable: `\d AudioNormalizationConfig` shows the column.
 
-## Files (placeholder -- finalized at NEEDS_PLAN exit)
+C3. `Scripts/SQLScripts/RedefineWorkBucketGeneratedColumn.py` drops and re-creates `MediaFiles.WorkBucket` as a STORED generated column whose expression returns NULL when ANY of (`VideoCompliant`, `ContainerCompliant`, `AudioCompliant`) IS NULL; `Transcode` when `VideoCompliant=FALSE`; `Remux` when `ContainerCompliant=FALSE`; `AudioFixOnly` when `AudioCompliant=FALSE`; NULL otherwise. Verifiable: insert rows covering all 8 truth-table combinations + NULL-input cases; assert correct WorkBucket per row.
 
-Per the spec's "Schema Changes" + "Verification Plan" + "Migration / Rollout" sections, the file roster includes:
+C4. `Scripts/SQLScripts/SeedPreMigrationDefaultProfile.py` inserts `_PreMigrationDefault` row (`Draft=FALSE`, `Active=TRUE`, `Codec=av1_nvenc`, `StreamCodecName=av1`, `TargetResolutionCategory=720p`, `TargetVideoKbps=NULL`, `AllowUpscale=FALSE`, `AudioCodec=aac`, `TargetAudioKbps=128`, `Container=mp4`). Encoder section cloned from the existing `NVENC AV1 P7 CANARY VBR -720p` profile. Idempotent via `ON CONFLICT DO NOTHING`.
 
-- `Scripts/SQLScripts/AlterProfilesAddComplianceColumns.py` -- NEW
-- `Scripts/SQLScripts/AlterAudioNormalizationConfigAddMaxChannels.py` -- NEW
-- `Scripts/SQLScripts/RedefineWorkBucketGeneratedColumn.py` -- NEW
-- `Scripts/SQLScripts/SeedPreMigrationDefaultProfile.py` -- NEW
-- `Scripts/SQLScripts/RenameLegacyComplianceRulesTables.py` -- NEW (renames `VideoComplianceRules` + `ContainerComplianceRules`)
-- `Features/VideoEncoding/VideoVertical.py` -- refactor: drop savings/BPP/mvtrust; read per-profile bar with NULL-aware bitrate check
-- `Features/AudioNormalization/AudioVertical.py` -- refactor: per-profile codec/bitrate check; defer channel count to `AudioPolicyAdmissionGate`
-- `Features/AudioNormalization/AudioPolicyAdmissionGate.py` -- add `MaxAudioChannels` read from `AudioNormalizationConfig`
-- `Features/ContainerFormat/ContainerVertical.py` -- drop `AcceptableAudioCodecsCsv`; per-profile container compare only
-- `Features/Profiles/ProfileController.py` -- new endpoints: `/finalize`, `/copy-draft`; PATCH immutability enforcement
-- `Features/Profiles/ProfileRepository.py` -- new columns reads/writes; lifecycle state
-- `Features/Profiles/Models/TranscodeProfileModel.py` -- new fields
-- `Features/MediaFile/ComplianceSummaryController.py` -- NEW endpoint `/api/MediaFile/<id>/ComplianceSummary`
-- `Features/MediaFile/templates/ComplianceSummary.html` -- NEW view
-- `Templates/Settings.html` -- profile editor Draft/Finalized split; pre-migration finalize pass UX
-- `Templates/AudioNormalization.html` -- add `MaxAudioChannels` knob
-- `pyproject.toml` -- register `pytest.mark.slow`
-- 8 new contract tests under `Tests/Contract/` per the spec's Verification Plan table
-- `transcode.flow.md` -- Stage 4 + Stage 7 prose pruned (consolidation continued from the 2026-06-22 doc consolidation commit)
+C5. Existing non-`_PreMigrationDefault` profiles flipped to `Draft=TRUE` in the same migration (or sibling step). Verifiable: `SELECT COUNT(*) FROM Profiles WHERE Draft=TRUE` matches `(total profile count) - 1`.
+
+C6. `Features/VideoEncoding/VideoVertical.Evaluate` is refactored: reads `StreamCodecName`, `TargetResolutionCategory`, `TargetVideoKbps`, `AllowUpscale` from the effective profile. Drops `_EstimatedSavingsMB`, `_IsAlreadyEfficient`, `MvTrusted` (`TranscodedByMediaVortex`) exemption, and `_LoadRules` from `VideoComplianceRules`. NULL `TargetVideoKbps` skips the bitrate check. Hardcoded 5% rounding tolerance in the bitrate comparator. Verifiable: `Tests/Contract/TestVideoComplianceBar.py` green; `grep -E 'EstimatedSavingsMB|IsAlreadyEfficient|MvTrusted|VideoComplianceRules' Features/VideoEncoding/VideoVertical.py` returns 0.
+
+C7. `Features/AudioNormalization/AudioVertical.Evaluate` is refactored: adds per-profile codec match check (`Mf.AudioCodec == profile.AudioCodec`) and nullable bitrate ceiling check (`Mf.AudioBitrateKbps <= profile.TargetAudioKbps * 1.05`). Channel-count check moves to `AudioPolicyAdmissionGate`. Upstream undecidable cascade (`AudioCorruptSuspect`, `HasExplicitEnglishAudio`, `no_audio_stream`, `LoudnessMeasurementFailureReason`) preserved. Verifiable: `Tests/Contract/TestAudioComplianceBar.py` green.
+
+C8. `Features/ContainerFormat/ContainerVertical.Evaluate` is refactored: compares `Mf.ContainerFormat` (lowercased) to `profile.Container` (lowercased) only. Drops `AcceptableContainersCsv` and `AcceptableAudioCodecsCsv` reads from `ContainerComplianceRules`. Verifiable: `Tests/Contract/TestContainerComplianceBar.py` green; `grep -E 'ContainerComplianceRules|AcceptableAudioCodecsCsv' Features/ContainerFormat/ContainerVertical.py` returns 0.
+
+C9. `Features/AudioNormalization/AudioPolicyAdmissionGate.AdmitOrDefer` reads `MaxAudioChannels` from the effective `AudioNormalizationConfig` row and returns a defer outcome named `channels_exceed_max` when the source channel count exceeds it. Verifiable: contract test creates a 5.1 source against a `MaxAudioChannels=2` policy scope; gate defers; verify reason is `channels_exceed_max`.
+
+C10. `Features/Profiles/ProfileController` exposes three new behaviors:
+  - `PATCH /api/profiles/<id>/knobs` rejects updates to any compliance-defining field (`Codec`, `StreamCodecName`, `TargetResolutionCategory`, `TargetVideoKbps`, `AllowUpscale`, `AudioCodec`, `TargetAudioKbps`, `Container`) when the profile has `Draft=FALSE` -- returns HTTP 400 with reason.
+  - `POST /api/profiles/<id>/finalize` flips `Draft` from TRUE to FALSE atomically. Refused on already-finalized profiles with HTTP 400.
+  - `POST /api/profiles/<id>/copy-draft` clones the source profile into a new row with `Draft=TRUE`, prefix `Copy of `, and a new `Id`. Returns the new id.
+
+C11. `Features/Profiles/Models/TranscodeProfileModel` carries the 9 new fields with sensible defaults matching the migration.
+
+C12. `Features/Profiles/ProfileRepository` writes + reads the 9 new fields. `EffectiveProfileResolver.Resolve` skips `Draft=TRUE` profiles in cascade resolution -- a show assigned to a draft falls through to `SystemSettings.DefaultProfileName`, which itself can only be set to a finalized profile.
+
+C13. `Features/MediaFile/ComplianceSummaryController.py` registers blueprint exposing `GET /api/MediaFile/<id>/ComplianceSummary` returning JSON with the three booleans, the effective Profile + AudioNormalizationConfig values driving them, the `WorkBucket`, the per-bucket planned ops, and per-dimension Reason strings. Registered in `WebService/Main.py`.
+
+C14. `Features/MediaFile/templates/ComplianceSummary.html` renders the endpoint payload for an operator.
+
+C15. `Templates/Settings.html` profile editor renders Draft vs Finalized states. Compliance fields are read-only when `Draft=FALSE`. Each finalized row has a "Copy as new draft" button posting to the C10 endpoint. The new fields are present in both states.
+
+C16. `Templates/AudioNormalization.html` Settings tab has a `MaxAudioChannels` input bound to the new column.
+
+C17. `pyproject.toml` registers `pytest.mark.slow` (resolves the prior `harness-drift-fixes` C7 carry-forward). Verifiable: `py -m pytest -m slow --co -q` returns the slow tests without "unknown mark" warning.
+
+C18. The 8 new contract tests are placed under `Tests/Contract/` and ALL pass green:
+  - `TestVideoComplianceBar.py`, `TestAudioComplianceBar.py`, `TestContainerComplianceBar.py`
+  - `TestProfileCascadeResolution.py`, `TestProfileLifecycle.py`
+  - `TestWorkBucketDerivation.py`, `TestComplianceIdempotency.py`
+  - `TestCrossVerticalLeak.py`, `TestComplianceSummaryEndpoint.py`
+
+C19. `Scripts/SQLScripts/RenameLegacyComplianceRulesTables.py` renames `VideoComplianceRules` -> `VideoComplianceRules_OLD_2026_06_22` and `ContainerComplianceRules` -> `ContainerComplianceRules_OLD_2026_06_22`. Idempotent: uses `IF EXISTS` so re-run is a no-op.
+
+C20. Three idempotency surface queries return 0:
+  - `SELECT COUNT(*) FROM MediaFilesArchive a JOIN MediaFiles m ON m.Id=a.MediaFileId WHERE a.WorkBucket='AudioFixOnly' AND m.WorkBucket='Transcode'`
+  - same with `'AudioFixOnly' AND m.WorkBucket='Remux'`
+  - same with `'Remux' AND m.WorkBucket='Transcode'`
+
+C21. `py -m pytest Tests/Contract/TestE2EPerBucket.py -m slow -v` runs all 4 tests GREEN against the live worker fleet. Inherits `harness-drift-fixes` C5 + C6.{1,2,3}.
+
+C22. `transcode.flow.md` Stage 4 and Stage 7 prose sections pruned (legacy text removed; replaced with a one-line pointer to the spec). Honors the single-source-of-truth mandate.
+
+## Files
+
+| File | Role | Criterion |
+|---|---|---|
+| `Scripts/SQLScripts/AlterProfilesAddComplianceColumns.py` | NEW migration | C1 |
+| `Scripts/SQLScripts/AlterAudioNormalizationConfigAddMaxChannels.py` | NEW migration | C2 |
+| `Scripts/SQLScripts/RedefineWorkBucketGeneratedColumn.py` | NEW migration | C3 |
+| `Scripts/SQLScripts/SeedPreMigrationDefaultProfile.py` | NEW migration | C4, C5 |
+| `Scripts/SQLScripts/RenameLegacyComplianceRulesTables.py` | NEW migration | C19 |
+| `Features/VideoEncoding/VideoVertical.py` | Refactor | C6 |
+| `Features/AudioNormalization/AudioVertical.py` | Refactor | C7 |
+| `Features/AudioNormalization/AudioPolicyAdmissionGate.py` | Channel-check addition | C9 |
+| `Features/ContainerFormat/ContainerVertical.py` | Refactor | C8 |
+| `Features/Profiles/ProfileController.py` | Endpoints + immutability | C10 |
+| `Features/Profiles/ProfileRepository.py` | New column reads/writes; cascade respects Draft | C12 |
+| `Features/Profiles/ProfileService.py` | Finalize + CopyDraft methods | C10 |
+| `Features/Profiles/EffectiveProfile.py` | Carry new fields | C11 |
+| `Features/Profiles/EffectiveProfileResolver.py` | Skip Draft=TRUE in cascade | C12 |
+| `Features/Profiles/Models/TranscodeProfileModel.py` | New fields | C11 |
+| `Features/MediaFile/ComplianceSummaryController.py` | NEW endpoint blueprint | C13 |
+| `Features/MediaFile/templates/ComplianceSummary.html` | NEW view | C14 |
+| `WebService/Main.py` | Register ComplianceSummary blueprint | C13 |
+| `Templates/Settings.html` | Profile editor Draft/Finalized + Copy-as-new-draft | C15 |
+| `Templates/AudioNormalization.html` | MaxAudioChannels input | C16 |
+| `pyproject.toml` | Register `pytest.mark.slow` | C17 |
+| `Tests/Contract/TestVideoComplianceBar.py` | NEW | C6, C18 |
+| `Tests/Contract/TestAudioComplianceBar.py` | NEW | C7, C18 |
+| `Tests/Contract/TestContainerComplianceBar.py` | NEW | C8, C18 |
+| `Tests/Contract/TestProfileCascadeResolution.py` | NEW | C12, C18 |
+| `Tests/Contract/TestProfileLifecycle.py` | NEW | C10, C18 |
+| `Tests/Contract/TestWorkBucketDerivation.py` | NEW | C3, C18 |
+| `Tests/Contract/TestComplianceIdempotency.py` | NEW | C20, C18 |
+| `Tests/Contract/TestCrossVerticalLeak.py` | NEW | C6, C7, C8, C18 |
+| `Tests/Contract/TestComplianceSummaryEndpoint.py` | NEW | C13, C18 |
+| `transcode.flow.md` | Doc consolidation: Stage 4 + Stage 7 prose pruned | C22 |
 
 ## R18 overrides
 
