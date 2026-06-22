@@ -1,107 +1,68 @@
-# Harness Drift Fixes
+# Compliance Symmetry
 
-**Slug:** harness-drift-fixes
-**Set:** 2026-06-21
-**Status:** Active -- phase: IMPLEMENTING
-
-## Reopened
-
-Closed prematurely 2026-06-21 with 4 KNOWN GAPS / DEFERRED. Operator: "NEVER CLOSE IT UNTIL WE AGREE IT IS 100% COMPLETE." Directive widened to require 4/4 green on `pytest -m slow`; the surfaced pipeline issues are now in scope, not follow-ups.
+**Slug:** compliance-symmetry
+**Set:** 2026-06-22
+**Status:** Active -- phase: NEEDS_PLAN
+**Reference:** `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md` (canonical design)
 
 ## Outcome
 
-`py -m pytest Tests/Contract/TestE2EPerBucket.py -m slow -v` runs all 4 slow E2E tests GREEN against the live worker fleet. No timeouts, no AssertionError, no schema crashes. Each test drives a real MediaFile through its bucket's pipeline (Transcode / Remux / AudioFixOnly / already-Compliant) and verifies post-state via direct DB + ffprobe assertions.
+Implement the design specified in `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md`. The "target keeps moving for compliance" cycle stops: once a file becomes Compliant, no profile tweak silently re-enters it into a queue. Per-profile compliance bars are immutable after Finalize; tweaks happen via Copy-as-new-draft. Three orthogonal compliance verticals (Video / Container / Audio) each evaluate against the cascade-resolved bar; `WorkBucket` derives from the three booleans with explicit NULL handling. CommandBuilder emits the minimum-scope op set per bucket so no worker can push a file into a higher-cost bucket post-replacement.
 
-## Acceptance Criteria
+The slow E2E suite (`Tests/Contract/TestE2EPerBucket.py -m slow`) is the live verification gate -- all 4 tests pass green against the live worker fleet.
 
-C1. `Tests/Pipeline/Harness/Assertions.py::AssertVideoCodecMatchesProfile` no longer queries `m.FilePath` (column removed by path-schema-migration). When it surfaces a codec mismatch, the error message names the MediaFile by Id + RelativePath, not FilePath.
+## Carry-forward from `harness-drift-fixes` (closed 2026-06-22 via supersession)
 
-C2. `Tests/Pipeline/Harness/Invocation.py::_Invoke` raises `RuntimeError` if the TranscodeAttempt completes with `Success=False`, including the attempt's `ErrorMessage`, `Disposition`, and `DispositionReason` in the message. Tests cannot mistake a fast-failed attempt for a successful one.
+| Inherited criterion | Source |
+|---|---|
+| All 4 slow E2E pass green | `harness-drift-fixes` C5 (full) |
+| BypassReplace -> FileReplaced=True within 60s | `harness-drift-fixes` C6.1 |
+| VMAF queue drains, no >15min stuck rows | `harness-drift-fixes` C6.2 |
+| Remux fixture passes compliance gate (no `ComplianceGateFailed`) | `harness-drift-fixes` C6.3 |
+| `pytest.mark.slow` registered in `pyproject.toml` | `harness-drift-fixes` C7 |
 
-C3. `Tests/Pipeline/Harness/Backup.py` builds `OriginalCanonicalPath` from `StorageRootId + RelativePath` via the PathStorageRoots singleton, not from a non-existent `FilePath` column. The Handle's CanonicalPath round-trips through restore for crash-recovery messaging.
+## Acceptance Criteria (placeholder -- finalized at NEEDS_PLAN exit)
 
-C4. `py -m pytest Tests/Contract/TestE2EPerBucket.py::test_transcode_bucket_e2e -m slow -v` runs to completion (success or assertion-with-reason). Smoke-test exit gate per the worker-restart memory rule.
+Criteria are drafted at NEEDS_PLAN. The spec's "Verification Plan" table names the contract tests; each acceptance criterion will cite one row of that table. Draft outline:
 
-C5. All 4 slow E2E tests pass GREEN: `test_transcode_bucket_e2e`, `test_remux_bucket_e2e`, `test_audiofixonly_bucket_e2e`, `test_already_compliant_no_work_e2e`. Each test asserts post-state matches the bucket's expected pipeline outcome (file replaced, codec updated, all three compliance booleans TRUE, WorkBucket NULL, no leftover queue rows).
+- **Schema**: `ALTER TABLE Profiles` + `ALTER TABLE AudioNormalizationConfig` + redefined `MediaFiles.WorkBucket` generated column all land idempotently; the seeded `_PreMigrationDefault` profile is queryable.
+- **Vertical refactor**: `VideoVertical`, `AudioVertical`, `ContainerVertical` read per-profile columns; no library-wide rules tables consulted; legacy savings/BPP/mvtrust paths deleted.
+- **Lifecycle**: API + GUI honor Draft -> Finalized -> Retired. Locked compliance fields refuse PATCH; "Copy as new draft" produces an editable clone.
+- **GUI**: `/Setup -> Profiles` editor renders Draft vs Finalized states; new `/MediaFile/<id>/ComplianceSummary` view exists; `MaxAudioChannels` moves to `/AudioNormalization`.
+- **Idempotency**: three surface queries return 0 in steady state.
+- **Slow E2E**: all 4 tests in `Tests/Contract/TestE2EPerBucket.py -m slow` pass green against live worker fleet.
+- **Open question resolved**: operator picks Dialog Boost interpretation (a) keep shipped LRA-compressed contract OR (b) bit-copy with default-disposition.
 
-C6. Pipeline issues surfaced by the harness are FIXED, not deferred:
-  - `BypassReplace` disposition must result in `FileReplaced=True` within reasonable time (post-disposition FileReplacement step actually runs and updates the attempt)
-  - VMAF queue must drain (QT-enabled workers claim and process pending VMAF jobs; nothing stuck for >15min)
-  - Remux fixture must not trigger `ComplianceGateFailed` — either fixture re-curated to one that passes compliance, OR compliance gate logic for Remux dispositions corrected to match reality
+## Files (placeholder -- finalized at NEEDS_PLAN exit)
 
-C7. `pytest.mark.slow` registered in `pyproject.toml` so `pytest -m slow` runs without unknown-mark warning.
+Per the spec's "Schema Changes" + "Verification Plan" + "Migration / Rollout" sections, the file roster includes:
 
-## Files
+- `Scripts/SQLScripts/AlterProfilesAddComplianceColumns.py` -- NEW
+- `Scripts/SQLScripts/AlterAudioNormalizationConfigAddMaxChannels.py` -- NEW
+- `Scripts/SQLScripts/RedefineWorkBucketGeneratedColumn.py` -- NEW
+- `Scripts/SQLScripts/SeedPreMigrationDefaultProfile.py` -- NEW
+- `Scripts/SQLScripts/RenameLegacyComplianceRulesTables.py` -- NEW (renames `VideoComplianceRules` + `ContainerComplianceRules`)
+- `Features/VideoEncoding/VideoVertical.py` -- refactor: drop savings/BPP/mvtrust; read per-profile bar with NULL-aware bitrate check
+- `Features/AudioNormalization/AudioVertical.py` -- refactor: per-profile codec/bitrate check; defer channel count to `AudioPolicyAdmissionGate`
+- `Features/AudioNormalization/AudioPolicyAdmissionGate.py` -- add `MaxAudioChannels` read from `AudioNormalizationConfig`
+- `Features/ContainerFormat/ContainerVertical.py` -- drop `AcceptableAudioCodecsCsv`; per-profile container compare only
+- `Features/Profiles/ProfileController.py` -- new endpoints: `/finalize`, `/copy-draft`; PATCH immutability enforcement
+- `Features/Profiles/ProfileRepository.py` -- new columns reads/writes; lifecycle state
+- `Features/Profiles/Models/TranscodeProfileModel.py` -- new fields
+- `Features/MediaFile/ComplianceSummaryController.py` -- NEW endpoint `/api/MediaFile/<id>/ComplianceSummary`
+- `Features/MediaFile/templates/ComplianceSummary.html` -- NEW view
+- `Templates/Settings.html` -- profile editor Draft/Finalized split; pre-migration finalize pass UX
+- `Templates/AudioNormalization.html` -- add `MaxAudioChannels` knob
+- `pyproject.toml` -- register `pytest.mark.slow`
+- 8 new contract tests under `Tests/Contract/` per the spec's Verification Plan table
+- `transcode.flow.md` -- Stage 4 + Stage 7 prose pruned (consolidation continued from the 2026-06-22 doc consolidation commit)
 
-- `Tests/Pipeline/Harness/Assertions.py` -- drop m.FilePath from SELECT (C1)
-- `Tests/Pipeline/Harness/Invocation.py` -- raise on Success=False with detail (C2)
-- `Tests/Pipeline/Harness/Backup.py` -- synthesize CanonicalPath from typed pair (C3)
-- `Tests/Contract/TestE2EPerBucket.py` -- drop unused `_CurrentCanonicalPath` helper (C1)
+## R18 overrides
+
+(none yet -- add lines `<path>` here if full reads of `*.feature.md` files are needed during NEEDS_DOC_PREREAD)
 
 ## Status
 
-### Progress
+NEEDS_PLAN. The plan is fleshed out by reading the spec, picking the exact criterion wording for each test in the Verification Plan, and naming the final `## Files` list. Operator-input items from the spec's "Open Questions" section must be resolved before IMPLEMENTING:
 
-- [x] C1: Assertions.py m.FilePath removed
-- [x] C2: Invocation.py raises on Success=False with full reason (ErrorMessage, Disposition, DispositionReason)
-- [x] C3: Backup.py CanonicalPath synthesized via Path.CanonicalDisplay; jsonb dict adapter wraps with psycopg2.extras.Json
-- [x] C4: TestE2EPerBucket transcode test runs to completion — no schema crashes; harness now polls for terminal FileReplaced state and reports the actual stuck disposition rather than masking it
-- [x] C5 (partial): 2/4 green (audiofixonly, compliant); 2/4 fail with clear pipeline reasons (transcode TimeoutError VMAF-stuck, remux NoReplace/ComplianceGateFailed)
-- [ ] C5 (full): all 4 green
-- [ ] C6.1: BypassReplace -> FileReplaced=True consistently within 60s
-- [ ] C6.2: VMAF queue drains (no >15min stuck rows)
-- [ ] C6.3: Remux fixture passes ComplianceGateFailed
-- [ ] C7: pytest.mark.slow registered
-
-### Verification evidence
-
-- **C1**: `Tests/Contract/TestE2EPerBucket.py::test_transcode_bucket_e2e` no longer raises `UndefinedColumn: column m.FilePath does not exist`. Error path through `AssertVideoCodecMatchesProfile` now formats `file={RelativePath}`.
-- **C2**: `_Invoke` returns `(AttemptId, Success, Disposition, FileReplaced)` shape via explicit terminal-state check; Success=False → RuntimeError with errormessage/disposition/dispositionreason in the message. No more silent fast-failure mistaken for completion.
-- **C3**: Run captured backup `Tests/Pipeline/_backup/15212-20260621T175803Z.json` containing TranscodeAttempts.audiopolicyjson dict; restore now succeeds without `psycopg2.ProgrammingError: can't adapt type 'dict'`.
-- **C4**: Test exit path is deterministic. Concrete observed outcomes during this directive:
-  1. Pre-fix: 4.55s AssertionError on m.FilePath (schema drift).
-  2. After C1: 4.52s AssertionError "codec mismatch current='mpeg4'" (test didn't check disposition).
-  3. After C2+C4 polling: 4.62s AssertionError "Disposition='BypassReplace' but FileReplaced=False" (real pipeline issue exposed).
-  4. After C2 wait-for-FileReplaced + C3 jsonb: test polls for terminal-replacement state. When QualityTestEnabled=False AND FileReplacement worker isn't draining BypassReplace attempts, _Invoke correctly times out with "VMAF worker may be stuck or QualityTesting disabled inconsistently".
-- **C5**: `py -m pytest Tests/Contract/TestE2EPerBucket.py -m slow -v` (15min 11s wall): **2 passed, 2 failed** — zero schema crashes, every failure cites the exact pipeline reason. Concrete observations:
-  - `test_transcode_bucket_e2e`: TimeoutError after 900s with `AttemptId=39196 Last seen: {'Success': True, 'Disposition': 'Pending', 'DispositionReason': 'AwaitingVmaf'}` — real VMAF-queue-stuck pipeline issue.
-  - `test_remux_bucket_e2e`: AssertionError `Pipeline ran but did not replace the file. AttemptId=39197 Disposition='NoReplace' Reason='ComplianceGateFailed'` — pipeline executed end-to-end; remuxed output failed the post-replace compliance gate. Real pipeline behavior, not harness drift.
-  - `test_audiofixonly_bucket_e2e`: **PASSED** — full end-to-end through Quick path on the live worker fleet.
-  - `test_already_compliant_no_work_e2e`: **PASSED** — idempotent vertical recomputes.
-- **C6/C7**: pending investigation + fix.
-
-### Decisions Made
-
-- `_Invoke` waits for FileReplaced=True OR Disposition in (Discard, NoReplace) as terminal — Disposition alone is insufficient because BypassReplace is set BEFORE the actual file swap.
-- Added `GetAttemptDetails(AttemptId)` helper so tests can branch on disposition rather than asserting blindly.
-- Added `_RequireReplacingDisposition` helper in TestE2EPerBucket so non-replacing dispositions fail informatively rather than as a codec-mismatch downstream.
-- Toggled `PostTranscodeGateConfig.QualityTestEnabled=FALSE` during verification per "Flip switches to meet criteria" memory rule; restored to TRUE before close.
-- `psycopg2.extras.Json` wrapping in Backup._ReinsertRow chosen over per-column type lookup -- O(1) test, handles both jsonb columns (audiopolicyjson, audiotracksemittedjson) without column-name allowlist.
-
-### Files (post-directive)
-
-- `Tests/Pipeline/Harness/Assertions.py` -- m.FilePath -> m.RelativePath
-- `Tests/Pipeline/Harness/Invocation.py` -- wait for terminal FileReplaced; new GetAttemptDetails helper
-- `Tests/Pipeline/Harness/Backup.py` -- CanonicalPath from typed pair; jsonb dict adapter
-- `Tests/Contract/TestE2EPerBucket.py` -- removed unused _CurrentCanonicalPath; added _RequireReplacingDisposition helper
-
-### Seams
-
-Existing flow-doc + feature-doc seams already cover this work. No new seams added.
-
-| Seam | Producer | Wire shape | Consumer expects | Verification |
-|---|---|---|---|---|
-| Assertions <- MediaFiles | DB | RealDictCursor row with codec + relativepath columns; no filepath | AssertVideoCodecMatchesProfile | C4 smoke run |
-| Invocation <- TranscodeAttempts | worker write | row with success boolean + errormessage text | _Invoke loop checks Success NOT NULL THEN raises if False | C4 smoke run |
-| Backup -> BackupHandle | MediaFiles row + PathStorageRoots | typed pair canonical-display string | RestoreMediaFile uses LocalPath separately | C4 smoke run |
-
-### Promotions
-
-| Source artifact | Target file | Commit |
-|---|---|---|
-| Wait-for-terminal-FileReplaced polling logic | `Tests/Pipeline/Harness/Invocation.py` | next commit |
-| GetAttemptDetails helper API | `Tests/Pipeline/Harness/Invocation.py` | next commit |
-| jsonb adapter via psycopg2.extras.Json | `Tests/Pipeline/Harness/Backup.py` | next commit |
-| CanonicalPath synthesized from StorageRootId+RelativePath | `Tests/Pipeline/Harness/Backup.py` | next commit |
-| _RequireReplacingDisposition test helper | `Tests/Contract/TestE2EPerBucket.py` | next commit |
-| m.FilePath -> m.RelativePath in AssertVideoCodecMatchesProfile | `Tests/Pipeline/Harness/Assertions.py` | next commit |
+1. Dialog Boost interpretation: (a) keep shipped LRA-compressed contract, or (b) bit-copy with default-disposition. Spec Decision #13 defaults to (a) pending operator override.
