@@ -160,6 +160,30 @@ Implementation of criteria 26-28 is owned by `Features/AudioCompletion/audio-com
 
 28. **[BUG-0003]** No file is queued for any re-encoding profile (`ProcessingMode = 'Transcode'`) when its source audio bitrate is at or below the channel-aware floor defined in `QueueAdmissionConfig.MinAudioBitrateKbps{Mono,Stereo,Surround}` (defaults: 64 / 96 / 128). The cascade in `_EvaluateCompliance` short-circuits the Transcode return for sub-floor sources and falls through to the Remux/compliant evaluation. Verifiable: a file with 53 kbps stereo source audio assigned to an SVT-AV1 profile produces `RecommendedMode` of `'Remux'` or `IsCompliant = true`, never `'Transcode'`.
 
+### L. Bucket-scoped operations contract
+
+The bucket precedence (`!Video -> Transcode`, `!Container -> Remux`, `!Audio -> AudioFixOnly`) tells the system which bucket OWNS a file. The bucket's worker fixes ONLY the dimensions actually flagged non-compliant -- not all dimensions at or below its level. This keeps each operation minimum-scope so running a bucket's work cannot make the file need MORE work.
+
+Operations per bucket, gated on the three compliance booleans read off the MediaFiles row at command-build time:
+
+| Bucket | Always (the bucket-defining op) | Conditionally (only when the flag is False) |
+|---|---|---|
+| Transcode | video re-encode (per AssignedProfile) | container rewrite (if `!ContainerCompliant`), audio loudnorm (if `!AudioCompliant`) |
+| Remux | container rewrite | audio loudnorm (if `!AudioCompliant`) |
+| AudioFixOnly | audio loudnorm | -- |
+
+Symmetric reads:
+- `!AudioCompliant` -> `-filter:a loudnorm ...` per `linear-loudnorm.feature.md`
+- `AudioCompliant=True` -> `-c:a copy` (do not touch the audio stream)
+- `!ContainerCompliant` -> output container = mp4 (or current target), source basename + `-mv` suffix
+- `ContainerCompliant=True` (in Remux/Transcode bucket reached for other reasons) -> output container matches source container; no rewrite
+
+29. **Bucket-scoped operations invariant.** `Features/CommandBuilder` emits the minimum-scope command per the table above. The three compliance booleans (`VideoCompliant`, `ContainerCompliant`, `AudioCompliant`) on `MediaFiles` are read fresh at command-build time; each False flag adds the corresponding op to the command, each True flag suppresses it. Verifiable: a Transcode-bucket file whose `AudioCompliant=True` produces a command containing `-c:a copy` and no `loudnorm`; an AudioFix-bucket file's output container equals source container when `ContainerCompliant=True`.
+
+30. **Idempotency invariant.** Running a bucket's worker on a file changes ONLY the dimensions the bucket owned. A worker is forbidden from causing any compliance boolean to flip from `True` to `False` post-replacement. Verifiable: post-replacement `RecomputeForFiles` must not produce a higher-cost bucket than the pre-replacement bucket. Surface query: `SELECT COUNT(*) FROM MediaFilesArchive a JOIN MediaFiles m ON m.Id = a.MediaFileId WHERE a.<pre-bucket> = 'AudioFixOnly' AND m.WorkBucket = 'Transcode'` -- 0 in steady state; any non-zero indicates the audio fix poisoned the video verdict (or analogous).
+
+31. **VideoVertical savings calc reads video stream bitrate, not total `SizeMB`.** Audio re-encoding can grow total file size without touching the video stream. The savings estimator must operate on the video bitrate so the verdict is invariant under audio-only changes. Verifiable: an AudioFix-bucket file whose pre-fix `VideoCompliant=True` still has `VideoCompliant=True` post-fix, even when total `SizeMB` grew 2-3x from audio re-encode.
+
 ## Status
 
 IN PROGRESS -- operator approved 2026-05-09 (cheap-loudnorm-detection validated; visibility panel placed at bottom of Activity page).
@@ -186,6 +210,7 @@ IN PROGRESS -- operator approved 2026-05-09 (cheap-loudnorm-detection validated;
 - [ ] Operator visibility widget (criterion 21) + SmartPopulate response shape (criterion 22)
 - [ ] Drop legacy `CompliantFiles` table (criterion 23)
 - [ ] Live verifies: walk criteria 4, 5, 12 (a-e), 18, 19 on the live DB
+- [ ] **C29-C31 (bucket-scoped ops + idempotency + video-savings calc fix)** -- documented 2026-06-22; current behavior diverges (CommandBuilder always loudnorms in Quick/Remux/AudioFix; VideoVertical savings uses total SizeMB). Open work owned by follow-up directive `compliance-symmetry` (proposed)
 
 NEXT: operator approval to start implementation. Recommended order:
 
