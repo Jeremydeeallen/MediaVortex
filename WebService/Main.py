@@ -490,6 +490,10 @@ class WebServiceApp:
         from Features.MediaFile.ComplianceSummaryController import ComplianceSummaryBlueprint
         self.App.register_blueprint(ComplianceSummaryBlueprint)
 
+        # directive: compliance-recompute-tools | # see startup.ST5
+        from Features.MediaFile.ComplianceRecomputeController import ComplianceRecomputeBlueprint
+        self.App.register_blueprint(ComplianceRecomputeBlueprint)
+
         # directive: compliance-tabbed-ui | # see startup.ST5
         @self.App.route('/Compliance')
         def render_compliance_tabbed_page():
