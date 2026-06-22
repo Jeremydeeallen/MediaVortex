@@ -808,14 +808,24 @@ function ShowProfileKnobs(ProfileId) {
             return;
         }
         const P = Resp.profile;
+        const IsDraft = (P.Draft === true || P.Draft === 1 || P.Draft === '1' || P.Draft === 't' || P.Draft === 'true');
+        const COMPLIANCE_FIELDS = new Set(['Codec','StreamCodecName','TargetResolutionCategory','TargetVideoKbps','AllowUpscale','AudioCodec','TargetAudioKbps','Container']);
         const ProfileEditable = [
             {name: 'ProfileName', kind: 'text', group: 'Identity'},
             {name: 'Description', kind: 'text', group: 'Identity'},
-            {name: 'Codec', kind: 'select', options: ['libsvtav1','av1_nvenc'], group: 'Codec'},
-            {name: 'Preset', kind: 'int', group: 'Codec'},
-            {name: 'UseNvidiaHardware', kind: 'bool_int', group: 'Codec'},
-            {name: 'RateControlMode', kind: 'select', options: ['cq','vbr'], group: 'Codec'},
-            {name: 'FilmGrain', kind: 'int', group: 'Codec'},
+            {name: 'Active', kind: 'bool', group: 'Identity'},
+            {name: 'Codec', kind: 'select', options: ['libsvtav1','av1_nvenc'], group: 'Compliance Bar'},
+            {name: 'StreamCodecName', kind: 'select', options: ['av1','hevc','h265','h264'], group: 'Compliance Bar'},
+            {name: 'TargetResolutionCategory', kind: 'select', options: ['480p','540p','720p','1080p','1440p','2160p'], group: 'Compliance Bar'},
+            {name: 'TargetVideoKbps', kind: 'int', group: 'Compliance Bar'},
+            {name: 'AllowUpscale', kind: 'bool', group: 'Compliance Bar'},
+            {name: 'AudioCodec', kind: 'select', options: ['aac','flac','ac3','eac3','opus'], group: 'Compliance Bar'},
+            {name: 'TargetAudioKbps', kind: 'int', group: 'Compliance Bar'},
+            {name: 'Container', kind: 'select', options: ['mp4','mkv','m4v','mov'], group: 'Compliance Bar'},
+            {name: 'Preset', kind: 'int', group: 'Encoder'},
+            {name: 'UseNvidiaHardware', kind: 'bool_int', group: 'Encoder'},
+            {name: 'RateControlMode', kind: 'select', options: ['cq','vbr'], group: 'Encoder'},
+            {name: 'FilmGrain', kind: 'int', group: 'Encoder'},
             {name: 'Tune', kind: 'text', group: 'NVENC'},
             {name: 'Multipass', kind: 'select', options: ['fullres','qres','disabled','2pass'], group: 'NVENC'},
             {name: 'PixelFormat', kind: 'text', group: 'NVENC'},
@@ -823,11 +833,9 @@ function ShowProfileKnobs(ProfileId) {
             {name: 'YadifMode', kind: 'int', group: 'Deinterlace'},
             {name: 'YadifParity', kind: 'int', group: 'Deinterlace'},
             {name: 'YadifDeint', kind: 'int', group: 'Deinterlace'},
-            {name: 'AudioCodec', kind: 'text', group: 'Audio'},
-            {name: 'AudioBitrateKbps', kind: 'int', group: 'Audio'},
-            {name: 'AudioChannels', kind: 'int', group: 'Audio'},
-            {name: 'AudioFilter', kind: 'text', group: 'Audio'},
-            {name: 'Container', kind: 'text', group: 'Output'},
+            {name: 'AudioBitrateKbps', kind: 'int', group: 'Encoder Audio'},
+            {name: 'AudioChannels', kind: 'int', group: 'Encoder Audio'},
+            {name: 'AudioFilter', kind: 'text', group: 'Encoder Audio'},
             {name: 'FastStart', kind: 'bool', group: 'Output'},
             {name: 'QualityTestRequired', kind: 'bool', group: 'Quality Test'},
         ];
@@ -855,6 +863,10 @@ function ShowProfileKnobs(ProfileId) {
 
         function CellInput(Col, Val, FieldId) {
             const V = (Val === null || Val === undefined) ? '' : String(Val);
+            const LockedByCompliance = (!IsDraft && COMPLIANCE_FIELDS.has(Col.name));
+            if (LockedByCompliance) {
+                return `<span class="text-muted" title="Locked: profile is Finalized. Use Copy as new draft to fork.">${V || '<i>null</i>'} <i class="fas fa-lock ms-1"></i></span>`;
+            }
             if (Col.kind === 'bool') {
                 const TrueSel = (Val === true) ? 'selected' : '';
                 const FalseSel = (Val === false) ? 'selected' : '';
@@ -884,13 +896,19 @@ function ShowProfileKnobs(ProfileId) {
             return `<input type="text" id="${FieldId}" data-kind="${Col.kind}" value="${V.replace(/"/g,'&quot;')}" class="form-control form-control-sm">`;
         }
 
-        let Body = '<h6 class="mb-2">Profile <small class="text-muted">(every field editable; Save commits)</small></h6>';
+        const DraftBadge = IsDraft
+            ? '<span class="badge bg-warning text-dark me-2">DRAFT</span>'
+            : '<span class="badge bg-success me-2">FINALIZED</span>';
+        const ComplianceNote = IsDraft
+            ? '<div class="alert alert-warning small mb-2"><i class="fas fa-exclamation-triangle me-1"></i> This profile is a DRAFT. Compliance Bar fields are editable. Click <b>Finalize</b> below to lock the bar and make this profile eligible to be set as Default or assigned to shows.</div>'
+            : '<div class="alert alert-info small mb-2"><i class="fas fa-lock me-1"></i> This profile is Finalized. Compliance Bar fields are locked. Use <b>Copy as new draft</b> below to fork this profile into a new Draft you can edit.</div>';
+        let Body = '<h6 class="mb-2">' + DraftBadge + 'Profile <small class="text-muted">(Compliance Bar locks at Finalize)</small></h6>' + ComplianceNote;
         const Groups = {};
         ProfileEditable.forEach(function(Col) {
             const G = Col.group || 'Other';
             (Groups[G] = Groups[G] || []).push(Col);
         });
-        const GroupOrder = ['Identity', 'Codec', 'NVENC', 'Deinterlace', 'Audio', 'Output', 'Quality Test'];
+        const GroupOrder = ['Identity', 'Compliance Bar', 'Encoder', 'NVENC', 'Deinterlace', 'Encoder Audio', 'Output', 'Quality Test'];
         Body += '<table class="table table-sm table-bordered mb-3"><tbody>';
         GroupOrder.forEach(function(G) {
             if (!Groups[G]) return;
@@ -931,6 +949,9 @@ function ShowProfileKnobs(ProfileId) {
                   <div class="modal-body">${Body}</div>
                   <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    ${IsDraft
+                        ? '<button type="button" class="btn btn-warning" id="FinalizeBtn"><i class="fas fa-lock me-1"></i> Finalize</button>'
+                        : '<button type="button" class="btn btn-outline-primary" id="CopyDraftBtn"><i class="fas fa-copy me-1"></i> Copy as new draft</button>'}
                     <button type="button" class="btn btn-primary" id="SaveKnobsBtn"><i class="fas fa-save me-1"></i> Save</button>
                   </div>
                 </div>
@@ -985,6 +1006,57 @@ function ShowProfileKnobs(ProfileId) {
                 const Msg = (XHR.responseJSON && XHR.responseJSON.error) || 'Request failed';
                 ShowAlert('Save failed: ' + Msg, 'danger');
                 Btn.prop('disabled', false).html('<i class="fas fa-save me-1"></i> Save');
+            });
+        });
+
+        Modal.find('#FinalizeBtn').on('click', function() {
+            if (!confirm('Finalize this profile? Compliance Bar fields will be LOCKED.\n\nAfter finalizing, the only way to change the bar is via "Copy as new draft".')) return;
+            const Btn = $(this);
+            Btn.prop('disabled', true);
+            $.ajax({
+                url: '/api/profiles/' + ProfileId + '/finalize',
+                method: 'POST',
+                contentType: 'application/json',
+            })
+            .done(function(R) {
+                if (R.success) {
+                    ShowAlert(R.message || 'Finalized.', 'success');
+                    BsModal.hide();
+                    LoadProfiles();
+                } else {
+                    ShowAlert('Finalize failed: ' + (R.error || 'unknown') + (R.missing_fields ? ' (missing: ' + R.missing_fields.join(', ') + ')' : ''), 'danger');
+                    Btn.prop('disabled', false);
+                }
+            })
+            .fail(function(XHR) {
+                const Msg = (XHR.responseJSON && XHR.responseJSON.error) || 'Request failed';
+                ShowAlert('Finalize failed: ' + Msg, 'danger');
+                Btn.prop('disabled', false);
+            });
+        });
+
+        Modal.find('#CopyDraftBtn').on('click', function() {
+            const Btn = $(this);
+            Btn.prop('disabled', true);
+            $.ajax({
+                url: '/api/profiles/' + ProfileId + '/copy-draft',
+                method: 'POST',
+                contentType: 'application/json',
+            })
+            .done(function(R) {
+                if (R.success) {
+                    ShowAlert((R.message || 'Copied.') + ' Reloading...', 'success');
+                    BsModal.hide();
+                    LoadProfiles();
+                } else {
+                    ShowAlert('Copy failed: ' + (R.error || 'unknown'), 'danger');
+                    Btn.prop('disabled', false);
+                }
+            })
+            .fail(function(XHR) {
+                const Msg = (XHR.responseJSON && XHR.responseJSON.error) || 'Request failed';
+                ShowAlert('Copy failed: ' + Msg, 'danger');
+                Btn.prop('disabled', false);
             });
         });
 

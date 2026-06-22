@@ -24,6 +24,7 @@ DEFERRED_INVALID_MEASUREMENT = 'invalid_loudness_measurement'
 DEFERRED_UNGAINABLE = 'ungainable_all_streams'
 DEFERRED_POLICY_MISSING = 'audio_policy_missing'
 DEFERRED_NO_TRACKS = 'no_emit_tracks_admissible'
+DEFERRED_CHANNELS_EXCEED_MAX = 'channels_exceed_max'
 
 
 SNAPSHOT_POLICY_SQL = (
@@ -123,6 +124,15 @@ class AudioPolicyAdmissionGate:
                 PolicyJson=None,
             )
 
+        MaxChannels = _GetField(Policy, 'MaxAudioChannels')
+        SrcChannels = _GetField(MediaFile, 'AudioChannels')
+        if MaxChannels is not None and SrcChannels is not None and int(SrcChannels) > int(MaxChannels):
+            return AdmissionDecision(
+                Outcome=DEFERRED_CHANNELS_EXCEED_MAX,
+                DeferReason=f'channels_exceed_max:{SrcChannels}>{MaxChannels}',
+                PolicyJson=None,
+            )
+
         Tracks = _GetField(Policy, 'EmitTracks') or []
         if not Tracks:
             return AdmissionDecision(
@@ -179,6 +189,7 @@ class AudioPolicyAdmissionGate:
             'TargetIntegratedLufs', 'TargetTruePeakDbtp', 'TargetLra', 'LoudnessTolerance',
             'EmitTracks', 'UngainablePolicy', 'LanguageKeepPolicy',
             'KeepCommentaryTracks', 'EnableSpeechLanguageDetection', 'AudioDelayMs',
+            'MaxAudioChannels',
         ):
             Val = _GetField(Policy, Key)
             if Val is not None:

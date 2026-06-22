@@ -27,8 +27,8 @@ UPSERT_POLICY_SQL = (
     "Scope, ScopeKey, Enabled, TargetIntegratedLufs, TargetTruePeakDbtp, TargetLra, "
     "LoudnessTolerance, EmitTracks, UngainablePolicy, LanguageKeepPolicy, "
     "KeepCommentaryTracks, EnableSpeechLanguageDetection, AudioDelayMs, "
-    "PreVerticalReNormalizePolicy, LastUpdated"
-    ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s::jsonb, %s, %s, %s, %s, NOW()) "
+    "PreVerticalReNormalizePolicy, MaxAudioChannels, LastUpdated"
+    ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s::jsonb, %s, %s, %s, %s, %s, NOW()) "
     "ON CONFLICT (Scope, COALESCE(ScopeKey, '')) DO UPDATE SET "
     "Enabled = EXCLUDED.Enabled, "
     "TargetIntegratedLufs = EXCLUDED.TargetIntegratedLufs, "
@@ -42,6 +42,7 @@ UPSERT_POLICY_SQL = (
     "EnableSpeechLanguageDetection = EXCLUDED.EnableSpeechLanguageDetection, "
     "AudioDelayMs = EXCLUDED.AudioDelayMs, "
     "PreVerticalReNormalizePolicy = EXCLUDED.PreVerticalReNormalizePolicy, "
+    "MaxAudioChannels = EXCLUDED.MaxAudioChannels, "
     "LastUpdated = NOW()"
 )
 
@@ -125,6 +126,7 @@ class AudioNormalizationController:
                     bool(Body.get('EnableSpeechLanguageDetection', False)),
                     int(Body.get('AudioDelayMs', 0)),
                     ValidatePreVerticalPolicy(Body.get('PreVerticalReNormalizePolicy', 'lazy')),
+                    int(Body.get('MaxAudioChannels', 2)),
                 )
                 DatabaseService().ExecuteNonQuery(UPSERT_POLICY_SQL, Args)
                 return jsonify({'Success': True, 'Message': 'Saved', 'Data': {}})

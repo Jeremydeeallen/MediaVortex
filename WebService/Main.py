@@ -486,6 +486,10 @@ class WebServiceApp:
         self.App.register_blueprint(VideoEncodingBlueprint)
         self.App.register_blueprint(ContainerFormatBlueprint)
 
+        # directive: compliance-symmetry | # see startup.ST5
+        from Features.MediaFile.ComplianceSummaryController import ComplianceSummaryBlueprint
+        self.App.register_blueprint(ComplianceSummaryBlueprint)
+
         # directive: compliance-tabbed-ui | # see startup.ST5
         @self.App.route('/Compliance')
         def render_compliance_tabbed_page():

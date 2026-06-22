@@ -5,10 +5,14 @@ from Core.Resolution.ResolutionTier import ResolutionTier
 
 
 @dataclass(frozen=True)
-# directive: resolution-types | # see resolution-types.C6
+# directive: compliance-symmetry
 class EffectiveProfile:
-    """Resolved profile + thresholds the operations evaluate against -- caller does the cascade + ProfileThresholds lookup. TargetResolutionCategory is now a typed ResolutionTier (resolution-types.C6) -- no more string heterogeneity."""
+    """Resolved profile + compliance bar fields the verticals evaluate against. Carries both the per-source-resolution encoder targets (TargetVideoKbps/TargetAudioKbps from ProfileThresholds) and the per-profile compliance bar (StreamCodecName, AllowUpscale, AudioCodec, Container)."""
     ProfileName: str
     TargetVideoKbps: Optional[int] = None
     TargetAudioKbps: Optional[int] = None
     TargetResolutionCategory: Optional[ResolutionTier] = None
+    StreamCodecName: Optional[str] = None
+    AllowUpscale: bool = False
+    AudioCodec: Optional[str] = None
+    Container: Optional[str] = None

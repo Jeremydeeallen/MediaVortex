@@ -175,9 +175,8 @@ class ProfileController:
                 }), 500
 
         @self.Blueprint.route('/profiles/<int:profile_id>/knobs', methods=['PATCH'])
-        # directive: unify-profile-editor
+        # directive: compliance-symmetry
         def patch_profile_knobs(profile_id):
-            """Update lifted knob columns on Profiles + ProfileThresholds. Column names whitelisted."""
             try:
                 Payload = request.get_json() or {}
                 PROFILE_COLS = {
@@ -188,6 +187,12 @@ class ProfileController:
                     'AudioCodec', 'AudioBitrateKbps', 'AudioChannels', 'AudioFilter',
                     'Container', 'FastStart', 'RateControlMode', 'AqStrength',
                     'QualityTestRequired',
+                    'StreamCodecName', 'TargetResolutionCategory', 'TargetVideoKbps',
+                    'AllowUpscale', 'TargetAudioKbps', 'Active',
+                }
+                COMPLIANCE_FIELDS = {
+                    'Codec', 'StreamCodecName', 'TargetResolutionCategory', 'TargetVideoKbps',
+                    'AllowUpscale', 'AudioCodec', 'TargetAudioKbps', 'Container',
                 }
                 THRESHOLD_COLS = {
                     'Resolution', 'TranscodeDownTo', 'Quality', 'ContainerType',
@@ -202,6 +207,20 @@ class ProfileController:
                 Db = DatabaseService()
 
                 ProfileUpdates = {k: v for k, v in (Payload.get('Profile') or {}).items() if k in PROFILE_COLS}
+
+                ComplianceTouches = set(ProfileUpdates.keys()) & COMPLIANCE_FIELDS
+                if ComplianceTouches:
+                    DraftRows = Db.ExecuteQuery("SELECT Draft FROM Profiles WHERE Id = %s", (profile_id,))
+                    if not DraftRows:
+                        return jsonify({'success': False, 'error': f'Profile {profile_id} not found'}), 404
+                    IsDraft = bool(DraftRows[0].get('draft'))
+                    if not IsDraft:
+                        return jsonify({
+                            'success': False,
+                            'error': f'Profile {profile_id} is Finalized; compliance fields are locked. Use "Copy as new draft" to fork.',
+                            'locked_fields': sorted(ComplianceTouches),
+                        }), 400
+
                 if ProfileUpdates:
                     Sets = ', '.join(f'{k} = %s' for k in ProfileUpdates.keys())
                     Db.ExecuteNonQuery(f'UPDATE Profiles SET {Sets} WHERE Id = %s',
@@ -259,6 +278,79 @@ class ProfileController:
                     'success': False,
                     'error': f'Failed to delete profile: {str(e)}'
                 }), 500
+
+        @self.Blueprint.route('/profiles/<int:profile_id>/finalize', methods=['POST'])
+        # directive: compliance-symmetry
+        def finalize_profile(profile_id):
+            try:
+                from Core.Database.DatabaseService import DatabaseService
+                Db = DatabaseService()
+                Rows = Db.ExecuteQuery(
+                    "SELECT Draft, ProfileName, StreamCodecName, TargetResolutionCategory, "
+                    "AudioCodec, Container "
+                    "FROM Profiles WHERE Id = %s",
+                    (profile_id,),
+                )
+                if not Rows:
+                    return jsonify({'success': False, 'error': f'Profile {profile_id} not found'}), 404
+                R = Rows[0]
+                if not bool(R.get('draft')):
+                    return jsonify({'success': False, 'error': f"Profile {R.get('profilename')} is already Finalized"}), 400
+                Missing = [F for F in ('streamcodecname', 'targetresolutioncategory', 'audiocodec', 'container') if not R.get(F)]
+                if Missing:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Cannot finalize: missing required compliance fields',
+                        'missing_fields': Missing,
+                    }), 400
+                Db.ExecuteNonQuery("UPDATE Profiles SET Draft = FALSE WHERE Id = %s", (profile_id,))
+                return jsonify({'success': True, 'message': f"Profile {R.get('profilename')} finalized; compliance fields locked."})
+            except Exception as e:
+                LoggingService.LogException("Failed to finalize profile", e, "ProfileController", "finalize_profile")
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.Blueprint.route('/profiles/<int:profile_id>/copy-draft', methods=['POST'])
+        # directive: compliance-symmetry
+        def copy_draft_profile(profile_id):
+            try:
+                from Core.Database.DatabaseService import DatabaseService
+                Db = DatabaseService()
+                Src = Db.ExecuteQuery("SELECT * FROM Profiles WHERE Id = %s", (profile_id,))
+                if not Src:
+                    return jsonify({'success': False, 'error': f'Profile {profile_id} not found'}), 404
+                S = Src[0]
+                NewName = f"Copy of {S.get('profilename')}"
+                Suffix = 1
+                while Db.ExecuteQuery("SELECT 1 FROM Profiles WHERE ProfileName = %s", (NewName,)):
+                    Suffix += 1
+                    NewName = f"Copy of {S.get('profilename')} ({Suffix})"
+                Db.ExecuteNonQuery(
+                    "INSERT INTO Profiles "
+                    "(ProfileName, Description, Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint, "
+                    " UseNvidiaHardware, SortOrder, Draft, Active, StreamCodecName, TargetResolutionCategory, "
+                    " TargetVideoKbps, AllowUpscale, AudioCodec, TargetAudioKbps, Container) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, TRUE, %s, %s, %s, %s, %s, %s, %s) "
+                    "ON CONFLICT (ProfileName) DO NOTHING",
+                    (
+                        NewName, S.get('description'), S.get('codec'), S.get('preset'), S.get('filmgrain'),
+                        S.get('yadifmode'), S.get('yadifparity'), S.get('yadifdeint'),
+                        S.get('usenvidiahardware'), S.get('sortorder'),
+                        S.get('streamcodecname'), S.get('targetresolutioncategory'),
+                        S.get('targetvideokbps'), S.get('allowupscale'), S.get('audiocodec'),
+                        S.get('targetaudiokbps'), S.get('container'),
+                    ),
+                )
+                Inserted = Db.ExecuteQuery("SELECT Id FROM Profiles WHERE ProfileName = %s", (NewName,))
+                NewId = Inserted[0]['id'] if Inserted else None
+                return jsonify({
+                    'success': True,
+                    'message': f'Copied to new draft "{NewName}"',
+                    'new_profile_id': NewId,
+                    'new_profile_name': NewName,
+                })
+            except Exception as e:
+                LoggingService.LogException("Failed to copy-draft profile", e, "ProfileController", "copy_draft_profile")
+                return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.Blueprint.route('/profiles/<int:profile_id>/copy', methods=['POST'])
         def copy_profile(profile_id):

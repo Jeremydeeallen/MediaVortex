@@ -39,6 +39,7 @@
         <div class="col-md-1"><label>Target LUFS</label><input name="TargetIntegratedLufs" type="number" step="0.1" value="-23" class="form-control"></div>
         <div class="col-md-1"><label>Target TP</label><input name="TargetTruePeakDbtp" type="number" step="0.1" value="-2" class="form-control"></div>
         <div class="col-md-1"><label>Tolerance</label><input name="LoudnessTolerance" type="number" step="0.1" value="4" class="form-control"></div>
+        <div class="col-md-1"><label>MaxAudioChannels</label><input name="MaxAudioChannels" type="number" min="1" max="8" value="2" class="form-control" title="Max acceptable source channel count; 2=stereo, 6=5.1; exceed -> defer with channels_exceed_max"></div>
         <div class="col-md-2"><label>Ungainable</label>
           <select name="UngainablePolicy" class="form-select">
             <option>adaptive</option><option>skip</option>
@@ -156,7 +157,7 @@ document.getElementById('settings-form').addEventListener('submit', async e=>{
   for(const [k,v] of fd.entries()){
     if(k==='Enabled'||k==='KeepCommentaryTracks'||k==='EnableSpeechLanguageDetection'){body[k]=true}
     else if(k==='EmitTracks'){try{body[k]=JSON.parse(v)}catch{body[k]=[]}}
-    else if(v===''){body[k]=null} else if(!isNaN(parseFloat(v))&&['TargetIntegratedLufs','TargetTruePeakDbtp','LoudnessTolerance','TargetLra','AudioDelayMs'].includes(k)){body[k]=parseFloat(v)}
+    else if(v===''){body[k]=null} else if(!isNaN(parseFloat(v))&&['TargetIntegratedLufs','TargetTruePeakDbtp','LoudnessTolerance','TargetLra','AudioDelayMs','MaxAudioChannels'].includes(k)){body[k]=k==='MaxAudioChannels'?parseInt(v,10):parseFloat(v)}
     else{body[k]=v}
   }
   ['Enabled','KeepCommentaryTracks','EnableSpeechLanguageDetection'].forEach(k=>{if(!fd.has(k))body[k]=false});

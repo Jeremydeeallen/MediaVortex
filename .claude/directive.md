@@ -2,7 +2,7 @@
 
 **Slug:** compliance-symmetry
 **Set:** 2026-06-22
-**Status:** Active -- phase: NEEDS_DOC_PREREAD
+**Status:** Active -- phase: IMPLEMENTING
 **Reference:** `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md` (canonical design)
 
 ## Outcome

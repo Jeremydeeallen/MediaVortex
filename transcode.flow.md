@@ -2,6 +2,8 @@
 
 **Slug:** transcode
 
+**Canonical compliance + bucket + admission contract:** see `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md`. This flow doc retains the pipeline shape and stage IDs; per-stage compliance and bucket-derivation prose has been consolidated into the spec.
+
 Entry point: `StartMediaVortex.py` (all services) or individual service scripts.
 
 ## Stage Overview

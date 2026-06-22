@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Compliance Summary - MediaFile {{ media_file_id }}</title>
+  <style>
+    body { font-family: -apple-system, Segoe UI, sans-serif; margin: 24px; max-width: 980px; }
+    h1 { margin: 0 0 4px 0; }
+    .sub { color: #666; margin-bottom: 24px; }
+    section { background: #fafafa; border: 1px solid #e6e6e6; border-radius: 6px; padding: 16px 20px; margin-bottom: 18px; }
+    section h2 { margin: 0 0 10px 0; font-size: 16px; color: #333; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #efefef; font-size: 14px; }
+    th { color: #555; width: 220px; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .ok { background: #d4f1d4; color: #1f6f1f; }
+    .bad { background: #fbd6d6; color: #9b2222; }
+    .nul { background: #eaeaea; color: #555; }
+    .bucket { font-size: 20px; font-weight: 700; }
+    code { background: #eef; padding: 2px 6px; border-radius: 3px; }
+    .err { color: #9b2222; }
+  </style>
+</head>
+<body>
+  <h1>Compliance Summary</h1>
+  <div class="sub">MediaFile <code>{{ media_file_id }}</code></div>
+  <div id="loading">Loading...</div>
+  <div id="content" style="display:none">
+    <section>
+      <h2>File</h2>
+      <table>
+        <tr><th>FileName</th><td id="file_name"></td></tr>
+      </table>
+    </section>
+    <section>
+      <h2>Effective Profile (compliance bar)</h2>
+      <table id="profile_table"></table>
+    </section>
+    <section>
+      <h2>Effective Audio Policy (per-scope loudness + channels)</h2>
+      <table id="audio_policy_table"></table>
+    </section>
+    <section>
+      <h2>Compliance Verdicts</h2>
+      <table id="verdicts_table"></table>
+    </section>
+    <section>
+      <h2>WorkBucket &amp; Planned Operations</h2>
+      <div class="bucket" id="bucket"></div>
+      <div id="ops"></div>
+    </section>
+  </div>
+  <script>
+    const MediaFileId = {{ media_file_id }};
+    function Badge(v) {
+      if (v === true) return '<span class="badge ok">true</span>';
+      if (v === false) return '<span class="badge bad">false</span>';
+      return '<span class="badge nul">null</span>';
+    }
+    function RenderKv(rows, target) {
+      const tbl = document.getElementById(target);
+      tbl.innerHTML = rows.map(r => `<tr><th>${r[0]}</th><td>${r[1] === null || r[1] === undefined ? '<i>null</i>' : r[1]}</td></tr>`).join('');
+    }
+    fetch(`/api/MediaFile/${MediaFileId}/ComplianceSummary`)
+      .then(r => r.json())
+      .then(data => {
+        if (!data.success) throw new Error(data.error || 'Unknown error');
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('content').style.display = '';
+        document.getElementById('file_name').textContent = data.file_name || '';
+        const ep = data.effective_profile || {};
+        RenderKv([
+          ['ProfileName', ep.name],
+          ['StreamCodecName', ep.stream_codec_name],
+          ['TargetResolutionCategory', ep.target_resolution_category],
+          ['TargetVideoKbps', ep.target_video_kbps],
+          ['AllowUpscale', ep.allow_upscale],
+          ['AudioCodec', ep.audio_codec],
+          ['TargetAudioKbps', ep.target_audio_kbps],
+          ['Container', ep.container],
+        ], 'profile_table');
+        const ap = data.audio_policy || {};
+        RenderKv([
+          ['Scope', ap.scope],
+          ['ScopeKey', ap.scopekey],
+          ['Enabled', ap.enabled],
+          ['TargetIntegratedLufs', ap.targetintegratedlufs],
+          ['TargetLra', ap.targetlra],
+          ['MaxAudioChannels', ap.maxaudiochannels],
+          ['LanguageKeepPolicy', ap.languagekeeppolicy],
+        ], 'audio_policy_table');
+        const v = data.verdicts || {};
+        document.getElementById('verdicts_table').innerHTML = `
+          <tr><th>Video</th><td>${Badge(v.video.compliant)} <code>${v.video.reason || ''}</code></td></tr>
+          <tr><th>Container</th><td>${Badge(v.container.compliant)} <code>${v.container.reason || ''}</code></td></tr>
+          <tr><th>Audio</th><td>${Badge(v.audio.compliant)} <code>${v.audio.reason || ''}</code></td></tr>
+        `;
+        document.getElementById('bucket').textContent = data.work_bucket || 'NULL (compliant or undecidable)';
+        document.getElementById('ops').innerHTML = data.planned_operations && data.planned_operations.length
+          ? '<ul>' + data.planned_operations.map(o => `<li><code>${o}</code></li>`).join('') + '</ul>'
+          : '<i>no operations</i>';
+      })
+      .catch(err => {
+        document.getElementById('loading').innerHTML = `<div class="err">${err.message}</div>`;
+      });
+  </script>
+</body>
+</html>

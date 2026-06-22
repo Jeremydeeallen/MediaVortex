@@ -19,19 +19,71 @@ class EffectiveProfileResolver:
         # directive: resolution-types | # see resolution-types.C6
         self.TierRegistry = TierRegistry or ResolutionTierRegistry()
 
-    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C12
+    # directive: compliance-symmetry
     def Resolve(self, Mf: MediaFileModel) -> Optional[EffectiveProfile]:
-        """Cascade resolves the profile name; thresholds lookup picks the row for the source resolution; bitrate strategy fills TargetVideoKbps; returns None when no profile assigned. TargetResolutionCategory is mapped to a ResolutionTier at this boundary (resolution-types.C6)."""
-        if not Mf.AssignedProfile or not Mf.ResolutionCategory:
+        ProfileName = self._ResolveAssignedProfileName(Mf)
+        if not ProfileName or not Mf.ResolutionCategory:
             return None
-        Row = self._LookupThresholdsRow(Mf.AssignedProfile, Mf.ResolutionCategory)
-        if not Row:
-            return EffectiveProfile(ProfileName=Mf.AssignedProfile, TargetVideoKbps=None, TargetAudioKbps=None, TargetResolutionCategory=None)
-        TargetResolutionStr = Row['TargetResolution']
-        TargetTier = self.TierRegistry.FromCategory(TargetResolutionStr)
-        TargetAudioKbps = Row['AudioBitrateKbps'] if Row['AudioBitrateKbps'] is not None else None
-        TargetVideoKbps = self._ResolveTargetVideoKbps(Row, Mf, TargetResolutionStr)
-        return EffectiveProfile(ProfileName=Mf.AssignedProfile, TargetVideoKbps=TargetVideoKbps, TargetAudioKbps=TargetAudioKbps, TargetResolutionCategory=TargetTier)
+        Bar = self._LookupComplianceBarRow(ProfileName)
+        if Bar is None:
+            return None
+        Row = self._LookupThresholdsRow(ProfileName, Mf.ResolutionCategory)
+        if Row:
+            TargetResolutionStr = Row['TargetResolution']
+            TargetAudioKbps = Row['AudioBitrateKbps'] if Row['AudioBitrateKbps'] else None
+            TargetVideoKbps = self._ResolveTargetVideoKbps(Row, Mf, TargetResolutionStr)
+        else:
+            TargetResolutionStr = Bar.get('targetresolutioncategory')
+            TargetVideoKbps = Bar.get('targetvideokbps')
+            TargetAudioKbps = Bar.get('targetaudiokbps')
+        TargetTier = self.TierRegistry.FromCategory(Bar.get('targetresolutioncategory') or TargetResolutionStr)
+        return EffectiveProfile(
+            ProfileName=ProfileName,
+            TargetVideoKbps=TargetVideoKbps if TargetVideoKbps else Bar.get('targetvideokbps'),
+            TargetAudioKbps=TargetAudioKbps if TargetAudioKbps else Bar.get('targetaudiokbps'),
+            TargetResolutionCategory=TargetTier,
+            StreamCodecName=Bar.get('streamcodecname'),
+            AllowUpscale=bool(Bar.get('allowupscale')),
+            AudioCodec=Bar.get('audiocodec'),
+            Container=Bar.get('container'),
+        )
+
+    # directive: compliance-symmetry
+    def _ResolveAssignedProfileName(self, Mf: MediaFileModel) -> Optional[str]:
+        Assigned = (Mf.AssignedProfile or '').strip() or None
+        if Assigned and self._IsFinalizedActive(Assigned):
+            return Assigned
+        DefaultRows = self.DB.ExecuteQuery(
+            "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'DefaultProfileName' LIMIT 1"
+        )
+        if DefaultRows and DefaultRows[0].get('settingvalue') and self._IsFinalizedActive(DefaultRows[0]['settingvalue']):
+            return DefaultRows[0]['settingvalue']
+        FallbackRows = self.DB.ExecuteQuery(
+            "SELECT ProfileName FROM Profiles WHERE Draft = FALSE AND Active = TRUE AND ProfileName = '_PreMigrationDefault' LIMIT 1"
+        )
+        if FallbackRows:
+            return FallbackRows[0]['profilename']
+        return None
+
+    # directive: compliance-symmetry
+    def _IsFinalizedActive(self, ProfileName: str) -> bool:
+        Rows = self.DB.ExecuteQuery(
+            "SELECT Draft, Active FROM Profiles WHERE ProfileName = %s LIMIT 1",
+            (ProfileName,),
+        )
+        if not Rows:
+            return False
+        return bool(Rows[0].get('active')) and not bool(Rows[0].get('draft'))
+
+    # directive: compliance-symmetry
+    def _LookupComplianceBarRow(self, ProfileName: str) -> Optional[dict]:
+        Rows = self.DB.ExecuteQuery(
+            "SELECT StreamCodecName, TargetResolutionCategory, TargetVideoKbps, AllowUpscale, "
+            "AudioCodec, TargetAudioKbps, Container "
+            "FROM Profiles WHERE ProfileName = %s LIMIT 1",
+            (ProfileName,),
+        )
+        return Rows[0] if Rows else None
 
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C12
     def _ResolveTargetVideoKbps(self, Row: dict, Mf: MediaFileModel, TargetResolution: Optional[str]) -> Optional[int]:
