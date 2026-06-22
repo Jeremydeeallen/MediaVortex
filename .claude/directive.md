@@ -31,7 +31,7 @@ Criteria are drafted at NEEDS_PLAN. The spec's "Verification Plan" table names t
 - **GUI**: `/Setup -> Profiles` editor renders Draft vs Finalized states; new `/MediaFile/<id>/ComplianceSummary` view exists; `MaxAudioChannels` moves to `/AudioNormalization`.
 - **Idempotency**: three surface queries return 0 in steady state.
 - **Slow E2E**: all 4 tests in `Tests/Contract/TestE2EPerBucket.py -m slow` pass green against live worker fleet.
-- **Open question resolved**: operator picks Dialog Boost interpretation (a) keep shipped LRA-compressed contract OR (b) bit-copy with default-disposition.
+- **Dialog Boost behavior**: existing shipped contract (Original = LRA preserved, Dialog Boost = LRA compressed to <=11.0 LU, both loudnorm'd to `TargetIntegratedLufs`, Dialog Boost `disposition.default=1`). Operator-locked 2026-06-22.
 
 ## Files (placeholder -- finalized at NEEDS_PLAN exit)
 
@@ -63,6 +63,4 @@ Per the spec's "Schema Changes" + "Verification Plan" + "Migration / Rollout" se
 
 ## Status
 
-NEEDS_PLAN. The plan is fleshed out by reading the spec, picking the exact criterion wording for each test in the Verification Plan, and naming the final `## Files` list. Operator-input items from the spec's "Open Questions" section must be resolved before IMPLEMENTING:
-
-1. Dialog Boost interpretation: (a) keep shipped LRA-compressed contract, or (b) bit-copy with default-disposition. Spec Decision #13 defaults to (a) pending operator override.
+NEEDS_PLAN. The plan is fleshed out by reading the spec, picking the exact criterion wording for each test in the Verification Plan, and naming the final `## Files` list. No open operator-input items remain -- all decisions are locked in spec section "Decisions Made During Tightening (2026-06-22)".
