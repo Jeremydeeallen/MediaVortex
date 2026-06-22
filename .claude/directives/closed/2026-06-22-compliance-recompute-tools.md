@@ -2,7 +2,7 @@
 
 **Slug:** compliance-recompute-tools
 **Set:** 2026-06-22
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Closed -- 2026-06-22 -- Success
 **Reference:** Closes the "no system-wide trigger" gap left open by `compliance-symmetry`. The per-file `RecomputeForFiles` infrastructure exists and fires on probe completion + file replacement; this directive adds the operator-callable wrappers (CLI + HTTP endpoint) for library-wide and scoped recompute sweeps.
 
 ## Outcome
@@ -27,4 +27,33 @@ C4. Smoke: run the CLI against the 30 jobs the operator queued earlier; surface 
 
 ## Status
 
-Active -- IMPLEMENTING.
+### Verification
+
+- **C1**: `Scripts/RecomputeLibraryCompliance.py` ran library-wide: 51,420 rows in 905s; profile-scoped earlier run: 50,222 rows in 822s. Filters + dry-run smoke-tested. Bucket-transition histogram printed at end.
+- **C2**: `POST /api/Compliance/Recompute` returned 200 with `{"Processed":5,"BucketChanges":{}}` for a 5-row sweep. Registered in `WebService/Main.py` blueprint list.
+- **C3**: Both share `QueueManagementBusinessService.RecomputeForFiles`; grep confirms no duplicate vertical-call paths.
+- **C4**: Profile-scoped run on the dominant profile produced **22,935 bucket changes / 50,222 rows (45.6% churn)**. Library-wide run added another 381 changes across the remaining profiles. Truth-state of the library now matches the new strict per-profile bar.
+
+### Live library state after recompute
+
+| Bucket | Count |
+|---|---|
+| Transcode | 35,982 |
+| None (Compliant) | 13,364 |
+| AudioFixOnly | 2,045 |
+| Remux | 29 |
+
+### Promotions
+
+| Source artifact | Target file |
+|---|---|
+| Library-wide recompute pattern (batches of 500, vertical RecomputeFor + writeback) | `Scripts/RecomputeLibraryCompliance.py` |
+| HTTP entrypoint with scoped filters | `Features/MediaFile/ComplianceRecomputeController.py` + `WebService/Main.py` |
+
+### Files (post-directive)
+
+| File | Role |
+|---|---|
+| `Scripts/RecomputeLibraryCompliance.py` | NEW CLI |
+| `Features/MediaFile/ComplianceRecomputeController.py` | NEW endpoint blueprint |
+| `WebService/Main.py` | Register blueprint |
