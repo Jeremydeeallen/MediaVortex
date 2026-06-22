@@ -199,7 +199,7 @@ class FileReplacementBusinessService:
                     'ErrorMessage': f'Transcoded file not found at: {LocalTranscodedPath}',
                 }
 
-            isRemux = (transcode_attempt.ProfileName or '') in ('Remux', 'SubtitleFix')
+            isRemux = (transcode_attempt.ProfileName or '') in ('Remux', 'SubtitleFix', 'Quick', 'AudioFix')
             if (not isRemux
                 and transcode_attempt.NewSizeBytes is not None
                 and transcode_attempt.OldSizeBytes is not None
