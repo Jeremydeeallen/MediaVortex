@@ -606,10 +606,11 @@ class ProcessTranscodeQueueService:
             if ActiveJobId:
                 self.ActiveJobRepository.CompleteActiveJob(ActiveJobId, Success=True)
 
-            LoggingService.LogInfo(f"Remux job {Job.Id} completed successfully", "ProcessTranscodeQueueService", "HandleRemuxResult")
+            Mode = (Job.ProcessingMode or 'Remux').lower()
+            LoggingService.LogInfo(f"{Mode} job {Job.Id} completed successfully", "ProcessTranscodeQueueService", "HandleRemuxResult")
 
         except Exception as e:
-            LoggingService.LogException("Exception handling remux result", e, "ProcessTranscodeQueueService", "HandleRemuxResult")
+            LoggingService.LogException("Exception handling job result", e, "ProcessTranscodeQueueService", "HandleRemuxResult")
 
     # directive: nvenc-rate-anchored-remediation
     def GetMediaFileData(self, Job: TranscodeQueueModel) -> Optional[MediaFileModel]:

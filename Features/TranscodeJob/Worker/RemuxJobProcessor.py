@@ -35,26 +35,28 @@ class RemuxJobProcessor(JobProcessor):
         TargetLocalPath = None
         TemporaryFilePathId = None
         OwnershipTransferred = False
+        Mode = Job.ProcessingMode or 'Remux'
+        Lower = Mode.lower()
         try:
-            LoggingService.LogInfo(f"Starting remux job processing for job ID: {Job.Id}", "RemuxJobProcessor", "_ProcessImpl")
+            LoggingService.LogInfo(f"Starting {Lower} job processing for job ID: {Job.Id}", "RemuxJobProcessor", "_ProcessImpl")
 
             ActiveJobId = self.QueueService.ActiveJobRepository.CreateActiveJob(
                 ServiceName="TranscodeService",
-                JobType="Remux",
+                JobType=Mode,
                 QueueId=Job.Id,
                 ProcessId=os.getpid(),
                 ThreadId=threading.get_ident(),
                 WorkerName=self.QueueService.WorkerName
             )
             if ActiveJobId == 0:
-                self.QueueService.HandleJobFailure(Job, "Failed to create active job record for remux", None, ActiveJobId)
+                self.QueueService.HandleJobFailure(Job, f"Failed to create active job record for {Lower}", None, ActiveJobId)
                 return
 
             self.QueueService.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Running")
 
             MediaFile = self.QueueService.GetMediaFileData(Job)
             if not MediaFile:
-                self.QueueService.HandleJobFailure(Job, "Failed to get media file data for remux", None, ActiveJobId)
+                self.QueueService.HandleJobFailure(Job, f"Failed to get media file data for {Lower}", None, ActiveJobId)
                 return
 
             LocalSourcePath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker.Current(Db=self.QueueService.DatabaseManager.DatabaseService))
@@ -75,23 +77,23 @@ class RemuxJobProcessor(JobProcessor):
 
             TranscodeAttemptId = self.QueueService.CreateTranscodeAttempt(Job, None, None, None)
             if not TranscodeAttemptId:
-                self.QueueService.HandleJobFailure(Job, "Failed to create transcode attempt record for remux", None, ActiveJobId)
+                self.QueueService.HandleJobFailure(Job, f"Failed to create transcode attempt record for {Lower}", None, ActiveJobId)
                 return
 
-            self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Initializing", 0.0, "Starting remux (container change)...")
+            self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Initializing", 0.0, f"Starting {Lower}...")
 
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing source file...")
             self.QueueService._LastSetupError = None
             EffectiveInputPath = self.QueueService.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
             if not EffectiveInputPath:
                 Detail = self.QueueService._LastSetupError or "unknown"
-                self.QueueService.HandleJobFailure(Job, f"Failed to setup file preparation for remux: {Detail}", TranscodeAttemptId, ActiveJobId)
+                self.QueueService.HandleJobFailure(Job, f"Failed to setup file preparation for {Lower}: {Detail}", TranscodeAttemptId, ActiveJobId)
                 return
 
             BaseName, _ = LocalSplitExt(LocalBasename(EffectiveInputPath))
             TargetLocalPath = LocalJoin(LocalDirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
 
-            self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building remux command...")
+            self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, f"Building {Lower} command...")
             _Spec = self.QueueService.EncodeShapeRegistry.Get(Job.ProcessingMode).Build(
                 MediaFile, Job,
                 Context={
@@ -104,7 +106,7 @@ class RemuxJobProcessor(JobProcessor):
             )
             CommandResult = {'Command': _Spec.Command, 'OutputPath': _Spec.OutputPath} if _Spec else None
             if not CommandResult:
-                self.QueueService.HandleJobFailure(Job, "Failed to build remux command", TranscodeAttemptId, ActiveJobId)
+                self.QueueService.HandleJobFailure(Job, f"Failed to build {Lower} command", TranscodeAttemptId, ActiveJobId)
                 return
 
             RemuxCommand = CommandResult['Command']
@@ -122,41 +124,41 @@ class RemuxJobProcessor(JobProcessor):
                 'NewSizeBytes': 0,
                 'Success': None,
                 'FfpmpegCommand': RemuxCommand,
-                'ProfileName': 'Remux',
+                'ProfileName': Mode,
                 'VMAF': None
             })
 
-            self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Remuxing", 0.0, "Remuxing to MP4...")
+            self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, Mode, 0.0, f"Running {Lower}...")
             TranscodeResult = self.QueueService.ExecuteTranscoding(Job, RemuxCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
             if not TranscodeResult.get("Success", False):
                 self.QueueService._DeleteInProgressFile(TargetLocalPath)
-                self.QueueService.HandleJobFailure(Job, f"Remux failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
+                self.QueueService.HandleJobFailure(Job, f"{Mode} failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
                 return
 
             if not self.QueueService._VerifyInProgressFile(TargetLocalPath):
                 self.QueueService._DeleteInProgressFile(TargetLocalPath)
-                self.QueueService.HandleJobFailure(Job, f"Remux output failed FFprobe verification: {TargetLocalPath}", TranscodeAttemptId, ActiveJobId)
+                self.QueueService.HandleJobFailure(Job, f"{Mode} output failed FFprobe verification: {TargetLocalPath}", TranscodeAttemptId, ActiveJobId)
                 return
 
-            self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Finalizing remux...")
+            self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, f"Finalizing {Lower}...")
             OwnershipTransferred = True
             self.QueueService.HandleRemuxResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId, OutputPath)
             self.QueueService.CleanupOrContinue(Job)
 
-            LoggingService.LogInfo(f"Completed remux job processing for job ID: {Job.Id}", "RemuxJobProcessor", "_ProcessImpl")
+            LoggingService.LogInfo(f"Completed {Lower} job processing for job ID: {Job.Id}", "RemuxJobProcessor", "_ProcessImpl")
 
         except Exception as e:
-            LoggingService.LogException(f"Exception processing remux job {Job.Id}", e, "RemuxJobProcessor", "_ProcessImpl")
-            self.QueueService.HandleJobFailure(Job, f"Exception during remux: {str(e)}", TranscodeAttemptId, ActiveJobId)
+            LoggingService.LogException(f"Exception processing {Lower} job {Job.Id}", e, "RemuxJobProcessor", "_ProcessImpl")
+            self.QueueService.HandleJobFailure(Job, f"Exception during {Lower}: {str(e)}", TranscodeAttemptId, ActiveJobId)
         finally:
             if not OwnershipTransferred:
                 if TargetLocalPath:
                     try:
                         self.QueueService._DeleteInProgressFile(TargetLocalPath)
                     except Exception as CleanupEx:
-                        LoggingService.LogException(f"Worker-owned .inprogress cleanup failed for remux job {Job.Id}", CleanupEx, "RemuxJobProcessor", "_ProcessImpl")
+                        LoggingService.LogException(f"Worker-owned .inprogress cleanup failed for {Lower} job {Job.Id}", CleanupEx, "RemuxJobProcessor", "_ProcessImpl")
                 if TemporaryFilePathId and TranscodeAttemptId:
                     try:
                         self.QueueService.DatabaseManager.DeleteTemporaryFilePath(TranscodeAttemptId)
                     except Exception as TfpEx:
-                        LoggingService.LogException(f"Worker-owned TFP cleanup failed for remux job {Job.Id}", TfpEx, "RemuxJobProcessor", "_ProcessImpl")
+                        LoggingService.LogException(f"Worker-owned TFP cleanup failed for {Lower} job {Job.Id}", TfpEx, "RemuxJobProcessor", "_ProcessImpl")
