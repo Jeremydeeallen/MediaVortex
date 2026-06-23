@@ -5,6 +5,14 @@
 **Status:** Active -- phase: VERIFYING
 **Continuation of:** `activity-admin-and-worker-telemetry` (closed 2026-06-23 with gaps; this directive closes them per operator review)
 
+## Files
+
+| File | Role |
+|---|---|
+| `Features/FileReplacement/TranscodedOutputPlacement.py` | `Execute` lines 219-230 + `FinalizePartialReplacement` lines 278-284: replace orphan-on-failure fallback with rollback + loud failure (BUG-0067). SameSlot path: defer BackupPath delete until after MediaFiles update succeeds. |
+| `Features/FileReplacement/transcoded-output-placement.feature.md` | Add C13 (rollback-on-update-failure invariant) + S4 (rollback seam) covering the BUG-0067 fix. |
+| `Tests/Contract/TestFileReplacementRollbackOnUpdateFailure.py` | New contract test asserting Execute returns Success=False on update failure AND the `-mv.mp4` orphan is removed AND the source survives (both SameSlot + non-SameSlot). |
+
 ## Outcome
 
 Workers are the authoritative source of truth for what they are doing RIGHT NOW. Three new worker-authored columns on `Workers`; one SRP writer class; WebService never writes them. `/Admin/Workers` renders two badges per tile (Intent + Truth) with amber-border divergence + red-border hung detection. `/Activity` carries the polished column shape per operator brief. The 3-of-each smoke regression gate runs against the live fleet with the broad candidate net.
@@ -30,9 +38,9 @@ Criteria live in the feature/flow docs; directive is the ASK only.
 - **Fleet on b69da8d -> d5bea21 -> fef476d -> 1a1bd7b**: all 8 dot+larry workers report `RuntimeState`, heartbeats fresh, IntentDiverges + IsHung fields populated in `/api/Admin/Workers/Snapshot`.
 - **/Activity snapshot returns live values**: ProgressPercent, SmoothedSpeed, EtaSeconds, EstimatedSavingsBytes, ProcessingMode all populated against live in-flight jobs after the QueueId-vs-AttemptId join fix.
 - **Doc consolidation**: criteria moved to `admin-workers.feature.md` C1-C12, `activity.feature.md` C1-C7, `WorkerService.flow.md` ST14-ST15 + S8-S9. BUG-0063 marked CLOSED in `memory/KNOWN-ISSUES.md`.
-- **Smoke regression gate: 7/9** (NOT MET). Two failures, both pre-existing pipeline bugs filed for their own directives:
-  - MediaFile 615496 -- `BUG-0068` AudioFilterEmitter STRATEGY_REVIEW bypass
-  - MediaFile 689432 -- `BUG-0067` FileReplacement orphan-on-failure
+- **Smoke regression gate: 7/9** (NOT MET). Two failures, both pre-existing pipeline bugs:
+  - MediaFile 615496 -- `BUG-0068` AudioFilterEmitter STRATEGY_REVIEW bypass (open)
+  - MediaFile 689432 -- `BUG-0067` FileReplacement orphan-on-failure -- **fix landed via /t BUG-0067 2026-06-23**: `TranscodedOutputPlacement.Execute` failure branch now rolls back the rename + returns `Success=False` with the real update error (was silent `Success=True` + orphan on disk); `FinalizePartialReplacement` parallel fix; SameSlot path defers BackupPath delete until after update commits so rollback can restore source. Evidence: `Tests/Contract/TestFileReplacementRollbackOnUpdateFailure.py` 3/3 PASS (non-SameSlot orphan removed + source intact; SameSlot source restored + staging gone; FinalizePartialReplacement returns Success=False with real error). C13 + S4 promoted to `Features/FileReplacement/transcoded-output-placement.feature.md`.
 
 ### Live-verification gaps (mechanism in code + contract tests green, runtime evidence pending)
 

@@ -148,14 +148,6 @@ class TranscodedOutputPlacement:
                         LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
                         return {'Success': False, 'ErrorMessage': ErrorMsg}
 
-                    try:
-                        os.remove(BackupPath)
-                        StepsCompleted.append(f"Removed backup {LocalBasename(BackupPath)}")
-                    except Exception as DelBakEx:
-                        LoggingService.LogWarning(
-                            f"Same-slot replacement: backup {BackupPath} could not be deleted (operator cleanup): {str(DelBakEx)}",
-                            "TranscodedOutputPlacement", "Execute"
-                        )
                 except Exception as e:
                     ErrorMsg = f"Same-slot replacement: rename dance failed before published: {str(e)}"
                     LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
@@ -194,6 +186,15 @@ class TranscodedOutputPlacement:
                                                                    Mode=Mode)
             if UpdateResult.get('Success', False):
                 StepsCompleted.append("Updated MediaFiles table")
+                if SameSlotReplacement:
+                    try:
+                        os.remove(BackupPath)
+                        StepsCompleted.append(f"Removed backup {LocalBasename(BackupPath)}")
+                    except Exception as DelBakEx:
+                        LoggingService.LogWarning(
+                            f"Same-slot replacement: backup {BackupPath} could not be deleted (operator cleanup): {str(DelBakEx)}",
+                            "TranscodedOutputPlacement", "Execute"
+                        )
                 RecomputeMediaFileId = UpdateResult.get('MediaFileId')
                 if RecomputeMediaFileId:
                     try:
@@ -217,16 +218,53 @@ class TranscodedOutputPlacement:
                             RecomputeEx, "TranscodedOutputPlacement", "Execute"
                         )
             else:
-                LoggingService.LogWarning(
-                    f"MediaFiles update skipped after successful rename -- transcoded file is on disk "
-                    f"but DB row still reflects the original. Original NOT deleted; future probe will reconcile. "
-                    f"Local: '{UpdateResult.get('LocalNewFilePath')}', Canonical: '{UpdateResult.get('CanonicalNewFilePath')}'",
+                # BUG-0067 rollback (see transcoded-output-placement.C13 / S4): no orphan on disk, no silent Success=True.
+                UpdateError = UpdateResult.get('ErrorMessage', 'Unknown update error')
+                LoggingService.LogError(
+                    f"MediaFiles update failed after rename to {TargetPath}; rolling back filesystem. Update error: {UpdateError}",
                     "TranscodedOutputPlacement", "Execute"
                 )
+                RollbackSteps = []
+                RollbackErrors = []
+                if SameSlotReplacement:
+                    try:
+                        os.rename(TargetPath, LocalStagedPath)
+                        RollbackSteps.append(f"Restored {LocalBasename(LocalStagedPath)} from target")
+                    except Exception as RbEx:
+                        RollbackErrors.append(f"restore .inprogress failed: {str(RbEx)}")
+                    try:
+                        os.rename(BackupPath, LocalOriginalPath)
+                        RollbackSteps.append("Restored source from backup")
+                    except Exception as RbEx:
+                        RollbackErrors.append(f"restore source failed: {str(RbEx)}")
+                    try:
+                        if LocalExists(LocalStagedPath):  # allow: local-path; host-resolved
+                            os.remove(LocalStagedPath)
+                            RollbackSteps.append(f"Removed staging artifact {LocalBasename(LocalStagedPath)}")
+                    except Exception as RbEx:
+                        RollbackErrors.append(f"remove staging failed: {str(RbEx)}")
+                else:
+                    try:
+                        if LocalExists(TargetPath):  # allow: local-path; host-resolved
+                            os.remove(TargetPath)
+                            RollbackSteps.append(f"Removed orphan {LocalBasename(TargetPath)}")
+                    except Exception as RbEx:
+                        RollbackErrors.append(f"remove target failed: {str(RbEx)}")
+                if RollbackErrors:
+                    LoggingService.LogError(
+                        f"Rollback after MediaFiles update failure encountered errors: {'; '.join(RollbackErrors)}. Filesystem may need manual recovery.",
+                        "TranscodedOutputPlacement", "Execute"
+                    )
+                else:
+                    LoggingService.LogInfo(
+                        f"Rollback after MediaFiles update failure completed cleanly: {', '.join(RollbackSteps)}",
+                        "TranscodedOutputPlacement", "Execute"
+                    )
                 return {
-                    'Success': True,
-                    'StepsCompleted': StepsCompleted,
-                    'Message': 'Rename succeeded; MediaFiles re-probe deferred to next scan; original retained.',
+                    'Success': False,
+                    'ErrorMessage': f'MediaFiles update failed: {UpdateError}',
+                    'StepsCompleted': StepsCompleted + [f"Rollback: {s}" for s in RollbackSteps],
+                    'RollbackErrors': RollbackErrors if RollbackErrors else None,
                 }
 
             if LocalSamePath(LocalOriginalPath, TargetPath):
@@ -276,12 +314,17 @@ class TranscodedOutputPlacement:
             if UpdateResult.get('Success', False):
                 StepsCompleted.append("Updated MediaFiles table")
             else:
-                LoggingService.LogWarning(
-                    f"FinalizePartialReplacement: MediaFiles update failed; original NOT deleted. "
-                    f"Local: '{UpdateResult.get('LocalNewFilePath')}'",
+                # BUG-0067 (see transcoded-output-placement.C13): crash-recovery must not mask a failed update as success.
+                UpdateError = UpdateResult.get('ErrorMessage', 'Unknown update error')
+                LoggingService.LogError(
+                    f"FinalizePartialReplacement: MediaFiles update failed for {FinalLocalPath}. Error: {UpdateError}",
                     "TranscodedOutputPlacement", "FinalizePartialReplacement"
                 )
-                return {'Success': True, 'StepsCompleted': StepsCompleted, 'Message': 'Partial: MediaFiles update failed; original retained'}
+                return {
+                    'Success': False,
+                    'ErrorMessage': f'MediaFiles update failed during crash recovery: {UpdateError}',
+                    'StepsCompleted': StepsCompleted,
+                }
 
             if LocalSamePath(OriginalLocalPath, FinalLocalPath):
                 StepsCompleted.append("Original and final are the same path; no delete needed")
