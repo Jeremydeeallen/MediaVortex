@@ -156,6 +156,7 @@ class WebServiceApp:
         # Start status polling for service control
         self.PrivateStartStatusPolling()
         self.PrivateStartAudioVerticalHealth()
+        self.PrivateStartFileReplacementSelfHeal()
         
         # Update service status to Running immediately after startup
         self.PrivateUpdateServiceStatus()
@@ -525,6 +526,32 @@ class WebServiceApp:
             print("Status polling started")
         except Exception as e:
             LoggingService.LogException("Failed to start status polling", e, "WebService", "PrivateStartStatusPolling")
+
+    # directive: filereplacement-drain-bug | # see filereplacement.C11
+    def PrivateStartFileReplacementSelfHeal(self):
+        try:
+            self.FileReplacementSelfHealThread = threading.Thread(
+                target=self.PrivateFileReplacementSelfHealLoop,
+                daemon=True,
+                name="FileReplacementSelfHeal",
+            )
+            self.FileReplacementSelfHealThread.start()
+            print("FileReplacementSelfHealService started")
+        except Exception as Ex:
+            LoggingService.LogException("Failed to start FileReplacementSelfHealService", Ex, "WebService", "PrivateStartFileReplacementSelfHeal")
+
+    # directive: filereplacement-drain-bug | # see filereplacement.C11
+    def PrivateFileReplacementSelfHealLoop(self):
+        from Features.FileReplacement.FileReplacementSelfHealService import FileReplacementSelfHealService
+        Svc = FileReplacementSelfHealService()
+        Interval = 120
+        while True:
+            try:
+                Svc.Run()
+            except Exception as Ex:
+                LoggingService.LogException("FileReplacementSelfHealService cycle raised", Ex,
+                                            "WebService", "PrivateFileReplacementSelfHealLoop")
+            time.sleep(Interval)
 
     # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.H1
     def PrivateStartAudioVerticalHealth(self):

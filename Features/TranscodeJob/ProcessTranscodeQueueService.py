@@ -658,10 +658,19 @@ class ProcessTranscodeQueueService:
             else:
                 pass
         except Exception as Ex:
+            # directive: filereplacement-drain-bug | # see filereplacement.C11
             LoggingService.LogException(
                 f"DispatchDisposition failed for TranscodeAttempt {TranscodeAttemptId}",
                 Ex, "ProcessTranscodeQueueService", "DispatchDisposition",
             )
+            try:
+                from Core.Database.DatabaseService import DatabaseService as _DbForErr
+                _DbForErr().ExecuteNonQuery(
+                    "UPDATE TranscodeAttempts SET ErrorMessage = %s WHERE Id = %s",
+                    (f"DispatchDisposition failed: {str(Ex)[:400]}", TranscodeAttemptId),
+                )
+            except Exception:
+                pass
 
     # directive: nvenc-rate-anchored-remediation
     def _MarkMediaFileSourceMissing(self, MediaFileId: int, ErrorMessage: str) -> None:

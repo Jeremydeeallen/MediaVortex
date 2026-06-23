@@ -199,15 +199,34 @@ class FileReplacementBusinessService:
                     'ErrorMessage': f'Transcoded file not found at: {LocalTranscodedPath}',
                 }
 
+            # directive: filereplacement-drain-bug | # see filereplacement.C11
             isRemux = (transcode_attempt.ProfileName or '') in ('Remux', 'SubtitleFix', 'Quick', 'AudioFix')
+            EffectiveOldBytes = transcode_attempt.OldSizeBytes
+            if (not isRemux) and (EffectiveOldBytes is None or EffectiveOldBytes <= 0):
+                try:
+                    from Core.Path.Path import Path as _Path
+                    SourceLocalPath = _Path(SourceSrId, SourceRel).Resolve(self._GetWorker())
+                    if SourceLocalPath and self.FileManager.ValidateFileExists(SourceLocalPath):
+                        from Core.Path.LocalPath import LocalGetSize
+                        EffectiveOldBytes = LocalGetSize(SourceLocalPath)
+                        LoggingService.LogInfo(
+                            f"Defense-in-depth fallback: TranscodeAttempt {TranscodeAttemptId} OldSizeBytes={transcode_attempt.OldSizeBytes!r}; resolved actual source size to {EffectiveOldBytes:,} bytes",
+                            "FileReplacementBusinessService", "ProcessFileReplacement",
+                        )
+                except Exception as SizeEx:
+                    LoggingService.LogException(
+                        f"Defense-in-depth fallback: could not resolve source size for TranscodeAttempt {TranscodeAttemptId}",
+                        SizeEx, "FileReplacementBusinessService", "ProcessFileReplacement",
+                    )
+
             if (not isRemux
                 and transcode_attempt.NewSizeBytes is not None
-                and transcode_attempt.OldSizeBytes is not None
-                and transcode_attempt.NewSizeBytes >= transcode_attempt.OldSizeBytes):
+                and EffectiveOldBytes is not None and EffectiveOldBytes > 0
+                and transcode_attempt.NewSizeBytes >= EffectiveOldBytes):
                 errorMsg = (
                     f"Defense-in-depth: refusing to replace because "
                     f"NewSize ({transcode_attempt.NewSizeBytes:,}) >= "
-                    f"OldSize ({transcode_attempt.OldSizeBytes:,}). "
+                    f"OldSize ({EffectiveOldBytes:,}). "
                     f"This case should have been routed to Disposition='Discard' "
                     f"upstream -- log a bug if it reaches here."
                 )
