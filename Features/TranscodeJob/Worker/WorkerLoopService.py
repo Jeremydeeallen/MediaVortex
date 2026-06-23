@@ -9,10 +9,11 @@ from Features.TranscodeJob.Worker.JobProcessorRegistry import JobProcessorRegist
 class WorkerLoopService:
     """Unified worker loop service; polls Transcode + Remux queues per worker capabilities and dispatches via JobProcessorRegistry. Replaces the dual ProcessTranscodeQueueService / ProcessRemuxQueueService poller pair."""
 
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    # directive: worker-runtime-state | # see workerservice.S8
     def __init__(self, DatabaseManager, JobProcessorRegistryInstance: JobProcessorRegistry, WorkerName: str,
                  TranscodeEnabled: bool, RemuxEnabled: bool, AcceptsInterlaced: bool = True,
-                 MaxConcurrentTranscodeJobs: int = 1, MaxConcurrentRemuxJobs: int = 2):
+                 MaxConcurrentTranscodeJobs: int = 1, MaxConcurrentRemuxJobs: int = 2,
+                 StateReporter=None):
         """Inject DB + registry + worker capability + concurrency knobs."""
         self.DatabaseManager = DatabaseManager
         self.JobProcessorRegistry = JobProcessorRegistryInstance
@@ -27,6 +28,7 @@ class WorkerLoopService:
         self.IsProcessing = False
         self.StopRequested = False
         self.ProcessingThread = None
+        self.StateReporter = StateReporter
 
     # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
     def Run(self) -> Dict[str, Any]:
@@ -120,16 +122,26 @@ class WorkerLoopService:
             LoggingService.LogException("Failed to claim Remux job", Ex, "WorkerLoopService", "_ClaimRemuxJob")
             return None
 
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    # directive: worker-runtime-state | # see workerservice.S8
     def _DispatchJob(self, Job):
         """Look up the JobProcessor for Job.ProcessingMode and run it."""
+        Mode = None
+        AttemptId = getattr(Job, 'Id', None)
         try:
             Mode = getattr(Job, 'ProcessingMode', None) or 'Transcode'
             if getattr(Job, 'IsTestMode', False):
                 Mode = 'TestVariant'
             Processor = self.JobProcessorRegistry.Get(Mode)
+            if self.StateReporter is not None:
+                self.StateReporter.Transition('Encoding', AttemptId=AttemptId)
             Processor.Process(Job)
         except KeyError as KeyEx:
-            LoggingService.LogError(f"No JobProcessor registered for ProcessingMode={Mode!r} (Job.Id={getattr(Job, 'Id', None)})", "WorkerLoopService", "_DispatchJob")
+            LoggingService.LogError(f"No JobProcessor registered for ProcessingMode={Mode!r} (Job.Id={AttemptId})", "WorkerLoopService", "_DispatchJob")
         except Exception as Ex:
-            LoggingService.LogException(f"_DispatchJob failed for Job.Id={getattr(Job, 'Id', None)}", Ex, "WorkerLoopService", "_DispatchJob")
+            LoggingService.LogException(f"_DispatchJob failed for Job.Id={AttemptId}", Ex, "WorkerLoopService", "_DispatchJob")
+        finally:
+            if self.StateReporter is not None:
+                try:
+                    self.StateReporter.Transition('Idle')
+                except Exception:
+                    pass

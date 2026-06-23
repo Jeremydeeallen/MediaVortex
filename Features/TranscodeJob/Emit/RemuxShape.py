@@ -5,6 +5,7 @@ from Core.Path.LocalPath import LocalDirname, LocalSamePath
 from Features.AudioNormalization.AudioFilterEmitter import AudioFilterEmitter
 from Features.AudioNormalization.AudioPolicyResolver import AudioPolicyResolver
 from Features.AudioNormalization.Services.AudioStreamProbe import AudioStreamProbe
+from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
 from Features.TranscodeJob.Emit.CommandSpec import CommandSpec
 from Features.TranscodeJob.Emit.EncodeShape import EncodeShape
 
@@ -21,7 +22,7 @@ class RemuxShape(EncodeShape):
         self.AudioCodecArgsBuilder = AudioCodecArgsBuilder
         self.MediaProbeAdapter = MediaProbeAdapter
         self.Resolver = Resolver or AudioPolicyResolver()
-        self.Emitter = Emitter or AudioFilterEmitter()
+        self.Emitter = Emitter or AudioFilterEmitter(ProfileResolver=EffectiveProfileResolver())
         self.StreamProbe = StreamProbe or AudioStreamProbe()
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13

@@ -4,9 +4,26 @@
 
 ## What It Does
 
-Renders the operator-facing worker fleet at `/Admin/Workers`. Displays per-worker tile with operator-set Status badge (Online / Paused) and an independent connectivity dot derived from heartbeat freshness. Each tile carries Online / Pause action buttons; clicks POST to `/api/TeamStatus/Workers/<name>/Status` and refresh.
+Renders the operator-facing worker fleet at `/Admin/Workers`. Each tile shows TWO badges per worker:
 
-Pure consumer of `Workers` rows. Workers self-report their `LastHeartbeat` and `Status` directly to PostgreSQL via the WorkerService process -- WebService is not in the telemetry path. Killing WebService does not affect what is shown on a future page load.
+- **Intent badge** -- `Workers.Status` (operator-set: `Online` / `Paused`). The operator's intent.
+- **Truth badge** -- `Workers.RuntimeState` (worker-authored: `Initializing` / `Idle` / `ClaimingJob` / `Encoding` / `Scanning` / `Draining` / `Paused` / `Faulted:<reason>`). What the worker is actually doing right now.
+
+When the two values disagree for more than the divergence threshold, the tile renders with an amber border + tooltip explaining the disagreement. The threshold lives in `SystemSettings.WorkerIntentDivergenceSec` (default 60). Operator-tunable per `worker-runtime-state` directive.
+
+Tiles also display a connectivity dot independent of either badge: green when `(NOW() - LastHeartbeat) <= HeartbeatStaleThresholdSec` (default 300), red otherwise.
+
+## Source-of-truth model
+
+Three columns on `Workers` are worker-authored ONLY -- WebService never writes them. The single SRP writer is `WorkerService/WorkerStateReporter.py`:
+
+| Column | Type | Worker-writes when |
+|---|---|---|
+| `RuntimeState` | TEXT | Every lifecycle transition + every heartbeat tick |
+| `CurrentAttemptId` | BIGINT NULL | Non-null exactly when `RuntimeState='Encoding'`; points at `TranscodeAttempts.Id` |
+| `LastRuntimeStateUpdate` | TIMESTAMP | Every state change or heartbeat tick |
+
+If WebService is down, RuntimeState writes continue. When WebService comes back, the page reflects worker truth immediately without manual recompute.
 
 ## Surface
 
@@ -18,23 +35,32 @@ Pure consumer of `Workers` rows. Workers self-report their `LastHeartbeat` and `
 
 C1. `/Admin/Workers` returns HTTP 200 and renders one tile per row in `Workers WHERE Enabled = TRUE`. Verifiable: `curl -I /Admin/Workers` -> 200; page source contains every enabled worker's name.
 
-C2. `/api/Admin/Workers/Snapshot` returns `{Success, Data: {Workers, HeartbeatStaleThresholdSec}}`. `Workers` is a list of dicts with `WorkerName`, `Status`, `LastHeartbeat`, `HeartbeatAgeSec`, capability flags, `Version`. Verifiable: `curl /api/Admin/Workers/Snapshot | jq '.Data | keys'`.
+C2. `/api/Admin/Workers/Snapshot` returns `{Success, Data: {Workers, HeartbeatStaleThresholdSec, WorkerIntentDivergenceSec}}`. `Workers` is a list of dicts with `WorkerName`, `Status`, `RuntimeState`, `CurrentAttemptId`, `LastHeartbeat`, `LastRuntimeStateUpdate`, `HeartbeatAgeSec`, `IntentDiverges` (bool), capability flags, `Version`. Verifiable: `curl /api/Admin/Workers/Snapshot | jq '.Data.Workers[0] | keys'` includes the new keys.
 
-C3. Status badge maps `Online` -> green, `Paused` -> amber. Unknown values render grey with the raw string. Driven by JS data table, no per-status code path. Verifiable: `UPDATE Workers SET Status='Maintenance'` -- the badge displays `Maintenance` in grey without code change.
+C3. Intent badge maps `Online` -> green, `Paused` -> amber. Unknown values render grey with the raw string. Same data-driven table approach for Truth badge: `Idle` -> light, `Encoding` -> blue, `Scanning` -> cyan, `Draining` -> amber, `Paused` -> grey, `Faulted` -> red, unknown -> grey. Verifiable: `UPDATE Workers SET Status='Maintenance'` -- the Intent badge displays `Maintenance` in grey without code change.
 
-C4. Connectivity dot is derived: green when `HeartbeatAgeSec <= HeartbeatStaleThresholdSec`, red otherwise. Independent of Status badge. Verifiable: a Paused worker with fresh heartbeat shows green dot + amber Status; a worker whose process is dead shows red dot regardless of badge.
+C4. Connectivity dot derived from heartbeat freshness only, independent of either badge. Green when `HeartbeatAgeSec <= 300`; red otherwise. Verifiable: a `Paused` worker with fresh heartbeat shows green dot + amber Intent badge.
 
-C5. Tile actions: Online / Pause buttons POST to `/api/TeamStatus/Workers/<name>/Status`. Page re-fetches snapshot on success. Verifiable: click Pause; the badge flips to amber on the next poll.
+C5. Tile actions: Online / Pause buttons POST to `/api/TeamStatus/Workers/<name>/Status`. Page re-fetches snapshot on success. Verifiable: click Pause; the Intent badge flips to amber on the next poll.
+
+C6. **Two-badge divergence warning.** When `Status` and `RuntimeState` carry semantically-incompatible values (e.g. `Status='Online'` but `RuntimeState='Paused'`) for more than `WorkerIntentDivergenceSec` seconds (default 60, operator-tunable in `SystemSettings`), the tile renders with an amber border. Tooltip text: `"Operator intent: Online; worker reports: Paused. Worker may be stuck or unable to honor the intent."` Verifiable: stop a worker process while its `Status='Online'`; the tile shows the amber border within ~60s of `LastRuntimeStateUpdate` going stale.
+
+C7. **Worker is the only writer.** `grep -rn 'UPDATE Workers SET .* RuntimeState\|UPDATE Workers SET .* CurrentAttemptId\|UPDATE Workers SET .* LastRuntimeStateUpdate' Features/ WebService/` returns 0 matches. The three columns are written only by `WorkerService/WorkerStateReporter.py`.
+
+C8. **WebService-outage resilience verified end-to-end.** Stop WebService; observe `Workers.RuntimeState` continues to update through normal worker lifecycle. Bring WebService back; `/api/Admin/Workers/Snapshot` reflects the truth immediately. Contract test `Tests/Contract/TestWorkerStateReporterResilience.py`.
 
 ## Files
 
 | File | Role |
 |------|------|
 | `Features/Admin/Workers/AdminWorkersController.py` | Blueprint with `/Admin/Workers` route + `/api/Admin/Workers/Snapshot` endpoint |
-| `Features/Admin/Workers/AdminWorkersRepository.py` | Single-shot tile data (SRP) |
-| `Templates/AdminWorkers.html` | Tile renderer; subnav include; 5s polling JS |
+| `Features/Admin/Workers/AdminWorkersRepository.py` | Tile data + IntentDiverges flag (pure-function divergence calc) |
+| `Templates/AdminWorkers.html` | Two-badge tile renderer; divergence amber border; 5s polling JS |
 | `Templates/_admin_subnav.html` | Workers link |
+| `WorkerService/WorkerStateReporter.py` | NEW SRP writer (the only writer of the 3 worker-truth columns) |
+| `WorkerService/Main.py` | Wires WorkerStateReporter into lifecycle transitions |
+| `Scripts/SQLScripts/AddWorkerRuntimeStateColumns.py` | Idempotent migration: adds 3 columns + seeds `SystemSettings.WorkerIntentDivergenceSec=60` |
 
 ## Status
 
-ACTIVE 2026-06-23. Tests: `Tests/Contract/TestAdminWorkersEndpoint.py` covers the page + snapshot shape.
+ACTIVE 2026-06-23 -- worker-runtime-state directive in flight. Tests cover: `TestAdminWorkersEndpoint.py` (page + snapshot shape), `TestWorkerStateReporterResilience.py` (WebService-outage resilience), `TestWorkerRuntimeStateAuthorship.py` (grep that only the SRP class writes the columns), `TestAdminWorkersDivergence.py` (IntentDiverges flag).

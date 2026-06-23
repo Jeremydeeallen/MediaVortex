@@ -2,7 +2,7 @@
 
 **Slug:** worker-runtime-state
 **Set:** 2026-06-23
-**Status:** Active -- phase: NEEDS_PLAN
+**Status:** Active -- phase: IMPLEMENTING
 **Continuation of:** `activity-admin-and-worker-telemetry` (closed 2026-06-23 with gaps; this directive closes them per operator review)
 
 ## Outcome
@@ -45,7 +45,7 @@ A10. **SOLID-clean implementation.** No god-functions added to existing controll
   - Activity / AdminWorkers JS modules each own one concern -- single render function, single fetch path
   Constructor-DI throughout.
 
-A11. **3-of-each smoke regression gate passes 9/9 with the BROAD candidate net.** Revert the picker tightening (`MaxAudioChannels=2 + Resolutions=['480p','720p']`) introduced earlier today as a workaround. To pass 9/9 with the broader net, this directive must ALSO fix the audio-bitrate-honors-profile-bar concern: `AudioCodecArgsBuilder.BuildAudioCodecArgs` must use `Profile.TargetAudioKbps` as the ceiling (rather than the channel-count default) when it is set. Verifiable: `Scripts/Smoke/ThreeOfEachBucketSmoke.py` 9/9; `Tests/Contract/TestAudioBitrateHonorsProfileBar.py` green.
+A11. **3-of-each smoke regression gate passes 9/9 with the BROAD candidate net.** Revert the picker tightening (`MaxAudioChannels=2 + Resolutions=['480p','720p']`) introduced earlier today as a workaround. To pass 9/9 with the broader net, this directive must ALSO fix the audio-bitrate-honors-profile-bar concern: the encoder hot path (`AudioFilterEmitter._BuildCodecArgs` -- which is what TranscodeShape + RemuxShape actually call, NOT `AudioCodecArgsBuilder` which has zero production callers) must clamp `TrackConfig.Bitrate` down to `Profile.TargetAudioKbps` when it is set on the effective profile. AudioFilterEmitter gains an injected `ProfileResolver` collaborator that resolves the effective profile per MediaFile. Verifiable: `Scripts/Smoke/ThreeOfEachBucketSmoke.py` 9/9; `Tests/Contract/TestAudioBitrateHonorsProfileBar.py` green.
 
 A12. **Doc consolidation completed.** Existing feature + flow docs reflect the new contract IN ENGLISH, with the criteria above translated into per-doc verifiable statements:
   - `Features/Activity/activity.feature.md` -- updated What It Does + Workflows (W6/W7 worker actions removed since they moved) + Success Criteria (focused on tables, not worker UI)
@@ -61,8 +61,7 @@ A13. **The 60s divergence threshold is operator-tunable** via `SystemSettings.Wo
 | File | Role | Criterion |
 |---|---|---|
 | `Scripts/SQLScripts/AddWorkerRuntimeStateColumns.py` | NEW migration: 3 new Workers columns + WorkerIntentDivergenceSec SystemSetting | A7, A13 |
-| `WorkerService/Services/WorkerStateReporter.py` | NEW SRP writer | A8 |
-| `WorkerService/Services/__init__.py` | Package marker | A8 |
+| `WorkerService/WorkerStateReporter.py` | NEW SRP writer (single-file at WorkerService root to avoid shadowing top-level Services package) | A8 |
 | `WorkerService/Main.py` | Wire WorkerStateReporter into lifecycle (Init, Idle, Claim, Encode, Drain, Pause, Fault transitions) | A8, A9 |
 | `Features/Admin/Workers/AdminWorkersRepository.py` | Surface RuntimeState + CurrentAttemptId + LastRuntimeStateUpdate + Intent-vs-Truth divergence flag | A4 |
 | `Features/Admin/Workers/AdminWorkersController.py` | Include divergence threshold in snapshot payload | A4, A13 |
@@ -70,9 +69,7 @@ A13. **The 60s divergence threshold is operator-tunable** via `SystemSettings.Wo
 | `Templates/Activity.html` | Add interesting columns (Target Res / Codec Change / Estimated Savings); ensure Speed not FPS | A2, A3 |
 | `Features/Activity/ActivityController.py` | `/api/Activity/Snapshot` payload includes the new per-job columns | A2 |
 | `Features/Activity/ActivityRepository.py` | Source columns for the new per-job interesting data | A2 |
-| `Features/TranscodeJob/Emit/AudioCodecArgsBuilder.py` | Use Profile.TargetAudioKbps as ceiling | A11 |
-| `Features/TranscodeJob/Emit/TranscodeShape.py` | Pass Profile.TargetAudioKbps to AudioCodecArgsBuilder | A11 |
-| `Features/TranscodeJob/Emit/RemuxShape.py` | Same | A11 |
+| `Features/AudioNormalization/AudioFilterEmitter.py` | Clamp TrackConfig.Bitrate down to EffectiveProfile.TargetAudioKbps when set | A11 |
 | `Scripts/Smoke/ThreeOfEachBucketSmoke.py` | Revert picker tightening | A11 |
 | `Features/Activity/activity.feature.md` | Doc consolidation | A12 |
 | `Features/Activity/activity-dashboard.flow.md` | Doc consolidation | A12 |
@@ -94,15 +91,44 @@ A13. **The 60s divergence threshold is operator-tunable** via `SystemSettings.Wo
 | `AdminWorkersRepository.GetTiles` | Worker tile data with divergence flag computed at fetch time | existing |
 | `_DeriveDivergence` (pure function) | Given (Status, RuntimeState, LastRuntimeStateUpdate, ThresholdSec) return bool | n/a |
 
-## Hook Pre-Flight
+## Hook Pre-Flight + Ordering
 
-- R1: Read existing feature/flow docs in NEEDS_DOC_PREREAD before editing them at IMPLEMENTING.
-- R11: Migration uses `ADD COLUMN IF NOT EXISTS` + `INSERT ... ON CONFLICT` for SystemSettings seed.
-- R12: New class has 1-line class docstring; per-method comments capped at one line.
-- R13: NO new `*.feature.md` files. The 4 doc updates are all EDITS to EXISTING files.
-- R14: Doc edits delete superseded sections cleanly. No `removed YYYY-MM-DD` annotations.
-- R15: Code edits in directive Files list carry `# directive: worker-runtime-state` anchor.
-- R18: Feature doc reads with limit<=50.
+The hook gates are deterministic. The plan executes in the only order that NEVER trips them:
+
+| Rule | Trip pattern | Avoidance ordering |
+|---|---|---|
+| R1 | Edit code without reading colocated `*.feature.md` / `*.flow.md` | All prereads done in NEEDS_DOC_PREREAD phase; partial reads with `# see <slug>.<ID>` anchors. |
+| R2 | INSERT numeric literal without `# from: <path>` citation; cited path must EXIST and CONTAIN the literal | **Update feature doc FIRST** with the literal value as part of the contract text, **THEN** write the migration citing that feature doc. |
+| R11 | `CREATE TABLE` / `CREATE INDEX` without `IF NOT EXISTS`; `INSERT INTO` without `ON CONFLICT` | Migration always uses both. |
+| R12 | Consecutive `#` comments > 1 line; docstrings > 1 line; module-level docstrings | Single-line class docstring; per-method 1-line WHY comments only. |
+| R13 | NEW `*.feature.md` / `*.flow.md` outside DELIVERING phase | NO new feature/flow docs. All 4 doc updates target EXISTING files. |
+| R14 | Annotation lines (`removed YYYY-MM-DD`, `deprecated`, `previously`) on existing feature doc edits | Delete superseded sections cleanly. Replace with single-line pointer or new prose. |
+| R15 | Edits to functions in directive `## Files` without `# directive: worker-runtime-state` anchor | Carry the anchor on every edited def/class. |
+| R16 | Feature doc lacks `**Slug:** <slug>` in first 15 lines | The 4 existing docs already have slugs. Verified. |
+| R18 | `Read(*.feature.md)` without `limit<=50` | All feature doc reads use `limit=50` (or smaller) + offset paging. |
+
+**Implementation order (each step pre-cleared against the hook):**
+
+1. Update `Features/Admin/Workers/admin-workers.feature.md` with the new criteria text INCLUDING the `WorkerIntentDivergenceSec=60` literal. This becomes R2's citation source for the migration.
+2. Update `Features/Activity/activity.feature.md` (refocus W6/W7 worker rows + Success Criteria) + `Features/Activity/activity-dashboard.flow.md` (remove worker stage; note RuntimeState seam).
+3. Update `WorkerService/WorkerService.flow.md` adding ST14 (RuntimeState writes) + S8 (worker-authored truth columns).
+4. Write `Scripts/SQLScripts/AddWorkerRuntimeStateColumns.py` citing the admin-workers feature doc for the `60` literal (R2 cleared).
+5. Run migration; verify columns present.
+6. Write `WorkerService/Services/WorkerStateReporter.py` (SRP).
+7. Wire into `WorkerService/Main.py` at appropriate lifecycle hooks.
+8. Update `AdminWorkersRepository.GetTiles` to surface RuntimeState + divergence flag.
+9. Update `AdminWorkersController` snapshot payload.
+10. Update `Templates/AdminWorkers.html` with two-badge UI + divergence border.
+11. Update `Features/TranscodeJob/Emit/AudioCodecArgsBuilder.py` to honor `Profile.TargetAudioKbps`.
+12. Update `Features/TranscodeJob/Emit/TranscodeShape.py` + `RemuxShape.py` callers.
+13. Update `Templates/Activity.html` with interesting columns (Target / Codec Change / Savings).
+14. Update `ActivityRepository` + `DashboardSnapshotService` to source the new per-job columns.
+15. Revert smoke picker tightening.
+16. Mark `BUG-0063` closed in `memory/KNOWN-ISSUES.md`.
+17. Write 5 contract tests.
+18. Restart WebService + redeploy workers.
+19. Run smoke regression gate; require 9/9.
+20. VERIFYING + DELIVERING + close.
 
 ## Status
 

@@ -4,9 +4,9 @@ from typing import Optional
 
 
 @dataclass(frozen=True)
-# directive: activity-dashboard-solid | # see activity-dashboard-solid.C3
+# directive: worker-runtime-state | # see activity.C2
 class ActiveJobRow:
-    """One row in the Active Jobs panel. Sourced from ActiveJobs JOIN Workers (display name only) JOIN TranscodeAttempts on AttemptId. Worker.Status does NOT filter visibility. see activity-dashboard.ST4"""
+    """One row in the Active Jobs panel. see activity-dashboard.ST3"""
     AttemptId: int
     MediaFileId: Optional[int]
     FileName: str
@@ -21,3 +21,9 @@ class ActiveJobRow:
     ClaimedAt: Optional[datetime] = None
     IsStale: bool = False
     Reasons: list = field(default_factory=list)
+    ProcessingMode: Optional[str] = None
+    SourceResolutionCategory: Optional[str] = None
+    TargetResolutionCategory: Optional[str] = None
+    SourceCodec: Optional[str] = None
+    TargetCodec: Optional[str] = None
+    EstimatedSavingsBytes: Optional[int] = None

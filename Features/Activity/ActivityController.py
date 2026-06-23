@@ -9,10 +9,10 @@ ActivityBlueprint = Blueprint('Activity', __name__, url_prefix='/api/Activity')
 
 
 @ActivityBlueprint.route('/Snapshot', methods=['GET'])
-# directive: activity-dashboard-solid | # see activity-dashboard-solid.C1
+# directive: worker-runtime-state | # see activity.C5
 def Snapshot():
-    """Single dashboard payload -- {Workers, ActiveJobs, QueueCounts, BadgeState, thresholds}. One round-trip per /Activity poll."""
-    # directive: activity-dashboard-solid | # see activity-dashboard-solid.C1
+    """Single dashboard payload -- {ActiveJobs, ActiveScans, QueueCounts, BadgeState, thresholds}."""
+    # directive: worker-runtime-state | # see activity.C5
     def _jsonable(D):
         return {k: (v.isoformat() if hasattr(v, 'isoformat') and v is not None else v) for k, v in D.items()}
     try:
@@ -21,12 +21,11 @@ def Snapshot():
         return jsonify({
             'Success': True,
             'Data': {
-                'Workers': [_jsonable(asdict(W)) for W in Snap.Workers],
                 'ActiveJobs': [_jsonable(asdict(J)) for J in Snap.ActiveJobs],
+                'ActiveScans': [_jsonable(S) for S in Snap.ActiveScans],
                 'QueueCounts': Snap.QueueCounts,
                 'BadgeState': Snap.BadgeState,
                 'StaleProgressThresholdSec': Snap.StaleProgressThresholdSec,
-                'HeartbeatStaleThresholdSec': Snap.HeartbeatStaleThresholdSec,
             },
         })
     except Exception as Ex:

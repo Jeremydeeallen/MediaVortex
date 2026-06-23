@@ -17,16 +17,16 @@
 
   <div class="card mb-4">
     <div class="card-header py-2 d-flex justify-content-between align-items-center">
-      <h6 class="mb-0"><i class="fas fa-film me-2"></i>Active Transcode Jobs <span id="ActiveJobsCount" class="text-muted small"></span></h6>
+      <h6 class="mb-0"><i class="fas fa-film me-2"></i>Active Jobs <span id="ActiveJobsCount" class="text-muted small"></span></h6>
     </div>
     <div class="card-body p-0">
       <div id="NoActiveJobs" class="text-muted py-3 px-3"><em>No active jobs</em></div>
       <div id="ActiveJobsWrapper" class="d-none">
         <table class="activity-tbl">
           <thead><tr>
-            <th>File</th><th>Worker</th><th>Bucket</th><th>Size</th>
-            <th class="text-end">FPS</th><th class="text-end">Speed</th>
-            <th class="text-end">Progress</th><th class="text-end">ETA</th>
+            <th>File</th><th>Size</th><th>Worker</th><th>Job Type</th>
+            <th class="text-end">Speed</th><th class="text-end">Progress</th><th class="text-end">ETA</th>
+            <th>Target</th><th>Codec</th><th class="text-end">Savings</th>
           </tr></thead>
           <tbody id="ActiveJobsBody"></tbody>
         </table>
@@ -54,8 +54,8 @@
   </div>
 
   <div class="small text-muted">
-    Worker tiles moved to <a href="/Admin/Workers">/Admin/Workers</a>.
-    Library compliance moved to <a href="/Admin/Compliance">/Admin/Compliance</a>.
+    Worker tiles live at <a href="/Admin/Workers">/Admin/Workers</a>.
+    Library compliance lives at <a href="/Admin/Compliance">/Admin/Compliance</a>.
   </div>
 </div>
 
@@ -63,9 +63,25 @@
 function EscapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function FormatSizeMB(MB) { var N = parseFloat(MB) || 0; return N >= 1024 ? (N/1024).toFixed(2) + ' GB' : N.toFixed(0) + ' MB'; }
 function FormatEtaSec(S) { if (S == null || S < 0) return '-'; if (S < 60) return Math.round(S) + 's'; var m = Math.floor(S/60), s = Math.round(S%60); if (m < 60) return m + 'm ' + (s<10?'0':'') + s + 's'; var h = Math.floor(m/60); return h + 'h ' + (m%60) + 'm'; }
-function FormatFps(F) { return (F == null || F === '') ? '-' : Number(F).toFixed(1); }
 function FormatSpeed(S) { return (S == null || S === '') ? '-' : (Number(S).toFixed(2) + 'x'); }
 function FormatProgress(P) { return (P == null || P === '') ? '-' : (Number(P).toFixed(1) + '%'); }
+function FormatSavingsBytes(B) {
+  if (B == null || B === '') return '-';
+  var N = Number(B); if (!isFinite(N)) return '-';
+  var Sign = N < 0 ? '-' : '+';
+  var MB = Math.abs(N) / 1048576;
+  return Sign + (MB >= 1024 ? (MB/1024).toFixed(2) + ' GB' : MB.toFixed(0) + ' MB');
+}
+function FormatResChange(Src, Tgt) {
+  if (!Src && !Tgt) return '-';
+  if (!Tgt || Tgt === Src) return EscapeHtml(Src || '?');
+  return EscapeHtml(Src || '?') + ' &rarr; ' + EscapeHtml(Tgt);
+}
+function FormatCodecChange(Src, Tgt) {
+  if (!Src && !Tgt) return '-';
+  if (!Tgt || Tgt === Src) return EscapeHtml(Src || '?');
+  return EscapeHtml(Src || '?') + ' &rarr; ' + EscapeHtml(Tgt);
+}
 
 function RenderActiveJobs(Jobs) {
   var Body = document.getElementById('ActiveJobsBody');
@@ -81,25 +97,26 @@ function RenderActiveJobs(Jobs) {
   Wrapper.classList.remove('d-none'); Empty.classList.add('d-none');
   Cnt.textContent = '(' + Jobs.length + ' running)';
   Body.innerHTML = Jobs.map(function(J) {
-    var Fps = J.SmoothedFPS != null ? J.SmoothedFPS : J.CurrentFPS;
     var Speed = J.SmoothedSpeed != null ? J.SmoothedSpeed : J.CurrentSpeed;
     var Eta = J.EtaSeconds != null ? J.EtaSeconds : J.ETASeconds;
+    var Savings = (J.ProcessingMode === 'Transcode') ? FormatSavingsBytes(J.EstimatedSavingsBytes) : '-';
     return '<tr>' +
       '<td title="' + EscapeHtml(J.FileName || '') + '">' + EscapeHtml((J.FileName || '').substring(0, 70)) + '</td>' +
+      '<td>' + FormatSizeMB(J.SizeMB) + '</td>' +
       '<td>' + EscapeHtml(J.ClaimedBy || J.WorkerName || '?') + '</td>' +
       '<td>' + EscapeHtml(J.ProcessingMode || J.WorkBucket || '?') + '</td>' +
-      '<td>' + FormatSizeMB(J.SizeMB) + '</td>' +
-      '<td class="text-end">' + FormatFps(Fps) + '</td>' +
       '<td class="text-end">' + FormatSpeed(Speed) + '</td>' +
       '<td class="text-end">' + FormatProgress(J.PercentComplete) + '</td>' +
       '<td class="text-end">' + FormatEtaSec(Eta) + '</td>' +
+      '<td>' + FormatResChange(J.SourceResolutionCategory, J.TargetResolutionCategory) + '</td>' +
+      '<td>' + FormatCodecChange(J.SourceCodec, J.TargetCodec) + '</td>' +
+      '<td class="text-end">' + Savings + '</td>' +
       '</tr>';
   }).join('');
-  var TotalFps = Jobs.reduce(function(a, J) { return a + (parseFloat(J.SmoothedFPS != null ? J.SmoothedFPS : J.CurrentFPS) || 0); }, 0);
   var TotalSize = Jobs.reduce(function(a, J) { return a + (parseFloat(J.SizeMB) || 0); }, 0);
   document.getElementById('ActiveJobsFooter').innerHTML =
     '<span>Total: ' + FormatSizeMB(TotalSize) + '</span>' +
-    '<span>' + TotalFps.toFixed(1) + ' fps</span>';
+    '<span>' + Jobs.length + ' running</span>';
 }
 
 function RenderActiveScans(Scans) {
@@ -139,12 +156,8 @@ function LoadActivity() {
   fetch('/api/Activity/Snapshot').then(function(R) { return R.json(); }).then(function(D) {
     if (!D || !D.Success) return;
     RenderActiveJobs((D.Data && D.Data.ActiveJobs) || []);
-    var Overview = fetch('/api/TeamStatus/Overview').then(function(R) { return R.json(); }).then(function(O) {
-      if (O && O.Success && O.Data) {
-        RenderActiveScans(O.Data.ActiveScans || []);
-        RenderQueueCounts(O.Data.QueueCounts || (D.Data && D.Data.QueueCounts) || {});
-      }
-    }).catch(function() {});
+    RenderActiveScans((D.Data && D.Data.ActiveScans) || []);
+    RenderQueueCounts((D.Data && D.Data.QueueCounts) || {});
   }).catch(function() {});
 }
 

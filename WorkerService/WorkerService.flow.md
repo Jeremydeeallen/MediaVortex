@@ -27,6 +27,7 @@ Replaces the former `TranscodeService/Main.py` + `QualityTestService/Main.py` du
 | ST11 | `_StartCapabilityPolling()` (start capability polling) | Thread: reads capability flags and concurrency columns every N seconds (default 15, configurable via `SystemSettings.CapabilityPollingIntervalSec`), calls `_ApplyCapabilities()` on flag changes, `_ApplyConcurrencyChanges()` on concurrency changes |
 | ST12 | `_ApplyCapabilities()` (apply capabilities) | Starts/stops TranscodeService, QualityTestService, ContinuousScanService based on flags |
 | ST13 | `_MainLoop()` (main loop) | Blocks on ShutdownEvent, checking every 10s |
+| ST14 | `WorkerStateReporter.Transition()` (runtime state) | The SRP writer for the worker-authored truth columns on `Workers`: `RuntimeState`, `CurrentAttemptId`, `LastRuntimeStateUpdate`. Called at every lifecycle transition: Initializing -> Idle -> ClaimingJob -> Encoding -> Idle (success) or Faulted (error); plus every health-monitor tick to refresh `LastRuntimeStateUpdate`. WebService never writes these columns. |
 
 ## Seams
 
@@ -39,6 +40,7 @@ Replaces the former `TranscodeService/Main.py` + `QualityTestService/Main.py` du
 | S5 | `ST10` status polling | `_StartStatusPolling` thread reads | `Workers.Status` column | `_HandleStatusChange` triggers `_StopAllCapabilities` (Paused) / `_ApplyCapabilities` (Online) | UPDATE `Workers.Status='Paused'`; observe `_StopAllCapabilities` log within 5s |
 | S6 | `ST11` capability polling | `_StartCapabilityPolling` thread reads | `Workers.(TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, MaxConcurrent*Jobs)` | `_ApplyCapabilities` + `_ApplyConcurrencyChanges` start/stop services and rebind pool size | UPDATE `Workers.TranscodeEnabled=FALSE`; observe `_StopTranscodeCapability` within `CapabilityPollingIntervalSec` |
 | S7 | `ST12` queue producers/consumers | Services started here drive the seams in `transcode.flow.md::S1` and `remux.flow.md::S1` | per-capability claim queries | Pending rows in `TranscodeQueue` / `QualityTestingQueue` / `RootFolders` are consumed | The cross-flow verifications listed in those seams |
+| S8 | `ST14` worker-authored truth columns | `WorkerStateReporter.Transition()` -- the only writer | `Workers.(RuntimeState TEXT, CurrentAttemptId BIGINT NULL, LastRuntimeStateUpdate TIMESTAMP)` UPDATE | `AdminWorkersRepository.GetTiles` reads + derives `IntentDiverges` flag against `Workers.Status`; `/Admin/Workers` Truth badge renders the RuntimeState | `grep -rn 'UPDATE Workers SET .*RuntimeState\|CurrentAttemptId\|LastRuntimeStateUpdate' Features/ WebService/` returns 0 matches; `Tests/Contract/TestWorkerRuntimeStateAuthorship.py` |
 
 ## Version
 

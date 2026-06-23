@@ -7,24 +7,26 @@ from Features.Admin.Workers.AdminWorkersRepository import AdminWorkersRepository
 AdminWorkersBlueprint = Blueprint('AdminWorkers', __name__)
 
 
-# directive: activity-admin-and-worker-telemetry
+# directive: worker-runtime-state | # see admin-workers.C1
 @AdminWorkersBlueprint.route('/Admin/Workers', methods=['GET'])
 def render_admin_workers():
     return render_template('AdminWorkers.html')
 
 
-# directive: activity-admin-and-worker-telemetry
+# directive: worker-runtime-state | # see admin-workers.C2
 @AdminWorkersBlueprint.route('/api/Admin/Workers/Snapshot', methods=['GET'])
 def admin_workers_snapshot():
     try:
         Repo = AdminWorkersRepository()
         Tiles = Repo.GetTiles()
         StaleSec = Repo.GetStaleThresholdSec()
+        DivergenceSec = Repo.GetDivergenceThresholdSec()
         return jsonify({
             'Success': True,
             'Data': {
                 'Workers': Tiles,
                 'HeartbeatStaleThresholdSec': StaleSec,
+                'WorkerIntentDivergenceSec': DivergenceSec,
             },
         })
     except Exception as Ex:

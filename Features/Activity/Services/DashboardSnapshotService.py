@@ -8,6 +8,23 @@ from Features.Activity.Models.DashboardSnapshot import DashboardSnapshot
 from Features.Activity.Services.ProgressSmoothingService import ProgressSmoothingService
 
 
+# directive: worker-runtime-state | # see activity.S4
+def _EstimateSavings(ProcessingMode, SourceSizeBytes, SourceVideoKbps, TargetVideoKbps):
+    """Negative => size shrink. Only meaningful for Transcode jobs with known source + target bitrates."""
+    if ProcessingMode != 'Transcode' or not SourceSizeBytes or not SourceVideoKbps or not TargetVideoKbps:
+        return None
+    try:
+        SrcBytes = int(SourceSizeBytes)
+        SrcKbps = float(SourceVideoKbps)
+        TgtKbps = float(TargetVideoKbps)
+    except (TypeError, ValueError):
+        return None
+    if SrcKbps <= 0:
+        return None
+    TargetBytes = int(SrcBytes * (TgtKbps / SrcKbps))
+    return TargetBytes - SrcBytes
+
+
 # directive: activity-dashboard-solid | # see activity-dashboard-solid.C1
 class DashboardSnapshotService:
     """Orchestrates a single DashboardSnapshot per poll. SRP: assembly only -- data lives in Repositories + Services it composes."""
@@ -32,16 +49,18 @@ class DashboardSnapshotService:
         except (TypeError, ValueError):
             return Default
 
-    # directive: activity-dashboard-solid | # see activity-dashboard-solid.C1
+    # directive: worker-runtime-state | # see activity.C5
     def BuildSnapshot(self) -> DashboardSnapshot:
-        """Single-pass build. Workers and ActiveJobs are independently sourced; Worker.Status never filters ActiveJobs (AC3)."""
+        """Single-pass build. Active Jobs + Active Scans + Queue Counts + Badge State."""
         Workers = self._BuildWorkers()
         ActiveJobs = self._BuildActiveJobs()
+        ActiveScans = self._BuildActiveScans()
         QueueCounts = self._BuildQueueCounts()
         BadgeState = self._BuildBadgeState(ActiveJobs)
         return DashboardSnapshot(
             Workers=Workers,
             ActiveJobs=ActiveJobs,
+            ActiveScans=ActiveScans,
             QueueCounts=QueueCounts,
             BadgeState=BadgeState,
             StaleProgressThresholdSec=self.StaleSec,
@@ -80,18 +99,24 @@ class DashboardSnapshotService:
             ))
         return Tiles
 
-    # directive: activity-dashboard-solid | # see activity-dashboard-solid.C3
+    # directive: worker-runtime-state | # see activity.S4
     def _BuildActiveJobs(self) -> List[ActiveJobRow]:
-        """ActiveJobs WHERE TranscodeAttempts.Success IS NULL. JOIN Workers for display name only. Worker.Status NEVER filters."""
+        """ActiveJobs JOIN MediaFiles + Profiles for the interesting columns. Worker.Status NEVER filters."""
         Rows = self.Db.ExecuteQuery(
             "SELECT aj.Id AS AttemptId, aj.WorkerName, aj.ServiceName, aj.StartedAt, "
-            "tq.MediaFileId, tq.FileName, tq.SizeMB, "
+            "tq.MediaFileId, tq.FileName, tq.SizeMB, tq.ProcessingMode, tq.SizeBytes, "
             "ta.ProfileName, "
-            "tp.ProgressPercent, tp.CurrentFrame, tp.TotalFrames, tp.LastProgressUpdate "
+            "tp.ProgressPercent, tp.CurrentFrame, tp.TotalFrames, tp.LastProgressUpdate, "
+            "mf.ResolutionCategory AS SourceResolutionCategory, mf.Codec AS SourceCodec, "
+            "mf.VideoBitrateKbps AS SourceVideoKbps, "
+            "p.TargetResolutionCategory AS TargetResolutionCategory, p.Codec AS TargetCodec, "
+            "p.TargetVideoKbps "
             "FROM ActiveJobs aj "
             "LEFT JOIN TranscodeQueue tq ON tq.Id = aj.QueueId "
             "LEFT JOIN TranscodeAttempts ta ON ta.Id = aj.QueueId "
             "LEFT JOIN TranscodeProgress tp ON tp.TranscodeAttemptId = aj.QueueId "
+            "LEFT JOIN MediaFiles mf ON mf.Id = tq.MediaFileId "
+            "LEFT JOIN Profiles p ON p.ProfileName = ta.ProfileName "
             "WHERE (ta.Success IS NULL OR ta.Id IS NULL) "
             "ORDER BY aj.StartedAt ASC"
         )
@@ -100,6 +125,9 @@ class DashboardSnapshotService:
             AttemptId = int(R['AttemptId'])
             Fps, Speed, Eta = self.Smoother.SmoothForAttempt(AttemptId)
             IsStale = (Fps is None)
+            SizeBytes = R.get('SizeBytes')
+            TargetKbps = R.get('TargetVideoKbps')
+            EstSavings = _EstimateSavings(R.get('ProcessingMode'), SizeBytes, R.get('SourceVideoKbps'), TargetKbps)
             Out.append(ActiveJobRow(
                 AttemptId=AttemptId,
                 MediaFileId=int(R['MediaFileId']) if R.get('MediaFileId') is not None else None,
@@ -114,7 +142,47 @@ class DashboardSnapshotService:
                 ServiceName=R.get('ServiceName'),
                 ClaimedAt=R.get('StartedAt'),
                 IsStale=IsStale,
+                ProcessingMode=R.get('ProcessingMode'),
+                SourceResolutionCategory=R.get('SourceResolutionCategory'),
+                TargetResolutionCategory=str(R.get('TargetResolutionCategory')) if R.get('TargetResolutionCategory') is not None else None,
+                SourceCodec=R.get('SourceCodec'),
+                TargetCodec=R.get('TargetCodec'),
+                EstimatedSavingsBytes=EstSavings,
             ))
+        return Out
+
+    # directive: worker-runtime-state | # see activity.C3
+    def _BuildActiveScans(self) -> List[Dict]:
+        """Drive / Worker / Phase / Progress / Files / ETA for the Active Scans table."""
+        Rows = self.Db.ExecuteQuery(
+            "SELECT WorkerName, CurrentDirectory AS Drive, Phase, "
+            "ProcessedFiles, TotalFiles, Progress AS PercentComplete, "
+            "StartTime "
+            "FROM ScanJobs WHERE Status = 'Running' "
+            "ORDER BY WorkerName ASC"
+        )
+        from datetime import datetime, timezone
+        Now = datetime.now(timezone.utc)
+        Out = []
+        for R in (Rows or []):
+            Processed = R.get('ProcessedFiles')
+            Total = R.get('TotalFiles')
+            StartTime = R.get('StartTime')
+            EtaSec = None
+            if StartTime is not None and Processed and Total and int(Total) > int(Processed):
+                StartTs = StartTime if StartTime.tzinfo else StartTime.replace(tzinfo=timezone.utc)
+                Elapsed = (Now - StartTs).total_seconds()
+                if Elapsed > 0 and int(Processed) > 0:
+                    EtaSec = int((Elapsed / int(Processed)) * (int(Total) - int(Processed)))
+            Out.append({
+                'Drive': R.get('Drive'),
+                'WorkerName': R.get('WorkerName'),
+                'Phase': R.get('Phase'),
+                'PercentComplete': float(R['PercentComplete']) if R.get('PercentComplete') is not None else None,
+                'FilesProcessed': int(Processed) if Processed is not None else None,
+                'FilesTotal': int(Total) if Total is not None else None,
+                'EtaSeconds': EtaSec,
+            })
         return Out
 
     # directive: activity-dashboard-solid | # see activity-dashboard-solid.C1

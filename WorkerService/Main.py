@@ -32,6 +32,7 @@ from typing import Optional
 from Features.ServiceControl.ServiceControlRepository import ServiceControlRepository
 from Features.Workers.WorkersRepository import WorkersRepository
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+from WorkerService.WorkerStateReporter import WorkerStateReporter
 
 
 # directive: path-schema-migration | # see path.S8
@@ -59,6 +60,8 @@ class WorkerServiceApp:
         self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
         self.WorkersRepository = WorkersRepositoryInstance or WorkersRepository()
 
+        # see workerservice.S8 -- WorkerStateReporter is constructed lazily once WorkerName resolves
+        self.StateReporter = None
 
         # Worker identity
         self.WorkerName = self._ResolveWorkerName()
@@ -67,6 +70,13 @@ class WorkerServiceApp:
 
         # Register worker and load config from Workers table
         self.WorkerConfig = self._RegisterAndLoadWorkerConfig()
+
+        # see workerservice.S8 -- sole writer of Workers.RuntimeState
+        self.StateReporter = WorkerStateReporter(self.DatabaseManager.DatabaseService, self.WorkerName)
+        try:
+            self.StateReporter.Transition('Initializing')
+        except Exception as Ex:
+            LoggingService.LogException("Failed to write Initializing RuntimeState", Ex, "WorkerService", "__init__")
 
         # Initialize WorkerContext singleton
         from Core.WorkerContext import WorkerContext
@@ -387,6 +397,7 @@ class WorkerServiceApp:
                 AcceptsInterlaced=getattr(QueueService, 'AcceptsInterlaced', True),
                 MaxConcurrentTranscodeJobs=MaxJobs,
                 MaxConcurrentRemuxJobs=0,
+                StateReporter=self.StateReporter,
             )
             self.TranscodeCurrentStatus = "Running"
             self.TranscodeManuallyStopped = False
@@ -477,6 +488,7 @@ class WorkerServiceApp:
                 RemuxEnabled=True,
                 MaxConcurrentTranscodeJobs=0,
                 MaxConcurrentRemuxJobs=MaxJobs,
+                StateReporter=self.StateReporter,
             )
             Result = self.RemuxService.Run()
             if Result.get("Success", False):
@@ -679,6 +691,11 @@ class WorkerServiceApp:
             # Start enabled capabilities if worker is Online
             if self.WorkerStatus == "Online":
                 self._ApplyCapabilities()
+                if self.StateReporter is not None:
+                    self.StateReporter.Transition('Idle')
+            else:
+                if self.StateReporter is not None:
+                    self.StateReporter.Transition('Paused')
 
             # Update service status
             self._UpdateServiceStatus("Running")
@@ -938,6 +955,8 @@ class WorkerServiceApp:
                     'HealthStatus': 'Healthy'
                 })
                 self.WorkersRepository.UpdateWorkerHeartbeat(self.WorkerName)
+                if self.StateReporter is not None:
+                    self.StateReporter.Tick()
                 self.ShutdownEvent.wait(30)
             except Exception as e:
                 LoggingService.LogException("Error in health check", e, "WorkerService", "_HealthCheckLoop")
@@ -979,21 +998,23 @@ class WorkerServiceApp:
         """Handle worker status transitions."""
         try:
             if NewStatus == "Online":
-                # Re-validate mounts before resuming. Operator may have fixed
-                # the host mount; we still cannot trust it without a check.
+                # Re-validate mounts before resuming; operator may have fixed the host mount.
                 if not self._ApplyMountValidationResult(self._ValidateStorageMounts()):
                     LoggingService.LogError(
                         f"Resume to Online blocked: mount validation failed. Worker remains Paused.",
                         "WorkerService", "_HandleStatusChange"
                     )
                     return
-                # Came back online - start enabled capabilities
                 LoggingService.LogInfo("Worker is Online, starting enabled capabilities", "WorkerService", "_HandleStatusChange")
                 self._ApplyCapabilities()
+                if self.StateReporter is not None:
+                    self.StateReporter.Transition('Idle')
 
             elif NewStatus == "Paused":
                 LoggingService.LogInfo("Worker is Paused, signaling capabilities to stop claiming new work", "WorkerService", "_HandleStatusChange")
                 self._StopAllCapabilities()
+                if self.StateReporter is not None:
+                    self.StateReporter.Transition('Paused')
 
         except Exception as e:
             LoggingService.LogException("Error handling status change", e, "WorkerService", "_HandleStatusChange")

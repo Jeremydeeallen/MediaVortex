@@ -10,17 +10,44 @@
   <div id="WorkersGrid" class="row g-3"></div>
 </div>
 
+<style>
+.diverge-border { border: 2px solid #f0ad4e !important; }
+</style>
+
 <script>
-const STATUS_BADGE = {
+// directive: worker-runtime-state | see admin-workers.C3
+const INTENT_BADGE = {
   'Online':   { cls: 'bg-success', label: 'Online' },
   'Paused':   { cls: 'bg-warning text-dark', label: 'Paused' },
   'Draining': { cls: 'bg-warning text-dark', label: 'Draining' },
   'Stopped':  { cls: 'bg-secondary', label: 'Stopped' },
 };
 
-function StatusBadgeHtml(Status) {
-  const Cfg = STATUS_BADGE[Status] || { cls: 'bg-secondary', label: Status || 'Unknown' };
-  return `<span class="badge ${Cfg.cls}">${Cfg.label}</span>`;
+// directive: worker-runtime-state | see admin-workers.C3
+const TRUTH_BADGE = {
+  'Initializing': { cls: 'bg-light text-dark border', label: 'Initializing' },
+  'Idle':         { cls: 'bg-light text-dark border', label: 'Idle' },
+  'ClaimingJob':  { cls: 'bg-info text-dark', label: 'ClaimingJob' },
+  'Encoding':     { cls: 'bg-primary', label: 'Encoding' },
+  'Scanning':     { cls: 'bg-info text-dark', label: 'Scanning' },
+  'Draining':     { cls: 'bg-warning text-dark', label: 'Draining' },
+  'Paused':       { cls: 'bg-secondary', label: 'Paused' },
+};
+
+function IntentBadgeHtml(Status) {
+  const Cfg = INTENT_BADGE[Status] || { cls: 'bg-secondary', label: Status || 'Unknown' };
+  return `<span class="badge ${Cfg.cls}" title="Operator intent">${Cfg.label}</span>`;
+}
+
+function TruthBadgeHtml(RuntimeState) {
+  if (!RuntimeState) {
+    return `<span class="badge bg-secondary" title="Worker has not reported runtime state">no truth</span>`;
+  }
+  if (typeof RuntimeState === 'string' && RuntimeState.startsWith('Faulted')) {
+    return `<span class="badge bg-danger" title="Worker fault">${RuntimeState}</span>`;
+  }
+  const Cfg = TRUTH_BADGE[RuntimeState] || { cls: 'bg-secondary', label: RuntimeState };
+  return `<span class="badge ${Cfg.cls}" title="Worker reports">${Cfg.label}</span>`;
 }
 
 function ConnectivityDotHtml(HeartbeatAgeSec, StaleSec) {
@@ -32,8 +59,9 @@ function ConnectivityDotHtml(HeartbeatAgeSec, StaleSec) {
   return `<span class="badge ${cls}" title="${title}">&#9679;</span>`;
 }
 
-function RenderTile(W, StaleSec) {
-  const StatusBadge = StatusBadgeHtml(W.status);
+function RenderTile(W, StaleSec, DivergenceSec) {
+  const Intent = IntentBadgeHtml(W.status);
+  const Truth = TruthBadgeHtml(W.runtimestate);
   const Dot = ConnectivityDotHtml(W.heartbeatagesec, StaleSec);
   const Mount = W.mountvalidationerror
     ? `<div class="small text-danger mt-1">Mount error: ${W.mountvalidationerror}</div>`
@@ -46,16 +74,24 @@ function RenderTile(W, StaleSec) {
     W.nvenccapable ? 'NVENC' : '',
   ].filter(Boolean).join(' ');
   const Ver = W.version || 'unknown';
+  const Diverge = W.intentdiverges === true;
+  const Border = Diverge ? 'diverge-border' : '';
+  const DivergeTip = Diverge
+    ? `title="Operator intent: ${W.status || '?'}; worker reports: ${W.runtimestate || 'no truth'}. Worker may be stuck or unable to honor the intent (> ${DivergenceSec}s)."`
+    : '';
+  const AttemptLine = (W.currentattemptid !== null && W.currentattemptid !== undefined)
+    ? `<div class="small text-muted">attempt ${W.currentattemptid}</div>` : '';
   return `
     <div class="col-md-3">
-      <div class="card h-100">
+      <div class="card h-100 ${Border}" ${DivergeTip}>
         <div class="card-body p-3">
           <div class="d-flex justify-content-between align-items-center mb-2">
             <strong>${Dot} ${W.workername}</strong>
-            ${StatusBadge}
+            <div class="d-flex gap-1">${Intent}${Truth}</div>
           </div>
           <div class="small text-muted">${W.platform || '?'} | ${Caps || 'no capabilities'}</div>
           <div class="small text-muted">v${Ver}</div>
+          ${AttemptLine}
           ${Mount}
           <div class="btn-group btn-group-sm mt-2 w-100" role="group">
             <button class="btn btn-outline-success" data-action="Online" data-worker="${W.workername}">Online</button>
@@ -80,10 +116,11 @@ function Load() {
     .then(data => {
       if (!data.Success) throw new Error(data.Message || 'unknown');
       const StaleSec = data.Data.HeartbeatStaleThresholdSec || 300;
+      const DivergenceSec = data.Data.WorkerIntentDivergenceSec || 60;
       document.getElementById('StaleNote').textContent =
-        `Connectivity dot: green if heartbeat < ${StaleSec}s, red otherwise. Status badge reflects operator-set value.`;
+        `Two badges per tile: left = operator intent (Workers.Status), right = worker truth (Workers.RuntimeState). Amber border if disagreement persists > ${DivergenceSec}s. Connectivity dot: green if heartbeat < ${StaleSec}s.`;
       const Grid = document.getElementById('WorkersGrid');
-      Grid.innerHTML = data.Data.Workers.map(W => RenderTile(W, StaleSec)).join('');
+      Grid.innerHTML = data.Data.Workers.map(W => RenderTile(W, StaleSec, DivergenceSec)).join('');
       Grid.querySelectorAll('button[data-action]').forEach(btn => {
         btn.addEventListener('click', () => {
           const W = btn.getAttribute('data-worker');

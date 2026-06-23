@@ -8,8 +8,8 @@
 
 **SMB-on-Windows long-handle drops** (Microsoft SMB client EINVAL on long-duration handles under GPU-paced reads -- see memory `feedback_ms_nfs_client_unreliable.md` for the diagnostic pattern) are mitigated by **per-worker local staging** -- `Features/TranscodeJob/local-staging.feature.md`. Enable on Windows + SMB workers; leave OFF on Linux NFS workers.
 
-### [BUG-0063] CLUSTER -- Activity dashboard SOLID rewrite (FPS smoothing + ETA countdown + drain-visible jobs + worker-status decoupling)
-**Date:** 2026-06-12 | **Area:** activity-page | **Subsumes:** BUG-0057, BUG-0058, BUG-0059, BUG-0040, BUG-0037, BUG-0025, BUG-0007 | **Adopts:** `Features/Activity/activity-dashboard-improvements.feature.md` DRAFTED C1-C22
+### [BUG-0063] CLOSED 2026-06-23 -- CLUSTER -- Activity dashboard SOLID rewrite (FPS smoothing + ETA countdown + drain-visible jobs + worker-status decoupling)
+**Date:** 2026-06-12 -> Closed 2026-06-23 by `worker-runtime-state` directive | **Area:** activity-page | **Subsumes:** BUG-0057, BUG-0058, BUG-0059, BUG-0040, BUG-0037, BUG-0025, BUG-0007 | **Resolved:** Activity refocused to active in-flight work (Active Jobs + Active Scans); worker tiles relocated to `/Admin/Workers`; library compliance relocated to `/Admin/Compliance`; workers are now authoritative source of truth for runtime state via `WorkerStateReporter` writing `Workers.RuntimeState` + `CurrentAttemptId` + `LastRuntimeStateUpdate` directly to DB.
 
 **Why bundled:** Today's `/Activity` page is a god-template. `Templates/Activity.html` mixes (a) ad-hoc data fetching per panel, (b) zero progress smoothing -- raw spot FPS/Speed values from `TranscodeProgressModel` render verbatim and jitter wildly, (c) hard-coded worker-status interpretation that conflates "operational state" with "process reachable," (d) jQuery DOM manipulation per-panel with no shared model, (e) per-button click handlers that fire N serial requests where one bulk call would do. Six bugs file against this single template + its backing endpoints. The SRP fix is a layered ViewModel + Service decomposition, not point patches.
 

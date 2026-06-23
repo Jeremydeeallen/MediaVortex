@@ -109,22 +109,25 @@ def _BuildLoudnormFilter(MediaFile, Strategy):
     return Filter
 
 
-# directive: perfect-audio-vertical | # see perfect-audio-vertical.C1
+# directive: worker-runtime-state | # see audio-normalization.C8
 class AudioFilterEmitter:
     """The seam: every shape consumes EmitTracks(MediaFile, Policy) -> List[TrackBlock]."""
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C1
-    def __init__(self, Classifier=None, LanguageDetectorInstance=None, DialNormHandlerInstance=None):
+    # directive: worker-runtime-state | # see audio-normalization.C8
+    def __init__(self, Classifier=None, LanguageDetectorInstance=None, DialNormHandlerInstance=None, ProfileResolver=None):
         """Constructor injection per SOLID DIP; default-constructs each collaborator when omitted."""
         self.Classifier = Classifier or AudioStrategyClassifier()
         self.LanguageDetector = LanguageDetectorInstance or LanguageDetector()
         self.DialNormHandler = DialNormHandlerInstance or DialNormHandler()
+        self.ProfileResolver = ProfileResolver
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C1
+    # directive: worker-runtime-state | # see audio-normalization.C8
     def EmitTracks(self, MediaFile, Policy, AudioStreams=None, LibraryDefault=None):
         """Return a list of TrackBlocks across Policy.EmitTracks x kept language streams."""
         if AudioStreams is None:
             AudioStreams = [{'index': 0, 'tags': {}, 'disposition': {}}]
+
+        self._ProfileBitrateCeiling = self._ResolveProfileBitrateCeiling(MediaFile)
 
         KeepCommentary = bool(_GetField(Policy, 'KeepCommentaryTracks'))
         if not KeepCommentary:
@@ -221,7 +224,21 @@ class AudioFilterEmitter:
             return 'stream_copy_fallback'
         return 'reencode'
 
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
+    # directive: worker-runtime-state | # see audio-normalization.C8
+    def _ResolveProfileBitrateCeiling(self, MediaFile):
+        """Return EffectiveProfile.TargetAudioKbps or None when no resolver / no profile / no ceiling."""
+        if self.ProfileResolver is None:
+            return None
+        try:
+            Profile = self.ProfileResolver.Resolve(MediaFile)
+            if Profile is None:
+                return None
+            Ceiling = getattr(Profile, 'TargetAudioKbps', None)
+            return int(Ceiling) if Ceiling else None
+        except Exception:
+            return None
+
+    # directive: worker-runtime-state | # see audio-normalization.C8
     def _BuildCodecArgs(self, TrackConfig, Mode, Codec, OutputIndex):
         """Codec + bitrate + sample rate + channel-count argv for the output index."""
         if Mode in ('stream_copy', 'stream_copy_fallback'):
@@ -230,6 +247,9 @@ class AudioFilterEmitter:
         Bitrate = TrackConfig.get('Bitrate')
         SampleRate = TrackConfig.get('SampleRateHz')
         Channels = TrackConfig.get('Channels')
+        Ceiling = getattr(self, '_ProfileBitrateCeiling', None)
+        if Bitrate and Ceiling and int(Bitrate) > Ceiling:
+            Bitrate = Ceiling
         if Bitrate:
             Args += [f'-b:a:{OutputIndex}', f'{int(Bitrate)}k']
         if SampleRate:
