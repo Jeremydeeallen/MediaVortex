@@ -8,6 +8,138 @@
 
 **SMB-on-Windows long-handle drops** (Microsoft SMB client EINVAL on long-duration handles under GPU-paced reads -- see memory `feedback_ms_nfs_client_unreliable.md` for the diagnostic pattern) are mitigated by **per-worker local staging** -- `Features/TranscodeJob/local-staging.feature.md`. Enable on Windows + SMB workers; leave OFF on Linux NFS workers.
 
+### [BUG-0068] AudioFilterEmitter STRATEGY_REVIEW bypass leaves audio bitrate uncontrolled -- fallback chain hides the real principle
+**Date:** 2026-06-23 | **Area:** transcode-emit + audio-policy
+
+**What breaks:** When source loudness is too extreme to gain safely (e.g. -37 LUFS), `AudioStrategyClassifier` returns `STRATEGY_REVIEW` for every track. `AudioFilterEmitter.EmitTracks` then `continue`s on every track and returns 0 blocks. `TranscodeShape.Build` hits the fallback branch and emits `-c:a copy` -- source bitrate (160kbps in the failure case) survives into the output. The post-transcode compliance gate then flips `ComplianceGateFailed: bitrate:160>134` and the file is stuck in `Transcode` bucket forever.
+
+The pipeline has TWO fallbacks stacked here:
+1. Strategy classifier silently demotes to REVIEW when gain budget is exceeded, with no signal to downstream that the loudnorm path was abandoned.
+2. TranscodeShape silently swaps in `-c:a copy` when blocks are empty, with no awareness that the source bitrate is above the profile's audio ceiling.
+
+Both fallbacks hide the real situation. The principle: every output track has an explicit policy decision that is either (a) honored (loudnorm + ceiling clamp), or (b) the job FAILS LOUD with a "this file cannot be made compliant under the current profile -- raise loudness tolerance or reassign profile" error visible to the operator.
+
+**Violates:** `Features/AudioNormalization/audio-normalization.feature.md` C8 (encoder honors per-profile ceiling). The contract today is satisfied on the re-encode path but the REVIEW/copy fallback bypasses it.
+
+**Look first:**
+- `Features/AudioNormalization/AudioFilterEmitter.py` `EmitTracks` -- the `STRATEGY_REVIEW: continue` line silently drops the track; needs to either honor the ceiling unconditionally (degrade to "encode at ceiling without loudnorm" + record `AudioPolicyDeferReason='loudnorm_ungainable'`) OR raise an explicit refusal that flows back as a typed exception
+- `Features/TranscodeJob/Emit/TranscodeShape.py` `if not Blocks` branch -- the bare `-c:a copy` fallback must be removed; if the emitter declined to produce blocks, the shape declines to emit a command (raises) so the worker can mark the attempt failed with a clear reason
+- `Features/AudioNormalization/AudioStrategyClassifier.py` -- the REVIEW classification should write its reason back to `MediaFiles.AdmissionDeferReason` so the operator can see which files need policy attention
+
+**Settings knobs (GUI-level, per `feedback_no_hardcoded_values.md`):**
+- `AudioNormalizationConfig.UngainablePolicy` already exists ('adaptive' / 'review' / ...) -- expose in the /AudioNormalization editor so the operator picks per-scope behavior between "encode at ceiling without loudnorm" vs "defer for review"
+- No hardcoded loudness gain limit -- promote to `SystemSettings.MaxLoudnessGainLU` (default whatever the current implicit threshold is, exposed in /Settings)
+- No hardcoded fallback bitrate -- TrackConfig.Bitrate is already a column; clamp against `Profile.TargetAudioKbps` (DB-driven, no constant in code)
+
+**Acceptance principle:** simplify and 100% solid-perfect implementation; NO hardcoding, NO fallbacks (these hide problems). Every audio output path must be either explicitly honored or explicitly rejected with a logged reason; silent cascades are forbidden (cross-reference BUG-0066).
+
+**Fix with:** `/t BUG-0068`. Co-prioritize with BUG-0066 (same principle).
+
+---
+
+### [BUG-0067] FileReplacement orphan-on-failure -- TranscodedOutputPlacement leaves transcoded .mp4 on disk when MediaFiles update fails; scanner ingests it as a duplicate row; next encode attempt fails identically; loop snowballs
+**Date:** 2026-06-23 | **Area:** file-replacement
+
+**What breaks:** `Features/FileReplacement/TranscodedOutputPlacement.py:Execute` lines 219-230. When `_UpdateMediaFilesAfterReplacement` returns `Success=False` (today's case: duplicate-key violation on `idx_mediafiles_storageroot_relpath_unique`), the function logs a warning ("future probe will reconcile") and returns `Success=True`. That promise is fiction: the orphan `.mp4` stays on disk next to the source `.mkv`, the file scanner later ingests the orphan as a brand-new MediaFile row, and the NEXT encode attempt for the same source hits the same unique-key collision. Each failed cleanup snowballs into another duplicate row.
+
+Evidence from 2026-06-23 smoke (MediaFile 689432 Young Sheldon S07E11):
+- 179MB `-mv.mp4` on disk from a June 14 encode attempt -- never cleaned up because that attempt also hit this branch
+- Today's 126MB `-mv.mp4` from a fresh encode -- same outcome
+- MediaFile 689416 (scanner-discovered duplicate of the June 14 orphan) blocks the update of MediaFile 689432
+- Source `.mkv` (624MB) untouched, MediaFile 689432 still reports source codec h264 + eac3 + matroska
+
+The fallback "return Success with a warning" is the bug. The principle: when post-rename DB update fails, the rename MUST be rolled back (move `.mp4` back to `.mp4.inprogress`, or delete it), the attempt MUST be marked failed with the actual error visible, and the source MUST stay intact.
+
+**Look first:**
+- `Features/FileReplacement/TranscodedOutputPlacement.py:Execute` lines 219-230 -- the orphan-on-failure branch; replace `return {Success: True, ...}` with rollback (rename target back to .inprogress, or os.remove) + `return {Success: False, ErrorMessage: <real error>}`
+- `Features/FileReplacement/TranscodedOutputPlacement.py:_UpdateMediaFilesAfterReplacement` -- when this fails on unique-key collision, the upstream symptom is "another MediaFile row already owns the target path". Investigate WHY a row exists at the target path; if the cause is a previous orphan (recursive symptom) the rollback above fixes both. If the cause is a legitimate MV-output that was previously transcoded, the system needs to dedup BEFORE writing rather than after.
+- `Features/FileScanning/FileScanningBusinessService` (or wherever a `-mv.mp4` filename is ingested) -- a scanner that discovers a `-mv.mp4` file should either (a) attach it to the source MediaFile by matching basename + storage root + relpath stripping the `-mv.mp4`-vs-source-extension suffix, OR (b) refuse to ingest if it would create a duplicate -- never silently create a parallel row
+
+**Settings knobs (GUI-level):**
+- No hardcoded retry / rollback / cleanup behavior -- exposed via `SystemSettings.FileReplacementOnUpdateFailure` enum ('Rollback' / 'LeaveOrphan' / 'DeleteOrphan'; default 'Rollback'). Visible in /Settings.
+- No hardcoded constants in the rollback path -- target path / staging path are both DB-resolved (already are).
+
+**Acceptance principle:** simplify and 100% solid-perfect implementation; NO hardcoding, NO fallbacks. Replace the orphan-on-failure branch with explicit rollback + loud failure; downstream the scanner-creates-duplicate-row symptom disappears because no orphans are produced.
+
+**Cross-references:** Surfaces during `worker-runtime-state` directive smoke verification (2026-06-23). The 689432 / 689416 duplicate is one snapshot of this bug; the same shape applies to any file where `_UpdateMediaFilesAfterReplacement` could fail.
+
+**Fix with:** `/t BUG-0067`.
+
+---
+
+### [BUG-0066] Audio pipeline has silent fallback chains -- principle violation; we cannot tell whether the primary rule fired
+**Date:** 2026-06-23 | **Area:** audio-pipeline | **Reshapes:** BUG-0065 fix path
+
+**What breaks:** Operator principle stated 2026-06-23: "We CANNOT have fallbacks. This prevents us from knowing if our system is working." The audio pipeline today is fallback-shaped in at least two places:
+
+1. **`LanguageDetector.Detect` (C11)** -- explicitly chains six rules in order: ISO 639-2 tag -> title regex -> single-audio-stream short-circuit -> `disposition.default==1` -> per-library default -> `AudioStreamLanguageDetectionsJson` cache. Whichever rule fires first wins; the others' outputs are discarded and nothing records WHICH rule actually picked the language. If rule 1 silently mis-tags `eng` as `und` because a tag is malformed, the chain falls through to rule 4 (disposition) and the operator sees a "correct" answer with no signal that rule 1 broke.
+
+2. **`_PickDefaultLanguage` (L1)** -- chains three rules for `disposition.default=1` placement: source's per-stream default-language -> library default -> first present language. Same silent-cascade pattern.
+
+3. **The BUG-0065 entry filed earlier today** proposed adding ANOTHER fallback layer (English-when-present, between source-default and first-present). That direction multiplies the problem instead of fixing it.
+
+The principle: each pick decision must either (a) be a single explicit rule with no fallback (fail loud if it doesn't apply), OR (b) record on the output which rule fired so the operator can audit. Silent cascades are forbidden.
+
+**Violates:** `Features/AudioNormalization/audio-normalization.feature.md` criterion C25 (added with this entry). Reshapes C24 (BUG-0065) -- the fix for BUG-0065 must satisfy C25 (no silent fallback) rather than extending the existing chain.
+
+**Look first:**
+- `Features/AudioNormalization/LanguageDetector.py` `Detect()` -- the explicit six-rule chain; the function's return must include WHICH rule fired (e.g. tagged result type carrying `Rule` field), AND the rule choice must be persisted to `TranscodeAttempts.AudioTracksEmittedJson` (C15) or a sibling column so an operator querying the DB can see whether ISO tags are doing their job or whether the system is silently leaning on the disposition fallback
+- `Features/AudioNormalization/AudioFilterEmitter.py` `_PickDefaultLanguage()` -- same pattern; emit a "default-pick-rule" annotation
+- `Features/AudioNormalization/audio-normalization.feature.md` C11 + L1 -- the contracts that codify the cascades; both need to be rewritten to either single-rule + fail-loud OR explicit-rule-recording
+- Any other `# fallback` / `or X if not Y` / chained-`elif` pattern in the audio vertical -- audit and either collapse or expose
+
+**Decision needed at fix time:** does the audio pipeline switch to (a) single explicit rule (English-or-fail) -- simple but rejects non-English-only sources, OR (b) explicit-rule-with-recorded-provenance -- keeps current capability but adds observability? The phrasing "prevents us from knowing if our system is working" suggests (b) is acceptable IF the rule provenance is recorded and queryable. Confirm during `/t`.
+
+**Fix with:** `/t BUG-0066`. Address BEFORE `/t BUG-0065` -- BUG-0065's fix must conform to the principle this bug establishes.
+
+---
+
+### [BUG-0065] Default audio track must be English when source carries multiple language audio streams
+**Date:** 2026-06-23 | **Area:** audio-default
+
+**What breaks:** When a media file carries multiple language audio streams (e.g. `eng` + `jpn`), the emitter's current default-language pick rule -- per `Features/AudioNormalization/audio-normalization.feature.md` lines 183-186: "source's per-stream default-language, falling back to library default, falling back to first present language" -- can land `disposition.default=1` on a non-English track when the source's `disposition.default` flag points at a non-English stream and the per-library default is unset. Operator expects English to be the implicit default whenever it is present, regardless of source disposition.
+
+**Violates:** `Features/AudioNormalization/audio-normalization.feature.md` criterion C24 (added with this entry). Related context: C11 (LanguageDetector.Detect chain) and C23 (EmitTracks.LanguageDefault config).
+
+**Look first:**
+- `Features/AudioNormalization/audio-normalization.feature.md` lines 179-186 (multi-language live-encode invariant L1) -- governs which track receives `disposition.default=1`
+- `Features/AudioNormalization/AudioFilterEmitter.py` `_PickDefaultLanguage(AudioStreams, StreamLanguageMap, ...)` -- the function that applies the fallback chain
+- `Features/AudioNormalization/LanguageDetector.py` `Detect()` -- the per-stream language identification (English detection already exists here via title regex `english|eng\b|en-us|en-gb`)
+- `AudioNormalizationConfig.LanguageDefault` -- per-scope override; new criterion should not weaken this (operator-set library default still wins over the implicit-English rule)
+
+**Decision needed at fix time:** does the English-default rule sit BEFORE or AFTER `disposition.default` from source? The user's phrasing ("audio should default to english if it has multiple languages") suggests English wins over source disposition. Confirm during `/t`.
+
+**Fix with:** `/t BUG-0065`.
+
+---
+
+### [BUG-0064] Deploy story not cleanly documented -- I9 local-vs-remote split missing; remote-worker deploy has inter-worker dependencies; two scripts where one SOLID script belongs
+**Date:** 2026-06-23 | **Area:** deploy
+
+**What breaks:** The deploy contract conflates two fundamentally different operations: (a) bringing remote worker hosts (Linux Docker / Windows SMB) online, and (b) cycling local I9 WebService + WorkerService processes that run directly from the live source tree. Today both go through the deploy/ surface, references to "deploy I9" exist in flow docs + bringup, and there's no single operator-facing script that captures the policy. Three concrete acceptance criteria from operator:
+
+1. **Local I9 services have NO deploy.** They are the active codebase -- code changes apply on restart. Operator-facing command starts both services from their respective venvs (`venv/` for the worker, `WebService/venv/` for the WebService -- see memory `feedback_webservice_venv_drift.md`), **WebService ALWAYS first online**, and **must check for any running WorkerService process on I9 and stop it before starting a new one** (see memory `feedback_one_i9_worker_instance.md` + `feedback_worker_restart_protocol.md`). No SyncSource, no Task Scheduler registration, no Docker.
+
+2. **Remote worker deploys are independent.** Deploying larry/wakko/dot or any future host MUST NOT depend on the state of any other worker. Today `deploy-fleet.py`-style orchestration and shared compose templates create cross-worker dependencies (one host's deploy can stall waiting on another's heartbeat or share a build context). Each remote deploy is a self-contained unit; failure on host A does not block or roll back host B.
+
+3. **Single SOLID deploy script.** Today there are two scripts (`deploy-linux-worker.py` + `deploy-windows-worker.py`) plus a fleet wrapper plus a register-task PS1. Collapse to ONE entry-point script with a Strategy pattern per host shape (LXC-Docker / bare-metal-Docker / Windows-SMB / I9-local). SRP: per-shape strategy owns its bring-up steps; the entry script owns CLI parsing + inventory lookup + verification polling only. Constructor-DI throughout. 100% clean code -- no scripts-shaped-as-bash-pipelines, no shared mutable state, no copy-paste between OS branches.
+
+**Violates:** `deploy/worker-deploy.feature.md` criterion 14 (added with this entry). Also touches:
+- `feature-docs.md` / `flow-docs.md` -- the I9-local-vs-remote split must be reflected in feature + flow contracts
+- `scope-discipline.md` -- a perfect-implementation directive cannot leave the I9 case smudged across "Code updates on I9-2024" prose
+
+**Look first:**
+- `deploy/worker-deploy.feature.md` lines 16-17 -- the "Code updates on I9-2024" paragraph today is informal prose; it needs to become a hard contract (no deploy path, just start/stop)
+- `deploy/deploy-windows-worker.py` -- this exists today and registers a Windows Task Scheduler task; if I9 is local-only it shouldn't be running through this path
+- `deploy/bringup.md` -- the runbook should route I9 to a local start command, not a deploy
+- `deploy/deploy-linux-worker.py` + `deploy/deploy-fleet.py` (if it exists) -- audit for inter-worker dependencies
+- `StartMediaVortex.py` -- already exists as the local lifecycle entry point; the I9-local "deploy" probably collapses into this
+- The four host-shape strategies that need to exist: LXC-Docker, bare-metal-Docker (wakko/dot), Windows-SMB, and the I9-local NO-OP
+
+**Fix with:** `/t BUG-0064`.
+
+---
+
 ### [BUG-0063] CLOSED 2026-06-23 -- CLUSTER -- Activity dashboard SOLID rewrite (FPS smoothing + ETA countdown + drain-visible jobs + worker-status decoupling)
 **Date:** 2026-06-12 -> Closed 2026-06-23 by `worker-runtime-state` directive | **Area:** activity-page | **Subsumes:** BUG-0057, BUG-0058, BUG-0059, BUG-0040, BUG-0037, BUG-0025, BUG-0007 | **Resolved:** Activity refocused to active in-flight work (Active Jobs + Active Scans); worker tiles relocated to `/Admin/Workers`; library compliance relocated to `/Admin/Compliance`; workers are now authoritative source of truth for runtime state via `WorkerStateReporter` writing `Workers.RuntimeState` + `CurrentAttemptId` + `LastRuntimeStateUpdate` directly to DB.
 
