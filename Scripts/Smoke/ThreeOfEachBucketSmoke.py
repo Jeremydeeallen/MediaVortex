@@ -20,7 +20,8 @@ BUCKET_TO_PROCESSING_MODE = {
 
 
 # directive: filereplacement-drain-bug
-def _PickCandidates(Db, Bucket, MinSizeMB, MaxSizeMB, MinVideoKbps, Limit=3):
+def _PickCandidates(Db, Bucket, MinSizeMB, MaxSizeMB, MinVideoKbps, Limit=3, MaxAudioChannels=2, Resolutions=None):
+    ResList = Resolutions or ['480p', '720p']
     Sql = (
         "SELECT m.Id, m.FileName, m.SizeMB, m.VideoBitrateKbps FROM MediaFiles m "
         "JOIN Profiles p ON p.ProfileName = m.AssignedProfile "
@@ -31,11 +32,12 @@ def _PickCandidates(Db, Bucket, MinSizeMB, MaxSizeMB, MinVideoKbps, Limit=3):
         "AND (m.VideoBitrateKbps IS NULL OR m.VideoBitrateKbps >= %s) "
         "AND (m.AudioCorruptSuspect IS NULL OR m.AudioCorruptSuspect = FALSE) "
         "AND m.SourceIntegratedLufs IS NOT NULL "
+        "AND (m.AudioChannels IS NULL OR m.AudioChannels <= %s) "
+        "AND m.ResolutionCategory = ANY(%s) "
         "AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.MediaFileId = m.Id AND tq.Status IN ('Pending','Running')) "
-        "AND m.FileName NOT LIKE 'XXX%%' "
         "ORDER BY m.SizeMB DESC LIMIT %s"
     )
-    Rows = Db.ExecuteQuery(Sql, (Bucket, MinSizeMB, MaxSizeMB, MinVideoKbps, Limit))
+    Rows = Db.ExecuteQuery(Sql, (Bucket, MinSizeMB, MaxSizeMB, MinVideoKbps, MaxAudioChannels, ResList, Limit))
     return [{'id': int(R['id']), 'filename': R['filename'], 'size_mb': float(R['sizemb']), 'video_kbps': R['videobitratekbps']} for R in Rows]
 
 
@@ -80,9 +82,9 @@ def Run():
     Db = DatabaseService()
 
     print("--- Picking candidates ---")
-    Transcode = _PickCandidates(Db, 'Transcode', MinSizeMB=400, MaxSizeMB=1500, MinVideoKbps=5000, Limit=3)
-    Remux = _PickCandidates(Db, 'Remux', MinSizeMB=80, MaxSizeMB=600, MinVideoKbps=0, Limit=3)
-    AudioFix = _PickCandidates(Db, 'AudioFixOnly', MinSizeMB=80, MaxSizeMB=600, MinVideoKbps=0, Limit=3)
+    Transcode = _PickCandidates(Db, 'Transcode', MinSizeMB=200, MaxSizeMB=600, MinVideoKbps=2500, Limit=3, MaxAudioChannels=2, Resolutions=['480p','720p'])
+    Remux = _PickCandidates(Db, 'Remux', MinSizeMB=80, MaxSizeMB=600, MinVideoKbps=0, Limit=3, MaxAudioChannels=2, Resolutions=['480p','720p'])
+    AudioFix = _PickCandidates(Db, 'AudioFixOnly', MinSizeMB=80, MaxSizeMB=600, MinVideoKbps=0, Limit=3, MaxAudioChannels=2, Resolutions=['480p','720p'])
     print(f"  Transcode: {[r['id'] for r in Transcode]} (sizes: {[round(r['size_mb']) for r in Transcode]} MB)")
     print(f"  Remux:     {[r['id'] for r in Remux]} (sizes: {[round(r['size_mb']) for r in Remux]} MB)")
     print(f"  AudioFix:  {[r['id'] for r in AudioFix]} (sizes: {[round(r['size_mb']) for r in AudioFix]} MB)")
