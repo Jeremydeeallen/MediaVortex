@@ -495,11 +495,17 @@ class WebServiceApp:
         from Features.MediaFile.ComplianceRecomputeController import ComplianceRecomputeBlueprint
         self.App.register_blueprint(ComplianceRecomputeBlueprint)
 
-        # directive: compliance-tabbed-ui | # see startup.ST5
+        # directive: activity-admin-and-worker-telemetry | # see startup.ST5
         @self.App.route('/Compliance')
-        def render_compliance_tabbed_page():
-            from flask import render_template
-            return render_template('Compliance.html')
+        def redirect_compliance_legacy():
+            from flask import redirect
+            return redirect('/Admin/Compliance', code=301)
+
+        # directive: activity-admin-and-worker-telemetry | # see startup.ST5
+        from Features.Admin.Workers.AdminWorkersController import AdminWorkersBlueprint
+        from Features.Admin.Compliance.AdminComplianceController import AdminComplianceBlueprint
+        self.App.register_blueprint(AdminWorkersBlueprint)
+        self.App.register_blueprint(AdminComplianceBlueprint)
 
     def PrivateStartServiceStatusTracking(self):
         """Start service status tracking thread."""

@@ -1,0 +1,111 @@
+{% extends "Base.html" %}
+
+{% block title %}Admin / Compliance - MediaVortex{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-3">
+  {% include "_admin_subnav.html" %}
+  <h2 class="h4 mb-3"><i class="fas fa-shield-alt me-2"></i>Compliance</h2>
+
+  <div class="card mb-4">
+    <div class="card-header py-2">
+      <h6 class="mb-0"><i class="fas fa-clipboard-check me-2"></i>Library Compliance</h6>
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <h6 class="text-muted small text-uppercase mb-2">Compliance state</h6>
+          <table class="table table-sm mb-0">
+            <tbody>
+              <tr><td>Total MediaFiles</td><td class="text-end" id="ComplianceTotal">-</td></tr>
+              <tr><td><span class="badge bg-success">Compliant</span></td><td class="text-end" id="ComplianceTrue">-</td></tr>
+              <tr><td><span class="badge bg-warning text-dark">Non-compliant</span></td><td class="text-end" id="ComplianceFalse">-</td></tr>
+              <tr><td><span class="badge bg-secondary">Undecided</span></td><td class="text-end" id="ComplianceNull">-</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="col-md-6">
+          <h6 class="text-muted small text-uppercase mb-2">WorkBucket (non-compliant breakdown)</h6>
+          <table class="table table-sm mb-0">
+            <tbody>
+              <tr><td><span class="badge bg-primary">Transcode</span></td><td class="text-end" id="ModeTranscode">-</td></tr>
+              <tr><td><span class="badge bg-info">Remux</span></td><td class="text-end" id="ModeRemux">-</td></tr>
+              <tr><td><span class="badge bg-warning text-dark">AudioFixOnly</span></td><td class="text-end" id="ModeAudioFix">-</td></tr>
+              <tr><td><em>(no bucket)</em></td><td class="text-end" id="ModeNone">-</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="col-md-12">
+          <h6 class="text-muted small text-uppercase mb-2">Audio</h6>
+          <table class="table table-sm mb-0">
+            <tbody>
+              <tr><td>AudioComplete = true</td><td class="text-end" id="AudioCompleteTrue">-</td></tr>
+              <tr><td>AudioComplete = false</td><td class="text-end" id="AudioCompleteFalse">-</td></tr>
+              <tr><td>AudioComplete IS NULL</td><td class="text-end" id="AudioCompleteNull">-</td></tr>
+              <tr><td><span class="badge bg-danger">AudioCorruptSuspect</span></td><td class="text-end" id="AudioSuspect">-</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="nav nav-tabs" id="ComplianceTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="audio-tab" data-bs-toggle="tab" data-bs-target="#audio-pane" type="button" role="tab">
+        <i class="fas fa-volume-up me-1"></i> Audio Rules
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="video-tab" data-bs-toggle="tab" data-bs-target="#video-pane" type="button" role="tab">
+        <i class="fas fa-film me-1"></i> Video Rules
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="container-tab" data-bs-toggle="tab" data-bs-target="#container-pane" type="button" role="tab">
+        <i class="fas fa-box me-1"></i> Container Rules
+      </button>
+    </li>
+  </ul>
+  <div class="tab-content border border-top-0 p-3" id="ComplianceTabContent">
+    <div class="tab-pane fade show active" id="audio-pane" role="tabpanel">
+      <p class="text-muted small">Audio rule editing -- see <a href="/AudioNormalization">/AudioNormalization</a> for the canonical per-scope policy editor.</p>
+    </div>
+    <div class="tab-pane fade" id="video-pane" role="tabpanel">
+      <p class="text-muted small">Per-profile video compliance bar is edited in <a href="/settings">/settings -> Profiles</a> (compliance fields lock at Finalize).</p>
+    </div>
+    <div class="tab-pane fade" id="container-pane" role="tabpanel">
+      <p class="text-muted small">Per-profile container compliance bar is edited in <a href="/settings">/settings -> Profiles</a> (compliance fields lock at Finalize).</p>
+    </div>
+  </div>
+</div>
+
+<script>
+function LoadCompliance() {
+  fetch('/api/Admin/Compliance/Snapshot')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.Success) throw new Error(data.Message || 'unknown');
+      const C = data.Data.Compliance || {};
+      document.getElementById('ComplianceTotal').textContent = (C.Total || 0).toLocaleString();
+      document.getElementById('ComplianceTrue').textContent = (C.True || 0).toLocaleString();
+      document.getElementById('ComplianceFalse').textContent = (C.False || 0).toLocaleString();
+      document.getElementById('ComplianceNull').textContent = (C.Null || 0).toLocaleString();
+      const M = data.Data.Mode || {};
+      document.getElementById('ModeTranscode').textContent = (M.Transcode || 0).toLocaleString();
+      document.getElementById('ModeRemux').textContent = (M.Remux || 0).toLocaleString();
+      document.getElementById('ModeAudioFix').textContent = (M.AudioFixOnly || 0).toLocaleString();
+      document.getElementById('ModeNone').textContent = (M.None || 0).toLocaleString();
+      const A = data.Data.Audio || {};
+      document.getElementById('AudioCompleteTrue').textContent = (A.CompleteTrue || 0).toLocaleString();
+      document.getElementById('AudioCompleteFalse').textContent = (A.CompleteFalse || 0).toLocaleString();
+      document.getElementById('AudioCompleteNull').textContent = (A.CompleteNull || 0).toLocaleString();
+      document.getElementById('AudioSuspect').textContent = (A.Suspect || 0).toLocaleString();
+    })
+    .catch(e => console.error('Compliance load failed:', e));
+}
+
+LoadCompliance();
+setInterval(LoadCompliance, 5000);
+</script>
+{% endblock %}

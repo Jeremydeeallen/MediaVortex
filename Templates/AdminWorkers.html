@@ -1,0 +1,104 @@
+{% extends "Base.html" %}
+
+{% block title %}Admin / Workers - MediaVortex{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-3">
+  {% include "_admin_subnav.html" %}
+  <h2 class="h4 mb-3"><i class="fas fa-server me-2"></i>Workers</h2>
+  <div id="StaleNote" class="small text-muted mb-2"></div>
+  <div id="WorkersGrid" class="row g-3"></div>
+</div>
+
+<script>
+const STATUS_BADGE = {
+  'Online':   { cls: 'bg-success', label: 'Online' },
+  'Paused':   { cls: 'bg-warning text-dark', label: 'Paused' },
+  'Draining': { cls: 'bg-warning text-dark', label: 'Draining' },
+  'Stopped':  { cls: 'bg-secondary', label: 'Stopped' },
+};
+
+function StatusBadgeHtml(Status) {
+  const Cfg = STATUS_BADGE[Status] || { cls: 'bg-secondary', label: Status || 'Unknown' };
+  return `<span class="badge ${Cfg.cls}">${Cfg.label}</span>`;
+}
+
+function ConnectivityDotHtml(HeartbeatAgeSec, StaleSec) {
+  if (HeartbeatAgeSec === null || HeartbeatAgeSec === undefined) {
+    return `<span class="badge bg-secondary" title="No heartbeat yet">&#9679;</span>`;
+  }
+  const cls = HeartbeatAgeSec <= StaleSec ? 'bg-success' : 'bg-danger';
+  const title = `Heartbeat ${HeartbeatAgeSec}s ago (stale > ${StaleSec}s)`;
+  return `<span class="badge ${cls}" title="${title}">&#9679;</span>`;
+}
+
+function RenderTile(W, StaleSec) {
+  const StatusBadge = StatusBadgeHtml(W.status);
+  const Dot = ConnectivityDotHtml(W.heartbeatagesec, StaleSec);
+  const Mount = W.mountvalidationerror
+    ? `<div class="small text-danger mt-1">Mount error: ${W.mountvalidationerror}</div>`
+    : '';
+  const Caps = [
+    W.transcodeenabled ? 'T' : '',
+    W.remuxenabled ? 'R' : '',
+    W.qualitytestenabled ? 'Q' : '',
+    W.scanenabled ? 'S' : '',
+    W.nvenccapable ? 'NVENC' : '',
+  ].filter(Boolean).join(' ');
+  const Ver = W.version || 'unknown';
+  return `
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body p-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <strong>${Dot} ${W.workername}</strong>
+            ${StatusBadge}
+          </div>
+          <div class="small text-muted">${W.platform || '?'} | ${Caps || 'no capabilities'}</div>
+          <div class="small text-muted">v${Ver}</div>
+          ${Mount}
+          <div class="btn-group btn-group-sm mt-2 w-100" role="group">
+            <button class="btn btn-outline-success" data-action="Online" data-worker="${W.workername}">Online</button>
+            <button class="btn btn-outline-warning" data-action="Paused" data-worker="${W.workername}">Pause</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function PostStatus(WorkerName, Status) {
+  return fetch(`/api/TeamStatus/Workers/${encodeURIComponent(WorkerName)}/Status`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({Status: Status})
+  });
+}
+
+function Load() {
+  fetch('/api/Admin/Workers/Snapshot')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.Success) throw new Error(data.Message || 'unknown');
+      const StaleSec = data.Data.HeartbeatStaleThresholdSec || 300;
+      document.getElementById('StaleNote').textContent =
+        `Connectivity dot: green if heartbeat < ${StaleSec}s, red otherwise. Status badge reflects operator-set value.`;
+      const Grid = document.getElementById('WorkersGrid');
+      Grid.innerHTML = data.Data.Workers.map(W => RenderTile(W, StaleSec)).join('');
+      Grid.querySelectorAll('button[data-action]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const W = btn.getAttribute('data-worker');
+          const S = btn.getAttribute('data-action');
+          PostStatus(W, S).then(Load);
+        });
+      });
+    })
+    .catch(e => {
+      document.getElementById('WorkersGrid').innerHTML =
+        `<div class="col-12 text-danger">Failed to load: ${e.message}</div>`;
+    });
+}
+
+Load();
+setInterval(Load, 5000);
+</script>
+{% endblock %}
