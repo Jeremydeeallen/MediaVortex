@@ -1026,8 +1026,7 @@ class StuckJobDetectionService:
                     if FFmpegPid and IsLocal:
                         self.ProcessManagementService.KillProcess(int(FFmpegPid))
                     self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                        "UPDATE TranscodeAttempts SET Success = FALSE, ErrorMessage = %s, "
-                        "EndTime = COALESCE(EndTime, NOW()) "
+                        "UPDATE TranscodeAttempts SET Success = FALSE, ErrorMessage = %s "
                         "WHERE Id = %s AND Success IS NULL",
                         ('hung_encode_detector', AttemptId),
                     )
