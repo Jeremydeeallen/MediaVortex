@@ -2,7 +2,48 @@
 
 **Slug:** activity-admin-and-worker-telemetry
 **Set:** 2026-06-23
-**Status:** Active -- phase: NEEDS_PLAN
+**Status:** Active -- phase: IMPLEMENTING
+
+## Discovery (NEEDS_DOC_PREREAD findings, 2026-06-23)
+
+Reading `WorkerService/WorkerService.flow.md` (ST9 + S4), `worker-lifecycle.feature.md` (C2 + C3), and `WorkerService/Main.py:_HealthCheckLoop` confirms:
+
+- **C4 (worker self-report) is ALREADY IMPLEMENTED.** Each WorkerService process runs a `_HealthCheckLoop` thread that calls `WorkersRepository.UpdateWorkerHeartbeat(self.WorkerName)` direct-to-DB every 30s. WebService is not in this path. Bringing WebService down does not affect heartbeat writes.
+- **C5 (heartbeat-staleness as derived UI concept) is ALREADY TRUE.** Per `worker-lifecycle.feature.md` C3, `Offline` is NOT a column value -- it is a UI-derived state when `(NOW() - LastHeartbeat) > HeartbeatStaleThresholdSec`.
+- **C6 (Stopped enum migration) is SUPERSEDED by `worker-lifecycle.feature.md`** which already simplified the worker enum to `Online`/`Paused` only. Current DB confirms: `SELECT DISTINCT Status FROM Workers` returns `Online` + `Paused`. No `Draining`/`Stopped`/`Offline` rows exist. Migration NOT NEEDED.
+- **`SystemSettings.HeartbeatStaleThresholdSec=300`** + **`StaleProgressThresholdSec=15`** already seeded.
+- **`Features/Activity/Services/ProgressSmoothingService.py`** + **`DashboardSnapshotService.py`** already exist. C9 (smoothing) is partially or fully shipped.
+
+So the directive's real surface narrows. Criteria revised below.
+
+## Revised Acceptance Criteria
+
+C1. `/Activity` page contents whitelist: ONLY Active Transcode Jobs, Active Scans, QT Progress, queue counts. Worker tiles + Library Compliance card + AudioVerticalHealth sub-section removed from `Templates/Activity.html`. Verifiable: `grep -c -E 'Worker|Compliance|AudioVerticalHealth' Templates/Activity.html` returns 0 (case-sensitive code grep; non-code text mentions OK).
+
+C2. `/Admin/Workers` new route + template. Renders worker tiles + Online/Paused action buttons (operating on the existing two-state model per `worker-lifecycle.feature.md`). Subnav at `Templates/_admin_subnav.html` gains a Workers link. `curl /Admin/Workers` returns 200.
+
+C3. `/Admin/Compliance` new route + template. Library compliance card + AudioVerticalHealth sub-section move from `/Activity` to here. Subnav gains a Compliance link. `curl /Admin/Compliance` returns 200.
+
+C4. Worker self-report verified resilient: kill WebService, observe `Workers.LastHeartbeat` continues to advance for at least 90 seconds on a live worker. (Already implemented per discovery; this criterion just adds the verification step + an integration test.)
+
+C5. `/Compliance` top-level URL responds with 301 redirect to `/Admin/Compliance`. Verifiable: `curl -I /Compliance` returns `301` + `Location: /Admin/Compliance`.
+
+C6. SRP-clean new units (per the SOLID plan above): `AdminWorkersController` + `AdminWorkersRepository` + `AdminComplianceController` + `AdminComplianceRepository` are each their own file, constructor-DI, narrow public surface.
+
+C7. Doc consolidation per the single-source-of-truth rule:
+  - `Features/Activity/activity-dashboard-improvements.feature.md` pruned: sections whose criteria the system already satisfies (or this directive moves) are replaced with a single-line pointer.
+  - New `Features/Admin/Workers/admin-workers.feature.md` documents the new sub-tab.
+  - New `Features/Admin/Compliance/admin-compliance.feature.md` documents the new sub-tab.
+  - `Features/Activity/activity.feature.md` updated to reflect the refocused contract (sections that mention Workers / Compliance get removed or pointed at the admin docs).
+
+C8. Contract tests under `Tests/Contract/`:
+  - `TestActivityContentsRefocus.py`: grep `Templates/Activity.html`; assert Workers + Compliance markup absent.
+  - `TestAdminWorkersEndpoint.py`: curl `/Admin/Workers` 200; payload contains worker tiles.
+  - `TestAdminComplianceEndpoint.py`: curl `/Admin/Compliance` 200; payload contains compliance card data.
+  - `TestComplianceRedirect.py`: `/Compliance` returns 301 to `/Admin/Compliance`.
+  - `TestWorkerSelfReportResilience.py` (integration; runs against live DB): records `LastHeartbeat` snapshot, asserts at least one worker's heartbeat advances in a 60s window (verifies the always-on heartbeat thread is independent of WebService).
+
+C9. **Regression gate**: `Scripts/Smoke/ThreeOfEachBucketSmoke.py` still passes 9/9 after the refactor.
 **Subsumes/adopts:** `BUG-0063` cluster (memory/KNOWN-ISSUES.md) which already drafted C1-C22 in `Features/Activity/activity-dashboard-improvements.feature.md`. This directive adopts that work and adds the operator-stated relocations + worker-self-reporting decoupling.
 
 ## Outcome (operator-stated 2026-06-23)
@@ -59,10 +100,65 @@ C17. **SOLID at the touch points.** Each new responsibility lives in its own cla
   - `DashboardSnapshotService` (existing) refactored to one method per snapshot endpoint
   Constructor DI throughout. No god-functions added to `ActivityController` / `TeamStatusController` / `WorkerService.Main`.
 
-## Open Decisions (pending operator confirmation)
+## Locked Decisions (2026-06-23)
 
-- **Heartbeat cadence**: BUG-0063 says default 300s for stale threshold. Worker write cadence: 30s? 60s? Suggest 30s (matches existing `ServiceStatusTracker` thread cadence) -- 10x oversampling on the 300s stale window.
-- **Backward compat for `/Compliance`** (currently a top-level route per `WebService/Main.py` line 490): keep as a 301 redirect to `/Admin/Compliance`, or hard-remove? Suggest 301 redirect for one release window so operator bookmarks don't break.
+- **Heartbeat cadence**: 30s write, 300s stale threshold. 10x oversampling.
+- **`/Compliance` route**: 301 redirect to `/Admin/Compliance` for one release.
+
+## SOLID Compliance Plan
+
+Every new unit obeys SRP + constructor DI. Concrete per-class scope:
+
+| Class | Single Responsibility | Constructor injections | Public surface |
+|---|---|---|---|
+| `WorkerHeartbeatService` (NEW, WorkerService side) | Periodic heartbeat write to `Workers.LastHeartbeat`; nothing else | `(Db, Clock, IntervalSec)` | `Start()`, `Stop()` |
+| `WorkerStatusReporter` (NEW, WorkerService side) | Direct-DB status writes (`Online`/`Draining`/`Stopped`) | `(Db, WorkerName)` | `WriteStatus(Status)` |
+| `ProgressSmoothingService` (NEW, Activity side) | Rolling-window arithmetic mean of FPS/Speed; NOT responsible for fetching progress rows | `(ProgressRepository, SystemSettingsRepository, Clock)` | `Smooth(AttemptId) -> {Fps, Speed}` |
+| `AdminWorkersRepository` (NEW) | Read worker tile data only | `(Db,)` | `GetTiles()`, `GetTile(WorkerName)` |
+| `AdminWorkersController` (NEW) | HTTP routing + JSON envelope | `(AdminWorkersRepository,)` | Blueprint with `/Admin/Workers` + `/api/Admin/Workers/Snapshot` |
+| `AdminComplianceRepository` (NEW) | Library-compliance card SQL | `(Db,)` | `GetCard()`, `GetAudioVerticalHealth()` |
+| `AdminComplianceController` (NEW) | HTTP routing + JSON envelope | `(AdminComplianceRepository,)` | Blueprint with `/Admin/Compliance` + `/api/Admin/Compliance/Snapshot` |
+| `DashboardSnapshotService` (REFACTOR existing) | Activity-only payload assembly (workers/compliance moved out) | `(ActivityRepository, ProgressSmoothingService, SystemSettingsRepository)` | `BuildSnapshot()` |
+| `ActivityRepository` (REFACTOR existing) | Active jobs + active scans only (workers + compliance removed) | `(Db,)` | `GetActiveJobs()`, `GetActiveScans()`, `GetQueueCounts()` |
+
+Anti-patterns explicitly avoided:
+- No `self._cached_*` in any `__init__` (R3).
+- Workers + Compliance data never re-imported by `ActivityRepository` after the move (kills the "while I'm here" temptation to keep a backward-compat shim).
+- `WorkerHeartbeatService.Run` is a single while-loop -- no inline orchestration logic, no embedded retry policy. Retry policy lives in DatabaseService.
+- Templates split: `AdminWorkers.html` + `AdminCompliance.html` are NEW; `Activity.html` is REFACTORED (sections removed, not copy-pasted into the new templates -- they fetch from their own endpoints).
+
+## Hook-Avoidance Pre-Flight
+
+Plan to NOT trip the PreToolUse hook. Concrete moves per rule:
+
+| Rule | Risk surface | Mitigation |
+|---|---|---|
+| R1 (Doc preread) | Editing `Templates/Activity.html` requires reading colocated docs in `Templates/`; editing `Features/Activity/*.py` requires reading every `Features/Activity/*.feature.md` + `*.flow.md`; same pattern for new `Features/Admin/Workers/` + `Features/Admin/Compliance/`. | Read every colocated doc in NEEDS_DOC_PREREAD phase BEFORE first code edit. Partial reads (`limit<=50`) per R18; use `# see <slug>.<ID>` anchors when only a section is needed. |
+| R12 (Comment/docstring volume) | Every new class has a temptation for a docstring block. | Single-line class docstring at most; per-method WHY-only comments capped at one line; no module-level docstrings. |
+| R13 (No new feature.md outside DELIVERING) | The 3 new feature docs (`admin-workers.feature.md`, `admin-compliance.feature.md`, refocused `activity.feature.md`) MUST land at DELIVERING phase only. | NEEDS_DOC_PREREAD reads existing docs; IMPLEMENTING writes code + tests; DELIVERING writes the 3 new feature docs + prunes `activity-dashboard-improvements.feature.md`. |
+| R14 (No annotation lines on feature.md edits) | Pruning `activity-dashboard-improvements.feature.md` -- cannot add `removed YYYY-MM-DD` markers. | Delete superseded sections cleanly. Replace with one-line pointer to the post-directive doc. |
+| R15 (directive anchor) | Every edit to a function/class in the ## Files list needs `# directive: activity-admin-and-worker-telemetry` directly above the `def`/`class`. | Carry the anchor pattern from prior closed directives (e.g. compliance-symmetry). |
+| R16 (Slug in first 15 lines) | The 3 new feature docs (and the refocused activity.feature.md if rewritten) need `**Slug:** ...` near the top. | Template every new feature doc with the slug line at line 3. |
+| R18 (Read budget) | All feature doc reads `limit<=50`. | Use offset/limit per the existing pattern. |
+
+## Implementation Order (de-risked sequencing)
+
+1. **Schema first**: `RenameWorkerStatusOfflineToStopped.py` + new SystemSettings rows (`HeartbeatStaleThresholdSec=300`, `StaleProgressThresholdSec=15`).
+2. **Worker self-report**: `WorkerHeartbeatService` + `WorkerStatusReporter` SRP classes; wire into `WorkerService/Main.py`. **Smoke**: kill WebService on I9, observe LastHeartbeat keeps updating.
+3. **Backend admin surfaces**: `AdminWorkersController` + `AdminWorkersRepository` + `AdminComplianceController` + `AdminComplianceRepository`. Register blueprints. **Smoke**: curl new endpoints.
+4. **Frontend admin pages**: `AdminWorkers.html` + `AdminCompliance.html` + subnav links. **Smoke**: visit each page in browser.
+5. **`/Compliance` 301 redirect**: keep old URL working for one release.
+6. **ProgressSmoothingService** + `ETACountdownTimer` JS + data-driven status renderer.
+7. **Refocus `/Activity`**: remove Worker + Compliance sections from `Templates/Activity.html`. Update `DashboardSnapshotService` to drop those payload keys.
+8. **Remove dead UI**: StopAfterJob, Resume, related endpoints/helpers.
+9. **Contract tests**: 5 new under `Tests/Contract/`.
+10. **Regression gate**: re-run `Scripts/Smoke/ThreeOfEachBucketSmoke.py` to prove the worker-telemetry refactor didn't break the pipeline.
+11. **VERIFYING**: collect per-criterion evidence.
+12. **DELIVERING**: write the 3 new feature docs (R13 only allows at this phase) + prune `activity-dashboard-improvements.feature.md` to pointer.
+
+## R18 overrides
+
+(none yet)
 
 ## Files (placeholder -- finalized at NEEDS_PLAN exit; subject to NEEDS_DOC_PREREAD requirement)
 
