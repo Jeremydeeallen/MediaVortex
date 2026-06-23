@@ -25,6 +25,7 @@ def Snapshot():
                 'ActiveScans': [_jsonable(S) for S in Snap.ActiveScans],
                 'QueueCounts': Snap.QueueCounts,
                 'BadgeState': Snap.BadgeState,
+                'HungAttempts': [_jsonable(H) for H in Snap.HungAttempts],
                 'StaleProgressThresholdSec': Snap.StaleProgressThresholdSec,
             },
         })

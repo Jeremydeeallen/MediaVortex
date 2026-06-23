@@ -990,6 +990,72 @@ class StuckJobDetectionService:
             LoggingService.LogException(errorMsg, e, "StuckJobDetectionService", "DetectAndCleanStuckScanJobs")
             return {"Success": False, "ErrorMessage": errorMsg, "StuckScansFound": 0, "ScansCleaned": 0}
 
+    # directive: worker-runtime-state | # see admin-workers.C9
+    def DetectAndCleanHungEncodes(self) -> Dict[str, Any]:
+        """RuntimeState-based hung-encode detector. Complements FFmpeg-PID-based detection."""
+        from Features.StuckJobDetection.HungEncodeDetector import IsHung
+        try:
+            ThresholdRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT SettingValue FROM SystemSettings WHERE SettingKey = %s LIMIT 1",
+                ('HungEncodeThresholdSec',),
+            )
+            Threshold = int(ThresholdRows[0]['settingvalue']) if ThresholdRows else 600
+            Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT w.WorkerName, w.RuntimeState, w.CurrentAttemptId, "
+                "EXTRACT(EPOCH FROM (NOW() - w.LastRuntimeStateUpdate))::int AS rs_age, "
+                "EXTRACT(EPOCH FROM (NOW() - tp.LastProgressUpdate))::int AS prog_age, "
+                "aj.Id AS ActiveJobId, aj.FFmpegPid "
+                "FROM Workers w "
+                "LEFT JOIN TranscodeProgress tp ON tp.TranscodeAttemptId = w.CurrentAttemptId "
+                "LEFT JOIN ActiveJobs aj ON aj.QueueId = w.CurrentAttemptId AND aj.WorkerName = w.WorkerName "
+                "WHERE w.Enabled = TRUE AND w.RuntimeState = 'Encoding' AND w.CurrentAttemptId IS NOT NULL"
+            )
+            Hung = []
+            Cleaned = []
+            for R in (Rows or []):
+                if not IsHung(R.get('runtimestate'), R.get('rs_age'), R.get('prog_age'), Threshold):
+                    continue
+                AttemptId = int(R['currentattemptid'])
+                WorkerName = R.get('workername')
+                FFmpegPid = R.get('ffmpegpid')
+                Hung.append({'AttemptId': AttemptId, 'WorkerName': WorkerName, 'FFmpegPid': FFmpegPid})
+                try:
+                    import socket as _socket
+                    LocalHost = _socket.gethostname()
+                    IsLocal = bool(WorkerName) and (WorkerName == LocalHost or WorkerName.startswith(LocalHost + '-') or WorkerName.split('-worker-')[0] == LocalHost)
+                    if FFmpegPid and IsLocal:
+                        self.ProcessManagementService.KillProcess(int(FFmpegPid))
+                    self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                        "UPDATE TranscodeAttempts SET Success = FALSE, ErrorMessage = %s, "
+                        "EndTime = COALESCE(EndTime, NOW()) "
+                        "WHERE Id = %s AND Success IS NULL",
+                        ('hung_encode_detector', AttemptId),
+                    )
+                    if R.get('activejobid') is not None:
+                        self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                            "DELETE FROM ActiveJobs WHERE Id = %s",
+                            (int(R['activejobid']),),
+                        )
+                    Cleaned.append(AttemptId)
+                    LoggingService.LogWarning(
+                        f"Hung encode auto-recovered: Worker={WorkerName} AttemptId={AttemptId} FFmpegPid={FFmpegPid}",
+                        "StuckJobDetectionService", "DetectAndCleanHungEncodes"
+                    )
+                except Exception as ex:
+                    LoggingService.LogException(
+                        f"Hung-encode cleanup failed for AttemptId={AttemptId}", ex,
+                        "StuckJobDetectionService", "DetectAndCleanHungEncodes"
+                    )
+            return {
+                "Success": True,
+                "HungFound": len(Hung),
+                "JobsCleaned": len(Cleaned),
+                "Hung": Hung,
+            }
+        except Exception as ex:
+            LoggingService.LogException("DetectAndCleanHungEncodes failed", ex, "StuckJobDetectionService", "DetectAndCleanHungEncodes")
+            return {"Success": False, "ErrorMessage": str(ex), "HungFound": 0, "JobsCleaned": 0}
+
     def DetectAndCleanAllStuckJobs(self) -> Dict[str, Any]:
         """Detect and clean stuck jobs for both transcode and quality test."""
         try:

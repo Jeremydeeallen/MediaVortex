@@ -709,6 +709,12 @@ class WorkerServiceApp:
 
         except Exception as e:
             LoggingService.LogException("Error starting WorkerService", e, "WorkerService", "Run")
+            try:
+                if self.StateReporter is not None:
+                    Reason = type(e).__name__[:40]
+                    self.StateReporter.Transition(f'Faulted:{Reason}')
+            except Exception:
+                pass
             return False
 
     def _EnsureServiceStatusExists(self):
@@ -881,14 +887,17 @@ class WorkerServiceApp:
                 except Exception as qtEx:
                     LoggingService.LogException("Error in stuck quality-test detection cycle", qtEx, "WorkerService", "_StuckJobDetectionLoop")
 
-                # Scan side (cheap, runs unconditionally -- the detector returns
-                # no-op when no Running scans exist, and any ScanEnabled worker
-                # in the cluster can clean stale rows so other workers' crashes
-                # don't leak into this worker's continuous-scan ticks)
+                # Scan side -- runs unconditionally; detector no-ops when no Running scans exist.
                 try:
                     DetectionService.DetectAndCleanStuckScanJobs()
                 except Exception as scanEx:
                     LoggingService.LogException("Error in stuck scan detection cycle", scanEx, "WorkerService", "_StuckJobDetectionLoop")
+
+                # directive: worker-runtime-state | # see admin-workers.C9
+                try:
+                    DetectionService.DetectAndCleanHungEncodes()
+                except Exception as hungEx:
+                    LoggingService.LogException("Error in hung-encode detection cycle", hungEx, "WorkerService", "_StuckJobDetectionLoop")
             except Exception as e:
                 LoggingService.LogException("Error in stuck job detection cycle", e, "WorkerService", "_StuckJobDetectionLoop")
             self.ShutdownEvent.wait(_ReadInterval())
@@ -1147,6 +1156,12 @@ class WorkerServiceApp:
                 self.ShutdownEvent.wait(10)
         except Exception as e:
             LoggingService.LogException("Error in main loop", e, "WorkerService", "_MainLoop")
+            try:
+                if self.StateReporter is not None:
+                    Reason = type(e).__name__[:40]
+                    self.StateReporter.Transition(f'Faulted:{Reason}')
+            except Exception:
+                pass
 
     def Shutdown(self):
         """Gracefully shutdown the service."""

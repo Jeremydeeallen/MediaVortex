@@ -49,6 +49,14 @@ C7. **Worker is the only writer.** `grep -rn 'UPDATE Workers SET .* RuntimeState
 
 C8. **WebService-outage resilience verified end-to-end.** Stop WebService; observe `Workers.RuntimeState` continues to update through normal worker lifecycle. Bring WebService back; `/api/Admin/Workers/Snapshot` reflects the truth immediately. Contract test `Tests/Contract/TestWorkerStateReporterResilience.py`.
 
+C9. **Hung-encode detector.** A worker is classified `IsHung=true` when `RuntimeState='Encoding'` on the same `CurrentAttemptId` for longer than `SystemSettings.HungEncodeThresholdSec` (default 600) AND `TranscodeProgress.LastProgressUpdate` for that attempt has not advanced within the same window. Auto-recovery: `StuckJobDetectionService` kills the ffmpeg subprocess by `FFmpegPid`, flips `TranscodeAttempts.Success=FALSE` with `ErrorMessage='hung_encode_detector'`, deletes the `ActiveJobs` row, and the worker on next lifecycle tick transitions `RuntimeState` to `Idle`. Verifiable: `Tests/Contract/TestHungEncodeDetector.py` simulates a stale progress row for an in-flight attempt and asserts auto-reset within the next detection sweep.
+
+C10. **Hung tile rendering.** A tile with `IsHung=true` renders with a red border + tooltip `"Encoding attempt N for X minutes without progress -- auto-reset pending."`. Operator visual signal independent of the amber-intent-divergence border. Verifiable: insert a synthetic hung attempt; the tile's class list contains `hung-border` within next poll.
+
+C11. **`Faulted:<reason>` writes happen.** Worker uncaught-exception paths (the top-level main loop, `_ApplyCapabilities`) transition to `RuntimeState='Faulted:<reason>'` via best-effort try/except around `WorkerStateReporter.Transition` BEFORE process exit. On next boot, `_RecoverFromCrash` clears any `Faulted:*` row by transitioning through normal `Initializing -> Idle` (or `Paused` per DB Status). Verifiable: `Tests/Contract/TestFaultedStateOnCrashRecovery.py` injects an uncaught exception; DB shows `RuntimeState` starting with `Faulted:`; restart clears it.
+
+C12. **Hung-encode threshold is operator-tunable** via `SystemSettings.HungEncodeThresholdSec` (default 600). Verifiable: `UPDATE SystemSettings SET SettingValue='120'` -- next detection sweep observes the new threshold without restart.
+
 ## Files
 
 | File | Role |
@@ -60,6 +68,10 @@ C8. **WebService-outage resilience verified end-to-end.** Stop WebService; obser
 | `WorkerService/WorkerStateReporter.py` | NEW SRP writer (the only writer of the 3 worker-truth columns) |
 | `WorkerService/Main.py` | Wires WorkerStateReporter into lifecycle transitions |
 | `Scripts/SQLScripts/AddWorkerRuntimeStateColumns.py` | Idempotent migration: adds 3 columns + seeds `SystemSettings.WorkerIntentDivergenceSec=60` |
+| `Scripts/SQLScripts/AddHungEncodeThresholdSetting.py` | Idempotent: seeds `SystemSettings.HungEncodeThresholdSec=600` |
+| `Features/StuckJobDetection/HungEncodeDetector.py` | Pure detector function (RuntimeState, AttemptId, RuntimeStateAge, ProgressAge, Threshold, Now) -> bool |
+| `Features/StuckJobDetection/StuckJobDetectionService.py` | Sweep invokes detector + executes auto-recovery |
+| `Templates/Activity.html` | Hung-attempts red banner with Reset buttons |
 
 ## Status
 

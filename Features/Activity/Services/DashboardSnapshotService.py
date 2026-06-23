@@ -51,21 +51,57 @@ class DashboardSnapshotService:
 
     # directive: worker-runtime-state | # see activity.C5
     def BuildSnapshot(self) -> DashboardSnapshot:
-        """Single-pass build. Active Jobs + Active Scans + Queue Counts + Badge State."""
+        """Single-pass build. Active Jobs + Active Scans + Queue Counts + Badge State + Hung Attempts."""
         Workers = self._BuildWorkers()
         ActiveJobs = self._BuildActiveJobs()
         ActiveScans = self._BuildActiveScans()
         QueueCounts = self._BuildQueueCounts()
         BadgeState = self._BuildBadgeState(ActiveJobs)
+        HungAttempts = self._BuildHungAttempts()
         return DashboardSnapshot(
             Workers=Workers,
             ActiveJobs=ActiveJobs,
             ActiveScans=ActiveScans,
             QueueCounts=QueueCounts,
             BadgeState=BadgeState,
+            HungAttempts=HungAttempts,
             StaleProgressThresholdSec=self.StaleSec,
             HeartbeatStaleThresholdSec=self.HeartSec,
         )
+
+    # directive: worker-runtime-state | # see admin-workers.C9
+    def _BuildHungAttempts(self):
+        """Return list of currently-hung attempts (worker-RuntimeState='Encoding' too long without progress)."""
+        from Features.StuckJobDetection.HungEncodeDetector import IsHung
+        ThresholdRows = self.Db.ExecuteQuery(
+            "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'HungEncodeThresholdSec' LIMIT 1"
+        )
+        try:
+            Threshold = int(ThresholdRows[0]['SettingValue']) if ThresholdRows else 600
+        except (KeyError, ValueError, TypeError):
+            Threshold = 600
+        Rows = self.Db.ExecuteQuery(
+            "SELECT w.WorkerName, w.RuntimeState, w.CurrentAttemptId, "
+            "EXTRACT(EPOCH FROM (NOW() - w.LastRuntimeStateUpdate))::int AS rs_age, "
+            "EXTRACT(EPOCH FROM (NOW() - tp.LastProgressUpdate))::int AS prog_age, "
+            "tq.FileName "
+            "FROM Workers w "
+            "LEFT JOIN TranscodeProgress tp ON tp.TranscodeAttemptId = w.CurrentAttemptId "
+            "LEFT JOIN ActiveJobs aj ON aj.QueueId = w.CurrentAttemptId AND aj.WorkerName = w.WorkerName "
+            "LEFT JOIN TranscodeQueue tq ON tq.Id = aj.QueueId "
+            "WHERE w.Enabled = TRUE AND w.RuntimeState = 'Encoding' AND w.CurrentAttemptId IS NOT NULL"
+        )
+        Out = []
+        for R in (Rows or []):
+            if not IsHung(R.get('RuntimeState') or R.get('runtimestate'), R.get('rs_age'), R.get('prog_age'), Threshold):
+                continue
+            Out.append({
+                'AttemptId': int(R['CurrentAttemptId']) if R.get('CurrentAttemptId') is not None else int(R['currentattemptid']),
+                'WorkerName': R.get('WorkerName') or R.get('workername'),
+                'FileName': R.get('FileName') or R.get('filename'),
+                'MinutesStuck': int((int(R.get('rs_age') or 0)) / 60),
+            })
+        return Out
 
     # directive: activity-dashboard-solid | # see activity-dashboard-solid.C4
     def _BuildWorkers(self) -> List[WorkerTile]:

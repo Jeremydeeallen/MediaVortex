@@ -15,6 +15,12 @@
     <div id="QueueCountsBadges" class="small text-muted"></div>
   </div>
 
+  <div id="HungBanner" class="alert alert-danger d-none mb-3" role="alert">
+    <strong><i class="fas fa-exclamation-triangle me-1"></i>Hung encodes detected:</strong>
+    <div id="HungBannerBody" class="mt-2"></div>
+    <div class="small mt-2 mb-0">Auto-reset by hung-encode detector each sweep (default 600s). Click Reset to flip the attempt now.</div>
+  </div>
+
   <div class="card mb-4">
     <div class="card-header py-2 d-flex justify-content-between align-items-center">
       <h6 class="mb-0"><i class="fas fa-film me-2"></i>Active Jobs <span id="ActiveJobsCount" class="text-muted small"></span></h6>
@@ -152,12 +158,44 @@ function RenderQueueCounts(Counts) {
     '<span>VMAF: <strong>' + (Counts.QualityTest || 0) + '</strong></span>';
 }
 
+function RenderHungBanner(Hung) {
+  var Banner = document.getElementById('HungBanner');
+  var Body = document.getElementById('HungBannerBody');
+  if (!Hung || Hung.length === 0) {
+    Banner.classList.add('d-none');
+    Body.innerHTML = '';
+    return;
+  }
+  Banner.classList.remove('d-none');
+  Body.innerHTML = Hung.map(function(H) {
+    var Name = EscapeHtml(H.FileName || '(unknown)').substring(0, 80);
+    var W = EscapeHtml(H.WorkerName || '?');
+    var M = (H.MinutesStuck != null ? H.MinutesStuck : '?');
+    var Aid = H.AttemptId;
+    return '<div class="d-flex justify-content-between align-items-center small py-1 border-bottom">' +
+      '<span><strong>Attempt ' + Aid + '</strong> on ' + W + ' &mdash; ' + Name + ' &mdash; stuck ' + M + ' min</span>' +
+      '<button class="btn btn-sm btn-outline-danger" data-reset="' + Aid + '">Reset</button>' +
+      '</div>';
+  }).join('');
+  Body.querySelectorAll('button[data-reset]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var Aid = btn.getAttribute('data-reset');
+      fetch('/api/TeamStatus/ResetStuckJob', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({AttemptId: Number(Aid)})
+      }).then(LoadActivity).catch(function() {});
+    });
+  });
+}
+
 function LoadActivity() {
   fetch('/api/Activity/Snapshot').then(function(R) { return R.json(); }).then(function(D) {
     if (!D || !D.Success) return;
     RenderActiveJobs((D.Data && D.Data.ActiveJobs) || []);
     RenderActiveScans((D.Data && D.Data.ActiveScans) || []);
     RenderQueueCounts((D.Data && D.Data.QueueCounts) || {});
+    RenderHungBanner((D.Data && D.Data.HungAttempts) || []);
   }).catch(function() {});
 }
 

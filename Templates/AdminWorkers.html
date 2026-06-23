@@ -12,6 +12,7 @@
 
 <style>
 .diverge-border { border: 2px solid #f0ad4e !important; }
+.hung-border { border: 2px solid #d9534f !important; }
 </style>
 
 <script>
@@ -75,10 +76,13 @@ function RenderTile(W, StaleSec, DivergenceSec) {
   ].filter(Boolean).join(' ');
   const Ver = W.version || 'unknown';
   const Diverge = W.intentdiverges === true;
-  const Border = Diverge ? 'diverge-border' : '';
-  const DivergeTip = Diverge
-    ? `title="Operator intent: ${W.status || '?'}; worker reports: ${W.runtimestate || 'no truth'}. Worker may be stuck or unable to honor the intent (> ${DivergenceSec}s)."`
-    : '';
+  const Hung = W.ishung === true;
+  const Border = Hung ? 'hung-border' : (Diverge ? 'diverge-border' : '');
+  const DivergeTip = Hung
+    ? `title="Encoding AttemptId ${W.currentattemptid || '?'} for ${Math.round((W.runtimestateagesec || 0)/60)} min without progress -- auto-reset pending."`
+    : (Diverge
+      ? `title="Operator intent: ${W.status || '?'}; worker reports: ${W.runtimestate || 'no truth'}. Worker may be stuck or unable to honor the intent (> ${DivergenceSec}s)."`
+      : '');
   const AttemptLine = (W.currentattemptid !== null && W.currentattemptid !== undefined)
     ? `<div class="small text-muted">attempt ${W.currentattemptid}</div>` : '';
   return `
