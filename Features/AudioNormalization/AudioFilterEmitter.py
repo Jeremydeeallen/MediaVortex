@@ -215,9 +215,13 @@ class AudioFilterEmitter:
         Block.DispositionArgs = self._BuildDispositionArgs(TrackConfig, OutputIndex, IsDefaultLanguage=IsDefaultLanguage)
         return Block
 
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S1
+    # directive: worker-runtime-state | # see audio-normalization.C8
     def _DecideStreamCopyOrReencode(self, MediaFile, TrackConfig, Strategy):
         """Return 'stream_copy' / 'stream_copy_fallback' / 'reencode' for the per-track output."""
+        Ceiling = getattr(self, '_ProfileBitrateCeiling', None)
+        SrcKbps = _GetField(MediaFile, 'AudioBitrateKbps')
+        if Ceiling and SrcKbps and int(SrcKbps) > int(Ceiling):
+            return 'reencode'
         if _ShouldStreamCopy(MediaFile, TrackConfig, Strategy):
             return 'stream_copy'
         if Strategy.Strategy == STRATEGY_SKIP:

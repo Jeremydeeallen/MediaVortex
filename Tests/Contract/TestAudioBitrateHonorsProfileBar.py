@@ -54,6 +54,34 @@ class TestAudioBitrateHonorsProfileBar(unittest.TestCase):
         Args = Emitter._BuildCodecArgs({'Bitrate': 256}, 'reencode', 'eac3', 0)
         self.assertEqual(Args[Args.index('-b:a:0') + 1], '256k')
 
+    # directive: worker-runtime-state | # see audio-normalization.C8
+    def test_stream_copy_refused_when_source_exceeds_ceiling(self):
+        """Even when policy says stream_copy, force reencode if source AudioBitrateKbps > Profile ceiling."""
+        from Features.AudioNormalization.AudioStrategyClassifier import STRATEGY_SKIP
+        class _S: Strategy = STRATEGY_SKIP
+        class _Mf:
+            AudioCodec = 'aac'
+            AudioBitrateKbps = 160
+            AudioCorruptSuspect = False
+        Emitter = AudioFilterEmitter(ProfileResolver=_FakeResolver(_FakeProfile(TargetAudioKbps=128)))
+        Emitter._ProfileBitrateCeiling = 128
+        Mode = Emitter._DecideStreamCopyOrReencode(_Mf, {'Codec': 'aac'}, _S())
+        self.assertEqual(Mode, 'reencode')
+
+    # directive: worker-runtime-state | # see audio-normalization.C8
+    def test_stream_copy_allowed_when_source_at_or_below_ceiling(self):
+        """When source bitrate <= ceiling and policy says skip, stream_copy stays allowed."""
+        from Features.AudioNormalization.AudioStrategyClassifier import STRATEGY_SKIP
+        class _S: Strategy = STRATEGY_SKIP
+        class _Mf:
+            AudioCodec = 'aac'
+            AudioBitrateKbps = 96
+            AudioCorruptSuspect = False
+        Emitter = AudioFilterEmitter(ProfileResolver=_FakeResolver(_FakeProfile(TargetAudioKbps=128)))
+        Emitter._ProfileBitrateCeiling = 128
+        Mode = Emitter._DecideStreamCopyOrReencode(_Mf, {'Codec': 'aac'}, _S())
+        self.assertEqual(Mode, 'stream_copy')
+
 
 if __name__ == '__main__':
     unittest.main()
