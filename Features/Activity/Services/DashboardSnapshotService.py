@@ -137,23 +137,26 @@ class DashboardSnapshotService:
 
     # directive: worker-runtime-state | # see activity.S4
     def _BuildActiveJobs(self) -> List[ActiveJobRow]:
-        """ActiveJobs JOIN MediaFiles + Profiles for the interesting columns. Worker.Status NEVER filters."""
+        """ActiveJobs joined via MediaFileId to latest in-flight TranscodeAttempt + TranscodeProgress."""
         Rows = self.Db.ExecuteQuery(
-            "SELECT aj.Id AS AttemptId, aj.WorkerName, aj.ServiceName, aj.StartedAt, "
+            "SELECT aj.Id AS AjId, aj.WorkerName, aj.ServiceName, aj.StartedAt, "
             "tq.MediaFileId, tq.FileName, tq.SizeMB, tq.ProcessingMode, tq.SizeBytes, "
-            "ta.ProfileName, "
-            "tp.ProgressPercent, tp.CurrentFrame, tp.TotalFrames, tp.LastProgressUpdate, "
+            "lta.Id AS AttemptId, lta.ProfileName, "
+            "tp.ProgressPercent, tp.CurrentFrame, tp.TotalFrames, tp.CurrentSpeed, tp.LastProgressUpdate, "
             "mf.ResolutionCategory AS SourceResolutionCategory, mf.Codec AS SourceCodec, "
             "mf.VideoBitrateKbps AS SourceVideoKbps, "
             "p.TargetResolutionCategory AS TargetResolutionCategory, p.Codec AS TargetCodec, "
             "p.TargetVideoKbps "
             "FROM ActiveJobs aj "
             "LEFT JOIN TranscodeQueue tq ON tq.Id = aj.QueueId "
-            "LEFT JOIN TranscodeAttempts ta ON ta.Id = aj.QueueId "
-            "LEFT JOIN TranscodeProgress tp ON tp.TranscodeAttemptId = aj.QueueId "
+            "LEFT JOIN LATERAL ("
+            "  SELECT Id, ProfileName FROM TranscodeAttempts "
+            "  WHERE MediaFileId = tq.MediaFileId AND Success IS NULL "
+            "  ORDER BY Id DESC LIMIT 1"
+            ") lta ON TRUE "
+            "LEFT JOIN TranscodeProgress tp ON tp.TranscodeAttemptId = lta.Id "
             "LEFT JOIN MediaFiles mf ON mf.Id = tq.MediaFileId "
-            "LEFT JOIN Profiles p ON p.ProfileName = ta.ProfileName "
-            "WHERE (ta.Success IS NULL OR ta.Id IS NULL) "
+            "LEFT JOIN Profiles p ON p.ProfileName = lta.ProfileName "
             "ORDER BY aj.StartedAt ASC"
         )
         Out: List[ActiveJobRow] = []
