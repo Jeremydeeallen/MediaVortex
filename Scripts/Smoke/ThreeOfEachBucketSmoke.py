@@ -4,7 +4,6 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from Core.Database.DatabaseService import DatabaseService
-from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
 
 
 # directive: filereplacement-drain-bug
@@ -13,34 +12,43 @@ MAX_WAIT_MINUTES = 60
 
 
 # directive: filereplacement-drain-bug
-def _PickCandidates(Db, Bucket, Limit=3):
+BUCKET_TO_PROCESSING_MODE = {
+    'Transcode': 'Transcode',
+    'Remux': 'Remux',
+    'AudioFixOnly': 'AudioFix',
+}
+
+
+# directive: filereplacement-drain-bug
+def _PickCandidates(Db, Bucket, MinSizeMB, MaxSizeMB, MinVideoKbps, Limit=3):
     Sql = (
-        "SELECT m.Id FROM MediaFiles m "
+        "SELECT m.Id, m.FileName, m.SizeMB, m.VideoBitrateKbps FROM MediaFiles m "
         "JOIN Profiles p ON p.ProfileName = m.AssignedProfile "
         "WHERE m.WorkBucket = %s "
         "AND p.Active = TRUE AND p.Draft = FALSE "
         "AND m.HasExplicitEnglishAudio = TRUE "
-        "AND m.SizeMB BETWEEN 80 AND 350 "
+        "AND m.SizeMB BETWEEN %s AND %s "
+        "AND (m.VideoBitrateKbps IS NULL OR m.VideoBitrateKbps >= %s) "
         "AND (m.AudioCorruptSuspect IS NULL OR m.AudioCorruptSuspect = FALSE) "
         "AND m.SourceIntegratedLufs IS NOT NULL "
-        "ORDER BY m.SizeMB ASC LIMIT %s"
+        "AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.MediaFileId = m.Id AND tq.Status IN ('Pending','Running')) "
+        "AND m.FileName NOT LIKE 'XXX%%' "
+        "ORDER BY m.SizeMB DESC LIMIT %s"
     )
-    Rows = Db.ExecuteQuery(Sql, (Bucket, Limit * 5))
-    return [int(R['id']) for R in Rows[:Limit]]
+    Rows = Db.ExecuteQuery(Sql, (Bucket, MinSizeMB, MaxSizeMB, MinVideoKbps, Limit))
+    return [{'id': int(R['id']), 'filename': R['filename'], 'size_mb': float(R['sizemb']), 'video_kbps': R['videobitratekbps']} for R in Rows]
 
 
 # directive: filereplacement-drain-bug
-def _QueueAll(Mids):
-    Qmbs = QueueManagementBusinessService()
-    Queued = []
-    for Mid in Mids:
-        R = Qmbs.AddJobToQueue(MediaFileId=Mid, Priority=150, ForceAdd=True)
-        if R.get('Success'):
-            Queued.append(Mid)
-            print(f"  queued {Mid} -> Queue.Id={R.get('ItemId')}")
-        else:
-            print(f"  FAILED to queue {Mid}: {R.get('ErrorMessage')}")
-    return Queued
+def _InsertQueueRow(Db, MfRow, ProcessingMode):
+    SizeBytes = int(MfRow['size_mb'] * 1024 * 1024)
+    Db.ExecuteNonQuery(
+        "INSERT INTO TranscodeQueue "
+        "(FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, ProcessingMode, MediaFileId, StorageRootId, RelativePath) "
+        "SELECT FileName, '', %s, SizeMB, 200, 'Pending', NOW(), %s, %s, StorageRootId, RelativePath "
+        "FROM MediaFiles WHERE Id = %s",
+        (SizeBytes, ProcessingMode, MfRow['id'], MfRow['id']),
+    )
 
 
 # directive: filereplacement-drain-bug
@@ -72,32 +80,37 @@ def Run():
     Db = DatabaseService()
 
     print("--- Picking candidates ---")
-    TranscodeMids = _PickCandidates(Db, 'Transcode', 3)
-    RemuxMids = _PickCandidates(Db, 'Remux', 3)
-    AudioFixMids = _PickCandidates(Db, 'AudioFixOnly', 3)
-    All = TranscodeMids + RemuxMids + AudioFixMids
-    print(f"  Transcode={TranscodeMids}")
-    print(f"  Remux={RemuxMids}")
-    print(f"  AudioFix={AudioFixMids}")
-    if len(All) != 9:
-        print(f"FATAL: only found {len(All)}/9 candidates; aborting")
+    Transcode = _PickCandidates(Db, 'Transcode', MinSizeMB=400, MaxSizeMB=1500, MinVideoKbps=5000, Limit=3)
+    Remux = _PickCandidates(Db, 'Remux', MinSizeMB=80, MaxSizeMB=600, MinVideoKbps=0, Limit=3)
+    AudioFix = _PickCandidates(Db, 'AudioFixOnly', MinSizeMB=80, MaxSizeMB=600, MinVideoKbps=0, Limit=3)
+    print(f"  Transcode: {[r['id'] for r in Transcode]} (sizes: {[round(r['size_mb']) for r in Transcode]} MB)")
+    print(f"  Remux:     {[r['id'] for r in Remux]} (sizes: {[round(r['size_mb']) for r in Remux]} MB)")
+    print(f"  AudioFix:  {[r['id'] for r in AudioFix]} (sizes: {[round(r['size_mb']) for r in AudioFix]} MB)")
+    AllRows = Transcode + Remux + AudioFix
+    AllMids = [r['id'] for r in AllRows]
+    if len(AllRows) != 9:
+        print(f"FATAL: only found {len(AllRows)}/9 candidates; aborting")
         sys.exit(1)
 
-    print("\n--- Queuing 9 jobs ---")
-    Queued = _QueueAll(All)
-    if len(Queued) != 9:
-        print(f"FATAL: only queued {len(Queued)}/9; aborting")
-        sys.exit(1)
+    print("\n--- Inserting 9 queue rows with correct ProcessingMode ---")
+    for R in Transcode:
+        _InsertQueueRow(Db, R, 'Transcode')
+        print(f"  queued MediaFile {R['id']} as Transcode")
+    for R in Remux:
+        _InsertQueueRow(Db, R, 'Remux')
+        print(f"  queued MediaFile {R['id']} as Remux")
+    for R in AudioFix:
+        _InsertQueueRow(Db, R, 'AudioFix')
+        print(f"  queued MediaFile {R['id']} as AudioFix")
 
     print("\n--- Polling until terminal ---")
     Started = time.time()
     while True:
         Elapsed = (time.time() - Started) / 60.0
-        InQueue = _StillQueued(Db, Queued)
-        Snap = _Snapshot(Db, Queued)
-        Compliant = sum(1 for Mid in Queued if Snap.get(Mid, {}).get('iscompliant') is True)
-        Print = f"  t+{Elapsed:.1f}min: {len(InQueue)} still in queue, {Compliant}/9 compliant"
-        print(Print)
+        InQueue = _StillQueued(Db, AllMids)
+        Snap = _Snapshot(Db, AllMids)
+        Compliant = sum(1 for Mid in AllMids if Snap.get(Mid, {}).get('iscompliant') is True)
+        print(f"  t+{Elapsed:.1f}min: {len(InQueue)} still in queue, {Compliant}/9 compliant")
         if not InQueue:
             break
         if Elapsed >= MAX_WAIT_MINUTES:
@@ -106,16 +119,19 @@ def Run():
         time.sleep(POLL_INTERVAL_SECONDS)
 
     print("\n--- Final per-file outcomes ---")
-    Snap = _Snapshot(Db, Queued)
+    Snap = _Snapshot(Db, AllMids)
     Compliant = 0
-    for Group, Mids in (('Transcode', TranscodeMids), ('Remux', RemuxMids), ('AudioFix', AudioFixMids)):
-        print(f"  {Group}:")
-        for Mid in Mids:
+    Groups = [('Transcode', Transcode), ('Remux', Remux), ('AudioFix', AudioFix)]
+    for GroupName, Rows in Groups:
+        print(f"  {GroupName}:")
+        for R in Rows:
+            Mid = R['id']
             S = Snap.get(Mid, {})
             Bucket = S.get('workbucket')
             IsComp = S.get('iscompliant')
             Mark = 'PASS' if IsComp is True else 'FAIL'
-            print(f"    {Mid}: bucket={Bucket} iscompliant={IsComp} -> {Mark}")
+            FnShort = R['filename'][:55] if R['filename'] else '?'
+            print(f"    {Mid} {FnShort}: bucket={Bucket} iscompliant={IsComp} -> {Mark}")
             if IsComp is True:
                 Compliant += 1
 
