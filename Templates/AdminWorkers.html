@@ -61,45 +61,48 @@ function ConnectivityDotHtml(HeartbeatAgeSec, StaleSec) {
 }
 
 function RenderTile(W, StaleSec, DivergenceSec) {
-  const Intent = IntentBadgeHtml(W.status);
-  const Truth = TruthBadgeHtml(W.runtimestate);
-  const Dot = ConnectivityDotHtml(W.heartbeatagesec, StaleSec);
-  const Mount = W.mountvalidationerror
-    ? `<div class="small text-danger mt-1">Mount error: ${W.mountvalidationerror}</div>`
+  const Name = W.WorkerName;
+  const HbAge = W.HeartbeatAgeSec != null ? W.HeartbeatAgeSec : W.heartbeatagesec;
+  const RsAge = W.RuntimeStateAgeSec != null ? W.RuntimeStateAgeSec : W.runtimestateagesec;
+  const Intent = IntentBadgeHtml(W.Status);
+  const Truth = TruthBadgeHtml(W.RuntimeState);
+  const Dot = ConnectivityDotHtml(HbAge, StaleSec);
+  const Mount = W.MountValidationError
+    ? `<div class="small text-danger mt-1">Mount error: ${W.MountValidationError}</div>`
     : '';
   const Caps = [
-    W.transcodeenabled ? 'T' : '',
-    W.remuxenabled ? 'R' : '',
-    W.qualitytestenabled ? 'Q' : '',
-    W.scanenabled ? 'S' : '',
-    W.nvenccapable ? 'NVENC' : '',
+    W.TranscodeEnabled ? 'T' : '',
+    W.RemuxEnabled ? 'R' : '',
+    W.QualityTestEnabled ? 'Q' : '',
+    W.ScanEnabled ? 'S' : '',
+    W.NvencCapable ? 'NVENC' : '',
   ].filter(Boolean).join(' ');
-  const Ver = W.version || 'unknown';
-  const Diverge = W.intentdiverges === true;
-  const Hung = W.ishung === true;
+  const Ver = (W.Version || 'unknown').toString().substring(0, 8);
+  const Diverge = W.IntentDiverges === true;
+  const Hung = W.IsHung === true;
   const Border = Hung ? 'hung-border' : (Diverge ? 'diverge-border' : '');
   const DivergeTip = Hung
-    ? `title="Encoding AttemptId ${W.currentattemptid || '?'} for ${Math.round((W.runtimestateagesec || 0)/60)} min without progress -- auto-reset pending."`
+    ? `title="Encoding AttemptId ${W.CurrentAttemptId || '?'} for ${Math.round((RsAge || 0)/60)} min without progress -- auto-reset pending."`
     : (Diverge
-      ? `title="Operator intent: ${W.status || '?'}; worker reports: ${W.runtimestate || 'no truth'}. Worker may be stuck or unable to honor the intent (> ${DivergenceSec}s)."`
+      ? `title="Operator intent: ${W.Status || '?'}; worker reports: ${W.RuntimeState || 'no truth'}. Worker may be stuck or unable to honor the intent (> ${DivergenceSec}s)."`
       : '');
-  const AttemptLine = (W.currentattemptid !== null && W.currentattemptid !== undefined)
-    ? `<div class="small text-muted">attempt ${W.currentattemptid}</div>` : '';
+  const AttemptLine = (W.CurrentAttemptId !== null && W.CurrentAttemptId !== undefined)
+    ? `<div class="small text-muted">attempt ${W.CurrentAttemptId}</div>` : '';
   return `
     <div class="col-md-3">
       <div class="card h-100 ${Border}" ${DivergeTip}>
         <div class="card-body p-3">
           <div class="d-flex justify-content-between align-items-center mb-2">
-            <strong>${Dot} ${W.workername}</strong>
+            <strong>${Dot} ${Name}</strong>
             <div class="d-flex gap-1">${Intent}${Truth}</div>
           </div>
-          <div class="small text-muted">${W.platform || '?'} | ${Caps || 'no capabilities'}</div>
+          <div class="small text-muted">${W.Platform || '?'} | ${Caps || 'no capabilities'}</div>
           <div class="small text-muted">v${Ver}</div>
           ${AttemptLine}
           ${Mount}
           <div class="btn-group btn-group-sm mt-2 w-100" role="group">
-            <button class="btn btn-outline-success" data-action="Online" data-worker="${W.workername}">Online</button>
-            <button class="btn btn-outline-warning" data-action="Paused" data-worker="${W.workername}">Pause</button>
+            <button class="btn btn-outline-success" data-action="Online" data-worker="${Name}">Online</button>
+            <button class="btn btn-outline-warning" data-action="Paused" data-worker="${Name}">Pause</button>
           </div>
         </div>
       </div>

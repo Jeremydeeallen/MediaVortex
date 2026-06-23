@@ -105,14 +105,15 @@ function RenderActiveJobs(Jobs) {
   Body.innerHTML = Jobs.map(function(J) {
     var Speed = J.SmoothedSpeed != null ? J.SmoothedSpeed : J.CurrentSpeed;
     var Eta = J.EtaSeconds != null ? J.EtaSeconds : J.ETASeconds;
+    var Progress = (J.ProgressPercent != null) ? J.ProgressPercent : J.PercentComplete;
     var Savings = (J.ProcessingMode === 'Transcode') ? FormatSavingsBytes(J.EstimatedSavingsBytes) : '-';
     return '<tr>' +
       '<td title="' + EscapeHtml(J.FileName || '') + '">' + EscapeHtml((J.FileName || '').substring(0, 70)) + '</td>' +
       '<td>' + FormatSizeMB(J.SizeMB) + '</td>' +
-      '<td>' + EscapeHtml(J.ClaimedBy || J.WorkerName || '?') + '</td>' +
+      '<td>' + EscapeHtml(J.WorkerName || J.ClaimedBy || '?') + '</td>' +
       '<td>' + EscapeHtml(J.ProcessingMode || J.WorkBucket || '?') + '</td>' +
       '<td class="text-end">' + FormatSpeed(Speed) + '</td>' +
-      '<td class="text-end">' + FormatProgress(J.PercentComplete) + '</td>' +
+      '<td class="text-end">' + FormatProgress(Progress) + '</td>' +
       '<td class="text-end">' + FormatEtaSec(Eta) + '</td>' +
       '<td>' + FormatResChange(J.SourceResolutionCategory, J.TargetResolutionCategory) + '</td>' +
       '<td>' + FormatCodecChange(J.SourceCodec, J.TargetCodec) + '</td>' +
