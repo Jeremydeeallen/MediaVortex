@@ -50,8 +50,6 @@ def CanonicalLocal(Prefix, Rel):
 
 # directive: worker-runtime-state | # see transcoded-output-placement.C13
 def DeleteRow(Db, MediaFileId):
-    Db.ExecuteNonQuery('DELETE FROM TranscodeAttempts WHERE MediaFileId = %s', (MediaFileId,))
-    Db.ExecuteNonQuery('DELETE FROM TranscodeFiles WHERE MediaFileId = %s', (MediaFileId,))
     Db.ExecuteNonQuery('DELETE FROM FailureBudgetResets WHERE MediaFileId = %s', (MediaFileId,))
     return Db.ExecuteNonQuery('DELETE FROM MediaFiles WHERE Id = %s', (MediaFileId,))
 
