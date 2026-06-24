@@ -22,7 +22,7 @@ Operator dogfood, 2026-05-10. Two adjacent topics surfaced in the same conversat
 
 - **Operator-visible.** Final filenames on the NAS shift from `<basename>.<ext>` to `<basename>-mv.<ext>` for new transcodes going forward. Pre-existing transcoded files are NOT renamed.
 - **Configuration.** `Workers.StagingDirectory` becomes obsolete; the column is dropped.
-- **No new HTTP endpoints, no new UI.** The Activity / SQLQueries pages display whatever's in `MediaFiles.FilePath`, which now ends in `-mv.<ext>` for new transcodes.
+- **No new HTTP endpoints, no new UI.** The Activity / SQLQueries pages display the path computed from the `MediaFiles` typed pair (`StorageRootId`, `RelativePath`, `FileName`), which now ends in `-mv.<ext>` for new transcodes.
 - **External library impact (Plex / Jellyfin / Kodi).** Filename changes by design -- libraries that match by probed metadata (GUID / episode signature) re-link cleanly; libraries that match by exact filename refresh their mapping. No data loss; some watch-progress reset is possible per library.
 
 ## Success Criteria
@@ -37,21 +37,19 @@ Operator dogfood, 2026-05-10. Two adjacent topics surfaced in the same conversat
 
 ### B. `-mv` final naming
 
-4. After a successful FileReplacement the final on-disk filename is `<basename>-mv.<ext>` where `<ext>` is the transcode output container (`mp4` today). The original is removed (`KeepSource=False`) or renamed to `<basename>.old.<orig-ext>` (`KeepSource=True`). Verifiable: post-replacement of `T:\Show\Show.mkv`, the source no longer exists, `T:\Show\Show-mv.mp4` exists; if `KeepSource=True`, `T:\Show\Show.old.mkv` exists.
+4. After a successful FileReplacement the final on-disk filename is `<basename>-mv.<ext>` where `<ext>` is the transcode output container (`mp4` today). The source file is removed. Verifiable: post-replacement of `T:\Show\Show.mkv`, the source no longer exists and `T:\Show\Show-mv.mp4` exists.
 
 5. The `-mv` suffix applies to all MediaVortex output flows -- transcode, remux, subtitle-fix. Verifiable: a remux of `Show.avi` produces `Show-mv.mp4`; a transcode of `Show.mkv` produces `Show-mv.mp4`; a subfix of `Show.mp4` produces `Show-mv.mp4`. Three asserts in the integration suite.
 
-6. A double-suffix `<basename>-mv-mv.<ext>` never appears on disk. The transcode pipeline refuses to admit a queue row whose source filename already ends in `-mv.<ext>`. Verifiable: insert a `TranscodeQueue` row with `FilePath` ending in `-mv.mp4`, run populate; the row is rejected with `Reason='AlreadyMediaVortexTranscoded'`. Audit query against MediaFiles also returns 0 rows matching `FilePath LIKE '%-mv-mv.%'` on a healthy library.
+6. A double-suffix `<basename>-mv-mv.<ext>` never appears on disk. The transcode pipeline refuses to admit a queue row whose source filename already ends in `-mv.<ext>`. Verifiable: queue a candidate whose `FileName` ends in `-mv.mp4`, run populate; the row is rejected with `Reason='AlreadyMediaVortexTranscoded'`. Audit query against MediaFiles also returns 0 rows matching `FileName LIKE '%-mv-mv.%'` on a healthy library.
 
-7. `MediaFiles.FilePath` for newly-transcoded rows ends in `-mv.<ext>`. Verifiable: for any cutover-date threshold T, `SELECT COUNT(*) FROM MediaFiles WHERE TranscodedByMediaVortex=TRUE AND ReplacementDate > T AND FilePath NOT LIKE '%-mv.%'` returns 0.
+7. The path stored on a newly-transcoded MediaFile row ends in `-mv.<ext>`. Path is the typed pair `(StorageRootId, RelativePath)` plus the `FileName` column (legacy `FilePath` column was migrated out per `BUG-0052` / Core.Path). Verifiable: `SELECT COUNT(*) FROM MediaFiles WHERE TranscodedByMediaVortex=TRUE AND FileName NOT LIKE '%-mv.%'` returns 0 for rows produced after the cutover; existing pre-cutover rows are out of scope (see C8).
 
 ### C. No backfill, no breakage
 
-8. Pre-existing transcoded files keep their current names. No bulk rename. Verifiable: `SELECT COUNT(*) FROM MediaFiles WHERE TranscodedByMediaVortex=TRUE AND ReplacementDate < '<cutover>' AND FilePath LIKE '%-mv.%'` returns 0. The `-mv` convention applies only to new replacements.
+8. Pre-existing transcoded files keep their current names. No bulk rename. Verifiable: pre-cutover rows are identified by the absence of the `-mv` suffix on `FileName` together with `TranscodedByMediaVortex=TRUE`; the cleanup script does not rename them. The `-mv` convention applies only to new replacements.
 
-9. `FileScanning` recognizes the `.old.<ext>` form as a MediaVortex artifact and does not insert it into `MediaFiles` or `TranscodeQueue`. Verifiable: scan a directory containing `Show-mv.mp4` and `Show.old.mkv`; only the `.mp4` row is created in `MediaFiles`. The `.old.<ext>` is also excluded from queue admission.
-
-10. The atomic-rename collision check at FileReplacement time still refuses to overwrite an existing target. Verifiable: pre-place a `Show-mv.mp4` in the source directory, then trigger replacement for a transcode that would produce the same path; replacement fails with `target already exists` and rolls the original back from `.orig` -- source is bit-identical to its pre-replacement state.
+10. The collision check at FileReplacement time refuses to overwrite an existing target. Verifiable: pre-place a `Show-mv.mp4` in the source directory, then trigger replacement for a transcode that would produce the same path. `TranscodedOutputPlacement.Execute` refuses BEFORE any rename happens (LocalExists check on TargetPath), returns `Success=False` with `ErrorMessage='Refusing to overwrite existing file at target: ...'`. No rollback is required because the rename has not occurred; the staged `.inprogress` file remains and the source is bit-identical to its pre-call state.
 
 ### D. Migration
 
@@ -65,7 +63,7 @@ Operator dogfood, 2026-05-10. Two adjacent topics surfaced in the same conversat
 
 ## Status
 
-**COMPLETE 2026-05-21.** Phase 1 (naming convention, queue admission guard, scanning exclusion) shipped 2026-05-10. Phase 2 (full `Workers.StagingDirectory` retirement + LocalStaging removal) shipped 2026-05-21 in the `drop-local-staging` branch: `Scripts/SQLScripts/drop_local_staging_2026_05_21.py` dropped the column and deleted the `TranscodeFileMode` setting; `Core/WorkerContext`, `Repositories/DatabaseManager`, `WorkerService/Main.py`, `WebService/Main.py`, and `ProcessTranscodeQueueService.py` all simplified to in-place only. `TranscodingFileManagerService` and the `archive_*` services were removed outright.
+**ACTIVE.** Side-by-side placement + `-mv` naming + `Workers.StagingDirectory` migration shipped 2026-05-10 / 2026-05-21. SOLID decomposition shipped 2026-06-02 via `filereplacement-decompose` -- the rename + MediaFiles refresh + source delete extracted to `TranscodedOutputPlacement.Execute`; `ComplianceGate` extracted to its own class; orchestration is `FileReplacementBusinessService.ProcessFileReplacement`. C13 (rollback on `_UpdateMediaFilesAfterReplacement` failure) + S4 (rollback seam) shipped 2026-06-23 via `/t BUG-0067`.
 
 ### Progress
 
@@ -74,10 +72,9 @@ Operator dogfood, 2026-05-10. Two adjacent topics surfaced in the same conversat
 - [x] 3. Drafted this feature doc with 12 success criteria
 - [x] 4. Operator approval of criteria (granted in same conversation; phase split agreed)
 - [x] 5. **Phase 1.1.** Pragmatic point-fix: `UPDATE Workers SET StagingDirectory='/mnt/media_tv/MediaVortex/Staging' WHERE WorkerName='larry-worker-1'` -- closes criterion 3's blast radius for tonight's smoke without the full refactor. (Criterion 3, partial.)
-- [x] 6. **Phase 1.2.** Update `_ProcessCompleteFileReplacement` to compute final `TargetPath` as `<originalbasename>-mv<ext>`, derived from the original filename rather than the staged filename's various suffixes (`_remuxed.mp4`, `_subfix.mp4`, resolution suffixes, etc.). (Criteria 4, 5.)
+- [x] 6. **Phase 1.2.** Compute final `TargetPath` in the FileReplacement rename step as `<originalbasename>-mv<ext>`, derived from the original filename rather than the staged filename's various suffixes (`_remuxed.mp4`, `_subfix.mp4`, resolution suffixes, etc.). (Criteria 4, 5.)
 - [x] 7. **Phase 1.3.** Add the `-mv` admission guard to queue populate paths (criterion 6).
-- [x] 7b. **Phase 1.3b** (added 2026-05-10): extend `-mv` suffix to the STAGED transcode output filename, not just the final FileReplacement target. Closes the same-name collision class structurally -- source `Show WEBDL-1080p.mp4` -> staged `Show WEBDL-1080p-mv.mp4`, different files by construction. `CommandBuilder.GenerateOutputFileName` now appends `-mv` to every output filename it generates. The existing pre-renamed-flow branch in `_ProcessCompleteFileReplacement` handles the case where staged path equals target path. Defense-in-depth at the write step, not just the rename step.
-- [x] 8. **Phase 1.4.** Update `FileScanning` exclusion list to recognize `.old.<ext>` (criterion 9).
+- [x] 7b. **Phase 1.3b** (added 2026-05-10): extend `-mv` suffix to the STAGED transcode output filename, not just the final FileReplacement target. Closes the same-name collision class structurally -- source `Show WEBDL-1080p.mp4` -> staged `Show WEBDL-1080p-mv.mp4`, different files by construction. `CommandBuilder.GenerateOutputFileName` now appends `-mv` to every output filename it generates. The SameSlot branch in `TranscodedOutputPlacement.Execute` handles the case where staged path equals target path. Defense-in-depth at the write step, not just the rename step.
 - [x] 9. **Phase 1.5.** Update `transcode.flow.md` Stage 8 with the new naming.
 - [x] 10. **Phase 1.6.** Smoke script `Scripts/Smoke/RunPostDispositionPipelineTest.py` to verify attempt 4394 end-to-end (lower threshold + manual disposition + FileReplacement + restore threshold).
 - [x] 11. **Phase 2 (2026-05-21).** SQL migration `Scripts/SQLScripts/drop_local_staging_2026_05_21.py` drops `Workers.StagingDirectory` and deletes the `TranscodeFileMode` SystemSettings row in a single transaction. Idempotent: re-running the dry-run reports zero changes. Code refactor lands in the same branch: `Core/WorkerContext`, `Repositories/DatabaseManager` RegisterWorker / GetWorkerConfig, `WorkerService/Main.py` + `WebService/Main.py` init, `ProcessTranscodeQueueService` (LocalStaging branches removed from ProcessJob / ProcessRemuxJob / ProcessSubtitleFixJob / _ProcessSingleVariant; `GetTranscodeFileMode` / `GetTranscodeOutputMode` / `GetLocalStagingDir` / `CopyBackFromLocalStaging` / `CleanupLocalStagingFiles` deleted). `Features/TranscodeJob/TranscodingFileManagerService.py` and `archive_TranscodeService/` + `archive_QualityTestService/` removed outright.
@@ -100,13 +97,12 @@ transcode.flow.md
 | File | Role |
 |---|---|
 | `Features/TranscodeJob/ProcessTranscodeQueueService.py` | Compute staging path side-by-side; stop reading `Workers.StagingDirectory` |
-| `Features/FileReplacement/TranscodedOutputPlacement.py` | `Execute` (renamed from `_ProcessCompleteFileReplacement`) -- owns the `.inprogress` -> `<basename>-mv.<ext>` rename, the MediaFiles re-probe, and the original-source delete. Extracted from FileReplacementBusinessService 2026-06-02 (`filereplacement-decompose` directive). |
+| `Features/FileReplacement/TranscodedOutputPlacement.py` | `Execute` owns the `.inprogress` -> `<basename>-mv.<ext>` rename, the MediaFiles re-probe, and the source delete. `FinalizePartialReplacement` is the crash-recovery completion path. Both fail loud + roll back when `_UpdateMediaFilesAfterReplacement` fails (C13). |
 | `Features/FileReplacement/FileReplacementBusinessService.py` | Orchestration only -- `ProcessFileReplacement` validates disposition + dispatches to `TranscodedOutputPlacement.Execute`. |
-| `Features/FileScanning/FileScanningBusinessService.py` | Skip `.old.<ext>` artifacts; do not insert them into `MediaFiles` |
 | `Features/TranscodeQueue/QueueManagementBusinessService.py` | Refuse to admit queue rows whose source ends in `-mv.<ext>` |
 | `Models/CommandBuilder.py` | `BuildTranscodeCommand` / `BuildRemuxCommand` / `BuildSubtitleFixCommand` -- output paths land side-by-side; staging suffix unchanged (`_transcoded.mp4` / `_remuxed.mp4` / `_subfix.mp4` during the encode) |
 | `Scripts/SQLScripts/drop_local_staging_2026_05_21.py` | One-shot, idempotent column drop |
-| `transcode.flow.md` | Stage 6 inputs table loses `StagingDirectory`; Stage 8 Action describes `-mv` rename and `KeepSource` settle |
+| `transcode.flow.md` | Stage 6 inputs no longer reference `StagingDirectory`; Stage 8 ACTION + Phase 7 lifecycle describe the current rename / re-probe / source-delete / rollback shape. |
 | `memory/KNOWN-ISSUES.md` | Cross-worker hand-off (Risk 5 in 2026-05-10 sight pass) closed by criterion 3 |
 
 ## Seams
