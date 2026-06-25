@@ -73,6 +73,23 @@ class TestEAC3OrPassthroughCodecPolicy(unittest.TestCase):
         Result = self.Policy.Decide(SourceCodec='eac3', ForceReencode=False, AudioCorruptSuspect=True)
         self.assertEqual(Result.Plan['Mode'], 'reencode')
 
+    def test_reencode_when_source_bitrate_over_ceiling(self):
+        # directive: worker-runtime-state
+        Result = self.Policy.Decide(
+            SourceCodec='aac', ForceReencode=False, AudioCorruptSuspect=False,
+            ProfileCeilingKbps=128, SourceBitrateKbps=160,
+        )
+        self.assertEqual(Result.Plan['Mode'], 'reencode')
+        self.assertEqual(Result.Plan['Reason'], 'source_bitrate_over_ceiling')
+
+    def test_passthrough_when_source_under_ceiling(self):
+        # directive: worker-runtime-state
+        Result = self.Policy.Decide(
+            SourceCodec='aac', ForceReencode=False, AudioCorruptSuspect=False,
+            ProfileCeilingKbps=192, SourceBitrateKbps=128,
+        )
+        self.assertEqual(Result.Plan['Codec'], 'copy')
+
 
 # directive: audio-pipeline-fail-loud
 class TestRankPreferredDefaultPolicy(unittest.TestCase):
