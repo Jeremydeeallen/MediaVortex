@@ -17,9 +17,9 @@ Answers one question about each MediaFile: is its video stream compliant under t
 ## Success Criteria
 
 C1. `VideoVertical.RecomputeFor(MediaFileIds)` writes `(VideoCompliant, VideoCompliantReason)` for each id.
-C2. Wraps existing `TranscodeOperation.Apply` for equivalence with current Compliance routing; adds `MinSourceBpp` override on top.
-C3. MinSourceBpp override: when wrapped predicate says "needs transcode" but `BPP = (VideoBitrateKbps * 1000) / (Pixels * 24)` is below `MinSourceBpp`, override to `VideoCompliant=TRUE`, reason=`'efficient_bpp_override'`. Pixel counts: 480p:345600, 720p:921600, 1080p:2073600, 2160p:8294400.
-C4. `VideoComplianceRules` read fresh per `RecomputeFor` call (`db-is-authority`).
+C2. `VideoVertical.Evaluate` is fully data-driven from `VideoComplianceRules` for the codec + BPP checks. Profile is consulted only for the resolution-tier check (when `ResolutionExceedsProfileTarget=TRUE`) and the absolute bitrate ceiling (`Profile.TargetVideoKbps`, often None). Codec check rejects when source codec is NOT in `AcceptableVideoCodecsCsv`; never compares against the profile's target codec.
+C3. Symmetric BPP rules with `BPP = (VideoBitrateKbps * 1000) / (Pixels * 24)`, pixel counts {480p:345600, 720p:921600, 1080p:2073600, 2160p:8294400}: when `BPP < MinSourceBpp`, return `(True, 'efficient_bpp_override')` (already compressed past the point of useful re-encoding); when `BPP > MaxSourceBpp`, return `(False, 'high_bpp_excessive:<bpp>><threshold>')` (wastefully encoded, transcode to AV1 saves real space). Defaults `MinSourceBpp=0.04`, `MaxSourceBpp=0.20`. `MaxSourceBpp` must be > `MinSourceBpp` (controller validates).
+C4. `VideoComplianceRules` read fresh per `Evaluate` call (`db-is-authority` -- no `__init__` cache).
 C5. Failure-loudly: missing rules row -> `RuntimeError`; missing MediaFileId -> `ValueError`; no try/except.
 
 ## Seams

@@ -28,7 +28,7 @@ class VideoVertical:
     # directive: worker-runtime-state
     def _LoadRules(self):
         Rows = self._Db.ExecuteQuery(
-            "SELECT AcceptableVideoCodecsCsv, MinSourceBpp, ResolutionExceedsProfileTarget "
+            "SELECT AcceptableVideoCodecsCsv, MinSourceBpp, MaxSourceBpp, ResolutionExceedsProfileTarget "
             "FROM VideoComplianceRules ORDER BY Id LIMIT 1"
         )
         if not Rows:
@@ -37,12 +37,13 @@ class VideoVertical:
         Csv = (R.get('AcceptableVideoCodecsCsv') or R.get('acceptablevideocodecscsv') or '').strip()
         Allowed = [C.strip().lower() for C in Csv.split(',') if C.strip()]
         MinBpp = R.get('MinSourceBpp') if 'MinSourceBpp' in R else R.get('minsourcebpp')
+        MaxBpp = R.get('MaxSourceBpp') if 'MaxSourceBpp' in R else R.get('maxsourcebpp')
         ResExceeds = R.get('ResolutionExceedsProfileTarget') if 'ResolutionExceedsProfileTarget' in R else R.get('resolutionexceedsprofiletarget')
-        return Allowed, (float(MinBpp) if MinBpp is not None else 0.0), bool(ResExceeds)
+        return Allowed, (float(MinBpp) if MinBpp is not None else 0.0), (float(MaxBpp) if MaxBpp is not None else 0.0), bool(ResExceeds)
 
     # directive: worker-runtime-state
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
-        AllowedCodecs, MinBpp, ResExceeds = self._LoadRules()
+        AllowedCodecs, MinBpp, MaxBpp, ResExceeds = self._LoadRules()
 
         Profile = self._Resolver.Resolve(Mf)
         if Profile is None:
@@ -52,14 +53,16 @@ class VideoVertical:
         if SrcCodec and AllowedCodecs and SrcCodec not in AllowedCodecs:
             return (False, f'codec:{SrcCodec}')
 
-        if MinBpp > 0:
-            SrcKbps = getattr(Mf, 'VideoBitrateKbps', None)
-            ResCat = getattr(Mf, 'ResolutionCategory', None)
-            Pixels = _PIXEL_COUNTS.get((ResCat or '').lower())
-            if SrcKbps and Pixels:
-                Bpp = (float(SrcKbps) * 1000.0) / (Pixels * 24.0)
-                if Bpp < MinBpp:
-                    return (True, 'efficient_bpp_override')
+        SrcKbps = getattr(Mf, 'VideoBitrateKbps', None)
+        ResCat = getattr(Mf, 'ResolutionCategory', None)
+        Pixels = _PIXEL_COUNTS.get((ResCat or '').lower())
+        Bpp = (float(SrcKbps) * 1000.0) / (Pixels * 24.0) if (SrcKbps and Pixels) else None
+
+        if Bpp is not None and MinBpp > 0 and Bpp < MinBpp:
+            return (True, 'efficient_bpp_override')
+
+        if Bpp is not None and MaxBpp > 0 and Bpp > MaxBpp:
+            return (False, f'high_bpp_excessive:{Bpp:.3f}>{MaxBpp:.3f}')
 
         if ResExceeds and Profile.TargetResolutionCategory is not None:
             SrcTier = self._TierRegistry.FromCategory(getattr(Mf, 'ResolutionCategory', None))

@@ -17,7 +17,7 @@ _BackfillStatus = {'Running': False, 'Total': 0, 'Completed': 0, 'StartedAt': No
 @VideoEncodingBlueprint.route('/Rules', methods=['GET'])
 def GetRules():
     Rows = _Db.ExecuteQuery(
-        "SELECT Id, AcceptableVideoCodecsCsv, EstimatedSavingsMBThreshold, PreventUpscale, ResolutionExceedsProfileTarget, MinSourceBpp, LastUpdated "
+        "SELECT Id, AcceptableVideoCodecsCsv, EstimatedSavingsMBThreshold, PreventUpscale, ResolutionExceedsProfileTarget, MinSourceBpp, MaxSourceBpp, LastUpdated "
         "FROM VideoComplianceRules ORDER BY Id LIMIT 1"
     )
     if not Rows:
@@ -34,17 +34,22 @@ def UpdateRules():
     PreventUpscale = Body.get('PreventUpscale')
     ResExceeds = Body.get('ResolutionExceedsProfileTarget')
     MinBpp = Body.get('MinSourceBpp')
+    MaxBpp = Body.get('MaxSourceBpp')
     if not Codecs:
         return jsonify({'Success': False, 'Message': 'AcceptableVideoCodecsCsv is required'}), 400
     if Threshold is None or int(Threshold) < 0:
         return jsonify({'Success': False, 'Message': 'EstimatedSavingsMBThreshold must be a non-negative integer'}), 400
     if MinBpp is None or float(MinBpp) < 0:
         return jsonify({'Success': False, 'Message': 'MinSourceBpp must be a non-negative number'}), 400
+    if MaxBpp is None or float(MaxBpp) <= 0:
+        return jsonify({'Success': False, 'Message': 'MaxSourceBpp must be a positive number'}), 400
+    if float(MaxBpp) <= float(MinBpp):
+        return jsonify({'Success': False, 'Message': 'MaxSourceBpp must be greater than MinSourceBpp'}), 400
     _Db.ExecuteNonQuery(
-        "UPDATE VideoComplianceRules SET AcceptableVideoCodecsCsv = %s, EstimatedSavingsMBThreshold = %s, PreventUpscale = %s, ResolutionExceedsProfileTarget = %s, MinSourceBpp = %s, LastUpdated = NOW() WHERE Id = (SELECT Id FROM VideoComplianceRules ORDER BY Id LIMIT 1)",
-        (Codecs, int(Threshold), bool(PreventUpscale), bool(ResExceeds), float(MinBpp)),
+        "UPDATE VideoComplianceRules SET AcceptableVideoCodecsCsv = %s, EstimatedSavingsMBThreshold = %s, PreventUpscale = %s, ResolutionExceedsProfileTarget = %s, MinSourceBpp = %s, MaxSourceBpp = %s, LastUpdated = NOW() WHERE Id = (SELECT Id FROM VideoComplianceRules ORDER BY Id LIMIT 1)",
+        (Codecs, int(Threshold), bool(PreventUpscale), bool(ResExceeds), float(MinBpp), float(MaxBpp)),
     )
-    LoggingService.LogInfo(f"VideoComplianceRules updated: codecs={Codecs!r} threshold={Threshold} upscale={PreventUpscale} resexceeds={ResExceeds} minbpp={MinBpp}", 'VideoEncodingController', 'UpdateRules')
+    LoggingService.LogInfo(f"VideoComplianceRules updated: codecs={Codecs!r} threshold={Threshold} upscale={PreventUpscale} resexceeds={ResExceeds} minbpp={MinBpp} maxbpp={MaxBpp}", 'VideoEncodingController', 'UpdateRules')
     # directive: worker-runtime-state
     _SpawnBackfill('Video')
     return jsonify({'Success': True, 'Message': 'Saved; library recompute kicked off in background.'}), 200
