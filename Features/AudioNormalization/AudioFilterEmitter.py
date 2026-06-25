@@ -10,6 +10,7 @@ from Features.AudioNormalization.AudioStrategyClassifier import (
     STRATEGY_REVIEW,
 )
 from Features.AudioNormalization.AudioDispositionResolver import AudioDispositionResolver
+from Features.AudioNormalization.AudioStrategyResult import Reject
 from Features.AudioNormalization.DialNormHandler import DialNormHandler
 from Features.AudioNormalization.LanguageDetector import LanguageDetector, KEEP_ALL
 
@@ -208,24 +209,24 @@ class AudioFilterEmitter:
         Block.DispositionArgs = self._BuildDispositionArgs(TrackConfig, OutputIndex, IsDefaultLanguage=IsDefaultLanguage)
         return Block
 
-    # directive: audio-vertical-live-evidence | # see audio-normalization.L1
+    # directive: audio-pipeline-fail-loud | # see audio-normalization.C24
     def _PickDefaultLanguage(self, AudioStreams, StreamLanguageMap, LibraryDefault):
-        """Pick exactly one default language across the source: prefer per-stream default disposition, fall back to library default, fall back to first language present."""
+        Present = [StreamLanguageMap.get(S.get('index'), 'und') for S in AudioStreams]
+        Result = self.DispositionResolver.PickDefaultLanguage(Present, LibraryDefault)
+        if isinstance(Result, Reject):
+            return None
+        Plan = Result.Plan
+        PickedLang = Plan.get('Language')
+        Reason = Plan.get('Reason', '')
+        if Reason.startswith('library_default_present') or Reason.startswith('rank_match'):
+            return PickedLang
         for S in AudioStreams:
             Disp = S.get('disposition') or {}
             if Disp.get('default') in (1, True, '1'):
                 Lang = StreamLanguageMap.get(S.get('index'), 'und')
                 if Lang and Lang != 'und':
                     return Lang
-        if LibraryDefault:
-            Present = {StreamLanguageMap.get(S.get('index'), 'und') for S in AudioStreams}
-            if LibraryDefault in Present:
-                return LibraryDefault
-        for S in AudioStreams:
-            Lang = StreamLanguageMap.get(S.get('index'), 'und')
-            if Lang and Lang != 'und':
-                return Lang
-        return None
+        return PickedLang
 
     # directive: audio-vertical-live-evidence | # see audio-normalization.L1
     def _BuildBlockForTrack(self, MediaFile, TrackConfig, Strategy, Stream, Language, OutputIndex, NumEmitTracks, IsDefaultLanguage=True):
