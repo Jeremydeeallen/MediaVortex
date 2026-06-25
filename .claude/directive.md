@@ -2,7 +2,7 @@
 
 **Slug:** worker-runtime-state
 **Set:** 2026-06-23
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: VERIFYING
 **Resumed:** 2026-06-25 -- audio cluster (`audio-pipeline-fail-loud`) closed Success; BUG-0068 closed via Phase D wiring + contract test 3/3
 **Continuation of:** `activity-admin-and-worker-telemetry` (closed 2026-06-23 with gaps; this directive closes them per operator review)
 
