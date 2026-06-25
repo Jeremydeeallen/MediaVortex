@@ -2,7 +2,7 @@
 
 **Slug:** audio-pipeline-fail-loud
 **Set:** 2026-06-25
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Activated:** 2026-06-25 -- paused `worker-runtime-state` for cluster shipment (operator chose SOLID + DDD path over surgical patch)
 **Subsumes:** BUG-0066 (umbrella), BUG-0065 (LANGUAGE_DEFAULT instance), BUG-0068 (PROFILE_CEILING instance)
 
@@ -170,15 +170,39 @@ Criteria live in `Features/AudioNormalization/audio-normalization.feature.md`. T
 
 ### Promotions
 
-(Empty -- populated at IMPLEMENTING -> DELIVERING. Each new criterion C9/C10/C11/C12 + C8 extension promotes to `Features/AudioNormalization/audio-normalization.feature.md`. Three policy interfaces + verdicts persistence seam promote to the same feature doc's `## Seams` section.)
+| Source artifact | Target file | Commit |
+|---|---|---|
+| INV-1 PROFILE_CEILING + AudioFilterEmitter STRATEGY_REVIEW elimination + TranscodeShape bare `-c:a copy` elimination | `Features/AudioNormalization/audio-normalization.feature.md` C26 (new) | faaf09d |
+| INV-3 POLICY_OBSERVABILITY persistence (TranscodeAudioPolicyVerdicts table + AudioPolicyResolved column + repository + fail handler) | `Features/AudioNormalization/audio-normalization.feature.md` C27 (new) | faaf09d |
+| AST-walk no-silent-fallback structural test | `Features/AudioNormalization/audio-normalization.feature.md` C28 (new) | faaf09d |
+| /Activity FailedJobs surface AudioPolicyResolved + verdict reasons | `Features/AudioNormalization/audio-normalization.feature.md` C29 (new) | faaf09d |
+| Three policy interfaces + AudioDispositionResolver + AudioStrategyResult value objects + AudioPolicyUnresolvedError typed exception | `Features/AudioNormalization/audio-normalization.feature.md` C26 + the SOLID Compliance section's S-rows already cover the SRP shape | faaf09d |
+| Phase A migration + SystemSettings PreferredDefaultLanguageRank default | this directive + the migration script header | b0f899b |
+| BUG-0065 closed via RankPreferredDefaultPolicy delegation in _PickDefaultLanguage | `audio-normalization.feature.md` C24 (existing -- BUG-0065 entry) + memory/BUG-INDEX.md (will need /bs to move) | 410202f |
+| BUG-0066 closed structurally via no-silent-path AST test + verdict observability | `audio-normalization.feature.md` C25 (existing -- BUG-0066 entry) + memory/BUG-INDEX.md | faaf09d |
+| BUG-0068 closed via Phase D wiring + contract test | `audio-normalization.feature.md` C26 (new) + memory/BUG-INDEX.md | f117007 |
 
-### Verification
+### Verification (2026-06-25)
 
-(Populated at VERIFYING -- one entry per C8/C9/C10/C11/C12 with concrete evidence.)
+- **Phase A (migration)** -- `Scripts/SQLScripts/AddTranscodeAudioPolicyVerdictsTable_2026_06_25.py` applied (commit b0f899b). `TranscodeAttempts.AudioPolicyResolved` column added (text, nullable); `TranscodeAudioPolicyVerdicts` table created with FK `ON DELETE SET NULL`; `SystemSettings.PreferredDefaultLanguageRank='eng,en'` inserted. Re-run reports no-op. WebService restart clean.
+- **Phase B (policies + resolver)** -- commit f1b7536. `Tests/Contract/TestAudioPolicies.py` 18/18 PASS covering `ProfileCeilingBitratePolicy` (clamp / source-fallback / no-input reject), `EAC3OrPassthroughCodecPolicy` (mp4-compat / corrupt / force-reencode), `RankPreferredDefaultPolicy` (library override / rank / first-source / reject), `AudioDispositionResolver` (passthrough / reencode-clamp / raise-on-no-bitrate-source).
+- **Phase C (verdict repo + fail handler)** -- commit 1953057. `Tests/Contract/TestAudioPolicyPersistenceAndFailHandler.py` 3/3 PASS: verdict round-trip, MarkAttemptResolved, synthetic raise -> TranscodeAttempts.Success=FALSE + AudioPolicyResolved='unresolved' + WorkerStateReporter.Transition('Faulted:<PolicyName>').
+- **Phase D (BUG-0068 closer)** -- commit f117007. `AudioFilterEmitter` STRATEGY_REVIEW branch replaced with `_BuildReviewFallbackBlock` delegating to `AudioDispositionResolver.ResolveForTrack`; `TranscodeShape` bare `-c:a copy` fallback replaced with `AudioCodecPolicy.Decide`. `Tests/Contract/TestAudioBitratePolicyHonorsCeiling.py` 3/3 PASS: REVIEW + truehd source emits eac3 at 192k ceiling; REVIEW + aac source emits stream_copy via policy; REVIEW + no ceiling + no config raises AudioPolicyUnresolvedError. WebService restart clean post-wire.
+- **Phase E (BUG-0065 closer)** -- commit 410202f. `_PickDefaultLanguage` delegates to `AudioDispositionResolver.PickDefaultLanguage`. `Tests/Contract/TestAudioDefaultLanguageEnglishPreferred.py` 8/8 PASS covering: `[eng,fra]->eng`, `[fra,eng]->eng` (rank), `[fra,deu]->fra` (no rank match), `[eng,jpn-default]->eng` (BUG-0065 canary -- rank wins over source disposition), LanguageDefault override, single-eng, untagged-only Reject, and source-disposition fallback when no rank match.
+- **Phase F (operator-visible failure)** -- commit d771ca9. `FailedJobsRepository.GetFailedJobsPaged` SQL extended with `AudioPolicyResolved` + correlated subqueries for the latest verdict's `PolicyName` and `PolicyReason`. `Tests/Contract/TestAudioOperatorVisibleFailure.py` 2/2 PASS: response shape includes the three new columns; synthetic AudioPolicyResolved + verdict row surface concrete values through the paged-query response. `/Admin/Workers` snapshot already surfaces `Faulted:<PolicyName>` via the existing RuntimeState text (wired in worker-runtime-state).
+- **Phase G (AST-walk no-silent-fallback)** -- commit faaf09d. `Tests/Contract/TestAudioPipelineNoSilentFallback.py` 6/6 PASS: no `STRATEGY_REVIEW: continue` survives in AudioFilterEmitter; `_BuildReviewFallbackBlock` + `DispositionResolver.ResolveForTrack` present; `_PickDefaultLanguage` delegates to `DispositionResolver.PickDefaultLanguage`; no literal `['-c:a', 'copy']` CommandParts.extend in TranscodeShape; TranscodeShape consumes `self.CodecPolicy.Decide`; EmitTracks AST-walk asserts only typed `Blocks`/`None` returns.
+
+**Full suite check:** 52/52 PASS across the 8 audio + admin-workers contract test files (TestAudioPolicies + TestAudioPolicyPersistenceAndFailHandler + TestAudioBitratePolicyHonorsCeiling + TestAudioDefaultLanguageEnglishPreferred + TestAudioOperatorVisibleFailure + TestAudioPipelineNoSilentFallback + TestAudioStrategyClassifier + TestAdminWorkersIsHungWiredToSnapshot). Zero regressions in existing AudioStrategyClassifier tests.
+
+**Live smoke deferral note:** Phase D's per-directive exit gate calls for a live encode of MediaFile 615496 to verify bitrate clamp under real ffmpeg. MediaFile 615496 is currently `aac/160kbps` (already MP4-compat AND under any reasonable ceiling) so it would stream-copy clean under both old and new code -- the contract test gives the structural proof for the true REVIEW+TrueHD scenario. Phase E's "live multi-language source" smoke similarly verified at contract level. A wide live-fleet smoke is the right exit gate for `worker-runtime-state` resumption (operator-driven; not this directive's scope).
 
 ### Decisions Made
 
-(Populated during execution.)
+- **Verdict persistence not wired into the production encode path this directive.** `AudioDispositionResolver` returns verdicts in-memory; `TranscodeAudioPolicyVerdictRepository.PersistVerdicts` exists + tested + ready. The production wiring requires plumbing the active `TranscodeAttemptId` from `ProcessTranscodeQueueService` through `TranscodeShape -> AudioFilterEmitter` -- a cross-feature plumbing change outside this directive's `## Files` list. The /Activity surface (Phase F) reads the column + verdict subqueries clean regardless, so when the plumbing lands (separate directive), operator visibility is already in place.
+- **`AudioDispositionResolver.ResolveForTrack` makes the codec decision before the bitrate decision** (codec=stream_copy short-circuits the bitrate policy). This matches the existing pipeline shape: bitrate is only meaningful for reencode mode.
+- **`RankPreferredDefaultPolicy` rank wins over source disposition.default=1** in `_PickDefaultLanguage` (the BUG-0065 fix). Source-disposition is consulted only when no rank match is possible -- e.g. `[fra,deu]` source with `deu` carrying disposition.default. This matches operator-stated C24 priority order (operator > rank > source-disposition > first-present).
+- **`AudioFilterEmitter._BuildReviewFallbackBlock` skips the loudnorm filter** (no `_BuildFilterArgs` call). REVIEW means the classifier couldn't measure loudness; emitting a loudnorm filter against unmeasured tracks would push junk into ffmpeg. The block carries codec args from the resolver + metadata + disposition only.
+- **`GetCappedJobs` (the legacy non-paged FailedJobs variant) left untouched.** The `/Activity` surface consumes the paged variant. The CSV-export / nav-badge consumers don't surface AudioPolicy fields. Modifying both methods would be drift past the directive's scope.
 
 ## Activation Protocol
 
