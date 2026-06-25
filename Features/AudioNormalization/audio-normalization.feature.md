@@ -12,7 +12,8 @@ The vertical absorbed the loudnorm measurement vertical (`Features/LoudnessAnaly
 
 | #  | User action | Surface element | Handler | Backing class.method |
 |----|-------------|-----------------|---------|----------------------|
-| W1 | Edit policy at any scope | Settings tab at `/AudioNormalization` | `POST /api/AudioNormalization/Settings` | `AudioNormalizationController.upsert_settings` |
+| W0 | Edit system-wide audio compliance rules (target LUFS, true peak ceiling, overshoot thresholds, codec allowlist, dialog-boost toggle, English-preferred toggle, language rank, speech-detection toggle) | `/Admin/Compliance` Audio Rules tab + `/Compliance` Audio tab | `PUT /api/AudioNormalization/Rules` | `AudioNormalizationController.update_audio_rules` (writes the AudioComplianceRules singleton row + spawns daemon-thread backfill via `AudioVertical().RecomputeFor`) |
+| W1 | Edit policy at any scope (per-library, per-folder, per-item overrides) | Settings tab at `/AudioNormalization` | `POST /api/AudioNormalization/Settings` | `AudioNormalizationController.upsert_settings` |
 | W2 | View consistency-band dashboard | Dashboard tab at `/AudioNormalization` | `GET /api/AudioNormalization/Dashboard` | `AudioNormalizationController.dashboard` |
 | W3 | Review operator-held file + resolve | Review tab at `/AudioNormalization` | `POST /api/AudioNormalization/Review/<id>/Resolve` | `AudioOperatorReviewService.ResolveReview` |
 | W4 | Trigger one-off policy snapshot on recent queue inserts | Dashboard tab "Run policy snapshot" button | `POST /api/AudioNormalization/SnapshotPolicies` | `AudioPolicyAdmissionGate.BackfillRecentInserts` |

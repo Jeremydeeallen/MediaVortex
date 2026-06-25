@@ -22,14 +22,26 @@ class AudioVertical:
         self._Resolver = ProfileResolver or EffectiveProfileResolver()
 
     # directive: worker-runtime-state
-    def _LoadAcceptableAudioCodecs(self) -> list:
+    def _LoadRules(self) -> dict:
         Rows = self._Db.ExecuteQuery(
-            "SELECT AcceptableAudioCodecsCsv FROM ContainerComplianceRules ORDER BY Id LIMIT 1"
+            "SELECT TargetIntegratedLufs, TargetTruePeakDbtp, "
+            "MaxOvershootDbForAdaptiveFallback, MaxOvershootDbForReview, "
+            "AcceptableAudioCodecsCsv, EnableDialogBoostTrack, "
+            "EnableEnglishPreferredDefault, PreferredDefaultLanguageRank, "
+            "EnableSpeechLanguageDetection "
+            "FROM AudioComplianceRules ORDER BY Id LIMIT 1"
         )
         if not Rows:
-            return []
-        Csv = (Rows[0].get('AcceptableAudioCodecsCsv') or Rows[0].get('acceptableaudiocodecscsv') or '').strip()
-        return [C.strip().lower() for C in Csv.split(',') if C.strip()]
+            raise RuntimeError('AudioComplianceRules has no rows -- migration not applied')
+        R = Rows[0]
+        Csv = (R.get('AcceptableAudioCodecsCsv') or R.get('acceptableaudiocodecscsv') or '').strip()
+        AllowedCodecs = [C.strip().lower() for C in Csv.split(',') if C.strip()]
+        return {
+            'TargetIntegratedLufs': float(R.get('TargetIntegratedLufs') if 'TargetIntegratedLufs' in R else R.get('targetintegratedlufs')),
+            'TargetTruePeakDbtp': float(R.get('TargetTruePeakDbtp') if 'TargetTruePeakDbtp' in R else R.get('targettruepeakdbtp')),
+            'MaxOvershootDbForReview': float(R.get('MaxOvershootDbForReview') if 'MaxOvershootDbForReview' in R else R.get('maxovershootdbforreview')),
+            'AllowedCodecs': AllowedCodecs,
+        }
 
     # directive: worker-runtime-state
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
@@ -42,21 +54,20 @@ class AudioVertical:
         if getattr(Mf, 'LoudnessMeasurementFailureReason', None):
             return (None, 'loudness_measurement_failed')
 
-        Profile = self._Resolver.Resolve(Mf)
-        if Profile is None:
-            return (None, 'no_effective_profile')
+        Rules = self._LoadRules()
 
         SrcCodec = (getattr(Mf, 'AudioCodec', None) or '').lower()
-        AllowedCodecs = self._LoadAcceptableAudioCodecs()
-        if SrcCodec and AllowedCodecs and SrcCodec not in AllowedCodecs:
+        if SrcCodec and Rules['AllowedCodecs'] and SrcCodec not in Rules['AllowedCodecs']:
             return (False, f'codec:{SrcCodec}')
 
-        if Profile.TargetAudioKbps is not None:
-            SrcKbps = getattr(Mf, 'AudioBitrateKbps', None)
-            if SrcKbps is not None and SrcKbps > 0:
-                Ceiling = Profile.TargetAudioKbps * _BITRATE_ROUNDING_TOLERANCE
-                if float(SrcKbps) > Ceiling:
-                    return (False, f'bitrate:{SrcKbps}>{Ceiling:.0f}')
+        SrcLufs = getattr(Mf, 'SourceIntegratedLufs', None)
+        SrcTp = getattr(Mf, 'SourceTruePeakDbtp', None)
+        if SrcLufs is not None and SrcTp is not None:
+            RequiredGain = float(Rules['TargetIntegratedLufs']) - float(SrcLufs)
+            Headroom = float(Rules['TargetTruePeakDbtp']) - float(SrcTp)
+            Overshoot = RequiredGain - Headroom
+            if Overshoot > float(Rules['MaxOvershootDbForReview']):
+                return (None, f'audio_ungainable:overshoot={Overshoot:.1f}dB')
 
         Decision = self._Gate.AdmitOrDefer(Mf)
         if Decision.Outcome != 'admitted':

@@ -69,7 +69,56 @@
   </ul>
   <div class="tab-content border border-top-0 p-3" id="ComplianceTabContent">
     <div class="tab-pane fade show active" id="audio-pane" role="tabpanel">
-      <p class="text-muted small">Audio rule editing -- see <a href="/AudioNormalization">/AudioNormalization</a> for the canonical per-scope policy editor.</p>
+      <h5 class="mb-3">Audio Compliance Rules</h5>
+      <p class="text-muted small">System-wide policy (singleton row). Applies to every MediaFile regardless of profile. Per-scope overrides for individual libraries / folders / files live at <a href="/AudioNormalization">/AudioNormalization</a>.</p>
+      <table class="table">
+        <tbody>
+          <tr>
+            <th style="width: 40%;">Target integrated loudness (LUFS)<br><small class="text-muted">Where the audio cluster aims. Streaming-TV standard ~-23 to -24. YouTube/Spotify ~-14.</small></th>
+            <td><input type="number" step="0.1" id="Ac_TargetLufs" class="form-control form-control-sm" style="max-width: 140px;"></td>
+          </tr>
+          <tr>
+            <th>Target true peak (dBTP)<br><small class="text-muted">Ceiling for true peaks. -2 dBTP is conservative; -1 dBTP is broadcast-standard tighter.</small></th>
+            <td><input type="number" step="0.1" id="Ac_TargetTpDbtp" class="form-control form-control-sm" style="max-width: 140px;"></td>
+          </tr>
+          <tr>
+            <th>Max overshoot for adaptive fallback (dB)<br><small class="text-muted">When LINEAR loudnorm would clip by less than this, fall to ADAPTIVE silently (limiter absorbs the overshoot).</small></th>
+            <td><input type="number" step="0.1" min="0" id="Ac_AdaptiveCap" class="form-control form-control-sm" style="max-width: 140px;"></td>
+          </tr>
+          <tr>
+            <th>Max overshoot for review (dB)<br><small class="text-muted">Beyond this overshoot, file defers to the operator review queue (true outliers).</small></th>
+            <td><input type="number" step="0.1" min="0" id="Ac_ReviewCap" class="form-control form-control-sm" style="max-width: 140px;"></td>
+          </tr>
+          <tr>
+            <th>Acceptable audio codecs (CSV)<br><small class="text-muted">Source codecs allowed. Anything else triggers transcode for codec.</small></th>
+            <td><input type="text" id="Ac_Codecs" class="form-control form-control-sm" style="max-width: 340px;"></td>
+          </tr>
+          <tr>
+            <th>Enable Dialog Boost track<br><small class="text-muted">Emit a second LRA-compressed track and flag it as the container default.</small></th>
+            <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Ac_EnableDialog"></div></td>
+          </tr>
+          <tr>
+            <th>Default to English when multiple languages present<br><small class="text-muted">RankPreferredDefaultPolicy. When false, the source's disposition.default wins.</small></th>
+            <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Ac_EnableEnglish"></div></td>
+          </tr>
+          <tr>
+            <th>Preferred default language rank (CSV)<br><small class="text-muted">Ordered list. First match in source wins. Default 'eng,en'.</small></th>
+            <td><input type="text" id="Ac_LangRank" class="form-control form-control-sm" style="max-width: 200px;"></td>
+          </tr>
+          <tr>
+            <th>Enable speech-based language detection<br><small class="text-muted">When source has no language tags, run a VAD-based detector. Slower probe; off by default.</small></th>
+            <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Ac_EnableSpeech"></div></td>
+          </tr>
+          <tr>
+            <th></th>
+            <td>
+              <button class="btn btn-sm btn-primary" id="Ac_Save">Save Audio rules</button>
+              <span id="Ac_Msg" class="ms-2 small"></span>
+              <div id="Ac_Backfill" class="mt-2 small text-muted"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
     <div class="tab-pane fade" id="video-pane" role="tabpanel">
       <h5 class="mb-3">Video Compliance Rules</h5>
@@ -239,9 +288,46 @@ async function PollBackfill(Url, ElId) {
     if (J.Success) RenderBackfillStatus(document.getElementById(ElId), J.Data);
   } catch (e) { /* ignore */ }
 }
+async function LoadAudioRules() {
+  const R = await fetch('/api/AudioNormalization/Rules');
+  const J = await R.json();
+  if (!J.Success) { document.getElementById('Ac_Msg').textContent = 'Load failed: ' + J.Message; return; }
+  const D = J.Data;
+  document.getElementById('Ac_TargetLufs').value = D.TargetIntegratedLufs;
+  document.getElementById('Ac_TargetTpDbtp').value = D.TargetTruePeakDbtp;
+  document.getElementById('Ac_AdaptiveCap').value = D.MaxOvershootDbForAdaptiveFallback;
+  document.getElementById('Ac_ReviewCap').value = D.MaxOvershootDbForReview;
+  document.getElementById('Ac_Codecs').value = D.AcceptableAudioCodecsCsv || '';
+  document.getElementById('Ac_EnableDialog').checked = !!D.EnableDialogBoostTrack;
+  document.getElementById('Ac_EnableEnglish').checked = !!D.EnableEnglishPreferredDefault;
+  document.getElementById('Ac_LangRank').value = D.PreferredDefaultLanguageRank || '';
+  document.getElementById('Ac_EnableSpeech').checked = !!D.EnableSpeechLanguageDetection;
+}
+async function SaveAudioRules() {
+  const Body = {
+    TargetIntegratedLufs: parseFloat(document.getElementById('Ac_TargetLufs').value),
+    TargetTruePeakDbtp: parseFloat(document.getElementById('Ac_TargetTpDbtp').value),
+    MaxOvershootDbForAdaptiveFallback: parseFloat(document.getElementById('Ac_AdaptiveCap').value),
+    MaxOvershootDbForReview: parseFloat(document.getElementById('Ac_ReviewCap').value),
+    AcceptableAudioCodecsCsv: document.getElementById('Ac_Codecs').value,
+    EnableDialogBoostTrack: document.getElementById('Ac_EnableDialog').checked,
+    EnableEnglishPreferredDefault: document.getElementById('Ac_EnableEnglish').checked,
+    PreferredDefaultLanguageRank: document.getElementById('Ac_LangRank').value,
+    EnableSpeechLanguageDetection: document.getElementById('Ac_EnableSpeech').checked,
+  };
+  const R = await fetch('/api/AudioNormalization/Rules', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(Body) });
+  const J = await R.json();
+  document.getElementById('Ac_Msg').textContent = J.Success ? 'Saved.' : 'Save failed: ' + J.Message;
+  document.getElementById('Ac_Msg').className = 'ms-2 small ' + (J.Success ? 'text-success' : 'text-danger');
+}
+
+LoadAudioRules();
+document.getElementById('Ac_Save').addEventListener('click', SaveAudioRules);
+
 function StartBackfillPolling() {
   PollBackfill('/api/VideoEncoding/BackfillStatus', 'Vc_Backfill');
   PollBackfill('/api/ContainerFormat/BackfillStatus', 'Cc_Backfill');
+  PollBackfill('/api/AudioNormalization/Rules/BackfillStatus', 'Ac_Backfill');
 }
 StartBackfillPolling();
 setInterval(StartBackfillPolling, 2000);

@@ -1,9 +1,46 @@
 import json
+import time
 
 from flask import Blueprint, request, jsonify, render_template
 
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
+
+# directive: worker-runtime-state
+_AudioBackfillStatus = {'Running': False, 'Total': 0, 'Completed': 0, 'StartedAt': None, 'FinishedAt': None, 'DurationSec': None, 'LastError': None}
+
+
+# directive: worker-runtime-state
+def _SpawnAudioBackfill():
+    import threading
+    def _Run():
+        Status = _AudioBackfillStatus
+        Status['Running'] = True
+        Status['Completed'] = 0
+        Status['StartedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+        Status['FinishedAt'] = None
+        Status['DurationSec'] = None
+        Status['LastError'] = None
+        StartedAt = time.time()
+        try:
+            Rows = DatabaseService().ExecuteQuery("SELECT Id FROM MediaFiles")
+            Ids = [int(R['Id'] if 'Id' in R else R['id']) for R in (Rows or [])]
+            Status['Total'] = len(Ids)
+            from Features.AudioNormalization.AudioVertical import AudioVertical
+            Vertical = AudioVertical()
+            ChunkSize = 500
+            for I in range(0, len(Ids), ChunkSize):
+                Vertical.RecomputeFor(Ids[I:I + ChunkSize])
+                Status['Completed'] = min(I + ChunkSize, len(Ids))
+            Status['FinishedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+            Status['DurationSec'] = round(time.time() - StartedAt, 2)
+            LoggingService.LogInfo(f"AudioVertical backfill complete for {len(Ids)} files in {Status['DurationSec']}s", 'AudioComplianceRulesUpdated', '_SpawnAudioBackfill')
+        except Exception as Ex:
+            Status['LastError'] = str(Ex)
+            LoggingService.LogException("AudioVertical backfill failed", Ex, 'AudioComplianceRulesUpdated', '_SpawnAudioBackfill')
+        finally:
+            Status['Running'] = False
+    threading.Thread(target=_Run, daemon=True, name='AudioBackfill').start()
 from Features.AudioNormalization.AudioPolicyAdmissionGate import AudioPolicyAdmissionGate
 from Features.AudioNormalization.Repositories.AudioNormalizationConfigRepository import (
     AudioNormalizationConfigRepository,
@@ -223,6 +260,69 @@ class AudioNormalizationController:
                 LoggingService.LogException("Failed snapshot trigger", Ex,
                                             "AudioNormalizationController", "snapshot_policies")
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
+
+        # directive: worker-runtime-state
+        @self.Blueprint.route('/api/AudioNormalization/Rules', methods=['GET'])
+        def get_audio_rules():
+            Rows = DatabaseService().ExecuteQuery(
+                "SELECT Id, TargetIntegratedLufs, TargetTruePeakDbtp, "
+                "MaxOvershootDbForAdaptiveFallback, MaxOvershootDbForReview, "
+                "AcceptableAudioCodecsCsv, EnableDialogBoostTrack, "
+                "EnableEnglishPreferredDefault, PreferredDefaultLanguageRank, "
+                "EnableSpeechLanguageDetection, LastUpdated "
+                "FROM AudioComplianceRules ORDER BY Id LIMIT 1"
+            )
+            if not Rows:
+                return jsonify({'Success': False, 'Message': 'AudioComplianceRules has no rows -- migration not applied'}), 500
+            return jsonify({'Success': True, 'Data': Rows[0]}), 200
+
+        # directive: worker-runtime-state
+        @self.Blueprint.route('/api/AudioNormalization/Rules', methods=['PUT'])
+        def update_audio_rules():
+            Body = request.get_json(silent=True) or {}
+            try:
+                Lufs = float(Body.get('TargetIntegratedLufs'))
+                TpDbtp = float(Body.get('TargetTruePeakDbtp'))
+                AdaptiveCap = float(Body.get('MaxOvershootDbForAdaptiveFallback'))
+                ReviewCap = float(Body.get('MaxOvershootDbForReview'))
+                Codecs = (Body.get('AcceptableAudioCodecsCsv') or '').strip()
+                EnableDialog = bool(Body.get('EnableDialogBoostTrack'))
+                EnableEnglish = bool(Body.get('EnableEnglishPreferredDefault'))
+                LangRank = (Body.get('PreferredDefaultLanguageRank') or '').strip()
+                EnableSpeech = bool(Body.get('EnableSpeechLanguageDetection'))
+            except (TypeError, ValueError):
+                return jsonify({'Success': False, 'Message': 'Body field had wrong type'}), 400
+            if not Codecs:
+                return jsonify({'Success': False, 'Message': 'AcceptableAudioCodecsCsv is required'}), 400
+            if not LangRank:
+                return jsonify({'Success': False, 'Message': 'PreferredDefaultLanguageRank is required'}), 400
+            if AdaptiveCap <= 0 or ReviewCap <= 0:
+                return jsonify({'Success': False, 'Message': 'Overshoot caps must be positive numbers'}), 400
+            if ReviewCap <= AdaptiveCap:
+                return jsonify({'Success': False, 'Message': 'MaxOvershootDbForReview must be > MaxOvershootDbForAdaptiveFallback'}), 400
+            if TpDbtp > 0:
+                return jsonify({'Success': False, 'Message': 'TargetTruePeakDbtp must be <= 0 dBTP'}), 400
+            DatabaseService().ExecuteNonQuery(
+                "UPDATE AudioComplianceRules SET "
+                "TargetIntegratedLufs=%s, TargetTruePeakDbtp=%s, "
+                "MaxOvershootDbForAdaptiveFallback=%s, MaxOvershootDbForReview=%s, "
+                "AcceptableAudioCodecsCsv=%s, EnableDialogBoostTrack=%s, "
+                "EnableEnglishPreferredDefault=%s, PreferredDefaultLanguageRank=%s, "
+                "EnableSpeechLanguageDetection=%s, LastUpdated=NOW() "
+                "WHERE Id = 1",
+                (Lufs, TpDbtp, AdaptiveCap, ReviewCap, Codecs, EnableDialog, EnableEnglish, LangRank, EnableSpeech),
+            )
+            LoggingService.LogInfo(
+                f"AudioComplianceRules updated: Lufs={Lufs} TpDbtp={TpDbtp} adaptiveCap={AdaptiveCap} reviewCap={ReviewCap} codecs={Codecs!r} dialog={EnableDialog} english={EnableEnglish} rank={LangRank!r} speech={EnableSpeech}",
+                'AudioNormalizationController', 'update_audio_rules',
+            )
+            _SpawnAudioBackfill()
+            return jsonify({'Success': True, 'Message': 'Saved; library recompute kicked off in background.'}), 200
+
+        # directive: worker-runtime-state
+        @self.Blueprint.route('/api/AudioNormalization/Rules/BackfillStatus', methods=['GET'])
+        def audio_rules_backfill_status():
+            return jsonify({'Success': True, 'Data': dict(_AudioBackfillStatus)}), 200
 
 
 # directive: perfect-audio-vertical | # see perfect-audio-vertical.C10
