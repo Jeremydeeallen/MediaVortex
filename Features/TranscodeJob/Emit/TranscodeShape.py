@@ -4,6 +4,7 @@ from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalDirname
 from Features.AudioNormalization.AudioFilterEmitter import AudioFilterEmitter
 from Features.AudioNormalization.AudioPolicyResolver import AudioPolicyResolver
+from Features.AudioNormalization.Policies.IAudioCodecPolicy import EAC3OrPassthroughCodecPolicy
 from Features.AudioNormalization.Services.AudioStreamProbe import AudioStreamProbe
 from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
 from Features.TranscodeJob.Emit.CommandSpec import CommandSpec
@@ -14,11 +15,10 @@ from Features.TranscodeJob.Emit.EncodeShape import EncodeShape
 class TranscodeShape(EncodeShape):
     """Builds ffmpeg argv for full video re-encode jobs; audio goes through AudioFilterEmitter (no profile-pinned override)."""
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
+    # directive: audio-pipeline-fail-loud | # see audio-normalization.C8
     def __init__(self, ResolutionCalculator, OutputFilenameBuilder, CodecParameterAssembler,
                  AudioCodecArgsBuilder, VideoFilterBuilder, MediaProbeAdapter,
-                 Resolver=None, Emitter=None, StreamProbe=None):
-        """Inject collaborators; audio path goes through Resolver + Emitter; StreamProbe enumerates per-language audio streams."""
+                 Resolver=None, Emitter=None, StreamProbe=None, CodecPolicy=None):
         self.ResolutionCalculator = ResolutionCalculator
         self.OutputFilenameBuilder = OutputFilenameBuilder
         self.CodecParameterAssembler = CodecParameterAssembler
@@ -28,6 +28,7 @@ class TranscodeShape(EncodeShape):
         self.Resolver = Resolver or AudioPolicyResolver()
         self.Emitter = Emitter or AudioFilterEmitter(ProfileResolver=EffectiveProfileResolver())
         self.StreamProbe = StreamProbe or AudioStreamProbe()
+        self.CodecPolicy = CodecPolicy or EAC3OrPassthroughCodecPolicy()
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C12
     def Build(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[CommandSpec]:
@@ -84,7 +85,11 @@ class TranscodeShape(EncodeShape):
             SourceStreams = self.StreamProbe.Probe(CommandData.get('InputPath')) or None
             Blocks = self.Emitter.EmitTracks(MediaFile, Policy, AudioStreams=SourceStreams) if Policy else []
             if not Blocks:
-                CommandParts.extend(['-map', f'0:a:{AudioStreamIndex}', '-c:a', 'copy'])
+                SourceCodec = getattr(MediaFile, 'AudioCodec', None)
+                AudioCorruptSuspect = bool(getattr(MediaFile, 'AudioCorruptSuspect', False))
+                CodecResult = self.CodecPolicy.Decide(SourceCodec, ForceReencode=False, AudioCorruptSuspect=AudioCorruptSuspect)
+                Plan = CodecResult.Plan
+                CommandParts.extend(['-map', f'0:a:{AudioStreamIndex}', '-c:a', Plan['Codec']])
             else:
                 for Block in Blocks:
                     CommandParts.extend(Block.MapArgs)

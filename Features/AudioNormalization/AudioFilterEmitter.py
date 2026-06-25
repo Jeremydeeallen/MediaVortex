@@ -9,6 +9,7 @@ from Features.AudioNormalization.AudioStrategyClassifier import (
     STRATEGY_SKIP,
     STRATEGY_REVIEW,
 )
+from Features.AudioNormalization.AudioDispositionResolver import AudioDispositionResolver
 from Features.AudioNormalization.DialNormHandler import DialNormHandler
 from Features.AudioNormalization.LanguageDetector import LanguageDetector, KEEP_ALL
 
@@ -113,13 +114,13 @@ def _BuildLoudnormFilter(MediaFile, Strategy):
 class AudioFilterEmitter:
     """The seam: every shape consumes EmitTracks(MediaFile, Policy) -> List[TrackBlock]."""
 
-    # directive: worker-runtime-state | # see audio-normalization.C8
-    def __init__(self, Classifier=None, LanguageDetectorInstance=None, DialNormHandlerInstance=None, ProfileResolver=None):
-        """Constructor injection per SOLID DIP; default-constructs each collaborator when omitted."""
+    # directive: audio-pipeline-fail-loud | # see audio-normalization.C8
+    def __init__(self, Classifier=None, LanguageDetectorInstance=None, DialNormHandlerInstance=None, ProfileResolver=None, DispositionResolver=None):
         self.Classifier = Classifier or AudioStrategyClassifier()
         self.LanguageDetector = LanguageDetectorInstance or LanguageDetector()
         self.DialNormHandler = DialNormHandlerInstance or DialNormHandler()
         self.ProfileResolver = ProfileResolver
+        self.DispositionResolver = DispositionResolver or AudioDispositionResolver()
 
     # directive: worker-runtime-state | # see audio-normalization.C8
     def EmitTracks(self, MediaFile, Policy, AudioStreams=None, LibraryDefault=None):
@@ -152,8 +153,7 @@ class AudioFilterEmitter:
 
         for TrackConfig in EmitTrackConfigs:
             Strategy = self.Classifier.ClassifyTrack(MediaFile, TrackConfig, Policy)
-            if Strategy.Strategy == STRATEGY_REVIEW:
-                continue
+            IsReview = Strategy.Strategy == STRATEGY_REVIEW
 
             for Stream in AudioStreams:
                 StreamIdx = Stream.get('index')
@@ -161,16 +161,52 @@ class AudioFilterEmitter:
                 if not _LanguageMatches(TrackConfig, StreamLanguage):
                     continue
 
-                Block = self._BuildBlockForTrack(
-                    MediaFile, TrackConfig, Strategy, Stream, StreamLanguage,
-                    OutputIndex, len(EmitTrackConfigs),
-                    IsDefaultLanguage=(StreamLanguage == DefaultLanguage),
-                )
+                IsDefaultLanguage = (StreamLanguage == DefaultLanguage)
+                if IsReview:
+                    Block = self._BuildReviewFallbackBlock(
+                        MediaFile, TrackConfig, Stream, StreamLanguage, OutputIndex, IsDefaultLanguage,
+                    )
+                else:
+                    Block = self._BuildBlockForTrack(
+                        MediaFile, TrackConfig, Strategy, Stream, StreamLanguage,
+                        OutputIndex, len(EmitTrackConfigs),
+                        IsDefaultLanguage=IsDefaultLanguage,
+                    )
                 if Block is not None:
                     Blocks.append(Block)
                     OutputIndex += 1
 
         return Blocks
+
+    # directive: audio-pipeline-fail-loud | # see audio-normalization.C24
+    def _BuildReviewFallbackBlock(self, MediaFile, TrackConfig, Stream, Language, OutputIndex, IsDefaultLanguage):
+        StreamIdx = Stream.get('index', 0)
+        Label = TrackConfig.get('Label') or 'Track'
+        Disp = self.DispositionResolver.ResolveForTrack(
+            TrackIndex=OutputIndex,
+            ProfileCeilingKbps=getattr(self, '_ProfileBitrateCeiling', None),
+            SourceBitrateKbps=_GetField(MediaFile, 'AudioBitrateKbps'),
+            ConfigBitrateKbps=TrackConfig.get('Bitrate'),
+            SourceCodec=_GetField(MediaFile, 'AudioCodec'),
+            ForceReencode=False,
+            AudioCorruptSuspect=bool(_GetField(MediaFile, 'AudioCorruptSuspect')),
+            IsDefault=IsDefaultLanguage,
+        )
+        Block = TrackBlock(
+            Label=Label,
+            Language=Language,
+            Strategy='review_resolved',
+            MapArgs=['-map', f'0:a:{StreamIdx}'],
+        )
+        if Disp.Mode == 'reencode':
+            Block.CodecArgs = [f'-c:a:{OutputIndex}', Disp.Codec]
+            if Disp.BitrateKbps:
+                Block.CodecArgs += [f'-b:a:{OutputIndex}', f'{int(Disp.BitrateKbps)}k']
+        else:
+            Block.CodecArgs = [f'-c:a:{OutputIndex}', 'copy']
+        Block.MetadataArgs = self._BuildMetadataArgs(Language, Label, OutputIndex)
+        Block.DispositionArgs = self._BuildDispositionArgs(TrackConfig, OutputIndex, IsDefaultLanguage=IsDefaultLanguage)
+        return Block
 
     # directive: audio-vertical-live-evidence | # see audio-normalization.L1
     def _PickDefaultLanguage(self, AudioStreams, StreamLanguageMap, LibraryDefault):
