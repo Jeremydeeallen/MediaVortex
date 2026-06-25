@@ -98,7 +98,11 @@
           </tr>
           <tr>
             <th></th>
-            <td><button class="btn btn-sm btn-primary" id="Vc_Save">Save Video rules</button> <span id="Vc_Msg" class="ms-2 small"></span></td>
+            <td>
+              <button class="btn btn-sm btn-primary" id="Vc_Save">Save Video rules</button>
+              <span id="Vc_Msg" class="ms-2 small"></span>
+              <div id="Vc_Backfill" class="mt-2 small text-muted"></div>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -118,7 +122,11 @@
           </tr>
           <tr>
             <th></th>
-            <td><button class="btn btn-sm btn-primary" id="Cc_Save">Save Container rules</button> <span id="Cc_Msg" class="ms-2 small"></span></td>
+            <td>
+              <button class="btn btn-sm btn-primary" id="Cc_Save">Save Container rules</button>
+              <span id="Cc_Msg" class="ms-2 small"></span>
+              <div id="Cc_Backfill" class="mt-2 small text-muted"></div>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -201,5 +209,35 @@ LoadVideoRules();
 LoadContainerRules();
 document.getElementById('Vc_Save').addEventListener('click', SaveVideoRules);
 document.getElementById('Cc_Save').addEventListener('click', SaveContainerRules);
+
+function RenderBackfillStatus(El, S) {
+  if (S.Running) {
+    const pct = S.Total ? Math.floor((S.Completed / S.Total) * 100) : 0;
+    El.textContent = `Backfill running: ${S.Completed.toLocaleString()} / ${S.Total.toLocaleString()} (${pct}%) -- started ${S.StartedAt}`;
+    El.className = 'mt-2 small text-primary';
+  } else if (S.LastError) {
+    El.textContent = `Backfill failed: ${S.LastError}`;
+    El.className = 'mt-2 small text-danger';
+  } else if (S.FinishedAt) {
+    El.textContent = `Backfill complete: ${S.Total.toLocaleString()} files in ${S.DurationSec}s (finished ${S.FinishedAt}).`;
+    El.className = 'mt-2 small text-success';
+  } else {
+    El.textContent = 'No backfill has run yet this session.';
+    El.className = 'mt-2 small text-muted';
+  }
+}
+async function PollBackfill(Url, ElId) {
+  try {
+    const R = await fetch(Url);
+    const J = await R.json();
+    if (J.Success) RenderBackfillStatus(document.getElementById(ElId), J.Data);
+  } catch (e) { /* ignore */ }
+}
+function StartBackfillPolling() {
+  PollBackfill('/api/VideoEncoding/BackfillStatus', 'Vc_Backfill');
+  PollBackfill('/api/ContainerFormat/BackfillStatus', 'Cc_Backfill');
+}
+StartBackfillPolling();
+setInterval(StartBackfillPolling, 2000);
 </script>
 {% endblock %}

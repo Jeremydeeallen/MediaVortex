@@ -1,3 +1,4 @@
+import time
 from flask import Blueprint, jsonify, request
 
 from Core.Database.DatabaseService import DatabaseService
@@ -7,6 +8,9 @@ from Core.Logging.LoggingService import LoggingService
 VideoEncodingBlueprint = Blueprint('VideoEncoding', __name__, url_prefix='/api/VideoEncoding')
 
 _Db = DatabaseService()
+
+# directive: worker-runtime-state
+_BackfillStatus = {'Running': False, 'Total': 0, 'Completed': 0, 'StartedAt': None, 'FinishedAt': None, 'DurationSec': None, 'LastError': None}
 
 
 # directive: compliance-tabbed-ui
@@ -47,19 +51,43 @@ def UpdateRules():
 
 
 # directive: worker-runtime-state
+@VideoEncodingBlueprint.route('/BackfillStatus', methods=['GET'])
+def GetBackfillStatus():
+    return jsonify({'Success': True, 'Data': dict(_BackfillStatus)}), 200
+
+
+# directive: worker-runtime-state
 def _SpawnBackfill(Which: str):
     import threading
     def _Run():
+        Status = _BackfillStatus
+        Status['Running'] = True
+        Status['Completed'] = 0
+        Status['StartedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+        Status['FinishedAt'] = None
+        Status['DurationSec'] = None
+        Status['LastError'] = None
+        StartedAt = time.time()
         try:
             Rows = DatabaseService().ExecuteQuery("SELECT Id FROM MediaFiles")
             Ids = [int(R['Id'] if 'Id' in R else R['id']) for R in (Rows or [])]
+            Status['Total'] = len(Ids)
             if Which == 'Video':
                 from Features.VideoEncoding.VideoVertical import VideoVertical
-                VideoVertical().RecomputeFor(Ids)
-            elif Which == 'Container':
+                Vertical = VideoVertical()
+            else:
                 from Features.ContainerFormat.ContainerVertical import ContainerVertical
-                ContainerVertical().RecomputeFor(Ids)
-            LoggingService.LogInfo(f"{Which}Vertical backfill complete for {len(Ids)} files", 'ComplianceRulesUpdated', '_SpawnBackfill')
+                Vertical = ContainerVertical()
+            ChunkSize = 500
+            for I in range(0, len(Ids), ChunkSize):
+                Vertical.RecomputeFor(Ids[I:I + ChunkSize])
+                Status['Completed'] = min(I + ChunkSize, len(Ids))
+            Status['FinishedAt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+            Status['DurationSec'] = round(time.time() - StartedAt, 2)
+            LoggingService.LogInfo(f"{Which}Vertical backfill complete for {len(Ids)} files in {Status['DurationSec']}s", 'ComplianceRulesUpdated', '_SpawnBackfill')
         except Exception as Ex:
+            Status['LastError'] = str(Ex)
             LoggingService.LogException(f"{Which}Vertical backfill failed", Ex, 'ComplianceRulesUpdated', '_SpawnBackfill')
+        finally:
+            Status['Running'] = False
     threading.Thread(target=_Run, daemon=True, name=f'{Which}Backfill').start()
