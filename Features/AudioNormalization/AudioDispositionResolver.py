@@ -60,11 +60,7 @@ class AudioDispositionResolver:
     ) -> AudioTrackDisposition:
         Verdicts = []
 
-        CodecResult = self.CodecPolicy.Decide(
-            SourceCodec, ForceReencode, AudioCorruptSuspect,
-            ProfileCeilingKbps=ProfileCeilingKbps,
-            SourceBitrateKbps=SourceBitrateKbps,
-        )
+        CodecResult = self.CodecPolicy.Decide(SourceCodec, ForceReencode, AudioCorruptSuspect)
         Verdicts.append(self._VerdictRow(TrackIndex, CodecResult))
         if isinstance(CodecResult, Reject):
             raise AudioPolicyUnresolvedError(CodecResult.PolicyName, CodecResult.Reason, TrackIndex)

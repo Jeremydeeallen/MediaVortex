@@ -87,17 +87,9 @@ class TranscodeShape(EncodeShape):
             if not Blocks:
                 SourceCodec = getattr(MediaFile, 'AudioCodec', None)
                 AudioCorruptSuspect = bool(getattr(MediaFile, 'AudioCorruptSuspect', False))
-                SourceAudioKbps = getattr(MediaFile, 'AudioBitrateKbps', None)
-                ProfileAudioCeiling = ProfileSettings.get('TargetAudioKbps')
-                # directive: worker-runtime-state
-                CodecResult = self.CodecPolicy.Decide(
-                    SourceCodec, ForceReencode=False, AudioCorruptSuspect=AudioCorruptSuspect,
-                    ProfileCeilingKbps=ProfileAudioCeiling, SourceBitrateKbps=SourceAudioKbps,
-                )
+                CodecResult = self.CodecPolicy.Decide(SourceCodec, ForceReencode=False, AudioCorruptSuspect=AudioCorruptSuspect)
                 Plan = CodecResult.Plan
                 CommandParts.extend(['-map', f'0:a:{AudioStreamIndex}', '-c:a', Plan['Codec']])
-                if Plan['Mode'] == 'reencode' and ProfileAudioCeiling:
-                    CommandParts.extend([f'-b:a', f'{int(ProfileAudioCeiling)}k'])
             else:
                 for Block in Blocks:
                     CommandParts.extend(Block.MapArgs)
