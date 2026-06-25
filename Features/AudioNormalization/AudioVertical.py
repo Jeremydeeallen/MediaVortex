@@ -21,7 +21,17 @@ class AudioVertical:
         self._RepoMgr = RepoMgr or DatabaseManager()
         self._Resolver = ProfileResolver or EffectiveProfileResolver()
 
-    # directive: compliance-symmetry
+    # directive: worker-runtime-state
+    def _LoadAcceptableAudioCodecs(self) -> list:
+        Rows = self._Db.ExecuteQuery(
+            "SELECT AcceptableAudioCodecsCsv FROM ContainerComplianceRules ORDER BY Id LIMIT 1"
+        )
+        if not Rows:
+            return []
+        Csv = (Rows[0].get('AcceptableAudioCodecsCsv') or Rows[0].get('acceptableaudiocodecscsv') or '').strip()
+        return [C.strip().lower() for C in Csv.split(',') if C.strip()]
+
+    # directive: worker-runtime-state
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
         if getattr(Mf, 'AudioCorruptSuspect', None) is True:
             return (None, 'audio_corrupt_suspect')
@@ -37,8 +47,8 @@ class AudioVertical:
             return (None, 'no_effective_profile')
 
         SrcCodec = (getattr(Mf, 'AudioCodec', None) or '').lower()
-        TgtCodec = (Profile.AudioCodec or '').lower()
-        if TgtCodec and SrcCodec and SrcCodec != TgtCodec:
+        AllowedCodecs = self._LoadAcceptableAudioCodecs()
+        if SrcCodec and AllowedCodecs and SrcCodec not in AllowedCodecs:
             return (False, f'codec:{SrcCodec}')
 
         if Profile.TargetAudioKbps is not None:
