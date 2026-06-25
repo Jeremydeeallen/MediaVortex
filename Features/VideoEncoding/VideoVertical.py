@@ -11,6 +11,9 @@ from Features.Profiles.EffectiveProfile import EffectiveProfile
 # directive: compliance-symmetry
 _BITRATE_ROUNDING_TOLERANCE = 1.05
 
+# directive: worker-runtime-state
+_PIXEL_COUNTS = {'480p': 345600, '720p': 921600, '1080p': 2073600, '2160p': 8294400}
+
 
 # directive: compliance-symmetry
 class VideoVertical:
@@ -22,29 +25,50 @@ class VideoVertical:
         self._Resolver = ProfileResolver or EffectiveProfileResolver()
         self._TierRegistry = TierRegistry or ResolutionTierRegistry()
 
-    # directive: compliance-symmetry
+    # directive: worker-runtime-state
+    def _LoadRules(self):
+        Rows = self._Db.ExecuteQuery(
+            "SELECT AcceptableVideoCodecsCsv, MinSourceBpp, ResolutionExceedsProfileTarget "
+            "FROM VideoComplianceRules ORDER BY Id LIMIT 1"
+        )
+        if not Rows:
+            raise RuntimeError('VideoComplianceRules has no rows -- migration not applied')
+        R = Rows[0]
+        Csv = (R.get('AcceptableVideoCodecsCsv') or R.get('acceptablevideocodecscsv') or '').strip()
+        Allowed = [C.strip().lower() for C in Csv.split(',') if C.strip()]
+        MinBpp = R.get('MinSourceBpp') if 'MinSourceBpp' in R else R.get('minsourcebpp')
+        ResExceeds = R.get('ResolutionExceedsProfileTarget') if 'ResolutionExceedsProfileTarget' in R else R.get('resolutionexceedsprofiletarget')
+        return Allowed, (float(MinBpp) if MinBpp is not None else 0.0), bool(ResExceeds)
+
+    # directive: worker-runtime-state
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
+        AllowedCodecs, MinBpp, ResExceeds = self._LoadRules()
+
         Profile = self._Resolver.Resolve(Mf)
         if Profile is None:
             return (None, 'no_effective_profile')
-        if Profile.StreamCodecName is None:
-            return (None, 'no_profile_stream_codec')
-        if Profile.TargetResolutionCategory is None:
-            return (None, 'no_profile_resolution')
 
         SrcCodec = (getattr(Mf, 'Codec', None) or '').lower()
-        TgtCodec = (Profile.StreamCodecName or '').lower()
-        if SrcCodec and SrcCodec != TgtCodec:
+        if SrcCodec and AllowedCodecs and SrcCodec not in AllowedCodecs:
             return (False, f'codec:{SrcCodec}')
 
-        SrcTier = self._TierRegistry.FromCategory(getattr(Mf, 'ResolutionCategory', None))
-        TgtTier = Profile.TargetResolutionCategory
+        if MinBpp > 0:
+            SrcKbps = getattr(Mf, 'VideoBitrateKbps', None)
+            ResCat = getattr(Mf, 'ResolutionCategory', None)
+            Pixels = _PIXEL_COUNTS.get((ResCat or '').lower())
+            if SrcKbps and Pixels:
+                Bpp = (float(SrcKbps) * 1000.0) / (Pixels * 24.0)
+                if Bpp < MinBpp:
+                    return (True, 'efficient_bpp_override')
 
-        if SrcTier is not None:
-            if SrcTier.Rank > TgtTier.Rank:
-                return (False, f'resolution:{SrcTier.Name}')
-            if SrcTier.Rank < TgtTier.Rank and not Profile.AllowUpscale:
-                return (True, 'upscale_prevented')
+        if ResExceeds and Profile.TargetResolutionCategory is not None:
+            SrcTier = self._TierRegistry.FromCategory(getattr(Mf, 'ResolutionCategory', None))
+            TgtTier = Profile.TargetResolutionCategory
+            if SrcTier is not None:
+                if SrcTier.Rank > TgtTier.Rank:
+                    return (False, f'resolution:{SrcTier.Name}')
+                if SrcTier.Rank < TgtTier.Rank and not Profile.AllowUpscale:
+                    return (True, 'upscale_prevented')
 
         if Profile.TargetVideoKbps is not None:
             SrcKbps = getattr(Mf, 'VideoBitrateKbps', None)
