@@ -53,15 +53,17 @@ The script runs these in order and exits non-zero on the first failure. Each che
 
 ## Build and Deploy (`ST2`)
 
-Four steps. All happen via SSH from the dev workstation. The script streams output of each step.
+Five steps. All happen via SSH from the dev workstation. The script streams output of each step.
 
 ```bash
 # 1. Sync source tree to target (tar-over-ssh, filtered by .deployignore)
 py deploy/SyncSource.py root@<ip> /tmp/mediavortex-build
 
-# 2. Build the worker image on the target
+# 2. Build the worker image on the target (FFmpeg pinned to deploy/ffmpeg-release.txt)
 ssh root@<ip> 'docker build \
     --build-arg COMMIT_SHA=$(git -C /c/Code/MediaVortex rev-parse HEAD) \
+    --build-arg FFMPEG_TAG=<from deploy/ffmpeg-release.txt> \
+    --build-arg FFMPEG_ASSET=<from deploy/ffmpeg-release.txt> \
     -t mediavortex-worker:latest \
     -f /tmp/mediavortex-build/deploy/Dockerfile /tmp/mediavortex-build/'
 
@@ -69,13 +71,44 @@ ssh root@<ip> 'docker build \
 scp deploy/compose-templates/<friendly>.yml root@<ip>:/opt/mediavortex/docker-compose.yml
 ssh root@<ip> 'cd /opt/mediavortex && docker compose up -d'
 
-# 4. Clean up build source
+# 4. Post-deploy NVENC probe: encode 1 second of testsrc with av1_nvenc inside the
+#    first container. Skipped on hosts where nvidia-smi is absent (Larry).
+ssh root@<ip> 'docker exec mediavortex-worker-1-1 ffmpeg -hide_banner -loglevel error \
+    -f lavfi -i testsrc=duration=1:size=128x128:rate=30 -c:v av1_nvenc -t 1 -f null -'
+
+# 5. Clean up build source
 ssh root@<ip> 'rm -rf /tmp/mediavortex-build'
 ```
 
 For LXC hosts (Larry): `/opt/mediavortex/` already exists -- Terraform created it during host provisioning. For bare-metal: the script creates it on first run.
 
-For code-only redeploys: same four steps. The FFmpeg static download is cached in a Docker build layer; only the `COPY . /app` layer rebuilds. Total time on a warm host: ~30-60 seconds.
+For code-only redeploys: same five steps. The FFmpeg static download is cached in a Docker build layer keyed on `FFMPEG_TAG` + `FFMPEG_ASSET`; only the `COPY . /app` layer rebuilds. Total time on a warm host: ~30-60 seconds.
+
+### NVENC + ffmpeg pinning (host-driver coupling)
+
+The Dockerfile no longer pulls BtbN's floating `latest` tag. `deploy/ffmpeg-release.txt` pins both the release tag AND the asset filename, e.g.:
+
+```
+TAG=autobuild-2026-06-23-13-52
+ASSET=ffmpeg-n7.1.5-linux64-gpl-7.1.tar.xz
+```
+
+Why pinned: BtbN's master builds occasionally bump the required NVENC API version (e.g. 13.1 needs Nvidia driver >= 610.00). A routine code redeploy that picks up an ffmpeg that needs a newer driver than the host has silently breaks every `av1_nvenc` transcode with exit 218. Pinning both the tag and the asset filename makes builds reproducible; bumping ffmpeg is a deliberate two-step.
+
+Bumping ffmpeg:
+
+1. Pick a new BtbN tag + asset: `curl https://api.github.com/repos/BtbN/FFmpeg-Builds/releases?per_page=8`.
+2. Edit `deploy/ffmpeg-release.txt` to the new TAG= and ASSET= pair.
+3. `py deploy/deploy-linux-worker.py <host>`. The Step 4 NVENC probe encodes a synthetic frame with `av1_nvenc` inside the first container; if it fails (exit != 0), the deploy aborts with the real ffmpeg stderr (the "Driver does not support the required nvenc API version. Required: X.Y Found: A.B" line). Fix path: roll the pin back OR upgrade the host's Nvidia driver to the required version. Hosts without an Nvidia GPU (Larry) skip the probe and pass automatically.
+
+Driver / API matrix observed at deploy time (extend as new BtbN tags land):
+
+| BtbN tag | ffmpeg asset (n7.1 stable line) | NVENC API required | Min Nvidia driver |
+|---|---|---|---|
+| `autobuild-2026-06-23-13-52` | `ffmpeg-n7.1.5-linux64-gpl-7.1.tar.xz` | 13.0 | 580.00 (works on dot today) |
+| `latest` (any current master) | `ffmpeg-master-latest-linux64-gpl.tar.xz` | 13.1 | 610.00 |
+
+Source-of-truth for required driver: the actual ffmpeg stderr at probe time, NOT this table. Update the row only when probe results are recorded against a new tag.
 
 ## Post-Deploy Verification (`ST3`)
 

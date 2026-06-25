@@ -266,17 +266,58 @@ def _ResolveLocalHeadSha() -> str:
     return ""
 
 
+# directive: worker-runtime-state
+def _LoadFfmpegPin() -> tuple[str, str]:
+    PinFile = DeployDir / "ffmpeg-release.txt"
+    if not PinFile.exists():
+        raise SystemExit(f"deploy/ffmpeg-release.txt missing -- create it with TAG= and ASSET= lines")
+    Tag, Asset = "", ""
+    for Line in PinFile.read_text(encoding='utf-8').splitlines():
+        L = Line.strip()
+        if L.startswith('TAG='):
+            Tag = L.split('=', 1)[1].strip()
+        elif L.startswith('ASSET='):
+            Asset = L.split('=', 1)[1].strip()
+    if not Tag or not Asset:
+        raise SystemExit(f"deploy/ffmpeg-release.txt must contain both TAG=<release-tag> and ASSET=<filename> lines")
+    return Tag, Asset
+
+
+# directive: worker-runtime-state
 def StepDockerBuild(Target: str, Sha: str) -> bool:
-    """Build the worker image on the target. Passes COMMIT_SHA from dev workstation."""
-    BuildArg = f"--build-arg COMMIT_SHA={Sha}" if Sha else ""
+    """Build the worker image on the target. Passes COMMIT_SHA + pinned ffmpeg tag + asset."""
+    FfmpegTag, FfmpegAsset = _LoadFfmpegPin()
+    BuildArgs = [f"--build-arg FFMPEG_TAG={FfmpegTag}", f"--build-arg FFMPEG_ASSET={FfmpegAsset}"]
+    if Sha:
+        BuildArgs.append(f"--build-arg COMMIT_SHA={Sha}")
     Cmd = (
-        f"docker build {BuildArg} "
+        f"docker build {' '.join(BuildArgs)} "
         f"-t mediavortex-worker:latest "
         f"-f /tmp/mediavortex-build/deploy/Dockerfile "
         f"/tmp/mediavortex-build/"
     )
     R = _RunSsh(Target, Cmd, Timeout=1800, CaptureOutput=False)
     return R.returncode == 0
+
+
+# directive: worker-runtime-state
+def StepNvencProbe(Target: str, Friendly: str) -> tuple[bool, str]:
+    NvidiaCheck = _RunSsh(Target, "nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null || echo NO_NVIDIA", Timeout=10)
+    Out = (NvidiaCheck.stdout or '').strip()
+    if 'NO_NVIDIA' in Out or NvidiaCheck.returncode != 0 or not Out:
+        return (True, f"no Nvidia GPU on {Friendly}; av1_nvenc probe skipped")
+    Driver = Out.split('\n')[0].strip()
+    Container = f"mediavortex-worker-1-1"
+    ProbeCmd = (
+        f"docker exec {Container} ffmpeg -hide_banner -loglevel error "
+        f"-f lavfi -i testsrc=duration=1:size=128x128:rate=30 -c:v av1_nvenc -t 1 -f null - "
+        f"2>&1 | head -20"
+    )
+    R = _RunSsh(Target, ProbeCmd, Timeout=30)
+    if R.returncode == 0:
+        return (True, f"av1_nvenc initialized cleanly on {Friendly} (driver {Driver})")
+    Stderr = ((R.stdout or '') + (R.stderr or '')).strip()[:400]
+    return (False, f"av1_nvenc FAILED on {Friendly} (driver {Driver}). Upgrade host driver OR pick an older BtbN tag in deploy/ffmpeg-release.txt. stderr: {Stderr}")
 
 
 def StepPushCompose(Target: str, Friendly: str) -> bool:
@@ -474,7 +515,7 @@ def Main(Argv: Optional[list] = None) -> int:
               "Deploy refuses to stamp an unknown version.", file=sys.stderr)
         return 2
 
-    Total = 1 if Args.check else 7
+    Total = 1 if Args.check else 8
     print("Pre-flight:")
     Ok, Diag = StepPreflight(Friendly, Target)
     if not Ok:
@@ -518,18 +559,26 @@ def Main(Argv: Optional[list] = None) -> int:
         return 2
     _Status(5, Total, "docker compose up", "OK")
 
+    # directive: worker-runtime-state
+    NvOk, NvDetail = StepNvencProbe(Target, Friendly)
+    if NvOk:
+        _Status(6, Total, "nvenc probe", "OK", NvDetail)
+    else:
+        _Status(6, Total, "nvenc probe", "FAILED", NvDetail)
+        return 2
+
     if not StepCleanupBuild(Target):
-        _Status(6, Total, "cleanup build", "FAILED",
+        _Status(7, Total, "cleanup build", "FAILED",
                 "non-fatal; /tmp/mediavortex-build may persist")
     else:
-        _Status(6, Total, "cleanup build", "OK")
+        _Status(7, Total, "cleanup build", "OK")
 
     print("\nVerify:")
     Ok, Summary = StepVerifyWorkers(Friendly, Sha)
     if Ok:
-        _Status(7, Total, "workers online", "OK", Summary)
+        _Status(8, Total, "workers online", "OK", Summary)
         return 0
-    _Status(7, Total, "workers online", "FAILED", Summary)
+    _Status(8, Total, "workers online", "FAILED", Summary)
     return 3
 
 

@@ -1,10 +1,14 @@
 # MediaVortex WorkerService
 # Multi-stage build: FFmpeg static + Python app
 
-# --- Stage 1: FFmpeg static build (BtbN, latest SVT-AV1 2.x) ---
+# --- Stage 1: FFmpeg static build (BtbN, pinned tag + asset) ---
+# directive: worker-runtime-state
 FROM debian:bookworm-slim AS ffmpeg
+ARG FFMPEG_TAG
+ARG FFMPEG_ASSET
+RUN test -n "$FFMPEG_TAG" && test -n "$FFMPEG_ASSET" || (echo "FFMPEG_TAG and FFMPEG_ASSET must be passed; see deploy/ffmpeg-release.txt" >&2; exit 1)
 RUN apt-get update -qq && apt-get install -y -qq curl xz-utils > /dev/null
-RUN curl -sL https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz \
+RUN curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_TAG}/${FFMPEG_ASSET}" \
     | tar xJ --strip-components=1 -C /usr/local
 
 # --- Stage 2: Application ---
