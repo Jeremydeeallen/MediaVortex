@@ -2,7 +2,7 @@
 
 **Slug:** audio-pipeline-fail-loud
 **Set:** 2026-06-25
-**Status:** Active -- phase: NEEDS_STANDARDS_REVIEW
+**Status:** Active -- phase: IMPLEMENTING
 **Activated:** 2026-06-25 -- paused `worker-runtime-state` for cluster shipment (operator chose SOLID + DDD path over surgical patch)
 **Subsumes:** BUG-0066 (umbrella), BUG-0065 (LANGUAGE_DEFAULT instance), BUG-0068 (PROFILE_CEILING instance)
 
