@@ -1,6 +1,6 @@
 from typing import List, Dict, Any, Optional
 
-from Core.Database.DatabaseService import DatabaseService
+from Core.Database.DatabaseService import DatabaseService, CaseInsensitiveDict
 
 
 # directive: worker-runtime-state | # see admin-workers.C6
@@ -29,7 +29,8 @@ class AdminWorkersRepository:
         from Features.StuckJobDetection.HungEncodeDetector import IsHung
         Tiles = []
         for R in (Rows or []):
-            Tile = dict(R)
+            # directive: worker-runtime-state
+            Tile = CaseInsensitiveDict(R)
             Tile['IntentDiverges'] = _DeriveDivergence(
                 Tile.get('status'),
                 Tile.get('runtimestate'),
