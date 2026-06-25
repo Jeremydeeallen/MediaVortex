@@ -310,8 +310,8 @@ def StepNvencProbe(Target: str, Friendly: str) -> tuple[bool, str]:
     Container = f"mediavortex-worker-1-1"
     ProbeCmd = (
         f"docker exec {Container} ffmpeg -hide_banner -loglevel error "
-        f"-f lavfi -i testsrc=duration=1:size=128x128:rate=30 -c:v av1_nvenc -t 1 -f null - "
-        f"2>&1 | head -20"
+        f"-f lavfi -i testsrc=duration=1:size=320x240:rate=30 -pix_fmt yuv420p "
+        f"-c:v av1_nvenc -t 1 -f null - 2>&1"
     )
     R = _RunSsh(Target, ProbeCmd, Timeout=30)
     if R.returncode == 0:

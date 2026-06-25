@@ -90,8 +90,10 @@ The Dockerfile no longer pulls BtbN's floating `latest` tag. `deploy/ffmpeg-rele
 
 ```
 TAG=autobuild-2026-06-23-13-52
-ASSET=ffmpeg-n7.1.5-linux64-gpl-7.1.tar.xz
+ASSET=ffmpeg-n8.1.2-linux64-gpl-8.1.tar.xz
 ```
+
+(The `n7.1` line is too old to include `av1_nvenc`; use `n8.1` or later for AV1 NVENC encoders.)
 
 Why pinned: BtbN's master builds occasionally bump the required NVENC API version (e.g. 13.1 needs Nvidia driver >= 610.00). A routine code redeploy that picks up an ffmpeg that needs a newer driver than the host has silently breaks every `av1_nvenc` transcode with exit 218. Pinning both the tag and the asset filename makes builds reproducible; bumping ffmpeg is a deliberate two-step.
 
@@ -103,10 +105,11 @@ Bumping ffmpeg:
 
 Driver / API matrix observed at deploy time (extend as new BtbN tags land):
 
-| BtbN tag | ffmpeg asset (n7.1 stable line) | NVENC API required | Min Nvidia driver |
-|---|---|---|---|
-| `autobuild-2026-06-23-13-52` | `ffmpeg-n7.1.5-linux64-gpl-7.1.tar.xz` | 13.0 | 580.00 (works on dot today) |
-| `latest` (any current master) | `ffmpeg-master-latest-linux64-gpl.tar.xz` | 13.1 | 610.00 |
+| BtbN tag | ffmpeg asset | NVENC API required | Min Nvidia driver | av1_nvenc? | Smoke-tested on dot |
+|---|---|---|---|---|---|
+| `autobuild-2026-06-23-13-52` | `ffmpeg-n8.1.2-linux64-gpl-8.1.tar.xz` | works on 13.0 | works on 595.71 | yes | 2026-06-25 PASS |
+| `autobuild-2026-06-23-13-52` | `ffmpeg-n7.1.5-linux64-gpl-7.1.tar.xz` | -- | -- | **no** -- "Unknown encoder 'av1_nvenc'" | rejected |
+| `latest` (master, any current) | `ffmpeg-master-latest-linux64-gpl.tar.xz` | 13.1 | 610.00+ | yes | 2026-06-25 FAIL on dot (driver 595.71) |
 
 Source-of-truth for required driver: the actual ffmpeg stderr at probe time, NOT this table. Update the row only when probe results are recorded against a new tag.
 
