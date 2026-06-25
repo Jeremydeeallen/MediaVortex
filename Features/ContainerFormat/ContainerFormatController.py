@@ -36,4 +36,21 @@ def UpdateRules():
         (Containers, AudioCodecs),
     )
     LoggingService.LogInfo(f"ContainerComplianceRules updated: containers={Containers!r} audio={AudioCodecs!r}", 'ContainerFormatController', 'UpdateRules')
-    return jsonify({'Success': True, 'Message': 'Saved'}), 200
+    # directive: worker-runtime-state
+    _SpawnBackfill()
+    return jsonify({'Success': True, 'Message': 'Saved; library recompute kicked off in background.'}), 200
+
+
+# directive: worker-runtime-state
+def _SpawnBackfill():
+    import threading
+    def _Run():
+        try:
+            Rows = DatabaseService().ExecuteQuery("SELECT Id FROM MediaFiles")
+            Ids = [int(R['Id'] if 'Id' in R else R['id']) for R in (Rows or [])]
+            from Features.ContainerFormat.ContainerVertical import ContainerVertical
+            ContainerVertical().RecomputeFor(Ids)
+            LoggingService.LogInfo(f"ContainerVertical backfill complete for {len(Ids)} files", 'ContainerComplianceRulesUpdated', '_SpawnBackfill')
+        except Exception as Ex:
+            LoggingService.LogException("ContainerVertical backfill failed", Ex, 'ContainerComplianceRulesUpdated', '_SpawnBackfill')
+    threading.Thread(target=_Run, daemon=True, name='ContainerBackfill').start()
