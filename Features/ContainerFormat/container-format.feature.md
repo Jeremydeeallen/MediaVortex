@@ -10,9 +10,9 @@ Answers one question about each MediaFile: is its container (mp4, mkv, etc.) acc
 
 | # | User action | Surface element | Handler | Backing class.method |
 |---|---|---|---|---|
-| W1 | Operator edits acceptable containers / audio codecs | future `/Compliance` Container tab | (UI lands in operator-surfaces directive) | direct UPDATE to `ContainerComplianceRules` |
+| W1 | Operator edits acceptable containers / audio codecs | `/Admin/Compliance` Container Rules tab + `/Compliance` Container tab | `PUT /api/ContainerFormat/Rules` | `ContainerFormatController.UpdateRules` (updates row + spawns daemon-thread backfill of every MediaFileId via `ContainerVertical().RecomputeFor`) |
 | W2 | Probe completion triggers Container recompute | scanner post-probe (after compliance refactor) | per-file `RecomputeFor` | `ContainerVertical.RecomputeFor([Id])` |
-| W3 | Admin recompute across all files | CLI / future button | -- | `ContainerVertical.RecomputeFor(all_ids)` |
+| W3 | Admin recompute across all files (no rule edit) | CLI fallback | -- | `ContainerVertical.RecomputeFor(all_ids)` |
 
 ## Success Criteria
 

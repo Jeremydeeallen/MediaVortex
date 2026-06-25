@@ -10,9 +10,9 @@ Answers one question about each MediaFile: is its video stream compliant under t
 
 | # | User action | Surface element | Handler | Backing class.method |
 |---|---|---|---|---|
-| W1 | Operator edits acceptable codecs / thresholds / MinSourceBpp | future `/Compliance` Video tab | (UI in operator-surfaces directive) | direct UPDATE to `VideoComplianceRules` |
+| W1 | Operator edits acceptable codecs / thresholds / MinSourceBpp | `/Admin/Compliance` Video Rules tab + `/Compliance` Video tab | `PUT /api/VideoEncoding/Rules` | `VideoEncodingController.UpdateRules` (updates row + spawns daemon-thread backfill of every MediaFileId via `VideoVertical().RecomputeFor`) |
 | W2 | Probe completion triggers Video recompute | scanner post-probe (after compliance refactor) | per-file `RecomputeFor` | `VideoVertical.RecomputeFor([Id])` |
-| W3 | Admin recompute across all files | CLI / future button | -- | `VideoVertical.RecomputeFor(all_ids)` |
+| W3 | Admin recompute across all files (no rule edit) | CLI fallback | -- | `VideoVertical.RecomputeFor(all_ids)` |
 
 ## Success Criteria
 
