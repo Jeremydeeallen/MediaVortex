@@ -25,7 +25,7 @@ Three contexts, each with explicit boundary + anti-corruption interface to the o
 | `DetectedLanguage(StreamIndex, LanguageCode, Confidence, DetectorName)` | Value Object | One stream's detection result |
 | `AudioStreamLanguageDetection` | Aggregate | All detections for a MediaFile (per-stream rows) |
 | `ILanguageDetectionService` | Domain Service interface | Pure `Detect(audio_sample) -> DetectedLanguage` |
-| `WhisperTinyLanguageDetectionService` | Concrete implementation | Whisper-tiny model + audio sampling |
+| `WhisperBaseLanguageDetectionService` | Concrete implementation | Whisper-base model + 30-sec audio sampling per stream |
 | `IAudioStreamLanguageDetectionRepository` | Repository interface | Persistence-agnostic CRUD on detection cache |
 | `MediaFilesAudioStreamLanguageDetectionRepository` | Concrete | Reads/writes `MediaFiles.AudioStreamLanguageDetectionsJson` |
 | `AudioEnrichmentApplicationService` | Application Service | Use case: "enrich one media file"; orchestrates Detection + Repository |
@@ -88,20 +88,21 @@ C5. **`AudioVertical.Evaluate` identifies metadata-fixable state.** New branch: 
 
 C6. **All operator levers in the UI.** `/Compliance` Audio Rules tab + `/Admin/Compliance` Audio Rules tab gain six new rows in the existing form (above the current Save button):
 
-- `WhisperModel` (select: tiny / base / small / medium) -- detection speed vs accuracy
 - `EnrichmentBatchSize` (number, default 50) -- per poll
 - `EnrichmentPollIntervalSec` (number, default 60)
 - `MaxConcurrentEnrichmentJobs` (number, default 2) -- per worker
 - `EnableMetadataLanguageFix` (boolean, default true) -- enable LanguageTagFromDetectionPolicy
-- `MetadataReDetectOnSourceChange` (boolean, default false) -- when MediaFile.LastModified changes, clear cache + re-mark
+- `MetadataReDetectOnSourceChange` (boolean, default true) -- when MediaFile.LastModified changes, clear cache + re-mark. Default true closes the silent-stale-cache footgun.
 
 Plus an existing-row update:
 
-- `EnableSpeechLanguageDetection` toggle gains a "Recompute now" button -- triggers `MarkForEnrichment` against every non-English-tagged MediaFile in the library
+- `EnableSpeechLanguageDetection` toggle gains a single-click "Recompute language detection for all non-English-tagged files (N)" button -- triggers `MarkForEnrichment` against every non-English-tagged MediaFile. Confirmation modal shows the live count. Worker pool batches via `EnrichmentBatchSize`; no UI-side batching exposed.
+
+**Decision: WhisperModel is NOT a UI field.** WhisperBase is the chosen production detector (locked in; see Decisions Made). Adding a model selector would expose a worker-side implementation detail to the operator without a real use case for switching. If a different detector is ever needed, it's a new `ILanguageDetectionService` concrete + composition root switch (OCP), not a per-deploy operator decision.
 
 C7. **Per-worker enrichment capability flag.** `/Admin/Workers` tile gains an "Enrichment" sub-badge (parallel to existing Transcode / Remux / QT / Scan badges). Operator-editable via existing `Workers` row UPDATE path. ClaimEnrichmentJob is gated by `Workers.EnrichmentEnabled=TRUE` (parallel to `TranscodeEnabled`).
 
-C8. **No silent failures.** Both ApplicationServices follow the `audio-pipeline-fail-loud` pattern: typed `EnrichmentFailedError(MediaFileId, DetectorName, Reason)` and `MetadataUpdateFailedError(MediaFileId, Reason)`. Worker catches, writes `TranscodeAttempts` row with `Success=FALSE`, `AdmissionDeferReason` cleared but `EnrichmentFailureReason` populated. Operator can review failed enrichments in the existing operator-review surface. Contract test verifies the loud-failure path.
+C8. **No silent failures.** One typed exception per context: `AudioEnrichmentError(MediaFileId, DetectorName, Reason)` covers all detection failures, `MetadataUpdateError(MediaFileId, Reason)` covers all metadata-update failures. Resist granular exception hierarchies -- operators want to know "did this fail," not "what subclass of failure was it." Worker catches, writes `TranscodeAttempts` row with `Success=FALSE`, `AdmissionDeferReason` cleared but `EnrichmentFailureReason` populated. Operator reviews failed enrichments in the existing operator-review surface. Contract test verifies the loud-failure path.
 
 C9. **End-to-end smoke.** Live smoke against three real files from your library:
 - file with `und` tag + English audio → marker set → enrichment runs → cache populated → MetadataOnly bucket → `-c copy + metadata language=eng` → file replaced → tag now `eng`, encoded duration unchanged, file size delta < 1% (just metadata bytes)
@@ -113,19 +114,20 @@ C9. **End-to-end smoke.** Live smoke against three real files from your library:
 | File | Role |
 |---|---|
 | `Scripts/SQLScripts/AddAudioEnrichmentLeversToComplianceRules_2026_07_XX.py` | Adds six new columns + Workers.EnrichmentEnabled (idempotent, R11) |
-| `Features/AudioNormalization/Enrichment/ILanguageDetectionService.py` | Interface + Whisper-tiny / -base / -small / -medium concretes (one class per file, SRP) |
+| `Features/AudioNormalization/Enrichment/ILanguageDetectionService.py` | Interface only (one class per file, SRP) |
+| `Features/AudioNormalization/Enrichment/WhisperBaseLanguageDetectionService.py` | The single production detector (CPU, Whisper Base, 30-sec audio sample). Other model sizes or a GPU variant are added later via OCP without changing callers if scale ever requires it. |
 | `Features/AudioNormalization/Enrichment/AudioStreamLanguageDetection.py` | Value object + Aggregate |
 | `Features/AudioNormalization/Enrichment/IAudioStreamLanguageDetectionRepository.py` | Repository interface |
 | `Features/AudioNormalization/Enrichment/MediaFilesAudioStreamLanguageDetectionRepository.py` | Concrete repository |
 | `Features/AudioNormalization/Enrichment/AudioEnrichmentApplicationService.py` | Use cases: `MarkForEnrichment`, `Enrich` |
-| `Features/AudioNormalization/Enrichment/EnrichmentFailedError.py` | Typed exception |
+| `Features/AudioNormalization/Enrichment/AudioEnrichmentError.py` | Single typed exception covering all detection failures |
 | `WorkerService/EnrichmentWorker.py` | Long-running poll loop, gated by `Workers.EnrichmentEnabled` |
 | `Features/TranscodeJob/Emit/MetadataUpdateShape.py` | New EncodeShape parallel to RemuxShape |
 | `Features/AudioNormalization/MetadataFix/MetadataDelta.py` | Value object |
 | `Features/AudioNormalization/MetadataFix/MetadataUpdatePlan.py` | Aggregate |
 | `Features/AudioNormalization/MetadataFix/IMetadataUpdatePolicy.py` | Interface + LanguageTagFromDetectionPolicy concrete |
 | `Features/AudioNormalization/MetadataFix/MetadataUpdateApplicationService.py` | Composes Plan + Shape, invoked from worker claim path |
-| `Features/AudioNormalization/MetadataFix/MetadataUpdateFailedError.py` | Typed exception |
+| `Features/AudioNormalization/MetadataFix/MetadataUpdateError.py` | Single typed exception covering all metadata-update failures |
 | `Features/TranscodeJob/Emit/EncodeShapeRegistry.py` | EDIT -- register MetadataOnly mode |
 | `Features/AudioNormalization/AudioVertical.py` | EDIT -- new `audio_tags_outdated_vs_cache` branch in Evaluate |
 | `Features/TranscodeQueue/QueueManagementBusinessService.py` | EDIT -- routing reason → MetadataOnly bucket |
@@ -146,7 +148,7 @@ C9. **End-to-end smoke.** Live smoke against three real files from your library:
 | Phase | Work | Exit gate |
 |---|---|---|
 | A | Migration: 6 new AudioComplianceRules columns + `Workers.EnrichmentEnabled` + `MediaFiles.EnrichmentFailureReason`. No code change. Idempotent. | Migration applies clean; re-run reports no-op; WebService + WorkerService restart clean. |
-| B | Detection layer (Context A internals): `ILanguageDetectionService` + WhisperTiny concrete + `DetectedLanguage` VO + repository interface + concrete repository. Standalone unit tests; not yet wired to a worker. | Unit tests green. Synthetic invoke of `WhisperTinyLanguageDetectionService.Detect(known_audio_sample)` returns expected language code. |
+| B | Detection layer (Context A internals): `ILanguageDetectionService` + `WhisperBaseLanguageDetectionService` concrete + `DetectedLanguage` VO + repository interface + concrete repository. Standalone unit tests; not yet wired to a worker. | Unit tests green. Synthetic invoke of `WhisperBaseLanguageDetectionService.Detect(known_audio_sample)` returns expected language code with confidence >= 0.85 across 5 known-language samples (eng / jpn / fra / deu / spa). |
 | C | `AudioEnrichmentApplicationService` + `EnrichmentFailedError`. Composes detection + repository. Marks/clears `AdmissionDeferReason`. | Contract test green: synthetic MediaFile + audio sample → service marks → enriches → cache populated → marker cleared. |
 | D | `EnrichmentWorker` loop wired into `WorkerService/Main.py`. Gated by `Workers.EnrichmentEnabled`. Polls + processes batch. | Live: one Worker's EnrichmentEnabled flipped TRUE → flagged MediaFile gets enriched within `EnrichmentPollIntervalSec`. Cache row appears. Operator can see count drop via `/api/AudioNormalization/EnrichmentQueue/Status`. |
 | E | `MetadataUpdateShape` + `MetadataDelta` + `MetadataUpdatePlan` + `IMetadataUpdatePolicy` interface + `LanguageTagFromDetectionPolicy` concrete + `MetadataUpdateApplicationService` + `MetadataUpdateFailedError`. Not yet wired to bucket routing. | Contract test green: synthetic MediaFile + cache row → plan has 1 delta → shape builds `ffmpeg -c copy -metadata:s:a:0 "language=eng" ...` command. |
@@ -161,11 +163,25 @@ C9. **End-to-end smoke.** Live smoke against three real files from your library:
 - Container-level metadata (title, description) -- can be added trivially as another `IMetadataUpdatePolicy`.
 - Whisper model download / GPU acceleration -- assume CPU Whisper-tiny initially; GPU variant lands as new `ILanguageDetectionService` implementation later.
 
-## Operator Decisions Needed Before Activation
+## Decisions Made (locked in 2026-06-26)
 
-1. **Whisper model default.** Tiny (~50 MB, ~1 sec per minute of audio, ~95% language ID accuracy) vs base (~140 MB, ~3 sec per minute, ~98% accuracy). Recommend tiny for the default; operator can switch via UI per C6.
-2. **CPU vs GPU detection.** CPU Whisper-tiny is fine for ~5,000 files spread over hours. GPU would cut wall-clock by ~5x but requires CUDA Python bindings + the same dot/larry NVENC concerns we just resolved for ffmpeg. Recommend start CPU; revisit if backlog grows.
-3. **Recompute-now button scope.** Mark ALL non-English-tagged files (5,132) at once, or batch (1,000 per click) to avoid swamping the worker pool. Recommend ALL with a confirmation dialog -- worker poll batches absorb it cleanly.
+These are not options. Each has a specific reason for being this answer and not another.
+
+1. **Detector: Whisper Base, single concrete.** Not tiny (95% accuracy means ~250 misdetected files out of 5,132 -- a silent-error class). Not small or medium (6x slower for an imperceptible accuracy bump). Base sits at the inflection where accuracy stops improving meaningfully -- ~98-99% language ID across noisy / clean / accented / dialog-over-music. Sample size: 30 sec of audio per stream. Wall-clock: ~1.5 sec/file, ~16 min total for the initial 5,132-file backfill on 8-way fleet. Not surfaced in the UI; if a different detector is ever needed it's a new `ILanguageDetectionService` concrete + composition root switch (OCP) without changing callers.
+
+2. **CPU only. No GPU detection.** Building both means maintaining both forever. GPU on dot would contend with the NVENC encode workload we just stabilized; Larry has no GPU and would diverge silently. 16-min initial backfill vs 2-min on GPU is a 14-min one-time saving against permanent architectural complexity. If scale ever requires it (e.g., 200K-files-of-inflow ongoing), a `WhisperBaseGpuLanguageDetectionService` lands as a new concrete -- zero changes to `AudioEnrichmentApplicationService`, `EnrichmentWorker`, or persistence.
+
+3. **Recompute-now: single-click "Mark all N" with confirmation modal.** No per-click batching exposed in the UI. The worker pool batches naturally via `EnrichmentBatchSize`. UI batching would be exposing a worker-pool implementation detail to the operator.
+
+4. **`MetadataReDetectOnSourceChange` default: TRUE.** When `MediaFile.LastModified` advances (re-scan picks up replaced file), the cached detection becomes stale. Defaulting false means stale cache survives silently -- silent-error class. Default true closes the footgun.
+
+5. **Detection cache stays on `MediaFiles.AudioStreamLanguageDetectionsJson`.** Resist the DDD temptation to extract a separate `AudioStreamLanguageDetections` table. The cache is per-MediaFile, lifecycle is tied to MediaFile, JSON column already exists in the schema. A separate table would add a JOIN cost on every compliance recompute, two-phase commit semantics for cache invalidation, and zero functional benefit.
+
+6. **`ProcessingMode='MetadataOnly'` lives in the same enum as Transcode/Remux/AudioFix.** Not a separate column. Not a separate routing path. Same bucket-priority cascade in `EvaluateCandidateCompliance`. Same worker claim path. The only new thing is `MetadataUpdateShape` registered in `EncodeShapeRegistry` -- same Strategy pattern that already works for the three existing shapes.
+
+7. **One typed exception per bounded context, not three.** `AudioEnrichmentError(MediaFileId, DetectorName, Reason)` covers all detection failures. `MetadataUpdateError(MediaFileId, Reason)` covers all metadata-update failures. Resist granular exception hierarchies.
+
+8. **No `WhisperModel` field in the operator UI.** That's a worker-side implementation detail; surfacing it would invite operator-side per-deployment customization with no real use case. See decision 1.
 
 ## Activation Protocol
 
