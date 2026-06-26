@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker
 from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalExists, LocalJoin, LocalSplitExt
+from Features.TranscodeJob.Emit.OutputFilenameBuilder import OutputFilenameBuilder
 from Features.TranscodeJob.Worker.JobProcessor import JobProcessor
 from Features.TranscodeJob.Worker.JobResult import JobResult
 
@@ -91,6 +92,7 @@ class RemuxJobProcessor(JobProcessor):
                 return
 
             BaseName, _ = LocalSplitExt(LocalBasename(EffectiveInputPath))
+            BaseName = OutputFilenameBuilder().CollapseMvSuffix(BaseName)
             TargetLocalPath = LocalJoin(LocalDirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
 
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, f"Building {Lower} command...")
