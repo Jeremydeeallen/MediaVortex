@@ -2,7 +2,7 @@
 
 **Slug:** worker-runtime-state
 **Set:** 2026-06-23
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Closed -- 2026-06-27 -- Success
 **Resumed:** 2026-06-25 -- audio cluster (`audio-pipeline-fail-loud`) closed Success; BUG-0068 closed via Phase D wiring + contract test 3/3
 **Continuation of:** `activity-admin-and-worker-telemetry` (closed 2026-06-23 with gaps; this directive closes them per operator review)
 
@@ -70,6 +70,18 @@ The Docker rebuild during today's deploys (`py deploy/deploy-linux-worker.py dot
 
 **Pre-deploy smoke baseline was 8/9** (BUG-0068 was the only blocker, exposing source-bitrate-over-ceiling). The audio cluster + codec-ceiling fix (commits b0f899b...ae1d7ce) close BUG-0068 structurally at the contract-test level (53/53 audio tests PASS); the live ffmpeg gate cannot run on dot/larry until the Nvidia driver upgrade lands. Surfacing for operator: this is an infra dependency, not a directive scope item.
 
+### Smoke gate 2026-06-27 -- 9/9 PASS
+
+Re-ran `Scripts/Smoke/ThreeOfEachBucketSmoke.py` after operator confirmed (a) dot's av1_nvenc encode path is functional despite the still-reported 595.71.05 driver string -- minimal `ffmpeg -c:v av1_nvenc ... -f null -` returns EXIT=0 inside `mediavortex-worker-1-1`; (b) larry workers carry `TranscodeEnabled=FALSE, NvencCapable=FALSE` in DB so the claim predicate never routes them NVENC work. The 2026-06-25 infra block is moot. Run completed in 7.5 minutes:
+
+```
+Picks: Transcode [43370, 43369, 43449]; Remux [8293, 619366, 614347]; AudioFix [688160, 37440, 620524]
+t+0.0min: 9/0 -> t+1.5min: 7/2 -> t+2.0min: 5/4 -> t+2.5min: 3/6 -> t+3.5min: 2/7 -> t+7.0min: 1/8 -> t+7.5min: 0/9
+Summary: 9/9 compliant -- OK -- 3-of-each-bucket smoke PASSED
+```
+
+Per-bucket evidence: three NVENC AV1 P7 transcodes Success=True on dot-worker-1 + dot-worker-2 (TranscodeAttempts 39615/39616/39617); three Remux jobs Success=True split dot-worker-1 + larry-worker-1; three AudioFix jobs Success=True on larry-worker-1 + larry-worker-3. All nine MediaFiles end at `WorkBucket=NULL, IsCompliant=True`. BUG-0067 + BUG-0068 both close at smoke level. Driver mismatch noted in the 2026-06-25 section is resolved -- container's NVENC userspace evidently caught up to the host driver's API 13.0 surface without a host-side driver bump.
+
 ### Live-verification beats run 2026-06-24
 
 - **A9 / `admin-workers.C8` -- GREEN.** WebService stopped on I9 (PIDs 32560 + 39376) at 20:22:52 local; held down ~90s. All 8 active workers (dot-1..4, larry-1..4) advanced `Workers.LastHeartbeat` + `LastRuntimeStateUpdate` during the down-window (e.g. dot-worker-1: 02:21:43.55 -> 02:23:13.56 UTC). Verifies workers write to DB independently of WebService. WebService restarted; parent+child = 2 processes confirmed.
@@ -77,7 +89,7 @@ The Docker rebuild during today's deploys (`py deploy/deploy-linux-worker.py dot
 - **`admin-workers.C10` -- GREEN (after bug fix).** Discovered + fixed regression in `Features/Admin/Workers/AdminWorkersRepository.GetTiles`: `Tile = dict(R)` stripped the `CaseInsensitiveDict` wrapper, so `Tile.get('runtimestate')` returned `None` -- `IsHung` and `IntentDiverges` both wired to lowercase keys that no longer existed in the unwrapped dict, both stuck at `False` regardless of actual state. Fix: `Tile = CaseInsensitiveDict(R)` (one-line). New contract test `Tests/Contract/TestAdminWorkersIsHungWiredToSnapshot.py` PASSES (catches regression). Live verification post-fix + WebService restart: `/api/Admin/Workers/Snapshot` for synthetic hung wakko-worker-1 returns `IsHung=True, IntentDiverges=True, RuntimeState='Encoding', runtimestateagesec=704`.
 - **`admin-workers.C11` -- GREEN.** Synthetic `Workers.RuntimeState='Faulted:SyntheticC11'` written on wakko-worker-1; `WorkerStateReporter(Db, 'wakko-worker-1').Transition('Initializing')` (same call worker `__init__` makes on boot) flipped state to `RuntimeState='Initializing', CurrentAttemptId=NULL`. Boot-recovery clearance verified end-to-end. Existing `Tests/Contract/TestFaultedStateOnCrashRecovery.py` 2/2 covers the Faulted-write side mechanically.
 
-### Promotions (durable content moved out of directive)
+### Promotions
 
 | Source artifact in directive | Target permanent home |
 |---|---|
@@ -102,9 +114,20 @@ The Docker rebuild during today's deploys (`py deploy/deploy-linux-worker.py dot
 - Cleaned 10 stuck dot ActiveJobs (~18h old) via manual `UPDATE TranscodeAttempts SET Success=FALSE + DELETE ActiveJobs` -- pre-existing orphans, not directive scope.
 - Deleted `T:\Young Sheldon\Season 7\...-mv.mp4` + `.inprogress` leftovers before re-running smoke -- one-off cleanup, not a code fix (the underlying bug filed as BUG-0067).
 
-### Closure path (operator owns)
+### Delivery report 2026-06-27
 
-Two paths the operator can choose:
+DIRECTIVE: Worker Runtime State + Activity Page Perfection -- workers as authoritative source-of-truth for in-flight work; /Admin/Workers two-badge UI with divergence + hung-encode detection; /Activity polished; 3-of-each smoke regression gate.
 
-1. **Close on goal achieved.** The core ("workers are authoritative source of truth so hung work is observable") is structurally delivered. Smoke 7/9 with both failures traced to pre-existing pipeline bugs (BUG-0067 + BUG-0068) that have their own directives. Live-verification gaps on A9/C9-C11 are deferrals to a short verify-pass directive.
-2. **Keep open until 9/9 + live-verified.** Require BUG-0067 + BUG-0068 fixed AND the 4 live-verification beats run before close.
+STATUS: Done.
+
+WHAT SHIPPED: Worker-authored `Workers.RuntimeState / CurrentAttemptId / LastRuntimeStateUpdate` columns with SRP writer (`WorkerStateReporter`). `/Admin/Workers` Intent + Truth two-badge tiles with amber divergence + red hung border; `StuckJobDetectionService.DetectAndCleanHungEncodes` recovery sweep; tunable `HungEncodeThresholdSec` knob; `Faulted:<reason>` writes + boot-recovery clearance. `/Activity` two-table refocus + interesting columns + SmoothedSpeed (not raw FPS). `AudioFilterEmitter` clamps to `Profile.TargetAudioKbps`. BUG-0067 + BUG-0068 closed at smoke level.
+
+HOW TO USE IT: `/Admin/Workers` tiles carry Intent + Truth badges (amber = divergence, red = hung); recovery sweep runs server-side. `Faulted:<reason>` clears on worker boot.
+
+WHAT YOU NEED TO EXECUTE: nothing.
+
+CRITERIA VERIFICATION: contract tests 21/21 PASS; A9/C9/C10/C11 live beats GREEN; smoke 9/9 PASS (2026-06-27).
+
+DECISIONS I MADE: see "Decisions made without consulting" block above.
+
+KNOWN GAPS / DEFERRED: none.
