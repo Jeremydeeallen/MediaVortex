@@ -8,35 +8,6 @@
 
 **SMB-on-Windows long-handle drops** (Microsoft SMB client EINVAL on long-duration handles under GPU-paced reads -- see memory `feedback_ms_nfs_client_unreliable.md` for the diagnostic pattern) are mitigated by **per-worker local staging** -- `Features/TranscodeJob/local-staging.feature.md`. Enable on Windows + SMB workers; leave OFF on Linux NFS workers.
 
-### [BUG-0068] AudioFilterEmitter STRATEGY_REVIEW bypass leaves audio bitrate uncontrolled -- fallback chain hides the real principle
-**Date:** 2026-06-23 | **Area:** transcode-emit + audio-policy
-
-**What breaks:** When source loudness is too extreme to gain safely (e.g. -37 LUFS), `AudioStrategyClassifier` returns `STRATEGY_REVIEW` for every track. `AudioFilterEmitter.EmitTracks` then `continue`s on every track and returns 0 blocks. `TranscodeShape.Build` hits the fallback branch and emits `-c:a copy` -- source bitrate (160kbps in the failure case) survives into the output. The post-transcode compliance gate then flips `ComplianceGateFailed: bitrate:160>134` and the file is stuck in `Transcode` bucket forever.
-
-The pipeline has TWO fallbacks stacked here:
-1. Strategy classifier silently demotes to REVIEW when gain budget is exceeded, with no signal to downstream that the loudnorm path was abandoned.
-2. TranscodeShape silently swaps in `-c:a copy` when blocks are empty, with no awareness that the source bitrate is above the profile's audio ceiling.
-
-Both fallbacks hide the real situation. The principle: every output track has an explicit policy decision that is either (a) honored (loudnorm + ceiling clamp), or (b) the job FAILS LOUD with a "this file cannot be made compliant under the current profile -- raise loudness tolerance or reassign profile" error visible to the operator.
-
-**Violates:** `Features/AudioNormalization/audio-normalization.feature.md` C8 (encoder honors per-profile ceiling). The contract today is satisfied on the re-encode path but the REVIEW/copy fallback bypasses it.
-
-**Look first:**
-- `Features/AudioNormalization/AudioFilterEmitter.py` `EmitTracks` -- the `STRATEGY_REVIEW: continue` line silently drops the track; needs to either honor the ceiling unconditionally (degrade to "encode at ceiling without loudnorm" + record `AudioPolicyDeferReason='loudnorm_ungainable'`) OR raise an explicit refusal that flows back as a typed exception
-- `Features/TranscodeJob/Emit/TranscodeShape.py` `if not Blocks` branch -- the bare `-c:a copy` fallback must be removed; if the emitter declined to produce blocks, the shape declines to emit a command (raises) so the worker can mark the attempt failed with a clear reason
-- `Features/AudioNormalization/AudioStrategyClassifier.py` -- the REVIEW classification should write its reason back to `MediaFiles.AdmissionDeferReason` so the operator can see which files need policy attention
-
-**Settings knobs (GUI-level, per `feedback_no_hardcoded_values.md`):**
-- `AudioNormalizationConfig.UngainablePolicy` already exists ('adaptive' / 'review' / ...) -- expose in the /AudioNormalization editor so the operator picks per-scope behavior between "encode at ceiling without loudnorm" vs "defer for review"
-- No hardcoded loudness gain limit -- promote to `SystemSettings.MaxLoudnessGainLU` (default whatever the current implicit threshold is, exposed in /Settings)
-- No hardcoded fallback bitrate -- TrackConfig.Bitrate is already a column; clamp against `Profile.TargetAudioKbps` (DB-driven, no constant in code)
-
-**Acceptance principle:** simplify and 100% solid-perfect implementation; NO hardcoding, NO fallbacks (these hide problems). Every audio output path must be either explicitly honored or explicitly rejected with a logged reason; silent cascades are forbidden (cross-reference BUG-0066).
-
-**Fix with:** `/t BUG-0068`. Co-prioritize with BUG-0066 (same principle).
-
----
-
 ### [BUG-0067] CLOSED 2026-06-23 -- FileReplacement orphan-on-failure -- TranscodedOutputPlacement leaves transcoded .mp4 on disk when MediaFiles update fails; scanner ingests it as a duplicate row; next encode attempt fails identically; loop snowballs
 **Date:** 2026-06-23 -> Closed 2026-06-23 by `/t BUG-0067` within `worker-runtime-state` directive | **Area:** file-replacement | **Resolution:** `Features/FileReplacement/TranscodedOutputPlacement.Execute` failure branch (post-rename, pre-original-delete) replaced silent `Success=True` + warning with explicit rollback (non-SameSlot: `os.remove(TargetPath)`; SameSlot: `os.rename(TargetPath, LocalStagedPath)` + `os.rename(BackupPath, LocalOriginalPath)` + remove staging) and returns `Success=False` carrying the real `_UpdateMediaFilesAfterReplacement` error. SameSlot eager `os.remove(BackupPath)` moved from inner rename block to after MediaFiles update commits so the rollback path can restore source. `FinalizePartialReplacement` parallel branch returns `Success=False` with the real error rather than masking. C13 + S4 added to `Features/FileReplacement/transcoded-output-placement.feature.md`. Verified by `Tests/Contract/TestFileReplacementRollbackOnUpdateFailure.py` (3/3 PASS: non-SameSlot orphan removed + source intact + bytes match; SameSlot source restored + backup gone + staging gone + bytes match; FinalizePartialReplacement returns Success=False with real error).
 
