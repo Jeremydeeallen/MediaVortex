@@ -9,6 +9,19 @@ class InvalidProfileError(ValueError):
 
 
 # directive: work-transcode-unified
+def IsFinalizedActive(ProfileNameStr: str, Db: Optional[DatabaseService] = None) -> bool:
+    # see work-bucket.C3
+    Rows = (Db or DatabaseService()).ExecuteQuery(
+        "SELECT Draft, Active FROM Profiles WHERE ProfileName = %s LIMIT 1",
+        (ProfileNameStr,),
+    )
+    if not Rows:
+        return False
+    R = Rows[0]
+    return bool(R.get('active')) and not bool(R.get('draft'))
+
+
+# directive: work-transcode-unified
 class ProfileName:
 
     __slots__ = ('Value',)
