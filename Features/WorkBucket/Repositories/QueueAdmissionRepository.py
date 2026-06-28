@@ -1,6 +1,6 @@
-from typing import Tuple
 from Core.Database.DatabaseService import DatabaseService
 from Features.WorkBucket.Domain.AdmissionResult import AdmissionResult
+from Features.WorkBucket.Domain.AdmitOneResult import AdmitOneResult
 from Features.WorkBucket.Domain.BucketKey import BucketKey
 from Features.WorkBucket.Domain.SeriesIdentity import SeriesIdentity
 
@@ -13,14 +13,14 @@ class QueueAdmissionRepository:
         self.Db = Db or DatabaseService()
 
     # directive: work-transcode-unified | # see work-bucket.C5
-    def AdmitOne(self, MediaFileId: int, ProcessingMode: str) -> Tuple[str, int]:
+    def AdmitOne(self, MediaFileId: int, ProcessingMode: str) -> AdmitOneResult:
         # see work-bucket.C5
         Existing = self.Db.ExecuteQuery(
             "SELECT Id FROM TranscodeQueue WHERE MediaFileId = %s AND Status = 'Pending' LIMIT 1",
             (int(MediaFileId),),
         )
         if Existing:
-            return ('already_queued', int(Existing[0]['id']))
+            return AdmitOneResult(Status='already_queued', QueueId=int(Existing[0]['id']))
         self.Db.ExecuteNonQuery(
             "INSERT INTO TranscodeQueue ("
             "  FileName, Directory, SizeBytes, SizeMB, MediaFileId, StorageRootId, RelativePath, "
@@ -35,7 +35,7 @@ class QueueAdmissionRepository:
             "SELECT Id FROM TranscodeQueue WHERE MediaFileId = %s AND Status = 'Pending' LIMIT 1",
             (int(MediaFileId),),
         )
-        return ('queued', int(Inserted[0]['id']) if Inserted else 0)
+        return AdmitOneResult(Status='queued', QueueId=int(Inserted[0]['id']) if Inserted else 0)
 
     # directive: work-transcode-unified | # see work-bucket.C4
     def AdmitSeries(self, Identity: SeriesIdentity, Bucket: BucketKey) -> AdmissionResult:

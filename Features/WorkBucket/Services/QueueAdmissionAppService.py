@@ -1,7 +1,8 @@
-from typing import Optional, Tuple
+from typing import Optional
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Features.WorkBucket.Domain.AdmissionResult import AdmissionResult
+from Features.WorkBucket.Domain.AdmitOneResult import AdmitOneResult
 from Features.WorkBucket.Domain.BucketKey import BucketKey
 from Features.WorkBucket.Domain.SeriesIdentity import SeriesIdentity
 from Features.WorkBucket.Repositories.QueueAdmissionRepository import QueueAdmissionRepository
@@ -20,15 +21,15 @@ class QueueAdmissionAppService:
         self.Repo = Repo or QueueAdmissionRepository(self.Db)
 
     # directive: work-transcode-unified | # see work-bucket.C5
-    def AdmitOne(self, MediaFileId: int, Bucket: BucketKey) -> Tuple[str, int]:
+    def AdmitOne(self, MediaFileId: int, Bucket: BucketKey) -> AdmitOneResult:
         # see work-bucket.C5
-        Status, QueueId = self.Repo.AdmitOne(MediaFileId, Bucket.ProcessingMode)
+        Result = self.Repo.AdmitOne(MediaFileId, Bucket.ProcessingMode)
         LoggingService.LogInfo(
-            f"Admit one: media_file={MediaFileId} bucket={Bucket.BucketName} status={Status}",
+            f"Admit one: media_file={MediaFileId} bucket={Bucket.BucketName} status={Result.Status}",
             "QueueAdmissionAppService",
             "AdmitOne",
         )
-        return Status, QueueId
+        return Result
 
     # directive: work-transcode-unified | # see work-bucket.C4
     def AdmitSeries(self, Identity: SeriesIdentity, Bucket: BucketKey) -> AdmissionResult:

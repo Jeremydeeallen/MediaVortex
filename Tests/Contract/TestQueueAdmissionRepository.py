@@ -27,10 +27,10 @@ class TestQueueAdmissionRepository(unittest.TestCase):
             "DELETE FROM TranscodeQueue WHERE MediaFileId = %s AND Status = 'Pending'",
             (MediaFileId,),
         )
-        Status1, _Id1 = Repo.AdmitOne(MediaFileId, 'Transcode')
-        Status2, _Id2 = Repo.AdmitOne(MediaFileId, 'Transcode')
-        self.assertEqual(Status1, 'queued')
-        self.assertEqual(Status2, 'already_queued')
+        R1 = Repo.AdmitOne(MediaFileId, 'Transcode')
+        R2 = Repo.AdmitOne(MediaFileId, 'Transcode')
+        self.assertEqual(R1.Status, 'queued')
+        self.assertEqual(R2.Status, 'already_queued')
         DatabaseService().ExecuteNonQuery(
             "DELETE FROM TranscodeQueue WHERE MediaFileId = %s AND Status = 'Pending'",
             (MediaFileId,),

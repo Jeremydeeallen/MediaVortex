@@ -29,12 +29,12 @@ class TestQueueAdmissionAppService(unittest.TestCase):
         )
         Service = QueueAdmissionAppService()
         Bucket = BucketKey.FromUrlKey('Transcode')
-        Status1, Id1 = Service.AdmitOne(MediaFileId, Bucket)
-        Status2, Id2 = Service.AdmitOne(MediaFileId, Bucket)
-        self.assertEqual(Status1, 'queued')
-        self.assertEqual(Status2, 'already_queued')
-        self.assertGreater(Id1, 0)
-        self.assertEqual(Id1, Id2)
+        R1 = Service.AdmitOne(MediaFileId, Bucket)
+        R2 = Service.AdmitOne(MediaFileId, Bucket)
+        self.assertEqual(R1.Status, 'queued')
+        self.assertEqual(R2.Status, 'already_queued')
+        self.assertGreater(R1.QueueId, 0)
+        self.assertEqual(R1.QueueId, R2.QueueId)
         DatabaseService().ExecuteNonQuery(
             "DELETE FROM TranscodeQueue WHERE MediaFileId = %s AND Status = 'Pending'",
             (MediaFileId,),

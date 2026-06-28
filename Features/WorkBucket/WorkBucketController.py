@@ -159,11 +159,11 @@ class WorkBucketController:
                 Bucket = BucketKey.FromUrlKey(url_key)
                 if Bucket is None:
                     return jsonify({'Success': False, 'Message': f"Unknown bucket: {url_key}", 'Data': {}}), 404
-                Status, QueueId = self.QueueService.AdmitOne(media_file_id, Bucket)
+                R = self.QueueService.AdmitOne(media_file_id, Bucket)
                 return jsonify({
                     'Success': True,
-                    'Message': 'Queued' if Status == 'queued' else 'Already queued',
-                    'Data': {'Status': Status, 'QueueId': QueueId, 'ProcessingMode': Bucket.ProcessingMode},
+                    'Message': 'Queued' if R.Status == 'queued' else 'Already queued',
+                    'Data': {'Status': R.Status, 'QueueId': R.QueueId, 'ProcessingMode': Bucket.ProcessingMode},
                 })
             except Exception as Ex:
                 LoggingService.LogException(f"queue_one failed for {url_key}/{media_file_id}", Ex, "WorkBucketController", "queue_one")
