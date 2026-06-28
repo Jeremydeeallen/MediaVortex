@@ -1,12 +1,10 @@
 from flask import Blueprint, jsonify, render_template, request
 
 from Core.Logging.LoggingService import LoggingService
-from Core.Querying import PagedQuery
 from Features.WorkBucket.Domain.BucketKey import BucketKey
-from Features.WorkBucket.Domain.FilterSpec import FilterSpec
+from Features.WorkBucket.Domain.ListSeriesRequest import ListSeriesRequest
 from Features.WorkBucket.Domain.ProfileName import InvalidProfileError
 from Features.WorkBucket.Domain.SeriesIdentity import SeriesIdentity
-from Features.WorkBucket.Domain.SortSpec import SortSpec
 from Features.WorkBucket.Repositories.FilesInSeriesRepository import FilesInSeriesRepository
 from Features.WorkBucket.Repositories.SeriesQueryRepository import SeriesQueryRepository
 from Features.WorkBucket.Services.QueueAdmissionAppService import QueueAdmissionAppService
@@ -37,24 +35,18 @@ class WorkBucketController:
             return render_template('WorkBucket.html', UrlKey=url_key, Bucket=Bucket)
 
         @self.Blueprint.route('/api/Work/<url_key>', methods=['GET'])
-        # directive: work-transcode-unified | # see work-bucket.C1
+        # directive: work-transcode-unified | # see work-bucket.C2
         def list_series(url_key):
             try:
                 Bucket = BucketKey.FromUrlKey(url_key)
                 if Bucket is None:
                     return jsonify({'Success': False, 'Message': f"Unknown bucket: {url_key}", 'Data': {}}), 404
-                Page = max(1, int(request.args.get('page', 1) or 1))
-                PageSize = max(1, min(200, int(request.args.get('pageSize', 25) or 25)))
-                Sort = SortSpec.FromString(request.args.get('sort', ''))
-                Drives = tuple(
-                    int(D) for D in request.args.getlist('drive') if D.strip().isdigit()
-                )
-                Filter = FilterSpec(StorageRootIds=Drives, SearchTerm=request.args.get('search', '') or '')
+                Req = ListSeriesRequest.FromQueryArgs(request.args)
                 Result = self.SeriesRepo.ListSeriesByBucket(
                     Bucket=Bucket,
-                    Query=PagedQuery(Page=Page, PageSize=PageSize),
-                    Sort=Sort,
-                    Filter=Filter,
+                    Query=Req.PagedQuery,
+                    Sort=Req.Sort,
+                    Filter=Req.Filter,
                 )
                 return jsonify({
                     'Success': True, 'Message': 'OK',
