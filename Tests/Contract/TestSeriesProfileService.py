@@ -29,7 +29,7 @@ class TestSeriesProfileService(unittest.TestCase):
             "SELECT mf.StorageRootId, split_part(mf.RelativePath, '/', 1) AS RelativePath "
             "FROM MediaFiles mf WHERE mf.WorkBucket = 'Transcode' AND mf.TranscodedByMediaVortex IS NOT TRUE "
             "GROUP BY mf.StorageRootId, split_part(mf.RelativePath, '/', 1) "
-            "HAVING COUNT(*) >= 1 LIMIT 1"
+            "HAVING COUNT(*) >= 1 ORDER BY mf.StorageRootId, split_part(mf.RelativePath, '/', 1) LIMIT 1"
         )
         if not Sample:
             self.skipTest("No untranscoded Transcode series available")
@@ -43,6 +43,13 @@ class TestSeriesProfileService(unittest.TestCase):
             RelativePath=Sample[0]['relativepath'],
         )
         Profile = ProfileRow[0]['profilename']
+
+        # Snapshot pre-existing state so we can restore exactly what was there.
+        PreExistingSeriesProfile = DatabaseService().ExecuteQuery(
+            "SELECT AssignedProfile, TargetResolution FROM SeriesProfiles "
+            "WHERE StorageRootId = %s AND RelativePath = %s LIMIT 1",
+            (Identity.StorageRootId, Identity.RelativePath),
+        )
         Original = DatabaseService().ExecuteQuery(
             "SELECT Id, AssignedProfile FROM MediaFiles "
             "WHERE StorageRootId=%s AND split_part(RelativePath,'/',1)=%s "
@@ -54,22 +61,41 @@ class TestSeriesProfileService(unittest.TestCase):
             self.assertEqual(FilesAffected, len(Original))
             Updated = DatabaseService().ExecuteQuery(
                 "SELECT AssignedProfile FROM MediaFiles "
-                "WHERE WorkBucket='Transcode' AND StorageRootId=%s AND split_part(RelativePath,'/',1)=%s "
+                "WHERE StorageRootId=%s AND split_part(RelativePath,'/',1)=%s "
                 "AND TranscodedByMediaVortex IS NOT TRUE",
                 (Identity.StorageRootId, Identity.RelativePath),
             )
             for R in Updated:
                 self.assertEqual(R['assignedprofile'], Profile)
         finally:
+            # Restore MediaFiles to exact pre-test values.
             for R in Original:
                 DatabaseService().ExecuteNonQuery(
                     "UPDATE MediaFiles SET AssignedProfile = %s WHERE Id = %s",
                     (R.get('assignedprofile'), int(R['id'])),
                 )
-            DatabaseService().ExecuteNonQuery(
-                "DELETE FROM SeriesProfiles WHERE StorageRootId = %s AND RelativePath = %s",
-                (Identity.StorageRootId, Identity.RelativePath),
-            )
+            # Restore SeriesProfiles to exact pre-test state (don't delete operator data).
+            if PreExistingSeriesProfile:
+                Pre = PreExistingSeriesProfile[0]
+                DatabaseService().ExecuteNonQuery(
+                    "INSERT INTO SeriesProfiles "
+                    "  (StorageRootId, RelativePath, TargetResolution, AssignedProfile, CreatedDate, LastModifiedDate) "
+                    "VALUES (%s, %s, %s, %s, NOW(), NOW()) "
+                    "ON CONFLICT (StorageRootId, RelativePath) DO UPDATE "
+                    "SET AssignedProfile = EXCLUDED.AssignedProfile, "
+                    "    TargetResolution = EXCLUDED.TargetResolution",
+                    (
+                        Identity.StorageRootId,
+                        Identity.RelativePath,
+                        Pre.get('targetresolution'),
+                        Pre.get('assignedprofile'),
+                    ),
+                )
+            else:
+                DatabaseService().ExecuteNonQuery(
+                    "DELETE FROM SeriesProfiles WHERE StorageRootId = %s AND RelativePath = %s",
+                    (Identity.StorageRootId, Identity.RelativePath),
+                )
 
 
 if __name__ == '__main__':
