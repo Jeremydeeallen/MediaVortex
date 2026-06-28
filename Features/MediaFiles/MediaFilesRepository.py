@@ -507,6 +507,18 @@ class MediaFilesRepository(BaseRepository):
         )
         return affected > 0
 
+    # directive: work-transcode-unified | # see work-bucket.C3
+    def SetAssignedProfileForFile(self, MediaFileId: int, ProfileName: str, Source: str = 'series') -> None:
+        """Set AssignedProfile + AssignedProfileSource for ONE MediaFile by Id. Only updates if currently NULL (idempotent)."""
+        self.DatabaseService.ExecuteNonQuery(
+            "UPDATE MediaFiles "
+            "   SET AssignedProfile = %s, "
+            "       AssignedProfileSource = %s, "
+            "       LastModifiedDate = NOW() "
+            " WHERE Id = %s AND AssignedProfile IS NULL",
+            (ProfileName, Source, int(MediaFileId)),
+        )
+
     # directive: work-transcode-unified | # see work-bucket.G1
     def PropagateSeriesProfile(self, Identity, ProfileName: str) -> int:
         """UPDATE MediaFiles.AssignedProfile for every untranscoded file in the series. Returns rowcount."""

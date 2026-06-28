@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
+from Features.MediaFiles.MediaFilesRepository import MediaFilesRepository
 from Features.WorkBucket.Domain.SeriesIdentity import SeriesIdentity
 from Features.WorkBucket.Repositories.SeriesProfileRepository import SeriesProfileRepository
 
@@ -16,6 +17,7 @@ from Features.WorkBucket.Repositories.SeriesProfileRepository import SeriesProfi
 def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
     Db = DatabaseService()
     SeriesRepo = SeriesProfileRepository(Db)
+    MediaFilesRepo = MediaFilesRepository(Db)
 
     Counted = Db.ExecuteQuery(
         "SELECT COUNT(*) AS Total FROM MediaFiles "
@@ -112,12 +114,7 @@ def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
                     Identity = SeriesIdentity.FromMediaFilePath(int(StorageRootId), RelPath)
                     CascadeProfile = SeriesRepo.GetProfile(Identity)
                 if CascadeProfile:
-                    Db.ExecuteNonQuery(
-                        "UPDATE MediaFiles "
-                        "SET AssignedProfile = %s, AssignedProfileSource = 'series', LastModifiedDate = NOW() "
-                        "WHERE Id = %s AND AssignedProfile IS NULL",
-                        (CascadeProfile, int(R.get("Id"))),
-                    )
+                    MediaFilesRepo.SetAssignedProfileForFile(int(R.get("Id")), CascadeProfile, 'series')
                     SeriesHitTotal += 1
                     continue
             except Exception as Ex:
