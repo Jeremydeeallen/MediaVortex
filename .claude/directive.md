@@ -160,7 +160,7 @@ Core/Querying/paged-query.feature.md                           -- EDIT: sweep Sh
 
 - [ ] T1 SeriesIdentity VO
 - [ ] T2 BucketKey VO
-- [ ] T3 ProfileName VO
+- [x] T3 ProfileName VO
 - [ ] T4 SortSpec / FilterSpec / AdmissionResult VOs
 - [ ] T5 Series + MediaFileRow aggregates
 - [ ] T6 SeriesQueryRepository
