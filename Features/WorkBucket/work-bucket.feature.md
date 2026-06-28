@@ -44,20 +44,6 @@ C6. Filters: multi-select drive + free-text series search. Pagination: 25 rows p
 | S6 | QueueAdmissionRepository -> TranscodeQueue | `QueueAdmissionRepository.AdmitSeries` | bulk INSERT with `NOT EXISTS` Pending guard | No duplicate Pending row per MediaFileId | `Tests/Contract/TestQueueAdmissionRepository.py::test_admit_series_idempotent` |
 | S7 | BackfillProfileAssignments -> SeriesProfiles | `Scripts/SQLScripts/BackfillProfileAssignments.py` | reads sp.AssignedProfile, writes MediaFiles.AssignedProfile | New files in an existing series get the sticky profile | manual smoke: insert a MediaFiles row with the right show folder, run backfill, observe AssignedProfile populated |
 
-## Known Gaps
-
-Architectural debts identified during the work-transcode-unified directive's code review pass. Each is mechanical, behavior-preserving, and intended to be closed before any new feature ships on top of this vertical. Sequence them in order; each is independent.
-
-- [x] **G1** -- Extract `MediaFilesRepository.PropagateSeriesProfile(SeriesIdentity, ProfileName) -> int` so `SeriesProfileService.SetProfile` stops carrying raw `UPDATE MediaFiles` SQL. SRP: services orchestrate, repositories own SQL.
-- [x] **G2** -- Add `SeriesIdentity.FromMediaFilePath(StorageRootId: int, RelativePath: str) -> SeriesIdentity` classmethod that implements the "first path segment is the series key" rule once. Route `BackfillProfileAssignments.py._SeriesKey` to it. (SQL `split_part(RelativePath, '/', 1)` stays SQL but the Python contract has one owner.)
-- [x] **G3** -- Add `Domain/AdmitOneResult.py` frozen dataclass `(Status: str, QueueId: int)`. `QueueAdmissionRepository.AdmitOne` and `QueueAdmissionAppService.AdmitOne` both return it instead of `Tuple[str, int]`. Symmetric with `AdmissionResult`.
-- [x] **G4** -- `BackfillProfileAssignments.py` cascade-write path stops issuing raw `UPDATE MediaFiles` SQL. Route through a new `MediaFilesRepository.SetAssignedProfileForFile(MediaFileId: int, ProfileName: str, Source: str = 'series')` method instead.
-- [x] **G5** -- Extract `WorkBucket/Domain/ListSeriesRequest.py` VO with `FromQueryArgs(args) -> (PagedQuery, SortSpec, FilterSpec)` factory. `WorkBucketController.list_series` stops parsing query-strings inline; the VO owns the parsing contract.
-- [x] **G6** -- Add `ProfileRepository.IsFinalizedActive(ProfileName: str) -> bool`. `ProfileName` VO ctor and `EffectiveProfileResolver._IsFinalizedActive` both delegate to it. Single SQL site for the Draft=FALSE + Active=TRUE check.
-- [x] **G7** -- Delete the no-op `HAVING COUNT(*) > 0` clause in `SeriesQueryRepository.ListSeriesByBucket` (cargo-culted from the old GetShowsWithStats; a `GROUP BY` row by definition has >= 1 contributing row).
-
-When all 7 are closed, delete this section. The Decisions Made section in the closing directive records the resolution.
-
 ## Status
 
 **Phase:** Active feature. The old narrow WorkBucket surface (single-file admit only) and the Media-tab vertical have both been retired; this expanded contract is the sole operator entry point for bucket-level work.
