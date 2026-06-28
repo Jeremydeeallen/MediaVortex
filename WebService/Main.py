@@ -385,14 +385,6 @@ class WebServiceApp:
                 LoggingService.LogException("Error rendering ClipBuilder page", e, "WebService", "clip_builder")
                 return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
 
-        @self.App.route('/ShowSettings')
-        def show_settings():
-            try:
-                return render_template('ShowSettings.html')
-            except Exception as e:
-                LoggingService.LogException("Error rendering ShowSettings page", e, "WebService", "show_settings")
-                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
-
         @self.App.route('/api/ClientLog', methods=['POST'])
         def ClientLog():
             """Receive client-side JavaScript errors and log them to the database."""

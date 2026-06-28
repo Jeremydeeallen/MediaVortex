@@ -22,11 +22,6 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint in ['show_settings', 'clip_builder'] %}active{% endif %}" href="/ShowSettings">
-                            <i class="fas fa-film"></i> Media
-                        </a>
-                    </li>
                     <li class="nav-item" style="position: relative;">
                         <a class="nav-link {% if request.endpoint == 'transcode_queue' %}active{% endif %}" href="/TranscodeQueue">
                             <i class="fas fa-list"></i> Queue
