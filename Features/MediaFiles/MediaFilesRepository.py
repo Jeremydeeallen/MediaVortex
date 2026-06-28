@@ -506,3 +506,18 @@ class MediaFilesRepository(BaseRepository):
             "DELETE FROM Seasons WHERE Id = %s", (SeasonId,)
         )
         return affected > 0
+
+    # directive: work-transcode-unified | # see work-bucket.G1
+    def PropagateSeriesProfile(self, Identity, ProfileName: str) -> int:
+        """UPDATE MediaFiles.AssignedProfile for every untranscoded file in the series. Returns rowcount."""
+        Affected = self.DatabaseService.ExecuteNonQuery(
+            "UPDATE MediaFiles "
+            "   SET AssignedProfile = %s, "
+            "       AssignedProfileSource = 'series', "
+            "       LastModifiedDate = NOW() "
+            " WHERE StorageRootId = %s "
+            "   AND split_part(RelativePath, '/', 1) = %s "
+            "   AND TranscodedByMediaVortex IS NOT TRUE",
+            (ProfileName, Identity.StorageRootId, Identity.RelativePath),
+        )
+        return int(Affected) if Affected is not None else 0

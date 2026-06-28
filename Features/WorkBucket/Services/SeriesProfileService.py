@@ -1,6 +1,7 @@
 from typing import Optional
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
+from Features.MediaFiles.MediaFilesRepository import MediaFilesRepository
 from Features.WorkBucket.Domain.ProfileName import ProfileName
 from Features.WorkBucket.Domain.SeriesIdentity import SeriesIdentity
 from Features.WorkBucket.Repositories.SeriesProfileRepository import SeriesProfileRepository
@@ -15,27 +16,19 @@ class SeriesProfileService:
         self,
         Db: Optional[DatabaseService] = None,
         ProfileRepo: Optional[SeriesProfileRepository] = None,
+        MediaFilesRepo: Optional[MediaFilesRepository] = None,
     ):
         # see work-bucket.C3
         self.Db = Db or DatabaseService()
         self.ProfileRepo = ProfileRepo or SeriesProfileRepository(self.Db)
+        self.MediaFilesRepo = MediaFilesRepo or MediaFilesRepository(self.Db)
 
     # directive: work-transcode-unified | # see work-bucket.C3
     def SetProfile(self, Identity: SeriesIdentity, RawProfileName: str) -> int:
         # see work-bucket.C3
         Profile = ProfileName(RawProfileName, Db=self.Db)
         self.ProfileRepo.UpsertProfile(Identity, Profile.Value)
-        Affected = self.Db.ExecuteNonQuery(
-            "UPDATE MediaFiles "
-            "   SET AssignedProfile = %s, "
-            "       AssignedProfileSource = 'series', "
-            "       LastModifiedDate = NOW() "
-            " WHERE StorageRootId = %s "
-            "   AND split_part(RelativePath, '/', 1) = %s "
-            "   AND TranscodedByMediaVortex IS NOT TRUE",
-            (Profile.Value, Identity.StorageRootId, Identity.RelativePath),
-        )
-        Affected = int(Affected) if Affected is not None else 0
+        Affected = self.MediaFilesRepo.PropagateSeriesProfile(Identity, Profile.Value)
         LoggingService.LogInfo(
             f"Series profile set: {Identity.ToCompositeKey()} -> {Profile.Value}, {Affected} files updated",
             "SeriesProfileService",
