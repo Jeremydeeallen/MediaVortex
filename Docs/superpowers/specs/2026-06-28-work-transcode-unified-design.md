@@ -29,9 +29,14 @@ The three bucket landing pages — `/Work/Transcode`, `/Work/Remux`, `/Work/Audi
 
 **Data-integrity (deletion does not lose operator config):**
 
-12. C12. Every row in the historical `ShowSettings` table has a corresponding row in `SeriesProfiles` after the migration runs. Re-running the migration is a no-op.
-13. C13. `Scripts/SQLScripts/BackfillProfileAssignments.py` continues to function — it reads `SeriesProfiles` (renamed) and writes `MediaFiles.AssignedProfile`.
+12. C12. Every row in the historical `ShowSettings` table (post-rename: `ShowSettings_DEPRECATED_2026_06_28`) has a corresponding row in `SeriesProfiles` after the migration runs. Re-running the migration is a no-op.
+13. C13. `Scripts/SQLScripts/BackfillProfileAssignments.py` continues to function — it reads `SeriesProfiles` and writes `MediaFiles.AssignedProfile`.
 14. C14. `EffectiveProfileResolver` is unchanged in behavior — it reads `MediaFiles.AssignedProfile` (already populated by the cascade) and falls back through SystemSettings.DefaultProfileName → `_PreMigrationDefault`.
+
+**Rename-then-drop hygiene (operator policy):**
+
+15. C15. After step 11, `pg_tables` contains `ShowSettings_DEPRECATED_2026_06_28` (not `ShowSettings`) and `pg_indexes` contains `idx_mediafiles_smartpopulate_DEPRECATED_2026_06_28` (not the original name). The drop migration script `DropDeprecatedShowSettingsArtifacts.py` is committed to `Scripts/SQLScripts/` but not executed by the directive.
+16. C16. The audit test additionally scans for surviving production references to the deprecated names — code MUST NOT read `ShowSettings_DEPRECATED_*` either. The marker exists for ad-hoc operator visibility only.
 
 These criteria pass the five litmus tests in `.claude/rules/feature-criteria.md` (rename / outsider / rewrite / negation / stability).
 
@@ -85,11 +90,23 @@ DB ──────────  MediaFiles, SeriesProfiles, TranscodeQueue, P
 - All `/api/ShowSettings/*` endpoints — no surviving consumer outside the deleted template
 - Cross-vertical pointer lines in surviving feature/flow docs that reference the deleted vertical (`transcode.flow.md`, `Features/TranscodeQueue/*.feature.md`, `Features/TranscodeQueue/media-tabs.flow.md`, `Features/FailureAccounting/*`, etc.) — rewritten to point at the new home or struck cleanly per `R14` (no annotation lines)
 
-### Renamed (data preservation)
+### Rename-then-drop pattern for unused SQL objects (operator policy)
 
-- DB table `ShowSettings` → `SeriesProfiles`. Columns unchanged: `Id`, `StorageRootId`, `RelativePath`, `TargetResolution`, `AssignedProfile`, `CreatedDate`, `LastModifiedDate`. Unique index on `(StorageRootId, RelativePath)` preserved.
-- `Scripts/SQLScripts/BackfillProfileAssignments.py` updated to read `SeriesProfiles` in the same commit as the migration.
-- `Scripts/SQLScripts/RenameShowSettingsToSeriesProfiles.py` is idempotent — safe to re-run.
+Per operator policy, every SQL object that becomes unused in this directive is **renamed to a deprecated marker first**, smoke-tested, and only dropped in a follow-up migration after soak. The deprecated marker is the literal suffix `_DEPRECATED_2026_06_28`. The reason: anyone running ad-hoc SQL against an old name gets an obvious "this is gone" signal instead of a "table doesn't exist" mystery; the audit grep can scan for the marker to confirm no surviving production references.
+
+Objects this rule applies to in this directive:
+
+| Object | Kind | New name (live) | Deprecated name (post-rename, pre-drop) |
+|---|---|---|---|
+| `ShowSettings` | TABLE | `SeriesProfiles` (new table created alongside, populated, then old renamed away) | `ShowSettings_DEPRECATED_2026_06_28` |
+| `idx_mediafiles_smartpopulate` | INDEX | (none — query path deleted) | `idx_mediafiles_smartpopulate_DEPRECATED_2026_06_28` |
+
+Migration scripts (all idempotent; safe to re-run):
+
+- `Scripts/SQLScripts/CreateSeriesProfilesAndDeprecateShowSettings.py` — one atomic transaction: `CREATE TABLE SeriesProfiles (...)`; `INSERT INTO SeriesProfiles SELECT ... FROM ShowSettings`; `ALTER TABLE ShowSettings RENAME TO ShowSettings_DEPRECATED_2026_06_28`. Recreates the unique index on the new table; the deprecated table's index gets implicitly renamed by Postgres.
+- `Scripts/SQLScripts/DeprecateSmartPopulateIndex.py` — `ALTER INDEX idx_mediafiles_smartpopulate RENAME TO idx_mediafiles_smartpopulate_DEPRECATED_2026_06_28` (only after `/api/ShowSettings/SmartPopulate` route is gone, so no live query relies on it).
+- `Scripts/SQLScripts/BackfillProfileAssignments.py` updated to read `SeriesProfiles` in the same commit as the table rename.
+- `Scripts/SQLScripts/DropDeprecatedShowSettingsArtifacts.py` — separate follow-up migration. Drops `ShowSettings_DEPRECATED_2026_06_28` and `idx_mediafiles_smartpopulate_DEPRECATED_2026_06_28`. Runs after the soak window per `ceo-mode.md` operator authority on destructive operations.
 
 ### Expanded — `Features/WorkBucket/`
 
@@ -292,7 +309,7 @@ Per `error-ux.md`:
 
 ### Audit test (one-shot enforcement)
 
-- `Tests/Contract/TestNoShowSettingsReferences.py` — grep production python + template tree for `ShowSettings`, `/api/ShowSettings/`, `Features/ShowSettings/`. Fails on any match outside `Scripts/SQLScripts/RenameShowSettingsToSeriesProfiles.py`, `Scripts/SQLScripts/BackfillProfileAssignments.py` (which references SeriesProfiles), and `.claude/directives/closed/`.
+- `Tests/Contract/TestNoShowSettingsReferences.py` — grep production python + template tree for `ShowSettings`, `/api/ShowSettings/`, `Features/ShowSettings/`, AND the deprecated markers `ShowSettings_DEPRECATED_` / `idx_mediafiles_smartpopulate_DEPRECATED_`. Fails on any match outside the three migration scripts (`CreateSeriesProfilesAndDeprecateShowSettings.py`, `DeprecateSmartPopulateIndex.py`, `DropDeprecatedShowSettingsArtifacts.py`) and `.claude/directives/closed/`. The deprecated-name scan exists because the marker is for operator visibility in ad-hoc SQL only — production code MUST NOT depend on it.
 
 ### Pipeline smoke (`Tests/Pipeline/`)
 
@@ -302,11 +319,13 @@ End-to-end: scan a new file → series row appears in `/api/Work/Transcode` with
 
 Each step's exit gate is a live deploy + browser/curl confirmation, not just unit-test green.
 
-- After migration step: `SELECT * FROM SeriesProfiles` returns the renamed rows; old ShowSettings table absent; `BackfillProfileAssignments.py` smoke runs and writes MediaFiles.AssignedProfile.
-- After services scaffolded: contract tests green.
-- After controller wired: curl `/api/Work/Transcode` round-trips grouped JSON.
-- After template + deletion sweep: load `/Work/Transcode`, `/Work/Remux`, `/Work/Audio` in browser; expand a series; change a profile; queue the series; observe TranscodeQueue rows; visit `/ShowSettings` and confirm 404; confirm top-nav lacks the Media entry.
-- After audit test landed: `py -m pytest Tests/Contract/TestNoShowSettingsReferences.py` green.
+- After migration (step 3): `SELECT * FROM SeriesProfiles` returns rows copied from the original `ShowSettings`; `SELECT count(*) FROM ShowSettings_DEPRECATED_2026_06_28` matches `SELECT count(*) FROM SeriesProfiles`; `SELECT * FROM ShowSettings` errors (relation does not exist); `BackfillProfileAssignments.py` smoke runs and writes MediaFiles.AssignedProfile.
+- After services scaffolded (step 2): contract tests green.
+- After controller wired (step 5): curl `/api/Work/Transcode` round-trips grouped JSON.
+- After template + deletion sweep (step 10): load `/Work/Transcode`, `/Work/Remux`, `/Work/Audio` in browser; expand a series; change a profile; queue the series; observe TranscodeQueue rows; visit `/ShowSettings` and confirm 404; confirm top-nav lacks the Media entry.
+- After index deprecation (step 11): `SELECT indexname FROM pg_indexes WHERE indexname = 'idx_mediafiles_smartpopulate_DEPRECATED_2026_06_28'` returns one row; the original index name returns zero rows.
+- After audit test landed (step 12): `py -m pytest Tests/Contract/TestNoShowSettingsReferences.py` green.
+- **Post-soak (operator-driven, not in this directive's auto-flow):** `DropDeprecatedShowSettingsArtifacts.py` runs; `SELECT count(*) FROM pg_tables WHERE tablename ILIKE 'showsettings%'` returns 0; `SELECT count(*) FROM pg_indexes WHERE indexname ILIKE 'idx_mediafiles_smartpopulate%'` returns 0.
 
 ## Doc-layering deliverables
 
@@ -316,22 +335,26 @@ Per `.claude/rules/doc-layering.md`, the directive that implements this design m
 - `Features/WorkBucket/work-bucket.flow.md` — new file. Stages ST1 (URL→render) ST2 (paged series query) ST3 (expand→files) ST4 (set profile) ST5 (admit to queue) ST6 (background backfill). Seams table covers each transition.
 - Cross-references in `transcode.flow.md`, `Features/TranscodeQueue/*.feature.md`, and other surviving docs are updated; pointers to deleted docs are either rewritten or struck cleanly (no annotation lines per `R14`).
 
-## Migration ordering (irreversible-last)
+## Migration ordering (rename-then-drop, irreversible-last)
 
-Implementation order minimizes blast radius. The destructive step (DROP TABLE ShowSettings) lands LAST after every consumer is verified.
+Implementation order minimizes blast radius. Destructive DROP operations live in a separate follow-up migration that runs after the soak window, per the rename-then-drop policy. This directive lands everything through step 12; the DROP migration script is **authored** here but only **run** after soak with operator authority (per `ceo-mode.md`).
 
 1. Domain VOs + repositories + services scaffolded (zero behavior change).
 2. Contract tests for new code, all green.
-3. `RenameShowSettingsToSeriesProfiles.py` migration created and run on dev — CREATE new table, COPY data, leave OLD table for now.
-4. `BackfillProfileAssignments.py` updated to read SeriesProfiles. Smoke runs.
-5. `WorkBucketController` swaps to new routes. Old WorkBucketRepository methods deleted (`CountByBucket`, `ListByBucket`, `QueueNext`, `QueueOne` — moved into the new repos).
-6. `WorkBucket.html` rewritten. Existing minimal template replaced.
-7. Surviving docs swept for cross-references to `Features/ShowSettings/`.
+3. `CreateSeriesProfilesAndDeprecateShowSettings.py` migration created and run on dev in one atomic transaction: new `SeriesProfiles` table created, data copied from `ShowSettings`, `ShowSettings` renamed to `ShowSettings_DEPRECATED_2026_06_28`. Verify row counts match.
+4. `BackfillProfileAssignments.py` updated to read `SeriesProfiles`. Smoke runs against the new table.
+5. `WorkBucketController` swaps to new routes. Old `WorkBucketRepository` methods (`CountByBucket`, `ListByBucket`, `QueueNext`, `QueueOne`) moved into the new SRP-focused repositories and deleted from the old file.
+6. `WorkBucket.html` rewritten to the grouped-by-series shape. Existing minimal template replaced.
+7. Surviving feature/flow docs swept for cross-references to `Features/ShowSettings/`. Pointers rewritten to the new home or struck cleanly (no annotation lines per R14).
 8. `Features/ShowSettings/` directory deleted in one commit.
 9. `Templates/ShowSettings.html` deleted.
-10. Blueprint registration removed from `WebService/Main.py`. Top-nav link removed from `Templates/Base.html`. Live deploy. Verify `/ShowSettings` returns 404 and all three bucket pages render.
-11. Audit test `TestNoShowSettingsReferences.py` lands and goes green.
-12. After 24h soak with no issues: DROP TABLE ShowSettings in a second migration script. (Operator authority — destructive op per `ceo-mode.md`.)
+10. Blueprint registration removed from `WebService/Main.py`. Top-nav link removed from `Templates/Base.html`. Live deploy. Verify `/ShowSettings` returns 404 and all three bucket pages render in the browser.
+11. `DeprecateSmartPopulateIndex.py` migration runs — renames `idx_mediafiles_smartpopulate` to its deprecated marker (safe now: no production query references it).
+12. Audit test `TestNoShowSettingsReferences.py` lands and goes green. `DropDeprecatedShowSettingsArtifacts.py` migration script is authored and committed (but **not run** in this directive).
+
+**Soak + follow-up (separate operator-driven step, not in this directive's auto-flow):**
+
+13. Operator runs `DropDeprecatedShowSettingsArtifacts.py` after at least 24h soak with no issues — drops `ShowSettings_DEPRECATED_2026_06_28` table and `idx_mediafiles_smartpopulate_DEPRECATED_2026_06_28` index. Operator authority per `ceo-mode.md` (destructive op).
 
 ## What this design explicitly does NOT change
 
@@ -343,7 +366,10 @@ Implementation order minimizes blast radius. The destructive step (DROP TABLE Sh
 
 ## Open questions for the operator to confirm
 
-None blocking. Items the operator may want to weigh in on before the implementation plan lands:
+**Resolved by operator (2026-06-28):**
 
-- Whether the destructive `DROP TABLE ShowSettings` step (step 12 above) should happen in the same directive or be filed as a follow-up gated on a soak period.
+- ~~Whether destructive DROP runs in this directive or a follow-up.~~ **Resolved:** rename-then-drop pattern. Unused SQL objects get a `_DEPRECATED_2026_06_28` marker now; the DROP migration is authored in this directive but run only after smoke soak.
+
+**Still parked:**
+
 - Whether the audit test should treat archived directives (`.claude/directives/closed/`) as exempt (proposed: yes, since they're historical artifacts) or scrub them too.
