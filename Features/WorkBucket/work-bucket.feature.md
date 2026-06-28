@@ -54,7 +54,7 @@ Architectural debts identified during the work-transcode-unified directive's cod
 - [x] **G4** -- `BackfillProfileAssignments.py` cascade-write path stops issuing raw `UPDATE MediaFiles` SQL. Route through a new `MediaFilesRepository.SetAssignedProfileForFile(MediaFileId: int, ProfileName: str, Source: str = 'series')` method instead.
 - [x] **G5** -- Extract `WorkBucket/Domain/ListSeriesRequest.py` VO with `FromQueryArgs(args) -> (PagedQuery, SortSpec, FilterSpec)` factory. `WorkBucketController.list_series` stops parsing query-strings inline; the VO owns the parsing contract.
 - [x] **G6** -- Add `ProfileRepository.IsFinalizedActive(ProfileName: str) -> bool`. `ProfileName` VO ctor and `EffectiveProfileResolver._IsFinalizedActive` both delegate to it. Single SQL site for the Draft=FALSE + Active=TRUE check.
-- [ ] **G7** -- Delete the no-op `HAVING COUNT(*) > 0` clause in `SeriesQueryRepository.ListSeriesByBucket` (cargo-culted from the old GetShowsWithStats; a `GROUP BY` row by definition has >= 1 contributing row).
+- [x] **G7** -- Delete the no-op `HAVING COUNT(*) > 0` clause in `SeriesQueryRepository.ListSeriesByBucket` (cargo-culted from the old GetShowsWithStats; a `GROUP BY` row by definition has >= 1 contributing row).
 
 When all 7 are closed, delete this section. The Decisions Made section in the closing directive records the resolution.
 

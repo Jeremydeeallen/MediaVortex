@@ -41,7 +41,6 @@ class SeriesQueryRepository:
             "   WHERE mf.WorkBucket = %s "
             f"   {FilterClause} "
             "   GROUP BY mf.StorageRootId, split_part(mf.RelativePath, '/', 1)"
-            "   HAVING COUNT(*) > 0"
             ")"
             "SELECT * FROM ("
             "  SELECT sa.StorageRootId AS StorageRootId,"
