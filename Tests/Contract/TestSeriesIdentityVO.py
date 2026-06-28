@@ -1,3 +1,4 @@
+import dataclasses
 import unittest
 from Features.WorkBucket.Domain.SeriesIdentity import SeriesIdentity
 
@@ -32,7 +33,7 @@ class TestSeriesIdentityVO(unittest.TestCase):
     def test_immutability(self):
         # see work-bucket.C2
         A = SeriesIdentity(StorageRootId=3, RelativePath='House')
-        with self.assertRaises(Exception):
+        with self.assertRaises(dataclasses.FrozenInstanceError):
             A.StorageRootId = 4
 
     # directive: work-transcode-unified
@@ -45,10 +46,11 @@ class TestSeriesIdentityVO(unittest.TestCase):
         self.assertEqual(A, B)
 
     # directive: work-transcode-unified
-    def test_composite_key_with_url_unsafe_chars(self):
+    def test_composite_key_roundtrip_with_colons_in_relativepath(self):
         # see work-bucket.C2
         A = SeriesIdentity(StorageRootId=3, RelativePath='Star Trek: Strange New Worlds')
         Key = A.ToCompositeKey()
+        self.assertEqual(Key, '3:Star Trek: Strange New Worlds')
         B = SeriesIdentity.FromCompositeKey(Key)
         self.assertEqual(A, B)
 
