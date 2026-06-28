@@ -1,141 +1,277 @@
 {% extends "Base.html" %}
 
-{% block title %}{{ Labels.Title }}{% endblock %}
+{% block title %}{{ Bucket.Title }} -- MediaVortex{% endblock %}
 
 {% block content %}
-<div class="container my-4">
-  <div class="d-flex align-items-center mb-2">
-    <h2 class="mb-0"><i class="{{ Labels.Icon }} me-2"></i>{{ Labels.Title }}</h2>
-    <span class="ms-3 text-muted small">{{ Labels.Subtitle }}</span>
+<div class="container-fluid mt-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="{{ Bucket.Icon }}"></i> {{ Bucket.Title }}</h2>
+    <p class="text-muted mb-0">{{ Bucket.Subtitle }}</p>
   </div>
 
-  <div class="row mb-3">
-    <div class="col-md-3">
-      <div class="card"><div class="card-body py-2">
-        <div class="text-muted small">Total in {{ Labels.Title }}</div>
-        <div class="h4 mb-0" id="WorkBucketTotal">--</div>
-      </div></div>
-    </div>
-    <div class="col-md-3">
-      <div class="card"><div class="card-body py-2">
-        <div class="text-muted small">Already in queue</div>
-        <div class="h4 mb-0" id="WorkBucketAlreadyQueued">--</div>
-      </div></div>
-    </div>
-    <div class="col-md-3">
-      <div class="card"><div class="card-body py-2">
-        <div class="text-muted small">Not yet queued</div>
-        <div class="h4 mb-0" id="WorkBucketRemaining">--</div>
-      </div></div>
-    </div>
-    <div class="col-md-3">
-      <div class="card"><div class="card-body py-2">
-        <div class="text-muted small">Bulk queue</div>
-        <div class="input-group input-group-sm">
-          <input type="number" id="WorkBucketBulkLimit" class="form-control" value="200" min="1" max="1000">
-          <button class="btn btn-success" id="WorkBucketBulkQueueBtn">Queue next N</button>
+  <div class="card mb-3">
+    <div class="card-body py-2">
+      <div class="row g-2 align-items-center">
+        <div class="col-md-3">
+          <label class="form-label small mb-0">Drive</label>
+          <select id="filter-drive" class="form-select form-select-sm" multiple size="3"></select>
         </div>
-      </div></div>
+        <div class="col-md-5">
+          <label class="form-label small mb-0">Search</label>
+          <input id="filter-search" type="text" class="form-control form-control-sm" placeholder="series name">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small mb-0">Sort</label>
+          <select id="sort-spec" class="form-select form-select-sm">
+            <option value="TotalGB.desc" selected>Total size desc</option>
+            <option value="FileCount.desc">File count desc</option>
+            <option value="Name.asc">Series name</option>
+          </select>
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+          <button id="btn-apply" class="btn btn-sm btn-primary w-100">Apply</button>
+        </div>
+      </div>
     </div>
   </div>
 
-  <div class="table-responsive">
-    <table class="table table-sm table-striped">
-      <thead>
-        <tr>
-          <th>Id</th>
-          <th>FileName</th>
-          <th>Resolution</th>
-          <th>Audio</th>
-          <th class="text-end">LUFS</th>
-          <th class="text-end">TP</th>
-          <th>OperationsNeeded</th>
-          <th>State</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody id="WorkBucketBody"><tr><td colspan="9" class="text-muted">Loading...</td></tr></tbody>
-    </table>
+  <div id="series-container">
+    <div class="text-center py-5"><div class="spinner-border" role="status"></div></div>
   </div>
 
-  <div class="d-flex justify-content-between align-items-center">
-    <span class="text-muted small" id="WorkBucketPageInfo"></span>
-    <div>
-      <button class="btn btn-outline-secondary btn-sm" id="WorkBucketPrev">Prev</button>
-      <button class="btn btn-outline-secondary btn-sm" id="WorkBucketNext">Next</button>
-    </div>
-  </div>
+  <nav>
+    <ul id="pager" class="pagination justify-content-center"></ul>
+  </nav>
 </div>
 
 <script>
-const URL_KEY = {{ UrlKey|tojson }};
-let Offset = 0;
-const Limit = 50;
+(function() {
+  const UrlKey = {{ UrlKey | tojson }};
+  const ApiBase = '/api/Work/' + UrlKey;
+  let CurrentPage = 1;
+  let PageSize = 25;
+  let ProfileOptions = [];
 
-function _esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'})[c])}
-
-async function loadPage(){
-  const r = await fetch(`/api/Work/${URL_KEY}?offset=${Offset}&limit=${Limit}`);
-  const j = await r.json();
-  const d = (j && j.Data) || {};
-  document.getElementById('WorkBucketTotal').textContent = (d.Total||0).toLocaleString();
-  document.getElementById('WorkBucketAlreadyQueued').textContent = (d.AlreadyQueued||0).toLocaleString();
-  document.getElementById('WorkBucketRemaining').textContent = Math.max(0, (d.Total||0) - (d.AlreadyQueued||0)).toLocaleString();
-  const rows = d.Rows || [];
-  const start = (d.Offset||0) + 1;
-  const end = (d.Offset||0) + rows.length;
-  document.getElementById('WorkBucketPageInfo').textContent = `Showing ${start.toLocaleString()}-${end.toLocaleString()} of ${(d.Total||0).toLocaleString()}`;
-  if (!rows.length) {
-    let emptyNote = 'Nothing here.';
-    if (URL_KEY === 'Audio' && (d.Total||0) === 0) {
-      emptyNote = 'Empty by design. ComplianceGate routes a file to AudioFixOnly only when audio is the SOLE blocker -- almost every audio-non-compliant source also needs a container remux to MP4, so it lands in Remux first. As Remux drains, watch this number rise.';
-    }
-    document.getElementById('WorkBucketBody').innerHTML = `<tr><td colspan="9" class="text-muted">${emptyNote}</td></tr>`;
-    return;
+  function FetchProfiles() {
+    return fetch('/api/Profiles/Active', {timeout: 10000})
+      .then(R => R.json())
+      .then(P => { ProfileOptions = (P.Data && P.Data.Profiles) || P.Profiles || []; })
+      .catch(() => { ProfileOptions = []; });
   }
-  document.getElementById('WorkBucketBody').innerHTML = rows.map(r => {
-    const inQueue = r.InQueue ?? r.inqueue;
-    const state = inQueue ? '<span class="badge bg-info text-dark">in queue</span>' : '<span class="badge bg-secondary">idle</span>';
-    const action = inQueue
-      ? '<button class="btn btn-sm btn-outline-secondary" disabled>Queued</button>'
-      : `<button class="btn btn-sm btn-outline-success" onclick="queueOne(${r.Id})">Queue now</button>`;
-    return `<tr>
-      <td>${r.Id}</td>
-      <td><code class="small">${_esc(r.FileName)}</code></td>
-      <td>${_esc(r.Resolution||'')}</td>
-      <td>${_esc(r.AudioCodec||'')} <span class="text-muted small">${_esc(r.AudioLanguages||'')}</span></td>
-      <td class="text-end">${r.SourceIntegratedLufs==null?'':r.SourceIntegratedLufs}</td>
-      <td class="text-end">${r.SourceTruePeakDbtp==null?'':r.SourceTruePeakDbtp}</td>
-      <td><code class="small">${_esc(r.VideoCompliantReason||r.ContainerCompliantReason||r.AudioCompliantReason||'')}</code></td>
-      <td>${state}</td>
-      <td>${action}</td>
-    </tr>`;
-  }).join('');
-}
 
-async function queueOne(id){
-  const r = await fetch(`/api/Work/${URL_KEY}/Queue/${id}`, {method:'POST'});
-  const j = await r.json();
-  if (!j.Success) { alert('Failed: '+(j.Message||'')); return; }
-  loadPage();
-}
+  function FetchDrives() {
+    return fetch('/api/StorageRoots').then(R => R.json()).then(P => {
+      const Select = document.getElementById('filter-drive');
+      Select.innerHTML = '';
+      const List = (P.Data && P.Data.StorageRoots) || P.StorageRoots || [];
+      List.forEach(SR => {
+        const Opt = document.createElement('option');
+        Opt.value = SR.Id || SR.id;
+        Opt.textContent = (SR.CanonicalPrefix || SR.canonicalprefix || ('Root ' + Opt.value));
+        Select.appendChild(Opt);
+      });
+    }).catch(() => {});
+  }
 
-document.getElementById('WorkBucketPrev').addEventListener('click', () => {
-  if (Offset >= Limit) { Offset -= Limit; loadPage(); }
-});
-document.getElementById('WorkBucketNext').addEventListener('click', () => {
-  Offset += Limit; loadPage();
-});
-document.getElementById('WorkBucketBulkQueueBtn').addEventListener('click', async () => {
-  const limit = parseInt(document.getElementById('WorkBucketBulkLimit').value, 10) || 200;
-  if (!confirm(`Queue next ${limit.toLocaleString()} idle ${URL_KEY} files?`)) return;
-  const r = await fetch(`/api/Work/${URL_KEY}/QueueNext`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({Limit: limit})});
-  const j = await r.json();
-  if (!j.Success) { alert('Failed: ' + (j.Message||'')); return; }
-  alert(`Inserted ${j.Data.Inserted.toLocaleString()} rows. ${j.Data.RemainingCandidates.toLocaleString()} idle files remain.`);
-  loadPage();
-});
+  function BuildQueryString() {
+    const Params = new URLSearchParams();
+    Params.set('page', CurrentPage);
+    Params.set('pageSize', PageSize);
+    Params.set('sort', document.getElementById('sort-spec').value);
+    const Drives = Array.from(document.getElementById('filter-drive').selectedOptions).map(O => O.value);
+    Drives.forEach(D => Params.append('drive', D));
+    const Search = document.getElementById('filter-search').value.trim();
+    if (Search) Params.set('search', Search);
+    return Params.toString();
+  }
 
-loadPage();
+  function RenderSeriesRows(Rows, Total) {
+    const C = document.getElementById('series-container');
+    if (!Rows.length) {
+      C.innerHTML = '<div class="alert alert-info">No series in this bucket.</div>';
+      return;
+    }
+    let Html = '<table class="table table-sm table-hover"><thead><tr>';
+    Html += '<th></th><th>Series</th><th class="text-end">Files</th><th class="text-end">GB</th>';
+    Html += '<th>Resolution</th><th>Codec</th><th>Profile</th><th>Queue</th><th></th></tr></thead><tbody>';
+    Rows.forEach(S => {
+      const Sid = S.CompositeKey;
+      const ProfileSelect = '<select class="form-select form-select-sm series-profile" data-sid="' + encodeURIComponent(Sid) + '">'
+        + '<option value="">(none)</option>'
+        + ProfileOptions.map(P => {
+            const Name = P.ProfileName || P.profilename;
+            const Sel = (Name === S.AssignedProfile) ? ' selected' : '';
+            return '<option value="' + Name + '"' + Sel + '>' + Name + '</option>';
+          }).join('')
+        + '</select>';
+      const QueueBadge = S.AnyInQueue
+        ? '<span class="badge bg-warning text-dark">Pending</span>'
+        : '<span class="badge bg-secondary">Idle</span>';
+      Html += '<tr class="series-row" data-sid="' + encodeURIComponent(Sid) + '">';
+      Html += '<td><button class="btn btn-sm btn-link expand-toggle">&#9656;</button></td>';
+      Html += '<td>' + S.ShowName + '</td>';
+      Html += '<td class="text-end">' + S.FileCount + '</td>';
+      Html += '<td class="text-end">' + (S.TotalGB || 0).toFixed(1) + '</td>';
+      Html += '<td>' + (S.CommonResolution || '') + '</td>';
+      Html += '<td>' + (S.CommonCodec || '') + '</td>';
+      Html += '<td>' + ProfileSelect + '</td>';
+      Html += '<td>' + QueueBadge + '</td>';
+      Html += '<td><button class="btn btn-sm btn-primary queue-all-btn" data-sid="' + encodeURIComponent(Sid) + '">Queue all</button></td>';
+      Html += '</tr>';
+      Html += '<tr class="files-row d-none" data-sid="' + encodeURIComponent(Sid) + '"><td colspan="9"><div class="files-container py-2"></div></td></tr>';
+    });
+    Html += '</tbody></table>';
+    C.innerHTML = Html;
+    RenderPager(Total);
+    AttachRowEvents();
+  }
+
+  function RenderPager(Total) {
+    const Pages = Math.max(1, Math.ceil(Total / PageSize));
+    const P = document.getElementById('pager');
+    let Html = '';
+    for (let i = 1; i <= Pages && i <= 20; i++) {
+      Html += '<li class="page-item' + (i === CurrentPage ? ' active' : '') + '">'
+        + '<a class="page-link" href="#" data-page="' + i + '">' + i + '</a></li>';
+    }
+    P.innerHTML = Html;
+    Array.from(P.querySelectorAll('a')).forEach(A => {
+      A.addEventListener('click', (E) => {
+        E.preventDefault();
+        CurrentPage = parseInt(A.dataset.page, 10);
+        LoadSeries();
+      });
+    });
+  }
+
+  function AttachRowEvents() {
+    document.querySelectorAll('.expand-toggle').forEach(Btn => {
+      Btn.addEventListener('click', () => {
+        const Tr = Btn.closest('tr');
+        const Sid = Tr.dataset.sid;
+        const FilesRow = document.querySelector('.files-row[data-sid="' + Sid + '"]');
+        if (FilesRow.classList.contains('d-none')) {
+          LoadFiles(decodeURIComponent(Sid), FilesRow.querySelector('.files-container'));
+          FilesRow.classList.remove('d-none');
+          Btn.innerHTML = '&#9662;';
+        } else {
+          FilesRow.classList.add('d-none');
+          Btn.innerHTML = '&#9656;';
+        }
+      });
+    });
+
+    document.querySelectorAll('.series-profile').forEach(Sel => {
+      Sel.addEventListener('change', () => {
+        const Sid = decodeURIComponent(Sel.dataset.sid);
+        const ProfileName = Sel.value;
+        const Method = ProfileName ? 'POST' : 'DELETE';
+        fetch(ApiBase + '/Series/' + encodeURIComponent(Sid) + '/Profile', {
+          method: Method,
+          headers: {'Content-Type': 'application/json'},
+          body: ProfileName ? JSON.stringify({ProfileName}) : null,
+        }).then(R => R.json()).then(P => {
+          if (P.Success) {
+            FlashToast(P.Message);
+          } else {
+            FlashToast(P.Message, 'danger');
+          }
+        }).catch(E => FlashToast('Profile update failed: ' + E, 'danger'));
+      });
+    });
+
+    document.querySelectorAll('.queue-all-btn').forEach(Btn => {
+      Btn.addEventListener('click', () => {
+        const Sid = decodeURIComponent(Btn.dataset.sid);
+        Btn.disabled = true;
+        Btn.innerHTML = '...';
+        fetch(ApiBase + '/Series/' + encodeURIComponent(Sid) + '/Queue', {method: 'POST'})
+          .then(R => R.json()).then(P => {
+            if (P.Success) {
+              FlashToast('Queued ' + P.Data.Inserted + ' files (' + P.Data.AlreadyQueued + ' already pending)');
+              LoadSeries();
+            } else {
+              FlashToast(P.Message, 'danger');
+            }
+          })
+          .catch(E => FlashToast('Queue failed: ' + E, 'danger'))
+          .finally(() => { Btn.disabled = false; Btn.innerHTML = 'Queue all'; });
+      });
+    });
+  }
+
+  function LoadFiles(Sid, Container) {
+    Container.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm" role="status"></div></div>';
+    fetch(ApiBase + '/Series/' + encodeURIComponent(Sid))
+      .then(R => R.json()).then(P => {
+        if (!P.Success) {
+          Container.innerHTML = '<div class="alert alert-danger">' + P.Message + '</div>';
+          return;
+        }
+        const Files = P.Data.Files || [];
+        let Html = '<table class="table table-sm mb-0"><thead><tr>';
+        Html += '<th>File</th><th class="text-end">GB</th><th>Resolution</th><th>Audio</th><th>Languages</th><th>Reasons</th><th>Queue</th><th></th></tr></thead><tbody>';
+        Files.forEach(F => {
+          const Reasons = [F.VideoCompliantReason, F.ContainerCompliantReason, F.AudioCompliantReason].filter(Boolean).join('; ');
+          const Badge = F.InQueue ? '<span class="badge bg-warning text-dark">Pending</span>' : '';
+          Html += '<tr>';
+          Html += '<td>' + F.FileName + '</td>';
+          Html += '<td class="text-end">' + (F.SizeGB || 0).toFixed(2) + '</td>';
+          Html += '<td>' + (F.Resolution || '') + '</td>';
+          Html += '<td>' + (F.AudioCodec || '') + '</td>';
+          Html += '<td>' + (F.AudioLanguages || '') + '</td>';
+          Html += '<td><small class="text-muted">' + Reasons + '</small></td>';
+          Html += '<td>' + Badge + '</td>';
+          Html += '<td><button class="btn btn-sm btn-outline-primary queue-one-btn" data-id="' + F.Id + '">Queue</button></td>';
+          Html += '</tr>';
+        });
+        Html += '</tbody></table>';
+        Container.innerHTML = Html;
+        Container.querySelectorAll('.queue-one-btn').forEach(B => {
+          B.addEventListener('click', () => {
+            B.disabled = true;
+            fetch(ApiBase + '/Queue/' + B.dataset.id, {method: 'POST'})
+              .then(R => R.json()).then(P => {
+                FlashToast(P.Message, P.Success ? 'info' : 'danger');
+                if (P.Success) LoadSeries();
+              })
+              .catch(E => FlashToast('Queue failed: ' + E, 'danger'))
+              .finally(() => { B.disabled = false; });
+          });
+        });
+      })
+      .catch(E => { Container.innerHTML = '<div class="alert alert-danger">' + E + '</div>'; });
+  }
+
+  function LoadSeries() {
+    const C = document.getElementById('series-container');
+    C.innerHTML = '<div class="text-center py-5"><div class="spinner-border" role="status"></div></div>';
+    fetch(ApiBase + '?' + BuildQueryString())
+      .then(R => R.json()).then(P => {
+        if (!P.Success) {
+          C.innerHTML = '<div class="alert alert-danger">' + P.Message + '</div>';
+          return;
+        }
+        RenderSeriesRows(P.Data.Series || [], P.Data.Total || 0);
+      })
+      .catch(E => { C.innerHTML = '<div class="alert alert-danger">' + E + '</div>'; });
+  }
+
+  function FlashToast(Message, Kind) {
+    Kind = Kind || 'info';
+    const Wrap = document.createElement('div');
+    Wrap.className = 'toast align-items-center text-bg-' + Kind + ' border-0 position-fixed top-0 end-0 m-3 show';
+    Wrap.style.zIndex = 1080;
+    Wrap.innerHTML = '<div class="d-flex"><div class="toast-body">' + Message + '</div>'
+      + '<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>';
+    document.body.appendChild(Wrap);
+    setTimeout(() => Wrap.remove(), 5000);
+  }
+
+  document.getElementById('btn-apply').addEventListener('click', () => { CurrentPage = 1; LoadSeries(); });
+  document.getElementById('filter-search').addEventListener('keydown', E => { if (E.key === 'Enter') { CurrentPage = 1; LoadSeries(); } });
+
+  Promise.all([FetchProfiles(), FetchDrives()]).then(LoadSeries);
+})();
 </script>
 {% endblock %}
