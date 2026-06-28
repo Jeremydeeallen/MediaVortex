@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 WebService Entry Point
 Main Flask web application for MediaVortex
@@ -315,7 +315,7 @@ class WebServiceApp:
         """Register main website routes."""
         @self.App.route('/')
         def home():
-            return redirect('/ShowSettings')
+            return redirect('/settings')
 
         @self.App.route('/settings')
         def settings():

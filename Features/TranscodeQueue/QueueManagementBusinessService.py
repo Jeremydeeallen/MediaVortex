@@ -288,7 +288,7 @@ class QueueManagementBusinessService:
     def SmartPopulateQueue(self, Limit: int = 100, Offset: int = 0, Drive: str = '',
                             Search: Optional[str] = None, Mode: Optional[str] = None,
                             Focus: Optional[str] = None) -> Dict[str, Any]:
-        """Untranscoded MediaFiles ranked by PriorityScore; optional Drive/Search/Mode filters scope by MediaFiles.WorkBucket; see transcode.flow.md ST3.5 + remux-populate-card.feature.md C4."""
+        """Untranscoded MediaFiles ranked by PriorityScore; optional Drive/Search/Mode filters scope by MediaFiles.WorkBucket; see transcode.flow.md ST3.5 + transcode-vs-remux-routing.feature.md C4."""
         try:
             LoggingService.LogFunctionEntry("SmartPopulateQueue", "QueueManagementBusinessService", Limit, Offset, Drive, Search, Mode)
 

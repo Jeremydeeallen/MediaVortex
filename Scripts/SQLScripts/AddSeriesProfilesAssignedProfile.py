@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-AddShowSettingsAssignedProfile.py
-Migration: add AssignedProfile VARCHAR(100) column to ShowSettings.
+AddSeriesProfilesAssignedProfile.py
+Migration: add AssignedProfile VARCHAR(100) column to SeriesProfiles.
 
 Owns: transcode-vs-remux-routing.feature.md criterion 2.
 
@@ -40,16 +40,16 @@ def RunMigration():
     Conn = GetConnection()
     Cur = Conn.cursor()
     try:
-        if ColumnExists(Cur, 'ShowSettings', 'AssignedProfile'):
-            print("ShowSettings.AssignedProfile already exists -- skipping ADD COLUMN")
+        if ColumnExists(Cur, 'SeriesProfiles', 'AssignedProfile'):
+            print("SeriesProfiles.AssignedProfile already exists -- skipping ADD COLUMN")
         else:
-            print("Adding ShowSettings.AssignedProfile VARCHAR(100) (nullable)...")
-            Cur.execute("ALTER TABLE ShowSettings ADD COLUMN AssignedProfile VARCHAR(100)")
+            print("Adding SeriesProfiles.AssignedProfile VARCHAR(100) (nullable)...")
+            Cur.execute("ALTER TABLE SeriesProfiles ADD COLUMN AssignedProfile VARCHAR(100)")
             Conn.commit()
             print("  done.")
-        Cur.execute("SELECT COUNT(*) FROM ShowSettings")
+        Cur.execute("SELECT COUNT(*) FROM SeriesProfiles")
         Total = Cur.fetchone()[0]
-        Cur.execute("SELECT COUNT(*) FROM ShowSettings WHERE AssignedProfile IS NOT NULL")
+        Cur.execute("SELECT COUNT(*) FROM SeriesProfiles WHERE AssignedProfile IS NOT NULL")
         Set_ = Cur.fetchone()[0]
         print(f"\nShowSettings total rows: {Total}")
         print(f"  AssignedProfile set: {Set_}")

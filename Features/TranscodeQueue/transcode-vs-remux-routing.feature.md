@@ -57,7 +57,7 @@ User-facing -- two GUI surfaces, two columns visible in any operator query, one 
 
 1. `SystemSettings('DefaultProfileName')` row exists, type string, default `'SVT-AV1 P6 FG8 >480p'` (operator's chosen global default). Seed script `Scripts/SQLScripts/SeedDefaultProfileSetting.py` is idempotent (`INSERT ... ON CONFLICT DO NOTHING`). Verifiable: run the seed, query `SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'DefaultProfileName'`.
 
-2. `SeriesProfiles.AssignedProfile VARCHAR(100)` column exists, nullable. NULL means "inherit from SystemSettings default." Migration `Scripts/SQLScripts/AddShowSettingsAssignedProfile.py` is idempotent (`ADD COLUMN IF NOT EXISTS`). Verifiable: `\d SeriesProfiles` shows the column.
+2. `SeriesProfiles.AssignedProfile VARCHAR(100)` column exists, nullable. NULL means "inherit from SystemSettings default." Migration `Scripts/SQLScripts/AddSeriesProfilesAssignedProfile.py` is idempotent (`ADD COLUMN IF NOT EXISTS`). Verifiable: `\d SeriesProfiles` shows the column.
 
 3. `_GetEffectiveProfile(MediaFile) -> Optional[str]` helper exists in `QueueManagementBusinessService`. It extracts the show folder from `MediaFile.FilePath` (segment immediately under the drive root, same `Parts[1]` rule the existing client-side ShowName extraction uses), looks up `SeriesProfiles.AssignedProfile` for that folder; if NULL or no row, returns `SystemSettings('DefaultProfileName')`. Returns NULL only if the SystemSetting itself is unset. Verifiable: insert `SeriesProfiles` row with `AssignedProfile='X'` for show `Y`, query a MediaFile in `Y` -- helper returns `'X'`. Delete the `SeriesProfiles` row, helper returns the SystemSettings default.
 
@@ -111,7 +111,6 @@ Criteria 10-13 are consolidated into `docs/superpowers/specs/2026-06-22-complian
 
 18. Every queue-entry path's WHERE clause includes `IsCompliant IS NOT TRUE` via the existing shared helper. Compliant files cannot enter any queue. Verifiable: mark a file `IsCompliant=true` manually, attempt to queue it via every entry path -- all return skipped, no TranscodeQueue row appears.
 
-19. The partial index `idx_mediafiles_smartpopulate` is recreated to include `IsCompliant IS NOT TRUE` in its WHERE so SmartPopulate stays sub-millisecond. Verifiable: `EXPLAIN ANALYZE` shows Index Scan after recreation.
 
 ### H. Admin endpoint
 
@@ -161,7 +160,7 @@ IN PROGRESS -- operator approved 2026-05-09 (cheap-loudnorm-detection validated;
 - [x] Pivot to compliance-driven model (this rewrite, 2026-05-09)
 - [x] Renamed file: `no-benefit-handling.feature.md` -> `transcode-vs-remux-routing.feature.md` (criterion 25)
 - [ ] Operator approves criteria 1-25
-- [x] Migrations: `AddIsCompliantColumn.py`, `AddRecommendedModeColumn.py`, `AddShowSettingsAssignedProfile.py` (renamed to `SeriesProfiles`), `SeedDefaultProfileSetting.py`, `DropCompliantFilesTable.py`
+- [x] Migrations: `AddIsCompliantColumn.py`, `AddRecommendedModeColumn.py`, `AddSeriesProfilesAssignedProfile.py`, `SeedDefaultProfileSetting.py`, `DropCompliantFilesTable.py`
 - [x] `_GetEffectiveProfile` helper (criterion 3)
 - [x] `_EvaluateCompliance` helper (criterion 11)
 - [x] `RecomputeForFiles` -- replaces `ComputePriorityScoresForFiles`, single-pass updater (criterion 8)
@@ -207,7 +206,7 @@ Templates/WorkBucket.html                                       -- per-series Pr
 Repositories/DatabaseManager.py                                 -- queue-population WHERE-clause helper updated, partial-index recreate
 Scripts/SQLScripts/AddIsCompliantColumn.py                      -- (NEW)
 Scripts/SQLScripts/AddRecommendedModeColumn.py                  -- (NEW)
-Scripts/SQLScripts/AddShowSettingsAssignedProfile.py            -- (NEW, renamed table to SeriesProfiles)
+Scripts/SQLScripts/AddSeriesProfilesAssignedProfile.py          -- (NEW, adds AssignedProfile to SeriesProfiles)
 Scripts/SQLScripts/SeedDefaultProfileSetting.py                 -- (NEW)
 Scripts/SQLScripts/DropCompliantFilesTable.py                   -- (NEW)
 Scripts/SQLScripts/AddSmartPopulateIndex.py                     -- (UPDATED, recreate with IsCompliant predicate)
@@ -221,10 +220,10 @@ transcode.flow.md                                                -- Stage 4 + St
 | Feature doc (this file) | Contract |
 | `Scripts/SQLScripts/AddIsCompliantColumn.py` | Idempotent ADD COLUMN MediaFiles.IsCompliant BOOLEAN |
 | `Scripts/SQLScripts/AddRecommendedModeColumn.py` | Idempotent ADD COLUMN MediaFiles.RecommendedMode VARCHAR(16) |
-| `Scripts/SQLScripts/AddShowSettingsAssignedProfile.py` | Idempotent ADD COLUMN SeriesProfiles.AssignedProfile VARCHAR(100) |
+| `Scripts/SQLScripts/AddSeriesProfilesAssignedProfile.py` | Idempotent ADD COLUMN SeriesProfiles.AssignedProfile VARCHAR(100) |
 | `Scripts/SQLScripts/SeedDefaultProfileSetting.py` | Idempotent INSERT SystemSetting `'DefaultProfileName' = 'SVT-AV1 P6 FG8 >480p'` ON CONFLICT DO NOTHING |
 | `Scripts/SQLScripts/DropCompliantFilesTable.py` | Idempotent DROP TABLE IF EXISTS CompliantFiles (criterion 23) |
-| `Scripts/SQLScripts/AddSmartPopulateIndex.py` | Updated: drop and recreate `idx_mediafiles_smartpopulate` with `IsCompliant IS NOT TRUE` in WHERE |
+| `Scripts/SQLScripts/AddSmartPopulateIndex.py` | Updated SmartPopulate partial index to include `IsCompliant IS NOT TRUE` in WHERE |
 | `Features/TranscodeQueue/QueueManagementBusinessService.py` | New helpers: `_GetEffectiveProfile`, `_EvaluateCompliance`, `RecomputeForFiles` (replaces `ComputePriorityScoresForFiles`); SmartPopulate / queue-population paths consult RecommendedMode |
 | `Features/WorkBucket/WorkBucketController.py` | `POST /api/WorkBucket/SetSeriesProfile` endpoint with profile-name validation; AddToQueue/QueueByFolder updated to read RecommendedMode |
 | `Features/WorkBucket/WorkBucketRepository.py` | Read/write `SeriesProfiles.AssignedProfile` |
