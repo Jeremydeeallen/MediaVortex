@@ -165,7 +165,7 @@ Core/Querying/paged-query.feature.md                           -- EDIT: sweep Sh
 - [ ] T5 Series + MediaFileRow aggregates
 - [ ] T6 SeriesQueryRepository
 - [x] T7 FilesInSeriesRepository
-- [ ] T8 SeriesProfileRepository
+- [x] T8 SeriesProfileRepository
 - [ ] T9 QueueAdmissionRepository
 - [ ] T10 SeriesProfileService
 - [ ] T11 QueueAdmissionAppService
