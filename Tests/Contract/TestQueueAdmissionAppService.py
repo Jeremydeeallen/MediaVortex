@@ -14,6 +14,32 @@ class TestQueueAdmissionAppService(unittest.TestCase):
     def setUpClass(cls):
         os.environ.setdefault('MEDIAVORTEX_DB_HOST', '10.0.0.15')
 
+    # directive: work-transcode-unified | # see work-bucket.C5
+    def test_admit_one_returns_status_and_id(self):
+        # see work-bucket.C5
+        Row = DatabaseService().ExecuteQuery(
+            "SELECT Id FROM MediaFiles WHERE WorkBucket = 'Transcode' AND TranscodedByMediaVortex IS NOT TRUE LIMIT 1"
+        )
+        if not Row:
+            self.skipTest("No Transcode MediaFile in DB")
+        MediaFileId = int(Row[0]['id'])
+        DatabaseService().ExecuteNonQuery(
+            "DELETE FROM TranscodeQueue WHERE MediaFileId = %s AND Status = 'Pending'",
+            (MediaFileId,),
+        )
+        Service = QueueAdmissionAppService()
+        Bucket = BucketKey.FromUrlKey('Transcode')
+        Status1, Id1 = Service.AdmitOne(MediaFileId, Bucket)
+        Status2, Id2 = Service.AdmitOne(MediaFileId, Bucket)
+        self.assertEqual(Status1, 'queued')
+        self.assertEqual(Status2, 'already_queued')
+        self.assertGreater(Id1, 0)
+        self.assertEqual(Id1, Id2)
+        DatabaseService().ExecuteNonQuery(
+            "DELETE FROM TranscodeQueue WHERE MediaFileId = %s AND Status = 'Pending'",
+            (MediaFileId,),
+        )
+
     # directive: work-transcode-unified | # see work-bucket.C4
     def test_admit_series_returns_admission_result(self):
         # see work-bucket.C4
