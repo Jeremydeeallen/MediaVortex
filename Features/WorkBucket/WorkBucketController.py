@@ -168,3 +168,30 @@ class WorkBucketController:
             except Exception as Ex:
                 LoggingService.LogException(f"queue_one failed for {url_key}/{media_file_id}", Ex, "WorkBucketController", "queue_one")
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
+
+        @self.Blueprint.route('/api/Profiles/Active', methods=['GET'])
+        # directive: work-transcode-unified | # see work-bucket.C3
+        def list_active_profiles():
+            try:
+                from Core.Database.DatabaseService import DatabaseService
+                Rows = DatabaseService().ExecuteQuery(
+                    "SELECT ProfileName FROM Profiles "
+                    "WHERE Draft = FALSE AND Active = TRUE "
+                    "ORDER BY SortOrder NULLS LAST, ProfileName"
+                )
+                Profiles = [{'ProfileName': R['profilename']} for R in (Rows or [])]
+                return jsonify({'Success': True, 'Message': 'OK', 'Data': {'Profiles': Profiles}})
+            except Exception as Ex:
+                LoggingService.LogException("list_active_profiles failed", Ex, "WorkBucketController", "list_active_profiles")
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
+
+        @self.Blueprint.route('/api/StorageRoots', methods=['GET'])
+        # directive: work-transcode-unified | # see work-bucket.C6
+        def list_storage_roots():
+            try:
+                from Core.Path.PathStorageRoots import GetStorageRoots
+                Roots = [{'Id': R['Id'], 'CanonicalPrefix': R['CanonicalPrefix']} for R in GetStorageRoots()]
+                return jsonify({'Success': True, 'Message': 'OK', 'Data': {'StorageRoots': Roots}})
+            except Exception as Ex:
+                LoggingService.LogException("list_storage_roots failed", Ex, "WorkBucketController", "list_storage_roots")
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
