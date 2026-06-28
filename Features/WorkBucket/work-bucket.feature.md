@@ -1,24 +1,65 @@
-# WorkBucket -- per-bucket landing pages
+# WorkBucket -- grouped-by-series operator surface for /Work/<bucket>
 
 **Slug:** work-bucket
 
 ## What It Does
 
-Renders operator-facing landing pages at `/Work/<bucket>` for each WorkBucket value (Transcode, Remux, AudioFixOnly). Each page is a paginated MediaFiles list filtered by `MediaFiles.WorkBucket = '<value>'`, with a single-row queue-admission endpoint for one-off operator actions. Pure consumer of the trigger-derived WorkBucket column.
+Renders `/Work/Transcode`, `/Work/Remux`, and `/Work/Audio` as an always-grouped-by-series view of files that need work in that bucket. Each series row exposes file count, total GB, common resolution/codec, an InQueue badge, a per-series profile dropdown, and a Queue-all button. Series rows expand inline to show their files, sorted by size. The page replaces the old `/ShowSettings` (Media) tab; per-series sticky profile assignment is preserved in the internal `SeriesProfiles` table.
 
 ## Workflows
 
-| # | User action | Surface element | Handler | Backing class.method |
-|---|---|---|---|---|
-| W1 | Browse files needing transcode | /Work/Transcode page | GET /Work/<bucket> | WorkBucketController.RenderPage |
-| W2 | Paginate within a bucket | page controls | GET /api/WorkBucket/<bucket>?page=N | WorkBucketRepository.ListByBucket |
-| W3 | Admit one file to the queue | per-row Queue button | POST /api/WorkBucket/<bucket>/Queue/<MediaFileId> | WorkBucketRepository.AdmitToQueue |
+| #  | User action | Surface element | Handler | Backing class.method |
+|----|-------------|-----------------|---------|----------------------|
+| W1 | Browse series needing work in a bucket | `/Work/<bucket>` page | GET `/Work/<bucket>` | `WorkBucketController.render_page` (`Features/WorkBucket/WorkBucketController.py`) |
+| W2 | Paginate / sort / filter the series list | toolbar + pager | GET `/api/Work/<bucket>` | `SeriesQueryRepository.ListSeriesByBucket` (`Features/WorkBucket/Repositories/SeriesQueryRepository.py`) |
+| W3 | Expand a series to see its files | row chevron | GET `/api/Work/<bucket>/Series/<sid>` | `FilesInSeriesRepository.ListFilesInSeries` (`Features/WorkBucket/Repositories/FilesInSeriesRepository.py`) |
+| W4 | Set the profile on a series | series-row dropdown | POST `/api/Work/<bucket>/Series/<sid>/Profile` | `SeriesProfileService.SetProfile` (`Features/WorkBucket/Services/SeriesProfileService.py`) |
+| W5 | Clear the profile on a series | dropdown -> blank | DELETE `/api/Work/<bucket>/Series/<sid>/Profile` | `SeriesProfileService.ClearProfile` (`Features/WorkBucket/Services/SeriesProfileService.py`) |
+| W6 | Queue every file in a series | Queue-all button | POST `/api/Work/<bucket>/Series/<sid>/Queue` | `QueueAdmissionAppService.AdmitSeries` (`Features/WorkBucket/Services/QueueAdmissionAppService.py`) |
+| W7 | Queue a single file | per-row Queue button | POST `/api/Work/<bucket>/Queue/<id>` | `QueueAdmissionAppService.AdmitOne` (`Features/WorkBucket/Services/QueueAdmissionAppService.py`) |
 
 ## Success Criteria
 
-C1. Each of {/Work/Transcode, /Work/Remux, /Work/Audio} renders within 1s on first load.
-C2. List query reads MediaFiles.WorkBucket (GENERATED column) -- no Python derivation.
-C3. Single-row admission writes a TranscodeQueue row only if MediaFile's WorkBucket matches the page's bucket (no cross-bucket leak).
+C1. `/Work/Transcode`, `/Work/Remux`, and `/Work/Audio` each render only `MediaFiles.WorkBucket = <X>` rows. Spot-checkable: `SELECT WorkBucket FROM MediaFiles WHERE Id IN (...the ids surfaced by /api/Work/Transcode...)` returns only `Transcode`.
+
+C2. Series rows default-sorted by total GB descending; secondary file-row sort by size desc. `Sort: File count desc` and `Sort: Series name asc` are alternative sort modes via the toolbar.
+
+C3. Setting a profile on a series row writes `SeriesProfiles.AssignedProfile` AND updates `MediaFiles.AssignedProfile` for every untranscoded file in the series. Re-scanned files inherit via the existing `BackfillProfileAssignments` cascade.
+
+C4. Queue-all is idempotent. A second click never produces duplicate Pending rows; reports `AlreadyQueued = N` instead of `Inserted = N` on retry.
+
+C5. Per-row Queue is idempotent. Returns `'queued'` first time, `'already_queued'` subsequently.
+
+C6. Filters: multi-select drive + free-text series search. Pagination: 25 rows per page server-side via `Core.Querying.PagedQueryBuilder`.
+
+## Seams
+
+| ID | Seam | Producer | Wire shape | Consumer expects | Verification |
+|---|---|---|---|---|---|
+| S1 | Controller -> SeriesQueryRepository | `WorkBucketController.list_series` | `(BucketKey, PagedQuery, SortSpec, FilterSpec)` | Returns `PagedQueryResult[Series]` | `Tests/Contract/TestSeriesQueryRepository.py` |
+| S2 | Controller -> FilesInSeriesRepository | `WorkBucketController.list_files_in_series` | `(SeriesIdentity, BucketKey)` | Returns `list[MediaFileRow]` | `Tests/Contract/TestFilesInSeriesRepository.py` |
+| S3 | Controller -> SeriesProfileService | `WorkBucketController.set_series_profile` | `(SeriesIdentity, RawProfileName: str)` | Raises `InvalidProfileError` on bad input; otherwise returns `FilesAffected: int` | `Tests/Contract/TestSeriesProfileService.py` |
+| S4 | SeriesProfileService -> SeriesProfileRepository | `SeriesProfileService.SetProfile` | UPSERT (StorageRootId, RelativePath, AssignedProfile) | Row present on subsequent `GetProfile` | `Tests/Contract/TestSeriesProfileRepository.py` |
+| S5 | SeriesProfileService -> MediaFiles | `SeriesProfileService.SetProfile` | `UPDATE MediaFiles SET AssignedProfile = ? WHERE ... AND TranscodedByMediaVortex IS NOT TRUE` | `MediaFiles.AssignedProfile` reflects choice for untranscoded files only | `Tests/Contract/TestSeriesProfileService.py::test_set_profile_updates_only_untranscoded_files` |
+| S6 | QueueAdmissionRepository -> TranscodeQueue | `QueueAdmissionRepository.AdmitSeries` | bulk INSERT with `NOT EXISTS` Pending guard | No duplicate Pending row per MediaFileId | `Tests/Contract/TestQueueAdmissionRepository.py::test_admit_series_idempotent` |
+| S7 | BackfillProfileAssignments -> SeriesProfiles | `Scripts/SQLScripts/BackfillProfileAssignments.py` | reads sp.AssignedProfile, writes MediaFiles.AssignedProfile | New files in an existing series get the sticky profile | manual smoke: insert a MediaFiles row with the right show folder, run backfill, observe AssignedProfile populated |
+
+## Status
+
+**Phase:** Active feature, replaces the deleted `Features/ShowSettings/` vertical.
+
+**Files:**
+
+- `Features/WorkBucket/WorkBucketController.py` -- HTTP routes only
+- `Features/WorkBucket/Domain/` -- value objects + aggregates (SeriesIdentity, BucketKey, ProfileName, Series, MediaFileRow, SortSpec, FilterSpec, AdmissionResult)
+- `Features/WorkBucket/Repositories/SeriesQueryRepository.py` -- grouped paged query
+- `Features/WorkBucket/Repositories/FilesInSeriesRepository.py` -- expanded file list
+- `Features/WorkBucket/Repositories/SeriesProfileRepository.py` -- SeriesProfiles CRUD
+- `Features/WorkBucket/Repositories/QueueAdmissionRepository.py` -- TranscodeQueue inserts
+- `Features/WorkBucket/Services/SeriesProfileService.py` -- validate + persist + propagate
+- `Features/WorkBucket/Services/QueueAdmissionAppService.py` -- queue orchestration
+- `Templates/WorkBucket.html` -- grouped UI
+- `Tests/Contract/Test{SeriesIdentity,BucketKey,ProfileName,SeriesQueryRepository,FilesInSeriesRepository,SeriesProfileRepository,QueueAdmissionRepository,SeriesProfileService,QueueAdmissionAppService,WorkBucketController,NoShowSettingsReferences}VO.py / .py`
 
 ## Cross-Vertical Contract
 
@@ -26,29 +67,33 @@ C3. Single-row admission writes a TranscodeQueue row only if MediaFile's WorkBuc
 
 | Column | Written by |
 |---|---|
-| TranscodeQueue row INSERT | AdmitToQueue (single-row admission only; bulk admission goes through TranscodeQueue vertical) |
+| `SeriesProfiles.AssignedProfile` | `SeriesProfileService.SetProfile` |
+| `MediaFiles.AssignedProfile`, `MediaFiles.AssignedProfileSource`, `MediaFiles.LastModifiedDate` | `SeriesProfileService.SetProfile` (untranscoded only) |
+| `TranscodeQueue` row INSERT (`ProcessingMode`, `Status='Pending'`, ...) | `QueueAdmissionRepository.AdmitOne` / `AdmitSeries` |
 
-### Columns READS
+### Columns READ
 
 | Column | Read by | Owner |
 |---|---|---|
-| MediaFiles.{Id, FilePath, FileName, WorkBucket, AssignedProfile, Resolution, AudioCodec, AudioLanguages, OperationsNeededCsv} | List queries | per-vertical (WorkBucket is GENERATED) |
-| TranscodeQueue.{Id, MediaFileId, Status} | "Already queued" filter | TranscodeQueue |
-
-### Stable function entry points
-
-None for external callers. Self-contained UI vertical.
+| `MediaFiles.{Id, FileName, FileSize, SizeMB, StorageRootId, RelativePath, Resolution, ResolutionCategory, Codec, AudioCodec, AudioLanguages, VideoCompliantReason, ContainerCompliantReason, AudioCompliantReason, WorkBucket, AssignedProfile, TranscodedByMediaVortex}` | repositories | per-vertical (WorkBucket is GENERATED) |
+| `SeriesProfiles.{StorageRootId, RelativePath, AssignedProfile}` | `SeriesProfileRepository`, `SeriesQueryRepository` | WorkBucket vertical |
+| `TranscodeQueue.{Id, MediaFileId, Status}` | "AnyInQueue" + idempotency guard | TranscodeQueue |
+| `Profiles.{ProfileName, Draft, Active}` | `ProfileName` VO ctor | Profiles |
 
 ### HTTP API surface
 
 | Method + URL | Purpose |
 |---|---|
-| GET /Work/<bucket> | Render the per-bucket landing page |
-| GET /api/WorkBucket/<bucket> | Paginated list JSON |
-| POST /api/WorkBucket/<bucket>/Queue/<MediaFileId> | One-row admission |
+| GET `/Work/<bucket>` | Render landing |
+| GET `/api/Work/<bucket>` | Paged series list |
+| GET `/api/Work/<bucket>/Series/<sid>` | Files in one series |
+| POST `/api/Work/<bucket>/Series/<sid>/Profile` | Set series profile |
+| DELETE `/api/Work/<bucket>/Series/<sid>/Profile` | Clear series profile |
+| POST `/api/Work/<bucket>/Series/<sid>/Queue` | Queue all files in series |
+| POST `/api/Work/<bucket>/Queue/<MediaFileId>` | Queue one file |
 
 ### What is EXPLICITLY NOT a contract
 
-- The per-row column set rendered -- adjustable
-- Whether single-row admission validates per the full compliance predicate or trusts WorkBucket -- today trusts the GENERATED column
-- The URL parameter format (`url_key` vs `bucket_name`) -- internal mapping
+- The exact HTML structure inside `WorkBucket.html` -- internal layout choice.
+- The list of sort options (extensible via `SortSpec`).
+- The exact JSON keys inside the `Data` envelope -- expand freely; consumers (only the template) update in lockstep.
