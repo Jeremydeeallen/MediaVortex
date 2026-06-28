@@ -1,123 +1,170 @@
 from flask import Blueprint, jsonify, render_template, request
 
 from Core.Logging.LoggingService import LoggingService
-from Features.WorkBucket.WorkBucketRepository import (
-    WorkBucketRepository,
-    BUCKET_TO_PROCESSING_MODE,
-    BUCKET_TO_URL_KEY,
-)
+from Core.Querying import PagedQuery
+from Features.WorkBucket.Domain.BucketKey import BucketKey
+from Features.WorkBucket.Domain.FilterSpec import FilterSpec
+from Features.WorkBucket.Domain.ProfileName import InvalidProfileError
+from Features.WorkBucket.Domain.SeriesIdentity import SeriesIdentity
+from Features.WorkBucket.Domain.SortSpec import SortSpec
+from Features.WorkBucket.Repositories.FilesInSeriesRepository import FilesInSeriesRepository
+from Features.WorkBucket.Repositories.SeriesQueryRepository import SeriesQueryRepository
+from Features.WorkBucket.Services.QueueAdmissionAppService import QueueAdmissionAppService
+from Features.WorkBucket.Services.SeriesProfileService import SeriesProfileService
 
 
-URL_LABELS = {
-    'Transcode': {
-        'Title': 'Transcode',
-        'Subtitle': 'Files needing full transcode -- video + audio + container.',
-        'Bucket': 'Transcode',
-        'Icon': 'fas fa-film',
-    },
-    'Remux': {
-        'Title': 'Remux',
-        'Subtitle': 'Files needing container fix (audio is also normalized through the same emitter).',
-        'Bucket': 'Remux',
-        'Icon': 'fas fa-box',
-    },
-    'Audio': {
-        'Title': 'Audio',
-        'Subtitle': 'Files where audio is the only blocker; container + video stream-copy through.',
-        'Bucket': 'AudioFixOnly',
-        'Icon': 'fas fa-volume-up',
-    },
-}
-
-
-# directive: work-bucket-landing-pages | # see directive.md C1
+# directive: work-transcode-unified | # see work-bucket.C1
 class WorkBucketController:
-    """Flask blueprint serving /Work/<bucket> pages + paginated JSON + single-row queue endpoint."""
+    """Flask blueprint serving /Work/<bucket> + /api/Work/<bucket>/*. HTTP-only -- no SQL, no business logic."""
 
-    # directive: work-bucket-landing-pages | # see directive.md C1
+    # directive: work-transcode-unified | # see work-bucket.C1
     def __init__(self):
-        """Construct repository + register routes."""
-        self.Repository = WorkBucketRepository()
         self.Blueprint = Blueprint('work_bucket', __name__)
+        self.SeriesRepo = SeriesQueryRepository()
+        self.FilesRepo = FilesInSeriesRepository()
+        self.ProfileService = SeriesProfileService()
+        self.QueueService = QueueAdmissionAppService()
         self._RegisterRoutes()
 
-    # directive: work-bucket-landing-pages | # see directive.md C1
+    # directive: work-transcode-unified | # see work-bucket.C1
     def _RegisterRoutes(self):
-        """Wire /Work/<bucket> render + /api/Work/<bucket> list + /api/Work/<bucket>/Queue/<id>."""
-
-        # directive: work-bucket-landing-pages | # see directive.md C1
         @self.Blueprint.route('/Work/<url_key>', methods=['GET'])
+        # directive: work-transcode-unified | # see work-bucket.C1
         def render_page(url_key):
-            """Render the shared landing template parameterized by URL key."""
-            Labels = URL_LABELS.get(url_key)
-            if Labels is None:
+            Bucket = BucketKey.FromUrlKey(url_key)
+            if Bucket is None:
                 return render_template('Error.html', ErrorCode=404, ErrorMessage=f"Unknown work bucket: {url_key}"), 404
-            return render_template('WorkBucket.html', UrlKey=url_key, Labels=Labels)
+            return render_template('WorkBucket.html', UrlKey=url_key, Bucket=Bucket)
 
-        # directive: work-bucket-landing-pages | # see directive.md C1
         @self.Blueprint.route('/api/Work/<url_key>', methods=['GET'])
-        def list_files(url_key):
-            """Return paginated list of MediaFiles in the bucket + total + already-queued count."""
+        # directive: work-transcode-unified | # see work-bucket.C1
+        def list_series(url_key):
             try:
-                Labels = URL_LABELS.get(url_key)
-                if Labels is None:
+                Bucket = BucketKey.FromUrlKey(url_key)
+                if Bucket is None:
                     return jsonify({'Success': False, 'Message': f"Unknown bucket: {url_key}", 'Data': {}}), 404
-                Bucket = Labels['Bucket']
-                Offset = int(request.args.get('offset', 0) or 0)
-                Limit = int(request.args.get('limit', 50) or 50)
-                Counts = self.Repository.CountByBucket(Bucket)
-                Rows = self.Repository.ListByBucket(Bucket, Offset=Offset, Limit=Limit)
+                Page = max(1, int(request.args.get('page', 1) or 1))
+                PageSize = max(1, min(200, int(request.args.get('pageSize', 25) or 25)))
+                Sort = SortSpec.FromString(request.args.get('sort', ''))
+                Drives = tuple(
+                    int(D) for D in request.args.getlist('drive') if D.strip().isdigit()
+                )
+                Filter = FilterSpec(StorageRootIds=Drives, SearchTerm=request.args.get('search', '') or '')
+                Result = self.SeriesRepo.ListSeriesByBucket(
+                    Bucket=Bucket,
+                    Query=PagedQuery(Page=Page, PageSize=PageSize),
+                    Sort=Sort,
+                    Filter=Filter,
+                )
                 return jsonify({
                     'Success': True, 'Message': 'OK',
                     'Data': {
-                        'Bucket': Bucket,
-                        'Total': Counts['Total'],
-                        'AlreadyQueued': Counts['AlreadyQueued'],
-                        'Offset': Offset,
-                        'Limit': Limit,
-                        'Rows': Rows,
+                        'Bucket': Bucket.BucketName,
+                        'Total': Result.TotalCount,
+                        'Page': Result.Page,
+                        'PageSize': Result.PageSize,
+                        'Series': [S.ToJson() for S in Result.Rows],
                     },
                 })
             except Exception as Ex:
-                LoggingService.LogException(f"WorkBucket list failed for {url_key}", Ex, "WorkBucketController", "list_files")
+                LoggingService.LogException(f"list_series failed for {url_key}", Ex, "WorkBucketController", "list_series")
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
 
-        # directive: h1-operator-control | # see directive.md H1G3
-        @self.Blueprint.route('/api/Work/<url_key>/QueueNext', methods=['POST'])
-        def queue_next(url_key):
-            """Bulk-queue up to {limit} idle MediaFiles in the bucket. Body: {Limit: int up to 1000}."""
+        @self.Blueprint.route('/api/Work/<url_key>/Series/<path:sid>', methods=['GET'])
+        # directive: work-transcode-unified | # see work-bucket.C2
+        def list_files_in_series(url_key, sid):
             try:
-                Labels = URL_LABELS.get(url_key)
-                if Labels is None:
+                Bucket = BucketKey.FromUrlKey(url_key)
+                if Bucket is None:
                     return jsonify({'Success': False, 'Message': f"Unknown bucket: {url_key}", 'Data': {}}), 404
+                Identity = SeriesIdentity.FromCompositeKey(sid)
+                Files = self.FilesRepo.ListFilesInSeries(Identity, Bucket)
+                return jsonify({
+                    'Success': True, 'Message': 'OK',
+                    'Data': {
+                        'Bucket': Bucket.BucketName,
+                        'Series': Identity.ToCompositeKey(),
+                        'Files': [F.ToJson() for F in Files],
+                    },
+                })
+            except ValueError as Ex:
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 400
+            except Exception as Ex:
+                LoggingService.LogException(f"list_files_in_series failed for {url_key}/{sid}", Ex, "WorkBucketController", "list_files_in_series")
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
+
+        @self.Blueprint.route('/api/Work/<url_key>/Series/<path:sid>/Profile', methods=['POST'])
+        # directive: work-transcode-unified | # see work-bucket.C3
+        def set_series_profile(url_key, sid):
+            try:
+                Bucket = BucketKey.FromUrlKey(url_key)
+                if Bucket is None:
+                    return jsonify({'Success': False, 'Message': f"Unknown bucket: {url_key}", 'Data': {}}), 404
+                Identity = SeriesIdentity.FromCompositeKey(sid)
                 Body = request.get_json(force=True, silent=True) or {}
-                Limit = int(Body.get('Limit', 200) or 200)
-                Mode = BUCKET_TO_PROCESSING_MODE[Labels['Bucket']]
-                Result = self.Repository.QueueNext(Labels['Bucket'], Mode, Limit=Limit)
+                RawName = Body.get('ProfileName', '')
+                Affected = self.ProfileService.SetProfile(Identity, RawName)
+                return jsonify({
+                    'Success': True, 'Message': f"Applied profile to {Affected} files",
+                    'Data': {'FilesAffected': Affected, 'ProfileName': RawName},
+                })
+            except InvalidProfileError as Ex:
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 400
+            except ValueError as Ex:
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 400
+            except Exception as Ex:
+                LoggingService.LogException(f"set_series_profile failed for {url_key}/{sid}", Ex, "WorkBucketController", "set_series_profile")
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
+
+        @self.Blueprint.route('/api/Work/<url_key>/Series/<path:sid>/Profile', methods=['DELETE'])
+        # directive: work-transcode-unified | # see work-bucket.C3
+        def clear_series_profile(url_key, sid):
+            try:
+                Bucket = BucketKey.FromUrlKey(url_key)
+                if Bucket is None:
+                    return jsonify({'Success': False, 'Message': f"Unknown bucket: {url_key}", 'Data': {}}), 404
+                Identity = SeriesIdentity.FromCompositeKey(sid)
+                self.ProfileService.ClearProfile(Identity)
+                return jsonify({'Success': True, 'Message': 'Profile cleared', 'Data': {}})
+            except ValueError as Ex:
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 400
+            except Exception as Ex:
+                LoggingService.LogException(f"clear_series_profile failed for {url_key}/{sid}", Ex, "WorkBucketController", "clear_series_profile")
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
+
+        @self.Blueprint.route('/api/Work/<url_key>/Series/<path:sid>/Queue', methods=['POST'])
+        # directive: work-transcode-unified | # see work-bucket.C4
+        def queue_series(url_key, sid):
+            try:
+                Bucket = BucketKey.FromUrlKey(url_key)
+                if Bucket is None:
+                    return jsonify({'Success': False, 'Message': f"Unknown bucket: {url_key}", 'Data': {}}), 404
+                Identity = SeriesIdentity.FromCompositeKey(sid)
+                Result = self.QueueService.AdmitSeries(Identity, Bucket)
                 return jsonify({
                     'Success': True,
-                    'Message': f"Queued {Result['Inserted']}",
-                    'Data': Result,
+                    'Message': f"Queued {Result.Inserted}",
+                    'Data': {'Inserted': Result.Inserted, 'AlreadyQueued': Result.AlreadyQueued, 'Total': Result.Total},
                 })
+            except ValueError as Ex:
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 400
             except Exception as Ex:
-                LoggingService.LogException(f"WorkBucket QueueNext failed for {url_key}", Ex, "WorkBucketController", "queue_next")
+                LoggingService.LogException(f"queue_series failed for {url_key}/{sid}", Ex, "WorkBucketController", "queue_series")
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
 
-        # directive: work-bucket-landing-pages | # see directive.md C2
         @self.Blueprint.route('/api/Work/<url_key>/Queue/<int:media_file_id>', methods=['POST'])
+        # directive: work-transcode-unified | # see work-bucket.C5
         def queue_one(url_key, media_file_id):
-            """Idempotently queue one MediaFile with the bucket's ProcessingMode."""
             try:
-                Labels = URL_LABELS.get(url_key)
-                if Labels is None:
+                Bucket = BucketKey.FromUrlKey(url_key)
+                if Bucket is None:
                     return jsonify({'Success': False, 'Message': f"Unknown bucket: {url_key}", 'Data': {}}), 404
-                Mode = BUCKET_TO_PROCESSING_MODE[Labels['Bucket']]
-                Status, QueueId = self.Repository.QueueOne(media_file_id, Mode)
+                Status, QueueId = self.QueueService.AdmitOne(media_file_id, Bucket)
                 return jsonify({
                     'Success': True,
                     'Message': 'Queued' if Status == 'queued' else 'Already queued',
-                    'Data': {'Status': Status, 'QueueId': QueueId, 'ProcessingMode': Mode},
+                    'Data': {'Status': Status, 'QueueId': QueueId, 'ProcessingMode': Bucket.ProcessingMode},
                 })
             except Exception as Ex:
-                LoggingService.LogException(f"WorkBucket queue failed for {url_key}/{media_file_id}", Ex, "WorkBucketController", "queue_one")
+                LoggingService.LogException(f"queue_one failed for {url_key}/{media_file_id}", Ex, "WorkBucketController", "queue_one")
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
