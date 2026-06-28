@@ -214,3 +214,5 @@ Required when phase advances to VERIFYING. One entry per acceptance criterion. C
 ### Decisions Made
 
 Engineering calls made under ambiguity during execution. Empty at start; populated as tasks execute.
+
+- **T3 — ProfileName VO duplicates `EffectiveProfileResolver._IsFinalizedActive` SQL.** Code review flagged this; the plan said the VO "centralizes" the validation but T3 added a second copy rather than collapsing. Decision: leave as-is. The spec's `Out of Scope` clause explicitly preserves `EffectiveProfileResolver` behavior (C14); migrating it to consume `ProfileName` would expand scope beyond what the criteria require. The duplication does not block any criterion's verification. Centralization is a follow-up if `EffectiveProfileResolver` is ever rewritten.
