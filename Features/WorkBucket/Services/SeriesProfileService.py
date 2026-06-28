@@ -25,15 +25,7 @@ class SeriesProfileService:
         # see work-bucket.C3
         Profile = ProfileName(RawProfileName, Db=self.Db)
         self.ProfileRepo.UpsertProfile(Identity, Profile.Value)
-        CountRows = self.Db.ExecuteQuery(
-            "SELECT COUNT(*) AS N FROM MediaFiles "
-            " WHERE StorageRootId = %s "
-            "   AND split_part(RelativePath, '/', 1) = %s "
-            "   AND TranscodedByMediaVortex IS NOT TRUE",
-            (Identity.StorageRootId, Identity.RelativePath),
-        )
-        Affected = int(CountRows[0]['n']) if CountRows else 0
-        self.Db.ExecuteNonQuery(
+        Affected = self.Db.ExecuteNonQuery(
             "UPDATE MediaFiles "
             "   SET AssignedProfile = %s, "
             "       AssignedProfileSource = 'series', "
@@ -43,6 +35,7 @@ class SeriesProfileService:
             "   AND TranscodedByMediaVortex IS NOT TRUE",
             (Profile.Value, Identity.StorageRootId, Identity.RelativePath),
         )
+        Affected = int(Affected) if Affected is not None else 0
         LoggingService.LogInfo(
             f"Series profile set: {Identity.ToCompositeKey()} -> {Profile.Value}, {Affected} files updated",
             "SeriesProfileService",
