@@ -115,13 +115,13 @@ for how `AudioComplete` is decided.
 
 ### G. Media tabs UI
 
-18. **Top-of-page nav on `/ShowSettings`** has three pills (in `_media_subnav.html`): **Transcode | Quick Fix | Clip Builder**. Each pill activates the matching in-page section pane (Transcode card, Quick Fix card, or navigates to `/ClipBuilder`). Hash routing (`#transcode`, `#quickfix`) persists the active section across reloads. Verifiable: click each pill, observe URL hash changes, observe the matching pane visible while the other is hidden.
+18. **Top-of-page nav on `/Work/<bucket>`** has three pills (in `_media_subnav.html`): **Transcode | Quick Fix | Clip Builder**. Each pill activates the matching in-page section pane (Transcode card, Quick Fix card, or navigates to `/ClipBuilder`). Hash routing (`#transcode`, `#quickfix`) persists the active section across reloads. Verifiable: click each pill, observe URL hash changes, observe the matching pane visible while the other is hidden.
 
 19. Quick Fix card (replaces the prior Remux and AudioFix cards) shows files where `NeedsQuick=true`. Transcode card shows files where `NeedsTranscode=true`. A file with both flags appears in both cards. Existing actions (Add Batch / Queue All / Re-Analyze) work identically. Verifiable: a file with `NeedsQuick=true AND NeedsTranscode=true` appears in both cards' SmartPopulate.
 
 20. SmartPopulate (current Card 1 on `/Scanning`) gains a `Mode` column per row showing the cascade's `RecommendedMode`. The "Add to queue" button uses that value -- the operator sees which tab a row will land on. Verifiable: SmartPopulate response shape includes `RecommendedMode`; UI renders a badge with the value.
 
-21. The Audio Fix tab gains a "Prioritize folder" control: input box accepting a folder name (autocomplete from `ShowFolders`), plus a list of currently-pinned folders with remove buttons. Pinning persists to a new `AudioFixPriorityHints` table (or extends `ShowSettings`). Verifiable: pin `Westworld`, observe `AudioFixPriorityHints` row inserted; Audio Fix tab list re-orders so Westworld files surface at the top.
+21. The Audio Fix tab gains a "Prioritize folder" control: input box accepting a folder name (autocomplete from `ShowFolders`), plus a list of currently-pinned folders with remove buttons. Pinning persists to `AudioFixPriorityHints` table. Verifiable: pin `Westworld`, observe `AudioFixPriorityHints` row inserted; Audio Fix tab list re-orders so Westworld files surface at the top.
 
 22. When the cascade routes a file to 'AudioFix' (criterion 15) and a folder pin matches its show folder, the `TranscodeQueue.Priority` is set higher (or a "BoostedPriority" column reflects the pin). Verifiable: pin a folder, run RecomputeForFiles, observe pinned-folder rows have higher Priority than unpinned ones of the same mode.
 
@@ -134,7 +134,7 @@ for how `AudioComplete` is decided.
     - **NEW** Loudness sub-section: distribution by integrated LUFS band (on target ±1, close ±3, off 3-6 LU, way off 6+ LU), unmeasured count, LRA > 18 count
    Verifiable: visual inspection plus SQL reconciliation against MediaFiles GROUP BY.
 
-24. `/api/MediaProbe/ReprobeQueueStatus` endpoint returns `{Pending: N, Running: M, CompletedLast24h: K}` for the reprobe queue. Used by the Reprobe button in /ShowSettings to show in-flight status. Verifiable: queue 100 reprobes, observe Pending=100 in the response.
+24. `/api/MediaProbe/ReprobeQueueStatus` endpoint returns `{Pending: N, Running: M, CompletedLast24h: K}` for the reprobe queue. Used by the Reprobe button in `/Work/<bucket>` to show in-flight status. Verifiable: queue 100 reprobes, observe Pending=100 in the response.
 
 ## Status
 
@@ -217,7 +217,7 @@ called out where I made a judgment call -- speak up if you'd rather take a
 different route:
 
 1. **Reprobe queue separate table vs reuse FileScanQueue?** I sketched a new `ReprobeQueue` for clarity but extending the existing scan queue with a `Kind='Reprobe'` discriminator is cheaper. I lean toward the new table because reprobe priorities, retry semantics, and triggers diverge from scan over time.
-2. **Folder pins separate table vs ShowSettings column?** I sketched `AudioFixPriorityHints` but a `ShowSettings.AudioFixBoost INTEGER` column would also work and reuse the existing per-show settings UI. I lean toward the new table because pins are operator-actionable transient state, not durable per-show config -- they get cleared as the work completes.
+2. **Folder pins separate table (resolved).** `AudioFixPriorityHints` standalone table. Pins are operator-actionable transient state, not durable per-show config -- they get cleared as the work completes.
 3. **"AudioFix" name or something better?** The user prompted "(or a better name)". Alternatives: "Audio Pass", "Loudness Fix", "Sound Fix". I went with `'AudioFix'` because it's the verbiage the cascade already uses internally; happy to rename.
 4. **Loudness measurement runs on file open or batched?** I chose: at MediaProbe time + a reprobe pass. Alternative: measure-on-demand during cascade evaluation (lazy). I rejected lazy because it would block the cascade for ~1.5 sec/file and the cascade is called in tight loops (RecomputeForFiles).
 5. **Should the existing "Remux" tab be renamed to "Container Fix"?** The user's mental model is "1-Transcode 2-Remux 3-Audio fix". "Remux" is technically accurate but operator-mysterious. "Container Fix" is more honest about what it does. Worth a rename? I left it as Remux for now to minimize disruption to existing operator habits.
@@ -241,7 +241,7 @@ Templates/TranscodeQueue.html                                -- tab bar + per-ta
 Templates/SmartPopulate (Card 1)                             -- Mode column
 Scripts/SQLScripts/AddSourceLoudnessColumns.py              -- (NEW)
 Scripts/SQLScripts/AddReprobeQueue.py                       -- (NEW) or extend FileScanQueue
-Scripts/SQLScripts/AddAudioFixPriorityHints.py              -- (NEW) or extend ShowSettings
+Scripts/SQLScripts/AddAudioFixPriorityHints.py              -- (NEW) standalone AudioFixPriorityHints table
 Scripts/SQLScripts/BackfillSourceLoudness.py                -- (NEW) one-time measurement pass
 Scripts/SQLScripts/QueueFullLibraryReprobe.py               -- (NEW) one-time reprobe seed
 Scripts/SQLScripts/BackfillAudioComplete.py                 -- extend with Pass 5 (target-loudness)
@@ -258,7 +258,7 @@ transcode.flow.md                                              -- Stage 4 (queue
 | `media-tabs.flow.md` | User-facing flow for the new tab UI |
 | `Scripts/SQLScripts/AddSourceLoudnessColumns.py` | Idempotent ADD COLUMN SourceIntegratedLufs / SourceLoudnessRangeLU / SourceTruePeakDbtp / LoudnessMeasuredAt |
 | `Scripts/SQLScripts/AddReprobeQueue.py` | NEW table or FileScanQueue extension (TBD) |
-| `Scripts/SQLScripts/AddAudioFixPriorityHints.py` | NEW table or ShowSettings extension (TBD) |
+| `Scripts/SQLScripts/AddAudioFixPriorityHints.py` | NEW standalone `AudioFixPriorityHints` table |
 | `Scripts/SQLScripts/BackfillSourceLoudness.py` | One-time measurement pass over the ~30k AudioComplete=false library |
 | `Scripts/SQLScripts/QueueFullLibraryReprobe.py` | One-time reprobe seed for all 56,698 MediaFiles rows |
 | `Features/LoudnessAnalysis/LoudnessAnalysisService.py` | MeasureLoudness (ebur128 invoke + parse), PersistLoudness, IsMeasurementStale |

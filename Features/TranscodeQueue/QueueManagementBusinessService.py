@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any, Tuple
+﻿from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 import os
 import ntpath
@@ -909,14 +909,6 @@ class QueueManagementBusinessService:
             resolutionService = ResolutionService()
             matchingFiles = []
 
-            # Load ShowSettings for per-show target resolution overrides
-            ShowSettingsRepo = None
-            try:
-                from Features.ShowSettings.ShowSettingsRepository import ShowSettingsRepository
-                ShowSettingsRepo = ShowSettingsRepository()
-            except Exception:
-                pass  # ShowSettings table may not exist yet
-
             for mediaFile in allMediaFiles:
                 sourceResolution = mediaFile.Resolution or ""
                 if not sourceResolution:
@@ -926,18 +918,7 @@ class QueueManagementBusinessService:
                     if not sourceResolution:
                         continue
 
-                # Check for per-show target resolution override (specific only).
-                # The `*` global default does NOT override the profile target
-                # here -- profile.TranscodeDownTo is the default. See
-                # ShowSettings.feature.md criterion 1.
                 FileTargetResolution = targetResolution
-                if ShowSettingsRepo:
-                    try:
-                        ShowOverride = ShowSettingsRepo.GetTargetResolutionForFile(mediaFile.FilePath)
-                        if ShowOverride:
-                            FileTargetResolution = ShowOverride
-                    except Exception:
-                        pass
 
                 # Compare file resolution to target resolution
                 comparison = resolutionService.CompareResolutions(sourceResolution, FileTargetResolution)
@@ -1481,7 +1462,7 @@ class QueueManagementBusinessService:
         from Core.Database.DatabaseService import DatabaseService
         try:
             rows = DatabaseService().ExecuteQuery(
-                "SELECT StorageRootId, RelativePath, AssignedProfile FROM ShowSettings WHERE AssignedProfile IS NOT NULL"
+                "SELECT StorageRootId, RelativePath, AssignedProfile FROM SeriesProfiles WHERE AssignedProfile IS NOT NULL"
             )
             Prefixes = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _GetStorageRoots()}
             Out: Dict[str, str] = {}
@@ -1499,7 +1480,7 @@ class QueueManagementBusinessService:
             return Out
         except Exception as Ex:
             LoggingService.LogException(
-                "Failed to load ShowSettings overrides; per-show overrides will not apply this cycle",
+                "Failed to load SeriesProfiles overrides; per-show overrides will not apply this cycle",
                 Ex, "QueueManagementBusinessService", "_LoadShowProfileOverrides"
             )
             return {}
@@ -1554,7 +1535,7 @@ class QueueManagementBusinessService:
     @staticmethod
     def _ExtractShowFolder(FilePath: Optional[str]) -> Optional[str]:
         """Extract 'T:\\Survivor' from 'T:\\Survivor\\Season 1\\file.mkv'. Same shape
-        as ShowSettings.ShowFolder so a dict lookup matches without normalization."""
+        as SeriesProfiles.ShowFolder so a dict lookup matches without normalization."""
         if not FilePath:
             return None
         from Core.PathNormalize import NormalizeCanonical, ExtractShowFolder
@@ -1573,7 +1554,7 @@ class QueueManagementBusinessService:
         ShowOverrides: Dict[str, str],
         DefaultProfileName: Optional[str],
     ) -> Optional[str]:
-        """Resolve the cascade: ShowSettings.AssignedProfile -> SystemSettings('DefaultProfileName').
+        """Resolve the cascade: SeriesProfiles.AssignedProfile -> SystemSettings('DefaultProfileName').
 
         Pure function over the pre-loaded caches -- no DB calls. Used per row in
         the bulk RecomputeForFiles loop. Returns None if the SystemSetting is

@@ -152,7 +152,7 @@ class SystemSettingsController:
                 self.Repository.AddOrUpdateSystemSetting(
                     'DefaultProfileName',
                     ProfileName,
-                    'Library-wide default profile name. ShowSettings.AssignedProfile per-show overrides this.'
+                    'Library-wide default profile name. SeriesProfiles.AssignedProfile per-series overrides this.'
                 )
                 LoggingService.LogInfo(
                     f"DefaultProfileName updated to {ProfileName!r}",

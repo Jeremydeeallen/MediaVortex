@@ -12,7 +12,7 @@
 
 | #  | Operator action / system event | Surface element | Handler | Backing class.method |
 |----|--------------------------------|-----------------|---------|----------------------|
-| W1 | Browse Media Library + Title Search on `/ShowSettings` | Library Card + Search Card (paged + sortable + inline profile editor) | `GET /api/ShowSettings/Shows?page=N&pageSize=N&sort=Key:DIR&q=text&filter.Drive=T:` | `Templates/ShowSettings.html` (module script); `ServerPagedDataSource` |
+| W1 | Browse Media Library + Title Search on `/Work/<bucket>` | Series list card (paged + sortable + inline profile editor) | `GET /api/WorkBucket/Shows?page=N&pageSize=N&sort=Key:DIR&q=text&filter.Drive=T:` | `Templates/WorkBucket.html` (module script); `ServerPagedDataSource` |
 | W2 | Inspect Transcode + QualityTest queues on `/TranscodeQueue` | Queue table + QT queue table | `GET /api/TranscodeQueue/GetQueue?page=N&pageSize=N&sort=Key:DIR&filter.Mode=Transcode` and `GET /api/QualityTest/Queue?page=N&pageSize=N&sort=Key:DIR` | `Templates/Queue.html` (module script); `ServerPagedDataSource` |
 | W3 | Watch live workers + jobs + scans on `/Activity` | Active Jobs + Active Scans + Workers tables (5s poll -> Table.Refresh()) | `LoadOverview` -> `/api/Activity/Snapshot`, `LoadWorkers` -> `/api/TeamStatus/Workers` | `Templates/Activity.html` (module script); `ClientArrayDataSource.SetRows()` + `Table.Refresh()` |
 | W4 | Review failure cap exceptions on `/FailedJobs` | Failed jobs table (paged + sortable + search + reset action) | `GET /api/FailedJobs?page=N&pageSize=N&sort=Key:DIR&q=text` | `Templates/FailedJobs.html` (module script); `ServerPagedDataSource` |
@@ -24,7 +24,7 @@
 
 ## Success Criteria
 
-C1. **Memory bound.** A 3,980-row dataset on `/ShowSettings` consumes <200MB browser process working set (Edge Task Manager). Verifiable: operator measured 99MB on 2026-06-15 (12x reduction from 1.17GB pre-migration baseline). Headroom: 50%.
+C1. **Memory bound.** A 3,980-row dataset on `/Work/Transcode` consumes <200MB browser process working set (Edge Task Manager). Verifiable: operator measured 99MB on 2026-06-15 (12x reduction from 1.17GB pre-migration baseline). Headroom: 50%.
 
 C2. **Site-wide standard, no antipattern survives.** Every `Templates/*.html` page that renders a multi-row data table imports `/static/js/TableRenderer/...`. Verifiable: `grep -rE "forEach\s*\([^)]*\)\s*\{[^}]*(innerHTML\s*=|\.html\()" Templates/` returns zero matches.
 
@@ -36,15 +36,15 @@ C5. **DIP -- no domain knowledge in shared package.** `grep -rE "\b(MediaFile|Tr
 
 C6. **SRP -- one class per file.** `TableRenderer`, `TableRendererConfig`, `ColumnDefinition`, `EventBus`, `SortController`, `FilterController`, `PaginationController`, `Virtualizer`, `ClientArrayDataSource`, `ServerPagedDataSource`, each `CellRenderer*`, each `InlineEditor*`, each `Registry`, each `I*` interface all live in their own file.
 
-C7. **Inline editor decoupling.** `/ShowSettings` Library table contains zero per-row `<select>` elements at rest; the profile editor opens on dblclick of the Profile cell, persists via `/api/ShowSettings/SetSeriesProfile`, then `Table.Refresh()`.
+C7. **Inline editor decoupling.** `/Work/<bucket>` series table contains zero per-row `<select>` elements at rest; the profile editor opens on dblclick of the Profile cell, persists via `/api/WorkBucket/SetSeriesProfile`, then `Table.Refresh()`.
 
 C8. **Virtualization above threshold.** `SQLQueries.html` instantiates `TableRenderer` with `Capabilities.Virtualized = true` and switches on when row count exceeds `TableRendererConfig.VirtualizationThreshold` (default 500).
 
-C9. **Server-paged search.** `/api/ShowSettings/Shows` accepts `?q=`, `?sort=Key:Dir`, `?page=` (0-based), `?pageSize=`, `?filter.Drive=` and returns `{Rows, TotalCount, Page, PageSize, TotalPages}`. Backend filter pushes to SQL via `Core.Querying.PagedQueryBuilder`.
+C9. **Server-paged search.** `/api/WorkBucket/Shows` accepts `?q=`, `?sort=Key:Dir`, `?page=` (0-based), `?pageSize=`, `?filter.Drive=` and returns `{Rows, TotalCount, Page, PageSize, TotalPages}`. Backend filter pushes to SQL via `Core.Querying.PagedQueryBuilder`.
 
 C10. **Contract test coverage.** `Tests/Static/*.js` exercises every controller invariant. Verifiable: `node --test Tests/Static/*.js` -> 71/71 pass.
 
-C11. **Migration completeness.** All 9 in-scope pages route through `TableRenderer`: `/ShowSettings`, `/TranscodeQueue`, `/Activity`, `/FailedJobs`, `/Stats`, `/Operations`, `/SQLQueries`, `/Optimization`, `/ClipBuilder`. `/VmafCompare` audited and verified non-tabular (visual button grid -- not the antipattern).
+C11. **Migration completeness.** All 9 in-scope pages route through `TableRenderer`: `/Work/Transcode`, `/TranscodeQueue`, `/Activity`, `/FailedJobs`, `/Stats`, `/Operations`, `/SQLQueries`, `/Optimization`, `/ClipBuilder`. `/VmafCompare` audited and verified non-tabular (visual button grid -- not the antipattern).
 
 C12. **Feature doc owns the contract.** This file.
 
@@ -54,7 +54,7 @@ C14. **Dependency direction.** Controllers depend on interfaces in `Static/js/Ta
 
 C15. **Observable event contract.** `Subscribe(EventName, Handler) -> unsubscribe` for `RowClicked`, `CellEdited`, `SortChanged`, `FilterChanged`, `PageChanged`, `SelectionChanged`. Event names live in `EventBus.EventNames`. No callback-config fields.
 
-C16. **Backend paging abstraction.** Every paged endpoint routes through `Core.Querying.PagedQueryBuilder` -- ShowSettings.GetShowsWithStats, QualityTestRepository.GetQualityTestQueuePaged, TranscodeQueueRepository.GetTranscodeQueueItemsPaginated, FileScanningRepository.GetMediaFilesPaginated, ActiveJobRepository.GetActiveJobsByService. No hand-rolled `LIMIT %s` / `OFFSET %s` in the 5 migrated methods. (paged-query-core directive, sibling.)
+C16. **Backend paging abstraction.** Every paged endpoint routes through `Core.Querying.PagedQueryBuilder` -- WorkBucketRepository.GetShowsWithStats, QualityTestRepository.GetQualityTestQueuePaged, TranscodeQueueRepository.GetTranscodeQueueItemsPaginated, FileScanningRepository.GetMediaFilesPaginated, ActiveJobRepository.GetActiveJobsByService. No hand-rolled `LIMIT %s` / `OFFSET %s` in the 5 migrated methods. (paged-query-core directive, sibling.)
 
 C17. **CSS ownership.** `Static/css/TableRenderer.css` is loaded by `Templates/Base.html` and owns every `.tr-*` selector. Page-specific layout overrides (e.g. `.activity-tr-mount .tr-table { ... }` in Activity.html) are scoped to the consumer page.
 
@@ -70,10 +70,10 @@ C20. **Controllers are unit-testable in isolation.** Each controller's construct
 |---|---|---|---|---|---|
 | S1 | `TableRenderer` → `DataSource` | `TableRenderer._BuildCurrentQuery()` | `{Page, PageSize, Sort: {Key, Direction}, Filters: {...}}` | `DataSource.GetRows(query) -> Promise<Array>`, `DataSource.GetTotalCount(query) -> Promise<number>` | `Tests/Static/TestServerPagedDataSource.js`, `TestClientArrayDataSource.js` |
 | S2 | Controller → `EventBus` | `SortController.SetSort`, `FilterController.SetFilter`, `PaginationController.SetPage` | `Bus.Emit(EventName, payload)` | TableRenderer subscribes on construction and calls `Refresh()` on any change | `Tests/Static/TestSortController.js`, `TestFilterController.js`, `TestPaginationController.js` |
-| S3 | `EventBus.Subscribe` → page code | `EventBus` | `(EventName: 'RowClicked'|'CellEdited'|'SortChanged'|'FilterChanged'|'PageChanged'|'SelectionChanged', handler: fn) -> Unsubscribe fn` | Page-level subscribers like ShowSettings' Profile inline-edit handler | `Tests/Static/TestEventBus.js` |
-| S4 | `ServerPagedDataSource._BuildUrl` → backend endpoint | `ServerPagedDataSource` | URL params: `page=N` (0-based), `pageSize=N`, `sort=Key:DIR`, `q=text`, `filter.Key=value` | Backend endpoint accepts BOTH legacy (PascalCase, 1-based Page) AND TableRenderer-lowercase conventions; mirrors `ShowSettingsController.GetShows` shape | Backend smokes per W1/W2/W4 endpoints |
+| S3 | `EventBus.Subscribe` → page code | `EventBus` | `(EventName: 'RowClicked'|'CellEdited'|'SortChanged'|'FilterChanged'|'PageChanged'|'SelectionChanged', handler: fn) -> Unsubscribe fn` | Page-level subscribers like WorkBucket's Profile inline-edit handler | `Tests/Static/TestEventBus.js` |
+| S4 | `ServerPagedDataSource._BuildUrl` → backend endpoint | `ServerPagedDataSource` | URL params: `page=N` (0-based), `pageSize=N`, `sort=Key:DIR`, `q=text`, `filter.Key=value` | Backend endpoint accepts BOTH legacy (PascalCase, 1-based Page) AND TableRenderer-lowercase conventions; mirrors `WorkBucketController.GetShows` shape | Backend smokes per W1/W2/W4 endpoints |
 | S5 | Backend Repository → JSON response | each paged Repository method | `{Rows: [...], TotalCount: int, Page: int, PageSize: int, TotalPages: int}` + legacy field for back-compat | Page-level `ServerPagedDataSource` reads `Rows`/`TotalCount`; legacy field served for any non-migrated caller | `Tests/Contract/TestPagedQueryBuilder.py` for the underlying primitive |
-| S6 | `TableRenderer` → DOM mutation | `_RenderFullBody` / `_RenderVirtualizedBody` | DocumentFragment append into `_TbodyEl` after `innerHTML = ''` | Live DOM mirrors the current page slice of rows; aria-live announces row count | Manual: load /ShowSettings, observe row count badge updates after sort/page change |
+| S6 | `TableRenderer` → DOM mutation | `_RenderFullBody` / `_RenderVirtualizedBody` | DocumentFragment append into `_TbodyEl` after `innerHTML = ''` | Live DOM mirrors the current page slice of rows; aria-live announces row count | Manual: load `/Work/Transcode`, observe row count badge updates after sort/page change |
 
 ## Files
 

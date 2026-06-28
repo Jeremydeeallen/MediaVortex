@@ -16,7 +16,7 @@ Backend serves the data contract `table-renderer-service` (sequence position 5 i
 |----|--------------------------------|-----------------|---------|----------------------|
 | W1 | View `/MediaFiles` page | Pagination + sort + search controls | `GET /api/MediaFiles` | `Features/FileScanning/FileScanningRepository.GetMediaFilesPaginated` |
 | W2 | View `/TranscodeQueue` page | Tabs (Transcode / Remux / AudioFix) + sort + pagination | `GET /api/TranscodeQueue` | `Features/TranscodeQueue/TranscodeQueueRepository.GetTranscodeQueueItemsPaginated` |
-| W3 | View `/ShowSettings` Media Library card | Drive filter + sort | `GET /api/ShowSettings/Shows` | `Features/ShowSettings/ShowSettingsRepository.GetShowsWithStats` |
+| W3 | View `/Work/<bucket>` series list | Drive filter + sort | `GET /api/WorkBucket/Shows` | `Features/WorkBucket/WorkBucketRepository.GetShowsWithStats` |
 | W4 | View VMAF results history | Pagination | `GET /api/QualityTest/History` | `Features/QualityTesting/QualityTestRepository.GetQualityTestResults` |
 | W5 | Worker / supervisor reads currently-running jobs by service | n/a (internal) | direct call | `Features/ServiceControl/ActiveJobRepository.GetActiveJobsByService` |
 
@@ -53,11 +53,11 @@ C13. **Contract tests cover invariants.** `Tests/Contract/TestPagedQuery.py` + `
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
 |---|---|---|---|---|---|
 | S1 | `PagedQueryBuilder.Execute` → `DatabaseService.ExecuteQuery` | `Core.Querying.PagedQueryBuilder` | `(sql: str, params: tuple)` → `List[CaseInsensitiveDict]` | DatabaseService.ExecuteQuery contract: SELECT only, returns lowercase-key rows wrapped in `CaseInsensitiveDict` | `Tests/Contract/TestPagedQueryBuilder.py` |
-| S2 | Repository → `PagedQueryBuilder.Execute` | each migrated Repository (Quality / FileScanning / TranscodeQueue / ShowSettings / ActiveJob) | `(RowsSelect, Query, StaticWhere?, GroupBy?, Having?, OrderByOverride?, CountStrategyChoice, CountSelect?)` → `PagedQueryResult` | Repository receives Rows + TotalCount + echoed Page/PageSize | per-Repository contract test (smoke) |
+| S2 | Repository → `PagedQueryBuilder.Execute` | each migrated Repository (Quality / FileScanning / TranscodeQueue / WorkBucket / ActiveJob) | `(RowsSelect, Query, StaticWhere?, GroupBy?, Having?, OrderByOverride?, CountStrategyChoice, CountSelect?)` → `PagedQueryResult` | Repository receives Rows + TotalCount + echoed Page/PageSize | per-Repository contract test (smoke) |
 | S3 | ViewModel / Controller request → `PagedQuery` | Flask `request.args.get`, ViewModel builder | `(Page, PageSize, Sort, Filters)` value object; `QuerySort.Create` clamps to whitelist; `PagedQueryConfig.ClampPageSize` clamps to MaxPageSize | Whitelist-validated `QuerySort` + filter primitives; unknown columns raise `InvalidColumnError` | injection tests + ViewModel smoke |
 | S4 | `PagedQueryResult` → JSON response | Repository → Controller → `jsonify` | `{Rows: [...], TotalCount: int, Page: int, PageSize: int, TotalPages: int}` inside the existing `{Success, Message, Data}` envelope (per-controller) | Frontend pagination controls consume the existing shape; new Pagination blocks alongside Data where added | controller-level edits verified via response shape |
 | S5 | `RealDictCursor` → `CaseInsensitiveDict` | `DatabaseService.ExecuteQuery` | rows with lowercase keys; `_parse_select_columns` relocates to PascalCase aliases | `Row['ShowName'] == Row['showname']` | C9 contract test |
-| S6 | Aggregate window-function COUNT | `ShowSettingsRepository.GetShowsWithStats` | `COUNT(*) OVER ()` evaluated after `GROUP BY` + `HAVING` | `__TotalCount` column on each grouped row equals distinct post-HAVING group count | live smoke 3980 shows total, 648 Drive=T: |
+| S6 | Aggregate window-function COUNT | `WorkBucketRepository.GetShowsWithStats` | `COUNT(*) OVER ()` evaluated after `GROUP BY` + `HAVING` | `__TotalCount` column on each grouped row equals distinct post-HAVING group count | live smoke 3980 shows total, 648 Drive=T: |
 
 ## Files
 

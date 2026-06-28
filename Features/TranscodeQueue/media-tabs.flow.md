@@ -42,7 +42,7 @@ Fix tab is reserved for files where audio is the *only* concern.
 |---|-------|-----------|---|
 | ST1 | Tab render | `TranscodeQueueController.GetTranscodeQueue()` accepts `?mode=Transcode|Remux|AudioFix`; returns rows filtered to that mode plus counts for the other tabs (so the tab badges show pending counts) | -- |
 | ST2 | Row selection | Operator clicks rows or "Select All in folder" | client-side selection state |
-| ST3 | Reprioritize (Audio Fix tab only) | Operator types/picks a folder name; click "Move to top" | `TranscodeQueue.Priority` updated for matching rows; SmartPopulate hint persisted to a new `AudioFixPriorityHints` table (or ShowSettings extension) so future cascade decisions for that folder land at the top |
+| ST3 | Reprioritize (Audio Fix tab only) | Operator types/picks a folder name; click "Move to top" | `TranscodeQueue.Priority` updated for matching rows; SmartPopulate hint persisted to `AudioFixPriorityHints` table so future cascade decisions for that folder land at the top |
 | ST4 | Queue execution | WorkerService claims `Status='Pending'` rows per the claim contract owned by `queue-priority.feature.md` (largest non-compliant first + 195-200 override window), respecting per-mode concurrency limits | TranscodeQueue.Status -> Running -> deleted on success |
 | ST5 | Post-flight | Standard FileReplacement + RecomputeForFiles. Re-probe + re-measure loudness so the row drops out of the tab automatically | MediaFiles.AudioComplete, SourceIntegratedLufs, IsCompliant, RecommendedMode all updated |
 
@@ -103,7 +103,6 @@ MediaFiles               -- IsCompliant, RecommendedMode, AudioComplete,
                             SourceTruePeakDbtp, LoudnessMeasuredAt
 TranscodeQueue           -- ProcessingMode now includes 'AudioFix'
 AudioFixPriorityHints    -- (NEW) folder-level priority overrides for Audio Fix tab
-                           (or extension to ShowSettings)
 ```
 
 ## Failure Modes

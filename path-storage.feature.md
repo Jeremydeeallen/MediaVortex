@@ -39,7 +39,7 @@ StorageRootResolutions
 
 -- Every path-bearing table gains two columns:
 MediaFiles, TranscodeQueue, TranscodeAttempts, TemporaryFilePaths,
-ShowSettings, MediaFilesArchive
+SeriesProfiles, MediaFilesArchive
   ADD COLUMN StorageRootId  BIGINT REFERENCES StorageRoots(Id)
   ADD COLUMN RelativePath   TEXT
   -- with a CHECK constraint (activated in Phase 4) enforcing format:
@@ -70,7 +70,7 @@ Each phase merges separately. Each phase has its own validation criterion. Phase
 
 ## Success Criteria
 
-1. **[BUG]** No row in any DB table contains a drive letter or backslash in a path field. Verifiable: `SELECT COUNT(*) FROM MediaFiles WHERE FilePath ~ '^[A-Za-z]:' OR FilePath LIKE '%\\\\%'` returns 0; same query against `TranscodeQueue.FilePath`, `TranscodeAttempts` path columns, `RootFolders.RootFolder`, `ShowSettings.ShowFolder`, and any future schema addition with a path-shaped column. CI lint refuses any new column that stores an OS-shaped path. (Stub criterion 1.)
+1. **[BUG]** No row in any DB table contains a drive letter or backslash in a path field. Verifiable: `SELECT COUNT(*) FROM MediaFiles WHERE FilePath ~ '^[A-Za-z]:' OR FilePath LIKE '%\\\\%'` returns 0; same query against `TranscodeQueue.FilePath`, `TranscodeAttempts` path columns, `RootFolders.RootFolder`, `SeriesProfiles.ShowFolder`, and any future schema addition with a path-shaped column. CI lint refuses any new column that stores an OS-shaped path. (Stub criterion 1.)
 
 2. **Storage shape**. Path storage is `(RootId BIGINT REFERENCES StorageRoots(Id), RelativePath TEXT)`. `RelativePath` uses forward slashes, no leading slash, no drive letter, no trailing slash, no `..` segments. Verifiable: schema dump shows the column shape; CHECK constraint enforces format on every path-bearing table. (Stub criterion 2.)
 
@@ -80,7 +80,7 @@ Each phase merges separately. Each phase has its own validation criterion. Phase
 
 5. **Operator-facing display unchanged**. Activity, Queue, SQLQueries, VmafCompare pages display absolute paths exactly as today, but the source columns are `(RootId, RelativePath)`. Verifiable: snapshot Activity / Queue / VmafCompare page HTML for the same rows before and after Phase 5; the visible path strings are character-equal (or differ only in path separator if intentional). (Stub criterion 5.)
 
-6. **Backfill correctness**. For every existing row in `MediaFiles`, `TranscodeQueue`, `TranscodeAttempts`, `TemporaryFilePaths`, `ShowSettings`, and `MediaFilesArchive` that had a valid `FilePath` matching a known root, the backfill produces `(RootId, RelativePath)` such that `Resolve(RootId, RelativePath, ProducingWorker)` returns the original `FilePath` (string-equal after normalization). Verifiable: backfill validation script enumerates every row, calls Resolve against the originating worker, and asserts equality. Reports any drift.
+6. **Backfill correctness**. For every existing row in `MediaFiles`, `TranscodeQueue`, `TranscodeAttempts`, `TemporaryFilePaths`, `SeriesProfiles`, and `MediaFilesArchive` that had a valid `FilePath` matching a known root, the backfill produces `(RootId, RelativePath)` such that `Resolve(RootId, RelativePath, ProducingWorker)` returns the original `FilePath` (string-equal after normalization). Verifiable: backfill validation script enumerates every row, calls Resolve against the originating worker, and asserts equality. Reports any drift.
 
 7. **Orphan rows are flagged, not silently dropped**. Rows whose `FilePath` doesn't match any `RootFolders` entry are left with `RootId IS NULL` and counted. The operator reviews and either creates a new `RootFolders` entry + re-runs backfill, or marks them archival, BEFORE Phase 5 drops `FilePath`. Verifiable: pre-Phase-5 report shows the count of `RootId IS NULL` rows per table; operator approval of the orphan list is required to advance.
 
@@ -244,7 +244,7 @@ columns dropped from PostgreSQL: `RootFolders.RootFolder`,
 `TemporaryFilePaths._legacy_originalpath`,
 `TemporaryFilePaths._legacy_localsourcepath`,
 `TemporaryFilePaths._legacy_localoutputpath`,
-`ShowSettings._legacy_showfolder`. Migration script
+`SeriesProfiles._legacy_showfolder`. Migration script
 `Scripts/SQLScripts/DropLegacyPathColumns_2026_06_05.py` is idempotent
 (ALTER TABLE DROP COLUMN guarded by `information_schema` lookup).
 Dual-write code dropped from Step 2's repository + business-service
@@ -291,7 +291,7 @@ rows; QualityTestRequired routing via `PostTranscodeDispositionService`.
 - [x] 7. **Phase 1 — Schema additive** (verified 2026-05-15):
   - MediaFiles has `StorageRootId BIGINT` + `RelativePath TEXT` columns present
   - `StorageRoots` table exists (3 rows: media_tv→T:\, movies→M:\, xxx→Z:\)
-  - Other path-bearing tables (TranscodeQueue, TranscodeAttempts, TemporaryFilePaths, ShowSettings, MediaFilesArchive) — column presence not re-verified in this audit; check before any Phase 4 work
+  - Other path-bearing tables (TranscodeQueue, TranscodeAttempts, TemporaryFilePaths, SeriesProfiles, MediaFilesArchive) — column presence not re-verified in this audit; check before any Phase 4 work
 - [x] 8. **Phase 1 — StorageRootResolutions seed** (verified 2026-05-15):
   - `StorageRootResolutions` table exists, 54 rows (per-worker per-root mappings)
   - `WorkerShareMappings` (48 rows) coexists for backward compatibility

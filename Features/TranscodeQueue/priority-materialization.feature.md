@@ -94,7 +94,7 @@ admin endpoint for full-library backfill. See `transcode.flow.md` Stage
    NULL).
 
 8. **On AssignedProfile bulk-update** (`POST /api/Profiles/AssignProfileToRootFolder`,
-   `POST /api/ShowSettings/Save`, `POST /api/ShowSettings/BulkUpdate`):
+   `POST /api/WorkBucket/SetSeriesProfile`):
    after the AssignedProfile UPDATE, the affected MediaFileIds are
    passed to `ComputePriorityScoresForFiles`. Verifiable: assign a new
    profile to a folder containing 50 files, query
@@ -211,7 +211,7 @@ Scripts/SQLScripts/BackfillPriorityScores.py                  -- (NEW) one-shot 
 Features/TranscodeQueue/QueueManagementBusinessService.py     -- ComputePriorityScore + bulk variant
 Features/MediaProbe/MediaProbeBusinessService.py              -- probe-completion hook
 Features/Profiles/ProfilesController.py                       -- AssignProfileToRootFolder hook
-Features/ShowSettings/ShowSettingsController.py               -- Save / BulkUpdate hooks
+Features/WorkBucket/WorkBucketController.py                   -- SetSeriesProfile hook triggers recompute
 Features/PriorityMaterialization/                             -- (NEW) admin endpoint feature dir
   PriorityMaterializationController.py
   PriorityMaterializationBusinessService.py
@@ -227,7 +227,7 @@ transcode.flow.md                                              -- (UPDATED) new 
 | `Features/TranscodeQueue/QueueManagementBusinessService.py` | `ComputePriorityScore(MediaFileId)` -- single-file recompute. `ComputePriorityScoresForFiles(MediaFileIds)` -- bulk variant with profile-thresholds cache. Both write to MediaFiles.PriorityScore. Reuse existing `CalculatePriority`. |
 | `Features/MediaProbe/MediaProbeBusinessService.py` | After successful `ProbeFile` write, invoke `ComputePriorityScore(MediaFileId)`. In-line. Failure logged but does not roll back probe. |
 | `Features/Profiles/ProfilesController.py` | `AssignProfileToRootFolder` -- after the bulk UPDATE on MediaFiles, collect affected Ids and call `ComputePriorityScoresForFiles`. |
-| `Features/ShowSettings/ShowSettingsController.py` | `Save` and `BulkUpdate` -- after AssignedProfile changes, recompute affected. |
+| `Features/WorkBucket/WorkBucketController.py` | `SetSeriesProfile` -- after `SeriesProfiles.AssignedProfile` change, recompute affected. |
 | `Features/PriorityMaterialization/PriorityMaterializationController.py` | (NEW) `POST /api/PriorityMaterialization/Recompute` admin endpoint. Accepts optional `ProfileName` or `Drive` filter. |
 | `Features/PriorityMaterialization/PriorityMaterializationBusinessService.py` | (NEW) Selects affected MediaFileIds in batches, calls `ComputePriorityScoresForFiles`, returns row count + elapsed time. |
 | `transcode.flow.md` | (UPDATED) Insert Stage 3.5 PRIORITY between ASSIGN and QUEUE describing the recompute lifecycle. |

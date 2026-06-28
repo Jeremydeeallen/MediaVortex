@@ -21,7 +21,7 @@ Three reinforcing parts:
 | W2 | Click a filename | Modal "Attempt history" | `GET /api/FailedJobs/<MediaFileId>/Attempts` | `FailedJobsController.GetAttemptHistory` -> `FailedJobsRepository.GetAttemptHistory` |
 | W3 | Click Reset on a row | Confirm modal then row disappears | `POST /api/FailedJobs/<MediaFileId>/Reset` | `FailedJobsController.ResetFailureBudget` -> `FailedJobsRepository.ResetFailureBudget` |
 | W4 | Worker boots, polls queue | (internal) | Claim path consults cap | `ClaimNextPendingTranscodeJob`, `ClaimNextPendingRemuxJob`, `ClaimQualityTestJob` |
-| W5 | Operator triggers Recompute / Smart-Populate / Next-Batch | The buttons on `/ShowSettings` / `/TranscodeQueue` | All Next-Batch SQL excludes capped files | `QueueManagementBusinessService.NextTranscodeBatch` / `SmartPopulateQueue` / `AddSuggestionsToQueue` / `QueueAllMatching` |
+| W5 | Operator triggers Recompute / Smart-Populate / Next-Batch | The buttons on `/Work/<bucket>` / `/TranscodeQueue` | All Next-Batch SQL excludes capped files | `QueueManagementBusinessService.NextTranscodeBatch` / `SmartPopulateQueue` / `AddSuggestionsToQueue` / `QueueAllMatching` |
 
 ## Success Criteria
 

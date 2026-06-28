@@ -91,10 +91,10 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 
 **Code paths (three ways):**
 1. Per-folder bulk: `POST /api/Profiles/AssignProfileToRootFolder` -> updates `MediaFiles.AssignedProfile` for all files in folder
-2. Per-title via Media page: ShowSettings target resolution dropdown -> `POST /api/ShowSettings/Save`
+2. Per-title via `/Work/<bucket>` page: per-series profile override via `SeriesProfiles` table
 3. At queue time: QueueByFolder and AddSuggestionsToQueue both accept ProfileId and assign it to files before queuing
 
-**Tables written:** MediaFiles.AssignedProfile (stores profile name string, not ID), ShowSettings (target resolution per folder)
+**Tables written:** MediaFiles.AssignedProfile (stores profile name string, not ID), SeriesProfiles (target resolution per series)
 
 **Note:** AssignedProfile is a string field storing ProfileName, not a foreign key. Profile lookup happens at transcode time.
 
@@ -121,8 +121,8 @@ See `Features/TranscodeQueue/priority-materialization.feature.md` and `Features/
 | Path | Endpoint | Safety guards applied |
 |------|----------|----------------------|
 | Full populate | `POST /api/TranscodeQueue/PopulateQueue` | All guards (audio, resolution, VMAF, CRF floor) |
-| Media page: queue by folder | `POST /api/ShowSettings/QueueByFolder` | Audio language, probed (Resolution NOT NULL), dedup, already-transcoded |
-| Media page: batch (NextTranscodeBatch -- TV/Movies cards; SmartPopulate -- Quick Fix/Remux/AudioFix cards) | `POST /api/ShowSettings/AddToQueue` | Dedup only (user explicitly chose files) |
+| Work bucket: queue by folder | `POST /api/WorkBucket/QueueByFolder` | Audio language, probed (Resolution NOT NULL), dedup, already-transcoded |
+| Work bucket: batch (NextTranscodeBatch -- TV/Movies cards; SmartPopulate -- Quick Fix/Remux/AudioFix cards) | `POST /api/WorkBucket/AddToQueue` | Dedup only (user explicitly chose files) |
 | Single file add | `POST /api/TranscodeQueue/AddJob` | All guards (audio, resolution, VMAF, CRF floor) |
 
 **Full populate code path** (most guards):
@@ -137,7 +137,7 @@ See `Features/TranscodeQueue/priority-materialization.feature.md` and `Features/
 - Creates TranscodeQueueModel, saves to TranscodeQueue
 
 **QueueByFolder code path** (Media page `+` button):
-- `Features/ShowSettings/ShowSettingsController.py` -> `QueueByFolder()`
+- `Features/WorkBucket/WorkBucketController.py` -> `QueueByFolder()`
 - SQL query filters: not transcoded, not in queue, `HasExplicitEnglishAudio IS NULL OR true`, SizeMB > 0
 - Passes to `AddSuggestionsToQueue()` which assigns profile and consults the marginal-savings gate before inserting queue rows.
 
@@ -393,7 +393,7 @@ ORDER BY DispositionDecidedAt DESC;
 MediaFiles.FilePath          -- created at SCAN, used everywhere
 MediaFiles.Resolution        -- set at PROBE, checked at QUEUE
 MediaFiles.HasExplicitEnglishAudio -- set at PROBE, checked at QUEUE
-MediaFiles.AssignedProfile   -- set at RECOMPUTE (cascade from ShowSettings/SystemSettings), read at TRANSCODE
+MediaFiles.AssignedProfile   -- set at RECOMPUTE (cascade from SeriesProfiles/SystemSettings), read at TRANSCODE
 MediaFiles.PriorityScore     -- set at RECOMPUTE, read by non-claim consumers (SmartPopulate helpers, backfill scripts); NOT consulted on the worker claim path (see queue-priority.feature.md)
 MediaFiles.IsCompliant       -- set at RECOMPUTE, checked at QUEUE (compliant files blocked)
 MediaFiles.RecommendedMode   -- set at RECOMPUTE, read by SmartPopulate to route Transcode vs Remux

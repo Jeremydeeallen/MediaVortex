@@ -19,7 +19,7 @@ records two materialized columns:
 The cascade for the effective profile is:
 
 ```
-  ShowSettings.AssignedProfile (per-series override -- NULL = inherit)
+  SeriesProfiles.AssignedProfile (per-series override -- NULL = inherit)
   -> SystemSettings.DefaultProfileName (operator-set library default)
 ```
 
@@ -30,7 +30,7 @@ source of truth -- the cascade is.
 The operator interacts with two GUI surfaces:
 
 1. `/settings` page -- pick the global default profile.
-2. `/ShowSettings` Media Library card -- pick per-series profile overrides for shows the operator wants kept higher-quality.
+2. `/Work/<bucket>` pages -- pick per-series profile overrides for shows the operator wants kept higher-quality.
 
 Once compliance is materialized, every queue-population path filters on
 `IsCompliant IS NOT TRUE`, so compliant files cannot enter the queue.
@@ -57,15 +57,15 @@ User-facing -- two GUI surfaces, two columns visible in any operator query, one 
 
 1. `SystemSettings('DefaultProfileName')` row exists, type string, default `'SVT-AV1 P6 FG8 >480p'` (operator's chosen global default). Seed script `Scripts/SQLScripts/SeedDefaultProfileSetting.py` is idempotent (`INSERT ... ON CONFLICT DO NOTHING`). Verifiable: run the seed, query `SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'DefaultProfileName'`.
 
-2. `ShowSettings.AssignedProfile VARCHAR(100)` column exists, nullable. NULL means "inherit from SystemSettings default." Migration `Scripts/SQLScripts/AddShowSettingsAssignedProfile.py` is idempotent (`ADD COLUMN IF NOT EXISTS`). Verifiable: `\d ShowSettings` shows the column.
+2. `SeriesProfiles.AssignedProfile VARCHAR(100)` column exists, nullable. NULL means "inherit from SystemSettings default." Migration `Scripts/SQLScripts/AddShowSettingsAssignedProfile.py` is idempotent (`ADD COLUMN IF NOT EXISTS`). Verifiable: `\d SeriesProfiles` shows the column.
 
-3. `_GetEffectiveProfile(MediaFile) -> Optional[str]` helper exists in `QueueManagementBusinessService`. It extracts the show folder from `MediaFile.FilePath` (segment immediately under the drive root, same `Parts[1]` rule the existing client-side ShowName extraction uses), looks up `ShowSettings.AssignedProfile` for that folder; if NULL or no row, returns `SystemSettings('DefaultProfileName')`. Returns NULL only if the SystemSetting itself is unset. Verifiable: insert ShowSettings row with `AssignedProfile='X'` for show `Y`, query a MediaFile in `Y` -- helper returns `'X'`. Delete the ShowSettings row, helper returns the SystemSettings default.
+3. `_GetEffectiveProfile(MediaFile) -> Optional[str]` helper exists in `QueueManagementBusinessService`. It extracts the show folder from `MediaFile.FilePath` (segment immediately under the drive root, same `Parts[1]` rule the existing client-side ShowName extraction uses), looks up `SeriesProfiles.AssignedProfile` for that folder; if NULL or no row, returns `SystemSettings('DefaultProfileName')`. Returns NULL only if the SystemSetting itself is unset. Verifiable: insert `SeriesProfiles` row with `AssignedProfile='X'` for show `Y`, query a MediaFile in `Y` -- helper returns `'X'`. Delete the `SeriesProfiles` row, helper returns the SystemSettings default.
 
 ### B. GUI surfaces
 
 4. `/settings` page exposes a "Default Profile" `<select>` populated from the Profiles table. Selected value reflects current `SystemSettings('DefaultProfileName')`. Changing the selection POSTs to a new `/api/SystemSettings/DefaultProfile` endpoint, which validates the chosen name exists in `Profiles.ProfileName` and updates the SystemSetting. Verifiable: change the dropdown, query `SystemSettings`, observe new value. Invalid value (manual API call with non-existent profile name) is rejected with HTTP 400.
 
-5. `/ShowSettings` Media Library card (Card 3) gains a "Profile" column with a per-row `<select>` populated from the Profiles table, plus a NULL/blank option labeled "(use default)". Changing a row's selection POSTs to a new `/api/ShowSettings/SetSeriesProfile` endpoint with `{ShowFolder, ProfileName}` -- ProfileName empty string means clear the override (back to default). Verifiable: pick a show, change its profile to "SVT-AV1 P6 FG2 >720p", reload, dropdown reflects the choice; query `ShowSettings WHERE ShowFolder=...` confirms the column.
+5. `/Work/<bucket>` series rows expose a "Profile" column with a per-row `<select>` populated from the Profiles table, plus a NULL/blank option labeled "(use default)". Changing a row's selection POSTs to `/api/WorkBucket/SetSeriesProfile` with `{ShowFolder, ProfileName}` -- ProfileName empty string means clear the override (back to default). Verifiable: pick a show, change its profile to "SVT-AV1 P6 FG2 >720p", reload, dropdown reflects the choice; query `SeriesProfiles WHERE ShowFolder=...` confirms the column.
 
 6. Both GUI controls validate that the chosen value exists in `Profiles.ProfileName`. Stale or invalid names cannot be saved. Verifiable: server-side validation tested with a curl against the API endpoint.
 
@@ -75,12 +75,12 @@ User-facing -- two GUI surfaces, two columns visible in any operator query, one 
 
 8. Recompute triggers extend the existing priority-materialization hooks. The same `ComputePriorityScoresForFiles` bulk function is rewritten as `RecomputeForFiles(MediaFileIds)` and computes `AssignedProfile` (from cascade), `PriorityScore`, `IsCompliant`, and `RecommendedMode` in a single pass per row. Triggers:
    - Probe completion (single file)
-   - `ShowSettings.AssignedProfile` change (all files in that show)
-   - `SystemSettings('DefaultProfileName')` change (all files where ShowSettings.AssignedProfile IS NULL)
+   - `SeriesProfiles.AssignedProfile` change (all files in that show)
+   - `SystemSettings('DefaultProfileName')` change (all files where `SeriesProfiles.AssignedProfile IS NULL`)
    - FileReplacement post-flight (single file -- re-probed file may flip IsCompliant)
    - Admin endpoint (full library or scoped sweep)
 
-9. Migration sets `MediaFiles.AssignedProfile = NULL` for all rows once the SystemSetting and ShowSettings.AssignedProfile column exist. Subsequent recompute hooks repopulate via cascade. Verifiable: post-migration `SELECT COUNT(*) FROM MediaFiles WHERE AssignedProfile IS NULL` = total row count; then run admin recompute, count drops to ~0 (only files with broken inputs stay NULL).
+9. Migration sets `MediaFiles.AssignedProfile = NULL` for all rows once the SystemSetting and `SeriesProfiles.AssignedProfile` column exist. Subsequent recompute hooks repopulate via cascade. Verifiable: post-migration `SELECT COUNT(*) FROM MediaFiles WHERE AssignedProfile IS NULL` = total row count; then run admin recompute, count drops to ~0 (only files with broken inputs stay NULL).
 
 ### D. IsCompliant materialization
 
@@ -161,14 +161,14 @@ IN PROGRESS -- operator approved 2026-05-09 (cheap-loudnorm-detection validated;
 - [x] Pivot to compliance-driven model (this rewrite, 2026-05-09)
 - [x] Renamed file: `no-benefit-handling.feature.md` -> `transcode-vs-remux-routing.feature.md` (criterion 25)
 - [ ] Operator approves criteria 1-25
-- [x] Migrations: `AddIsCompliantColumn.py`, `AddRecommendedModeColumn.py`, `AddShowSettingsAssignedProfile.py`, `SeedDefaultProfileSetting.py`, `DropCompliantFilesTable.py`
+- [x] Migrations: `AddIsCompliantColumn.py`, `AddRecommendedModeColumn.py`, `AddShowSettingsAssignedProfile.py` (renamed to `SeriesProfiles`), `SeedDefaultProfileSetting.py`, `DropCompliantFilesTable.py`
 - [x] `_GetEffectiveProfile` helper (criterion 3)
 - [x] `_EvaluateCompliance` helper (criterion 11)
 - [x] `RecomputeForFiles` -- replaces `ComputePriorityScoresForFiles`, single-pass updater (criterion 8)
 - [x] Recompute hook: probe-completion calls `RecomputeForFiles` (MediaProbeBusinessService.py)
 - [ ] Recompute hook: FileReplacement post-flight calls `RecomputeForFiles` (criterion 17 -- wired, needs live verify)
 - [x] /settings GUI: Default Profile dropdown + API endpoint (criterion 4) -- live-verified 2026-05-09. Card visible at top of /settings page after Setup -> Settings tab rename + lift out of collapsed Profile Management section.
-- [x] /ShowSettings Card 3 GUI: per-row Profile dropdown + API endpoint (criterion 5) -- live-verified 2026-05-09 (per-show overrides save and persist via /api/ShowSettings/SetSeriesProfile).
+- [x] `/Work/<bucket>` series profile dropdown + API endpoint (criterion 5) -- live-verified 2026-05-09 (per-show overrides save and persist via `/api/WorkBucket/SetSeriesProfile`).
 - [ ] Wipe `MediaFiles.AssignedProfile` to NULL, run admin recompute to repopulate from cascade (criterion 9)
 - [ ] Pre-flight gate update at all four queue-entry sites (criteria 14, 15)
 - [ ] Post-flight gate Mode-aware split (criterion 16)
@@ -195,20 +195,19 @@ NEXT: operator approval to start implementation. Recommended order:
 Features/TranscodeQueue/transcode-vs-remux-routing.feature.md  -- (THIS FILE, renamed)
 Features/TranscodeQueue/QueueManagementBusinessService.py      -- _GetEffectiveProfile, _EvaluateCompliance, RecomputeForFiles
 Features/TranscodeQueue/TranscodeQueueController.py            -- AddJob route consumes RecommendedMode
-Features/ShowSettings/ShowSettingsController.py                -- new /SetSeriesProfile endpoint, AddToQueue/QueueByFolder consume RecommendedMode
-Features/ShowSettings/ShowSettingsRepository.py                -- read/write ShowSettings.AssignedProfile
-Features/ShowSettings/Models/ShowSettingModel.py               -- add AssignedProfile field
+Features/WorkBucket/WorkBucketController.py                    -- /SetSeriesProfile endpoint, AddToQueue/QueueByFolder consume RecommendedMode
+Features/WorkBucket/WorkBucketRepository.py                    -- read/write SeriesProfiles.AssignedProfile
 Features/SystemSettings/SystemSettingsController.py            -- new /DefaultProfile endpoint
 Features/MediaProbe/MediaProbeBusinessService.py               -- probe-completion hook calls RecomputeForFiles
 Features/Profiles/ProfileRepository.py                         -- bulk-update hook calls RecomputeForFiles
 Features/FileReplacement/FileReplacementBusinessService.py     -- post-flight gate Mode-aware + RecomputeForFiles call
 Features/PriorityMaterialization/PriorityMaterializationController.py  -- admin endpoint extended
 Templates/Settings.html                                         -- Default Profile dropdown
-Templates/ShowSettings.html                                     -- Card 3 per-show Profile column
+Templates/WorkBucket.html                                       -- per-series Profile column
 Repositories/DatabaseManager.py                                 -- queue-population WHERE-clause helper updated, partial-index recreate
 Scripts/SQLScripts/AddIsCompliantColumn.py                      -- (NEW)
 Scripts/SQLScripts/AddRecommendedModeColumn.py                  -- (NEW)
-Scripts/SQLScripts/AddShowSettingsAssignedProfile.py            -- (NEW)
+Scripts/SQLScripts/AddShowSettingsAssignedProfile.py            -- (NEW, renamed table to SeriesProfiles)
 Scripts/SQLScripts/SeedDefaultProfileSetting.py                 -- (NEW)
 Scripts/SQLScripts/DropCompliantFilesTable.py                   -- (NEW)
 Scripts/SQLScripts/AddSmartPopulateIndex.py                     -- (UPDATED, recreate with IsCompliant predicate)
@@ -222,23 +221,22 @@ transcode.flow.md                                                -- Stage 4 + St
 | Feature doc (this file) | Contract |
 | `Scripts/SQLScripts/AddIsCompliantColumn.py` | Idempotent ADD COLUMN MediaFiles.IsCompliant BOOLEAN |
 | `Scripts/SQLScripts/AddRecommendedModeColumn.py` | Idempotent ADD COLUMN MediaFiles.RecommendedMode VARCHAR(16) |
-| `Scripts/SQLScripts/AddShowSettingsAssignedProfile.py` | Idempotent ADD COLUMN ShowSettings.AssignedProfile VARCHAR(100) |
+| `Scripts/SQLScripts/AddShowSettingsAssignedProfile.py` | Idempotent ADD COLUMN SeriesProfiles.AssignedProfile VARCHAR(100) |
 | `Scripts/SQLScripts/SeedDefaultProfileSetting.py` | Idempotent INSERT SystemSetting `'DefaultProfileName' = 'SVT-AV1 P6 FG8 >480p'` ON CONFLICT DO NOTHING |
 | `Scripts/SQLScripts/DropCompliantFilesTable.py` | Idempotent DROP TABLE IF EXISTS CompliantFiles (criterion 23) |
 | `Scripts/SQLScripts/AddSmartPopulateIndex.py` | Updated: drop and recreate `idx_mediafiles_smartpopulate` with `IsCompliant IS NOT TRUE` in WHERE |
 | `Features/TranscodeQueue/QueueManagementBusinessService.py` | New helpers: `_GetEffectiveProfile`, `_EvaluateCompliance`, `RecomputeForFiles` (replaces `ComputePriorityScoresForFiles`); SmartPopulate / queue-population paths consult RecommendedMode |
-| `Features/ShowSettings/ShowSettingsController.py` | New `POST /api/ShowSettings/SetSeriesProfile` endpoint with profile-name validation; AddToQueue/QueueByFolder updated to read RecommendedMode |
-| `Features/ShowSettings/ShowSettingsRepository.py` | Read/write `ShowSettings.AssignedProfile` |
-| `Features/ShowSettings/Models/ShowSettingModel.py` | Add `AssignedProfile: Optional[str] = None` field |
+| `Features/WorkBucket/WorkBucketController.py` | `POST /api/WorkBucket/SetSeriesProfile` endpoint with profile-name validation; AddToQueue/QueueByFolder updated to read RecommendedMode |
+| `Features/WorkBucket/WorkBucketRepository.py` | Read/write `SeriesProfiles.AssignedProfile` |
 | `Features/SystemSettings/SystemSettingsController.py` | New `POST /api/SystemSettings/DefaultProfile` endpoint with profile-name validation |
 | `Features/MediaProbe/MediaProbeBusinessService.py` | Probe-completion hook now calls `RecomputeForFiles([Id])` (was `ComputePriorityScore`) -- updates all four cached fields in one pass |
-| `Features/Profiles/ProfileRepository.py` | Bulk-assign-profile flow updated -- writes ShowSettings.AssignedProfile when scoped to a folder, instead of MediaFiles.AssignedProfile directly. Calls RecomputeForFiles for affected rows. |
+| `Features/Profiles/ProfileRepository.py` | Bulk-assign-profile flow updated -- writes `SeriesProfiles.AssignedProfile` when scoped to a folder, instead of MediaFiles.AssignedProfile directly. Calls RecomputeForFiles for affected rows. |
 | `Features/FileReplacement/FileReplacementBusinessService.py` | Post-flight gate Mode-aware (criterion 16); after successful replacement, calls RecomputeForFiles for the MediaFileId |
 | `Features/PriorityMaterialization/PriorityMaterializationController.py` | Admin recompute endpoint accepts new optional `Drive` and `ShowFolder` filters; calls unified RecomputeForFiles |
 | `Templates/Settings.html` | "Default Profile" `<select>` populated from Profiles, bound to `/api/SystemSettings/DefaultProfile` |
-| `Templates/ShowSettings.html` | Card 3 (Media Library) gains a "Profile" column with `<select>` per row, bound to `/api/ShowSettings/SetSeriesProfile`. Card 1 SmartPopulate row template renders RecommendedMode badge alongside the Priority badge. |
+| `Templates/WorkBucket.html` | Series rows gain a "Profile" column with `<select>` per row, bound to `/api/WorkBucket/SetSeriesProfile`. SmartPopulate row template renders RecommendedMode badge alongside the Priority badge. |
 | `Repositories/DatabaseManager.py` | Queue-population WHERE clause helper updated to include `IsCompliant IS NOT TRUE`; partial-index recreate matches |
-| `transcode.flow.md` | Stage 4 safety guards updated: `IsCompliant IS NOT TRUE` filter; Stage 7 post-flight gate Mode-aware; Stage 3.5 PRIORITY note adjusted to mention IsCompliant + RecommendedMode now share the same materialization pass |
+| `transcode.flow.md` | Stage 4 safety guards updated: `IsCompliant IS NOT TRUE` filter; Stage 7 post-flight gate Mode-aware; Stage 3.5 PRIORITY note adjusted to mention IsCompliant + RecommendedMode now share the same materialization pass | 
 
 ## Deviation from conventions
 

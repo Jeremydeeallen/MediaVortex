@@ -71,7 +71,7 @@ Features/TranscodeQueue/**
 | GET /api/TranscodeQueue/GetQueue | Paginated queue list |
 | POST /api/TranscodeQueue/Clear | Clear queue |
 | POST /api/TranscodeQueue/AudioFix/PinFolder | Pin AudioFix folder |
-| POST /api/ShowSettings/NextTranscodeBatch | Smart batch admission |
+| POST /api/WorkBucket/NextTranscodeBatch | Smart batch admission |
 
 ### What is EXPLICITLY NOT a contract
 

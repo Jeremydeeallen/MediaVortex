@@ -173,7 +173,7 @@ Core/Querying/paged-query.feature.md                           -- EDIT: sweep Sh
 - [ ] T13 Update BackfillProfileAssignments.py
 - [x] T14 Rewrite WorkBucketController + delete old repo
 - [ ] T15 Rewrite Templates/WorkBucket.html
-- [ ] T16 Sweep cross-vertical ShowSettings references
+- [x] T16 Sweep cross-vertical ShowSettings references
 - [ ] T17 Delete Features/ShowSettings/ directory
 - [ ] T18 Delete template + route + blueprint + nav link
 - [ ] T19 Deprecate idx_mediafiles_smartpopulate
@@ -211,6 +211,18 @@ Required when phase advances to VERIFYING. One entry per acceptance criterion. C
 - **C14:** TBD
 - **C15:** TBD
 - **C16:** TBD
+
+### R18 overrides
+
+- Features/TranscodeQueue/next-batch-per-drive.feature.md -- T16 ShowSettings sweep; full read required to locate all deletion targets
+- Features/TranscodeQueue/transcode-vs-remux-routing.feature.md -- T16 ShowSettings sweep; full read required
+- Features/TranscodeQueue/media-tabs-and-loudness.feature.md -- T16 ShowSettings sweep; full read required
+- Features/TranscodeQueue/priority-materialization.feature.md -- T16 ShowSettings sweep; full read required
+- Features/SharedTable/shared-table-renderer.feature.md -- T16 ShowSettings sweep; full read required
+- Core/Querying/paged-query.feature.md -- T16 ShowSettings sweep; full read required
+- Core/Path/path.feature.md -- T16 ShowSettings sweep; full read required
+- Features/FailureAccounting/failure-accounting.feature.md -- T16 ShowSettings sweep; full read required
+- Features/TranscodeQueue/media-tabs.flow.md -- T16 ShowSettings sweep; full read required
 
 ### Decisions Made
 

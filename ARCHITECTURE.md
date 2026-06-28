@@ -66,13 +66,12 @@ Each domain vertical answers ONE compliance question about a file and writes ONE
 | Vertical | Page | Owns |
 |---|---|---|
 | Activity | `/Activity` | Live worker / job / scan dashboard; 5s poll; uses SharedTable for every table. |
-| ShowSettings | `/ShowSettings` (Media page) | Media library browse + title search + "Next Batch" auto-populate. |
 | TeamStatus | `/Stats` | Per-worker job attribution; stuck-job reset; per-volume savings; CPU temperature breakdown. |
 | SystemSettings | `/Settings` | Global key-value config UI; per-known-key controls plus generic advanced table for unknowns. |
 | SQLQueries | `/SQLQueries` | Ad-hoc DB query interface; quick-query buttons; custom SQL execution. |
 | ClipBuilder | `/ClipBuilder` | Independent tool: clip extraction + compilation export. Not part of the transcoding pipeline. |
 | Compliance (tabbed shell) | `/Compliance` | Layout-only page with three tabs (Audio / Video / Container) -- each tab is rendered by its vertical's controller. No logic; pure UI shell. |
-| WorkBucket | `/Work/<bucket>` (`/Work/Transcode`, `/Work/Remux`, `/Work/Audio`) | Per-bucket landing pages: paginated MediaFiles list filtered by `MediaFiles.WorkBucket`; single-row queue endpoint for one-off admission. Pure UI consumer of the generated column. |
+| WorkBucket | `/Work/<bucket>` (`/Work/Transcode`, `/Work/Remux`, `/Work/Audio`) | Per-bucket browse: files grouped by series, sorted by GB; profile picker per series; bulk queue admission; drive filter + search; per-series profile persisted in `SeriesProfiles` table. |
 | FailureTracking | `/api/FailureTracking/RecentFailures` | Recent service-failure history surface across `Transcode` / `Quality` services. Distinct from `FailureAccounting` (which enforces the per-MediaFile budget at `/FailedJobs`). |
 
 ### Infrastructure
