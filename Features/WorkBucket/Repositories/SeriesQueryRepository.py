@@ -36,8 +36,7 @@ class SeriesQueryRepository:
             "         COUNT(*)::int AS FileCount,"
             "         ROUND(SUM(mf.SizeMB)::numeric / 1024, 1)::float AS TotalGB,"
             "         MODE() WITHIN GROUP (ORDER BY mf.ResolutionCategory) AS CommonResolution,"
-            "         MODE() WITHIN GROUP (ORDER BY mf.Codec) AS CommonCodec,"
-            "         MAX(mf.WorkBucket) AS WorkBucket"
+            "         MODE() WITHIN GROUP (ORDER BY mf.Codec) AS CommonCodec"
             "    FROM MediaFiles mf"
             "   WHERE mf.WorkBucket = %s "
             f"   {FilterClause} "
@@ -59,7 +58,7 @@ class SeriesQueryRepository:
             "            WHERE tq.Status = 'Pending'"
             "              AND m2.StorageRootId = sa.StorageRootId"
             "              AND split_part(m2.RelativePath, '/', 1) = sa.SeriesKey"
-            "              AND m2.WorkBucket = sa.WorkBucket"
+            "              AND m2.WorkBucket = %s"
             "         ) AS AnyInQueue,"
             "         COUNT(*) OVER () AS __TotalCount"
             "    FROM series_agg sa"
@@ -70,7 +69,7 @@ class SeriesQueryRepository:
             f"ORDER BY {Sort.ToSql()} "
             "LIMIT %s OFFSET %s"
         )
-        Params = (Bucket.BucketName,) + FilterParams + (Limit, Offset)
+        Params = (Bucket.BucketName,) + FilterParams + (Bucket.BucketName, Limit, Offset)
         Rows = self.Db.ExecuteQuery(Sql, Params)
         TotalCount = int(Rows[0]['__totalcount']) if Rows else 0
         SeriesList = [
