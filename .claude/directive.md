@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-28
-**Status:** Active -- phase: NEEDS_DOC_PREREAD
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** work-transcode-unified
 **Replaces:** `directives/closed/2026-06-27-worker-runtime-state.md` (closed Success 2026-06-27)
 **Spec:** `Docs/superpowers/specs/2026-06-28-work-transcode-unified-design.md`
