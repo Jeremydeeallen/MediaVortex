@@ -56,15 +56,10 @@ class EffectiveProfileResolver:
             return FallbackRows[0]['profilename']
         return None
 
-    # directive: compliance-symmetry
+    # directive: compliance-symmetry | # see work-bucket.G6
     def _IsFinalizedActive(self, ProfileName: str) -> bool:
-        Rows = self.DB.ExecuteQuery(
-            "SELECT Draft, Active FROM Profiles WHERE ProfileName = %s LIMIT 1",
-            (ProfileName,),
-        )
-        if not Rows:
-            return False
-        return bool(Rows[0].get('active')) and not bool(Rows[0].get('draft'))
+        from Features.Profiles.ProfileRepository import ProfileRepository
+        return ProfileRepository().IsFinalizedActive(ProfileName)
 
     # directive: compliance-symmetry
     def _LookupComplianceBarRow(self, ProfileName: str) -> Optional[dict]:

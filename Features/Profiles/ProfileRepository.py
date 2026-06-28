@@ -9,6 +9,27 @@ from Core.Logging.LoggingService import LoggingService
 class ProfileRepository(BaseRepository):
     """Data access for profiles, thresholds, and codec configuration."""
 
+    # directive: work-transcode-unified | # see work-bucket.G6
+    def GetProfileState(self, ProfileName: str) -> Optional[Dict[str, bool]]:
+        """Return {'Draft': bool, 'Active': bool} for the named profile, or None if absent. Single SQL site for Draft/Active introspection across the codebase."""
+        Rows = self.ExecuteQuery(
+            "SELECT Draft, Active FROM Profiles WHERE ProfileName = %s LIMIT 1",
+            (ProfileName,),
+        )
+        if not Rows:
+            return None
+        R = Rows[0]
+        return {
+            'Draft': bool(R.get('Draft', R.get('draft'))),
+            'Active': bool(R.get('Active', R.get('active'))),
+        }
+
+    # directive: work-transcode-unified | # see work-bucket.G6
+    def IsFinalizedActive(self, ProfileName: str) -> bool:
+        """Bool projection over GetProfileState. True iff the profile exists, is not a draft, and is active."""
+        State = self.GetProfileState(ProfileName)
+        return State is not None and not State['Draft'] and State['Active']
+
     def GetAllProfiles(self) -> List[TranscodeProfileModel]:
         """Get all transcoding profiles."""
         # allow: R12 -- SQL string literal

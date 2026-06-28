@@ -1,67 +1,52 @@
 from typing import Optional
 from Core.Database.DatabaseService import DatabaseService
+from Features.Profiles.ProfileRepository import ProfileRepository
 
 
-# directive: work-transcode-unified
+# directive: work-transcode-unified | # see work-bucket.C3
 class InvalidProfileError(ValueError):
     # see work-bucket.C3
     pass
 
 
-# directive: work-transcode-unified
-def IsFinalizedActive(ProfileNameStr: str, Db: Optional[DatabaseService] = None) -> bool:
-    # see work-bucket.C3
-    Rows = (Db or DatabaseService()).ExecuteQuery(
-        "SELECT Draft, Active FROM Profiles WHERE ProfileName = %s LIMIT 1",
-        (ProfileNameStr,),
-    )
-    if not Rows:
-        return False
-    R = Rows[0]
-    return bool(R.get('active')) and not bool(R.get('draft'))
-
-
-# directive: work-transcode-unified
+# directive: work-transcode-unified | # see work-bucket.C3
 class ProfileName:
+    # see work-bucket.C3
 
     __slots__ = ('Value',)
 
-    # directive: work-transcode-unified
-    def __init__(self, RawName: str, Db: Optional[DatabaseService] = None):
-        # see work-bucket.C3
+    # directive: work-transcode-unified | # see work-bucket.G6
+    def __init__(self, RawName: str, Db: Optional[DatabaseService] = None, Repo: Optional[ProfileRepository] = None):
+        # see work-bucket.G6
         Name = (RawName or '').strip()
         if not Name:
             raise InvalidProfileError("Profile name is empty")
-        DbInstance = Db or DatabaseService()
-        Rows = DbInstance.ExecuteQuery(
-            "SELECT Draft, Active FROM Profiles WHERE ProfileName = %s LIMIT 1",
-            (Name,),
-        )
-        if not Rows:
+        ProfileRepo = Repo or ProfileRepository()
+        State = ProfileRepo.GetProfileState(Name)
+        if State is None:
             raise InvalidProfileError(f"Profile {Name!r} does not exist")
-        R = Rows[0]
-        if bool(R.get('draft')):
+        if State['Draft']:
             raise InvalidProfileError(f"Profile {Name!r} is a draft")
-        if not bool(R.get('active')):
+        if not State['Active']:
             raise InvalidProfileError(f"Profile {Name!r} is not active")
         object.__setattr__(self, 'Value', Name)
 
-    # directive: work-transcode-unified
+    # directive: work-transcode-unified | # see work-bucket.C3
     def __setattr__(self, *_args):
         # see work-bucket.C3
         raise AttributeError("ProfileName is immutable")
 
-    # directive: work-transcode-unified
+    # directive: work-transcode-unified | # see work-bucket.C3
     def __eq__(self, Other):
         # see work-bucket.C3
         return isinstance(Other, ProfileName) and self.Value == Other.Value
 
-    # directive: work-transcode-unified
+    # directive: work-transcode-unified | # see work-bucket.C3
     def __hash__(self):
         # see work-bucket.C3
         return hash(self.Value)
 
-    # directive: work-transcode-unified
+    # directive: work-transcode-unified | # see work-bucket.C3
     def __repr__(self):
         # see work-bucket.C3
         return f"ProfileName({self.Value!r})"
