@@ -164,7 +164,7 @@ Core/Querying/paged-query.feature.md                           -- EDIT: sweep Sh
 - [ ] T4 SortSpec / FilterSpec / AdmissionResult VOs
 - [ ] T5 Series + MediaFileRow aggregates
 - [ ] T6 SeriesQueryRepository
-- [ ] T7 FilesInSeriesRepository
+- [x] T7 FilesInSeriesRepository
 - [ ] T8 SeriesProfileRepository
 - [ ] T9 QueueAdmissionRepository
 - [ ] T10 SeriesProfileService
