@@ -49,7 +49,7 @@ class QueueAdmissionRepository:
                 (Bucket.BucketName, Identity.StorageRootId, Identity.RelativePath),
             )[0]['c']
         )
-        Candidates = int(
+        BeforeCandidates = int(
             self.Db.ExecuteQuery(
                 "SELECT COUNT(*)::int AS c FROM MediaFiles mf "
                 "WHERE mf.WorkBucket = %s "
@@ -62,7 +62,7 @@ class QueueAdmissionRepository:
                 (Bucket.BucketName, Identity.StorageRootId, Identity.RelativePath),
             )[0]['c']
         )
-        if Candidates == 0:
+        if BeforeCandidates == 0:
             return AdmissionResult(Inserted=0, AlreadyQueued=Total, Total=Total)
         self.Db.ExecuteNonQuery(
             "INSERT INTO TranscodeQueue ("
@@ -81,4 +81,18 @@ class QueueAdmissionRepository:
             "   )",
             (Bucket.ProcessingMode, Bucket.BucketName, Identity.StorageRootId, Identity.RelativePath),
         )
-        return AdmissionResult(Inserted=Candidates, AlreadyQueued=Total - Candidates, Total=Total)
+        AfterCandidates = int(
+            self.Db.ExecuteQuery(
+                "SELECT COUNT(*)::int AS c FROM MediaFiles mf "
+                "WHERE mf.WorkBucket = %s "
+                "  AND mf.StorageRootId = %s "
+                "  AND split_part(mf.RelativePath, '/', 1) = %s "
+                "  AND NOT EXISTS ("
+                "    SELECT 1 FROM TranscodeQueue tq "
+                "     WHERE tq.MediaFileId = mf.Id AND tq.Status = 'Pending'"
+                "  )",
+                (Bucket.BucketName, Identity.StorageRootId, Identity.RelativePath),
+            )[0]['c']
+        )
+        Inserted = max(0, BeforeCandidates - AfterCandidates)
+        return AdmissionResult(Inserted=Inserted, AlreadyQueued=Total - Inserted, Total=Total)
