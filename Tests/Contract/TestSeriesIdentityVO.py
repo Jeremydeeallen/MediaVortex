@@ -54,6 +54,16 @@ class TestSeriesIdentityVO(unittest.TestCase):
         B = SeriesIdentity.FromCompositeKey(Key)
         self.assertEqual(A, B)
 
+    # directive: work-transcode-unified
+    def test_from_media_file_path_extracts_first_segment(self):
+        # see work-bucket.C2
+        Self = SeriesIdentity.FromMediaFilePath(3, 'House/Season 1/ep01.mkv')
+        self.assertEqual(Self, SeriesIdentity(StorageRootId=3, RelativePath='House'))
+        Solo = SeriesIdentity.FromMediaFilePath(3, 'StandaloneMovie.mkv')
+        self.assertEqual(Solo, SeriesIdentity(StorageRootId=3, RelativePath='StandaloneMovie.mkv'))
+        Empty = SeriesIdentity.FromMediaFilePath(3, '')
+        self.assertEqual(Empty, SeriesIdentity(StorageRootId=3, RelativePath=''))
+
 
 if __name__ == '__main__':
     unittest.main()

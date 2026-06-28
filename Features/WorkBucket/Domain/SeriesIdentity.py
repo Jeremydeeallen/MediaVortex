@@ -24,3 +24,11 @@ class SeriesIdentity:
         if Sep < 0:
             raise ValueError(f"SeriesIdentity composite key missing ':' separator: {Key!r}")
         return cls(StorageRootId=int(Key[:Sep]), RelativePath=Key[Sep + 1:])
+
+    @classmethod
+    # directive: work-transcode-unified
+    def FromMediaFilePath(cls, StorageRootId: int, RelativePath: str) -> "SeriesIdentity":
+        """Python mirror of SQL split_part(RelativePath, '/', 1) -- single owner of the first-segment rule."""
+        # see work-bucket.C2
+        Seg = (RelativePath or '').split('/', 1)[0]
+        return cls(StorageRootId=int(StorageRootId), RelativePath=Seg)

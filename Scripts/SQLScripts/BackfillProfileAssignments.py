@@ -13,13 +13,6 @@ from Features.WorkBucket.Repositories.SeriesProfileRepository import SeriesProfi
 
 
 # directive: work-transcode-unified | # see work-bucket.C3
-def _SeriesKey(RelativePath: str) -> str:
-    if not RelativePath:
-        return ""
-    return RelativePath.split('/', 1)[0]
-
-
-# directive: work-transcode-unified | # see work-bucket.C3
 def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
     Db = DatabaseService()
     SeriesRepo = SeriesProfileRepository(Db)
@@ -53,9 +46,9 @@ def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
         for R in Sample:
             try:
                 StorageRootId = R.get("StorageRootId")
-                SeriesKey = _SeriesKey(R.get("RelativePath") or "")
-                if StorageRootId is not None and SeriesKey:
-                    Identity = SeriesIdentity(StorageRootId=int(StorageRootId), RelativePath=SeriesKey)
+                RelPath = R.get("RelativePath") or ""
+                if StorageRootId is not None and RelPath:
+                    Identity = SeriesIdentity.FromMediaFilePath(int(StorageRootId), RelPath)
                     if SeriesRepo.GetProfile(Identity):
                         DrySeriesHits += 1
                         continue
@@ -113,10 +106,10 @@ def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
         for R in Rows:
             try:
                 StorageRootId = R.get("StorageRootId")
-                SeriesKey = _SeriesKey(R.get("RelativePath") or "")
+                RelPath = R.get("RelativePath") or ""
                 CascadeProfile = None
-                if StorageRootId is not None and SeriesKey:
-                    Identity = SeriesIdentity(StorageRootId=int(StorageRootId), RelativePath=SeriesKey)
+                if StorageRootId is not None and RelPath:
+                    Identity = SeriesIdentity.FromMediaFilePath(int(StorageRootId), RelPath)
                     CascadeProfile = SeriesRepo.GetProfile(Identity)
                 if CascadeProfile:
                     Db.ExecuteNonQuery(
