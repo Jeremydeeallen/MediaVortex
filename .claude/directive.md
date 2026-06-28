@@ -191,7 +191,7 @@ Required when phase advances to DELIVERING. Populated incrementally per `feedbac
 |---|---|---|
 | DB table `ShowSettings` → `SeriesProfiles` (rename-then-drop pattern) | `Scripts/SQLScripts/CreateSeriesProfilesAndDeprecateShowSettings.py` | a68c10a |
 | WorkBucket vertical contract rewrite | `Features/WorkBucket/work-bucket.feature.md` | efeda4f |
-| WorkBucket pipeline flow doc | `Features/WorkBucket/work-bucket.flow.md` | TBD |
+| WorkBucket pipeline flow doc | `Features/WorkBucket/work-bucket.flow.md` | 5a12e2b |
 
 ### Verification
 
