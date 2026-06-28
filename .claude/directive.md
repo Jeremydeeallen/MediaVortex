@@ -189,7 +189,7 @@ Required when phase advances to DELIVERING. Populated incrementally per `feedbac
 
 | Source artifact | Target file | Commit |
 |---|---|---|
-| DB table `ShowSettings` → `SeriesProfiles` (rename-then-drop pattern) | `Scripts/SQLScripts/CreateSeriesProfilesAndDeprecateShowSettings.py` | TBD |
+| DB table `ShowSettings` → `SeriesProfiles` (rename-then-drop pattern) | `Scripts/SQLScripts/CreateSeriesProfilesAndDeprecateShowSettings.py` | a68c10a |
 
 ### Verification
 
