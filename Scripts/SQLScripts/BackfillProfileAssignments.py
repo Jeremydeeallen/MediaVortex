@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from Core.Database.DatabaseService import DatabaseService
+from Core.Logging.LoggingService import LoggingService
 from Features.WorkBucket.Domain.SeriesIdentity import SeriesIdentity
 from Features.WorkBucket.Repositories.SeriesProfileRepository import SeriesProfileRepository
 
@@ -50,13 +51,21 @@ def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
         DrySkipped = 0
         DryUnmatched = 0
         for R in Sample:
-            StorageRootId = R.get("StorageRootId")
-            SeriesKey = _SeriesKey(R.get("RelativePath") or "")
-            if StorageRootId is not None and SeriesKey:
-                Identity = SeriesIdentity(StorageRootId=int(StorageRootId), RelativePath=SeriesKey)
-                if SeriesRepo.GetProfile(Identity):
-                    DrySeriesHits += 1
-                    continue
+            try:
+                StorageRootId = R.get("StorageRootId")
+                SeriesKey = _SeriesKey(R.get("RelativePath") or "")
+                if StorageRootId is not None and SeriesKey:
+                    Identity = SeriesIdentity(StorageRootId=int(StorageRootId), RelativePath=SeriesKey)
+                    if SeriesRepo.GetProfile(Identity):
+                        DrySeriesHits += 1
+                        continue
+            except Exception as Ex:
+                LoggingService.LogException(
+                    f"BackfillProfileAssignments series cascade failed for MediaFile {R.get('Id')} (dry-run)",
+                    Ex,
+                    "BackfillProfileAssignments",
+                    "RunDry",
+                )
             Media = Repo.GetMediaFileForClassification(R.get("Id"))
             if not Media or Media.get("AssignedProfile"):
                 DrySkipped += 1
@@ -102,22 +111,30 @@ def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
 
         Residual = []
         for R in Rows:
-            StorageRootId = R.get("StorageRootId")
-            SeriesKey = _SeriesKey(R.get("RelativePath") or "")
-            CascadeProfile = None
-            if StorageRootId is not None and SeriesKey:
-                Identity = SeriesIdentity(StorageRootId=int(StorageRootId), RelativePath=SeriesKey)
-                CascadeProfile = SeriesRepo.GetProfile(Identity)
-            if CascadeProfile:
-                Db.ExecuteNonQuery(
-                    "UPDATE MediaFiles "
-                    "SET AssignedProfile = %s, AssignedProfileSource = 'series', LastModifiedDate = NOW() "
-                    "WHERE Id = %s AND AssignedProfile IS NULL",
-                    (CascadeProfile, int(R.get("Id"))),
+            try:
+                StorageRootId = R.get("StorageRootId")
+                SeriesKey = _SeriesKey(R.get("RelativePath") or "")
+                CascadeProfile = None
+                if StorageRootId is not None and SeriesKey:
+                    Identity = SeriesIdentity(StorageRootId=int(StorageRootId), RelativePath=SeriesKey)
+                    CascadeProfile = SeriesRepo.GetProfile(Identity)
+                if CascadeProfile:
+                    Db.ExecuteNonQuery(
+                        "UPDATE MediaFiles "
+                        "SET AssignedProfile = %s, AssignedProfileSource = 'series', LastModifiedDate = NOW() "
+                        "WHERE Id = %s AND AssignedProfile IS NULL",
+                        (CascadeProfile, int(R.get("Id"))),
+                    )
+                    SeriesHitTotal += 1
+                    continue
+            except Exception as Ex:
+                LoggingService.LogException(
+                    f"BackfillProfileAssignments series cascade failed for MediaFile {R.get('Id')}",
+                    Ex,
+                    "BackfillProfileAssignments",
+                    "RunBatch",
                 )
-                SeriesHitTotal += 1
-            else:
-                Residual.append(R.get("Id"))
+            Residual.append(R.get("Id"))
 
         if Residual:
             Result = Svc.ClassifyAndAssignBatch(Residual)
