@@ -442,7 +442,6 @@ class WebServiceApp:
         from Features.TeamStatus.TeamStatusController import TeamStatusBlueprint
         from Features.MediaProbe.MediaProbeController import MediaProbeBlueprint
         from Features.FailureTracking.FailureTrackingController import FailureTrackingBlueprint
-        from Features.ShowSettings.ShowSettingsController import ShowSettingsBlueprint
         from Features.AudioNormalization.Controllers.AudioCompletionController import AudioCompletionBlueprint
         from Features.AudioNormalization.AudioNormalizationController import BuildBlueprint as BuildAudioNormalizationBlueprint
         from Features.Activity.ActivityController import ActivityBlueprint
@@ -455,7 +454,6 @@ class WebServiceApp:
         from Features.FileScanning.ScannersController import ScannersBlueprint
 
         # Register all blueprints
-        self.App.register_blueprint(ShowSettingsBlueprint)
         self.App.register_blueprint(AudioCompletionBlueprint)
         self.App.register_blueprint(BuildAudioNormalizationBlueprint())
         self.App.register_blueprint(ActivityBlueprint)

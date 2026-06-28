@@ -20,7 +20,6 @@ from Features.MediaFiles.MediaFilesRepository import MediaFilesRepository
 from Features.TranscodeQueue.TranscodeQueueRepository import TranscodeQueueRepository
 from Features.TranscodeJob.TranscodeJobRepository import TranscodeJobRepository
 from Features.QualityTesting.QualityTestRepository import QualityTestRepository
-from Features.ShowSettings.ShowSettingsRepository import ShowSettingsRepository
 from Features.FileScanning.FileScanningRepository import FileScanningRepository
 from Features.Activity.ActivityRepository import ActivityRepository
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
@@ -40,7 +39,6 @@ class DatabaseManager(
     TranscodeQueueRepository,
     TranscodeJobRepository,
     QualityTestRepository,
-    ShowSettingsRepository,
     FileScanningRepository,
     ActivityRepository,
     SystemSettingsRepository,

@@ -747,22 +747,6 @@ class ProcessTranscodeQueueService:
 
             ProfileSettings['SourceVideoBitrateKbps'] = MediaFile.VideoBitrateKbps
 
-            try:
-                from Features.ShowSettings.ShowSettingsRepository import ShowSettingsRepository
-                ShowSettingsRepo = ShowSettingsRepository()
-                ShowTargetResolution = ShowSettingsRepo.GetTargetResolutionForFile(Job.FilePath)
-                if ShowTargetResolution:
-                    OriginalTarget = ProfileSettings.get('TargetResolution', '')
-                    ProfileSettings['TargetResolution'] = ShowTargetResolution
-                    LoggingService.LogInfo(
-                        f"ShowSettings override: {Job.FileName} target resolution changed from '{OriginalTarget}' to '{ShowTargetResolution}'",
-                        "ProcessTranscodeQueueService", "GetTranscodingSettings"
-                    )
-            except Exception as ShowSettingsEx:
-                LoggingService.LogWarning(
-                    f"Could not check ShowSettings for {Job.FileName}: {ShowSettingsEx}",
-                    "ProcessTranscodeQueueService", "GetTranscodingSettings"
-                )
 
             # Get codec flags
             CodecFlags = self.CodecFlagsRepository.GetCodecFlagsByCodecName(ProfileSettings.get('Codec'))
