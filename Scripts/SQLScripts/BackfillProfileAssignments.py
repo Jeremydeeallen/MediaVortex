@@ -1,14 +1,4 @@
-"""Backfill MediaFiles.AssignedProfile for NULL rows by walking the
-ContentClassificationRules table.
-
-See Features/ContentClassifier/content-classifier.feature.md criteria 16, 17.
-
-Idempotent. NULL-profile rows only.
-
-Usage:
-    py Scripts/SQLScripts/BackfillProfileAssignments.py --dry-run --limit 100
-    py Scripts/SQLScripts/BackfillProfileAssignments.py --batch-size 500
-"""
+# directive: work-transcode-unified | # see work-bucket.C3
 
 import argparse
 import sys
@@ -17,10 +7,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from Core.Database.DatabaseService import DatabaseService
+from Features.WorkBucket.Domain.SeriesIdentity import SeriesIdentity
+from Features.WorkBucket.Repositories.SeriesProfileRepository import SeriesProfileRepository
 
 
+# directive: work-transcode-unified | # see work-bucket.C3
+def _SeriesKey(RelativePath: str) -> str:
+    if not RelativePath:
+        return ""
+    return RelativePath.split('/', 1)[0]
+
+
+# directive: work-transcode-unified | # see work-bucket.C3
 def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
     Db = DatabaseService()
+    SeriesRepo = SeriesProfileRepository(Db)
 
     Counted = Db.ExecuteQuery(
         "SELECT COUNT(*) AS Total FROM MediaFiles "
@@ -38,16 +39,24 @@ def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
         Repo = ContentClassifierRepository()
         Rules = Repo.GetActiveRules()
         Sample = Db.ExecuteQuery(
-            "SELECT Id FROM MediaFiles "
+            "SELECT Id, StorageRootId, RelativePath FROM MediaFiles "
             "WHERE AssignedProfile IS NULL AND AssignedProfileSource IS NULL "
             "AND TranscodedByMediaVortex IS NOT TRUE AND SizeMB > 0 "
             "ORDER BY Id LIMIT %s",
             (min(Limit or 100, 100),),
         )
         DryHits = {}
+        DrySeriesHits = 0
         DrySkipped = 0
         DryUnmatched = 0
         for R in Sample:
+            StorageRootId = R.get("StorageRootId")
+            SeriesKey = _SeriesKey(R.get("RelativePath") or "")
+            if StorageRootId is not None and SeriesKey:
+                Identity = SeriesIdentity(StorageRootId=int(StorageRootId), RelativePath=SeriesKey)
+                if SeriesRepo.GetProfile(Identity):
+                    DrySeriesHits += 1
+                    continue
             Media = Repo.GetMediaFileForClassification(R.get("Id"))
             if not Media or Media.get("AssignedProfile"):
                 DrySkipped += 1
@@ -58,6 +67,7 @@ def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
             else:
                 DryHits[Matched.RuleName] = DryHits.get(Matched.RuleName, 0) + 1
         print(f"\n[DRY RUN sample of {len(Sample)}] would assign:")
+        print(f"  series-cascade hits: {DrySeriesHits}")
         for K, V in sorted(DryHits.items()):
             print(f"  {V:>6}  {K}")
         print(f"  skipped: {DrySkipped}, unmatched: {DryUnmatched}")
@@ -72,6 +82,7 @@ def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
 
     Processed = 0
     HitCounts = {}
+    SeriesHitTotal = 0
     SkippedTotal = 0
     UnmatchedTotal = 0
 
@@ -80,7 +91,7 @@ def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
             break
         Take = min(BatchSize, Limit - Processed) if Limit > 0 else BatchSize
         Rows = Db.ExecuteQuery(
-            "SELECT Id FROM MediaFiles "
+            "SELECT Id, StorageRootId, RelativePath FROM MediaFiles "
             "WHERE AssignedProfile IS NULL AND AssignedProfileSource IS NULL "
             "AND TranscodedByMediaVortex IS NOT TRUE AND SizeMB > 0 "
             "ORDER BY Id LIMIT %s",
@@ -88,18 +99,40 @@ def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
         )
         if not Rows:
             break
-        Ids = [R.get("Id") for R in Rows]
-        Result = Svc.ClassifyAndAssignBatch(Ids)
-        for K, V in Result.get("HitCounts", {}).items():
-            HitCounts[K] = HitCounts.get(K, 0) + V
-        SkippedTotal += Result.get("Skipped", 0)
-        UnmatchedTotal += Result.get("Unmatched", 0)
-        Processed += len(Ids)
+
+        Residual = []
+        for R in Rows:
+            StorageRootId = R.get("StorageRootId")
+            SeriesKey = _SeriesKey(R.get("RelativePath") or "")
+            CascadeProfile = None
+            if StorageRootId is not None and SeriesKey:
+                Identity = SeriesIdentity(StorageRootId=int(StorageRootId), RelativePath=SeriesKey)
+                CascadeProfile = SeriesRepo.GetProfile(Identity)
+            if CascadeProfile:
+                Db.ExecuteNonQuery(
+                    "UPDATE MediaFiles "
+                    "SET AssignedProfile = %s, AssignedProfileSource = 'series', LastModifiedDate = NOW() "
+                    "WHERE Id = %s AND AssignedProfile IS NULL",
+                    (CascadeProfile, int(R.get("Id"))),
+                )
+                SeriesHitTotal += 1
+            else:
+                Residual.append(R.get("Id"))
+
+        if Residual:
+            Result = Svc.ClassifyAndAssignBatch(Residual)
+            for K, V in Result.get("HitCounts", {}).items():
+                HitCounts[K] = HitCounts.get(K, 0) + V
+            SkippedTotal += Result.get("Skipped", 0)
+            UnmatchedTotal += Result.get("Unmatched", 0)
+
+        Processed += len(Rows)
         print(f"  Progress: {Processed}/{Total}", flush=True)
         if len(Rows) < Take:
             break
 
     print(f"\nDone. processed={Processed}")
+    print(f"  series-cascade hits: {SeriesHitTotal}")
     print(f"  per-rule hits:")
     for K, V in sorted(HitCounts.items(), key=lambda T: -T[1]):
         print(f"    {V:>6}  {K}")
@@ -108,8 +141,9 @@ def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 500) -> int:
     return 0
 
 
+# directive: work-transcode-unified | # see work-bucket.C3
 def main():
-    Parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    Parser = argparse.ArgumentParser(description="Backfill MediaFiles.AssignedProfile via SeriesProfiles cascade then ContentClassificationRules.")
     Parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
     Parser.add_argument("--limit", type=int, default=0, help="Max rows to process (0 = no limit)")
     Parser.add_argument("--batch-size", type=int, default=500, help="Rows per batch")
