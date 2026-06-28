@@ -171,7 +171,7 @@ Core/Querying/paged-query.feature.md                           -- EDIT: sweep Sh
 - [ ] T11 QueueAdmissionAppService
 - [x] T12 Migration: create SeriesProfiles + deprecate ShowSettings
 - [ ] T13 Update BackfillProfileAssignments.py
-- [ ] T14 Rewrite WorkBucketController + delete old repo
+- [x] T14 Rewrite WorkBucketController + delete old repo
 - [ ] T15 Rewrite Templates/WorkBucket.html
 - [ ] T16 Sweep cross-vertical ShowSettings references
 - [ ] T17 Delete Features/ShowSettings/ directory
