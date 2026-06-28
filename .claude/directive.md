@@ -169,7 +169,7 @@ Core/Querying/paged-query.feature.md                           -- EDIT: sweep Sh
 - [ ] T9 QueueAdmissionRepository
 - [ ] T10 SeriesProfileService
 - [ ] T11 QueueAdmissionAppService
-- [ ] T12 Migration: create SeriesProfiles + deprecate ShowSettings
+- [x] T12 Migration: create SeriesProfiles + deprecate ShowSettings
 - [ ] T13 Update BackfillProfileAssignments.py
 - [ ] T14 Rewrite WorkBucketController + delete old repo
 - [ ] T15 Rewrite Templates/WorkBucket.html
@@ -189,6 +189,7 @@ Required when phase advances to DELIVERING. Populated incrementally per `feedbac
 
 | Source artifact | Target file | Commit |
 |---|---|---|
+| DB table `ShowSettings` → `SeriesProfiles` (rename-then-drop pattern) | `Scripts/SQLScripts/CreateSeriesProfilesAndDeprecateShowSettings.py` | TBD |
 
 ### Verification
 

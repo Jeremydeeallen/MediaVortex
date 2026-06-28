@@ -45,7 +45,7 @@ class TestSeriesProfileService(unittest.TestCase):
         Profile = ProfileRow[0]['profilename']
         Original = DatabaseService().ExecuteQuery(
             "SELECT Id, AssignedProfile FROM MediaFiles "
-            "WHERE WorkBucket='Transcode' AND StorageRootId=%s AND split_part(RelativePath,'/',1)=%s "
+            "WHERE StorageRootId=%s AND split_part(RelativePath,'/',1)=%s "
             "AND TranscodedByMediaVortex IS NOT TRUE",
             (Identity.StorageRootId, Identity.RelativePath),
         )
