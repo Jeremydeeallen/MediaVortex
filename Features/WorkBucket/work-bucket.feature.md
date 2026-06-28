@@ -4,7 +4,7 @@
 
 ## What It Does
 
-Renders `/Work/Transcode`, `/Work/Remux`, and `/Work/Audio` as an always-grouped-by-series view of files that need work in that bucket. Each series row exposes file count, total GB, common resolution/codec, an InQueue badge, a per-series profile dropdown, and a Queue-all button. Series rows expand inline to show their files, sorted by size. The page replaces the old `/ShowSettings` (Media) tab; per-series sticky profile assignment is preserved in the internal `SeriesProfiles` table.
+Renders `/Work/Transcode`, `/Work/Remux`, and `/Work/Audio` as an always-grouped-by-series view of files that need work in that bucket. Each series row exposes file count, total GB, common resolution/codec, an InQueue badge, a per-series profile dropdown, and a Queue-all button. Series rows expand inline to show their files, sorted by size. The page replaces the old Media tab (the retired per-show-settings UI); per-series sticky profile assignment is preserved in the internal `SeriesProfiles` table.
 
 ## Workflows
 
@@ -46,7 +46,7 @@ C6. Filters: multi-select drive + free-text series search. Pagination: 25 rows p
 
 ## Status
 
-**Phase:** Active feature, replaces the deleted `Features/ShowSettings/` vertical.
+**Phase:** Active feature. The old narrow WorkBucket surface (single-file admit only) and the Media-tab vertical have both been retired; this expanded contract is the sole operator entry point for bucket-level work.
 
 **Files:**
 
@@ -59,7 +59,7 @@ C6. Filters: multi-select drive + free-text series search. Pagination: 25 rows p
 - `Features/WorkBucket/Services/SeriesProfileService.py` -- validate + persist + propagate
 - `Features/WorkBucket/Services/QueueAdmissionAppService.py` -- queue orchestration
 - `Templates/WorkBucket.html` -- grouped UI
-- `Tests/Contract/Test{SeriesIdentity,BucketKey,ProfileName,SeriesQueryRepository,FilesInSeriesRepository,SeriesProfileRepository,QueueAdmissionRepository,SeriesProfileService,QueueAdmissionAppService,WorkBucketController,NoShowSettingsReferences}VO.py / .py`
+- `Tests/Contract/` -- contract tests per repository, service, VO, and controller
 
 ## Cross-Vertical Contract
 
