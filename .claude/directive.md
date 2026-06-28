@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-28
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** work-transcode-unified
 **Replaces:** `directives/closed/2026-06-27-worker-runtime-state.md` (closed Success 2026-06-27)
 **Spec:** `Docs/superpowers/specs/2026-06-28-work-transcode-unified-design.md`
@@ -191,27 +191,28 @@ Required when phase advances to DELIVERING. Populated incrementally per `feedbac
 |---|---|---|
 | DB table `ShowSettings` → `SeriesProfiles` (rename-then-drop pattern) | `Scripts/SQLScripts/CreateSeriesProfilesAndDeprecateShowSettings.py` | a68c10a |
 | WorkBucket vertical contract rewrite | `Features/WorkBucket/work-bucket.feature.md` | efeda4f |
+| WorkBucket pipeline flow doc | `Features/WorkBucket/work-bucket.flow.md` | TBD |
 
 ### Verification
 
 Required when phase advances to VERIFYING. One entry per acceptance criterion. Concrete evidence (command output, SQL result, file path), per `Docs/superpowers/plans/2026-06-28-work-transcode-unified.md` Task 24.
 
-- **C1:** TBD
-- **C2:** TBD
-- **C3:** TBD
-- **C4:** TBD
-- **C5:** TBD
-- **C6:** TBD
-- **C7:** TBD
-- **C8:** TBD
-- **C9:** TBD
-- **C10:** TBD
-- **C11:** TBD
-- **C12:** TBD
-- **C13:** TBD
-- **C14:** TBD
-- **C15:** TBD
-- **C16:** TBD
+- **C1:** `SELECT DISTINCT WorkBucket FROM MediaFiles WHERE WorkBucket='Transcode'` → single row `Transcode`. Pass.
+- **C2:** `GET /api/Work/Transcode?page=1&pageSize=10` → Total: 364, TotalGB DESC monotonic [2432.4, 200.7, 149.8, 53.8, 44.6]. Pass.
+- **C3:** Series rows include `AssignedProfile` key; `POST /api/Work/<bucket>/Series/<sid>/Profile` route registered in `WorkBucketController._RegisterRoutes`. Pass.
+- **C4:** `POST /api/Work/<bucket>/Series/<sid>/Queue` route registered; `TestQueueAdmissionRepository::test_admit_series_idempotent` PASSED. Pass.
+- **C5:** `POST /api/Work/<bucket>/Queue/<id>` route registered; `TestQueueAdmissionRepository::test_admit_one_is_idempotent` PASSED. Pass.
+- **C6:** `GET /api/Work/Transcode?page=1&pageSize=25&search=two` → Total: 3 (filtered). Pagination: 364 total / 25 per page = 15 pages. All three /Work/* pages return 200. Pass.
+- **C7:** `GET /ShowSettings` → 404. `Templates/Base.html` contains no `ShowSettings` reference. Pass.
+- **C8:** `os.path.exists('Features/ShowSettings')` → False. Pass.
+- **C9:** `os.path.exists('Templates/ShowSettings.html')` → False. Pass.
+- **C10:** `/api/ShowSettings/Shows` 404, `/api/ShowSettings/SmartPopulate` 404, `/api/ShowSettings/NextTranscodeBatch` 404. Pass.
+- **C11:** `TestNoShowSettingsReferences::test_no_references_in_production_tree` PASSED. Pass.
+- **C12:** `SELECT COUNT(*) FROM SeriesProfiles` = 6; `SELECT COUNT(*) FROM ShowSettings_DEPRECATED_2026_06_28` = 6. Row counts match; migration is idempotent (re-run exits early with "already applied" message). Pass.
+- **C13:** `py Scripts/SQLScripts/BackfillProfileAssignments.py` → processed=220, no exception. Pass.
+- **C14:** `TestProfileNameVO` 4/4 PASSED. `EffectiveProfileResolver` unchanged — reads `MediaFiles.AssignedProfile`, falls back via SystemSettings → `_PreMigrationDefault`. Pass.
+- **C15:** `pg_tables` contains `showsettings_deprecated_2026_06_28` and `showsettings_legacy_showfolder_deprecated_2026_06_28`; no bare `showsettings`. `pg_indexes` contains `idx_mediafiles_smartpopulate_deprecated_2026_06_28`. `DropDeprecatedShowSettingsArtifacts.py` committed (not run). Pre-existing 0-row legacy table (showfolder schema) renamed to `showsettings_legacy_showfolder_DEPRECATED_2026_06_28` and added to drop migration. Pass.
+- **C16:** `TestNoShowSettingsReferences` PASSED — audit scans for `ShowSettings_DEPRECATED_` needle in production tree (Features, Templates, WebService, Core, Services, Repositories, Models); 0 violations. Pass.
 
 ### R18 overrides
 

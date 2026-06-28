@@ -15,6 +15,8 @@ def RunMigration():
     DB.ExecuteNonQuery("DROP INDEX IF EXISTS idx_mediafiles_smartpopulate_deprecated_2026_06_28")
     print("DROP TABLE IF EXISTS ShowSettings_DEPRECATED_2026_06_28")
     DB.ExecuteNonQuery("DROP TABLE IF EXISTS ShowSettings_DEPRECATED_2026_06_28 CASCADE")
+    print("DROP TABLE IF EXISTS ShowSettings_legacy_showfolder_DEPRECATED_2026_06_28")
+    DB.ExecuteNonQuery("DROP TABLE IF EXISTS ShowSettings_legacy_showfolder_DEPRECATED_2026_06_28 CASCADE")
     print("Done.")
 
 
