@@ -58,7 +58,7 @@ class TestSeriesQueryRepository(unittest.TestCase):
             Prev = S.TotalGB
 
     # directive: work-transcode-unified | # see work-bucket.C1
-    def test_unknown_bucket_returns_empty_result(self):
+    def test_none_bucket_raises(self):
         Repo = SeriesQueryRepository()
         with self.assertRaises((AttributeError, TypeError, ValueError)):
             Repo.ListSeriesByBucket(
@@ -67,6 +67,28 @@ class TestSeriesQueryRepository(unittest.TestCase):
                 Sort=SortSpec.TotalGbDesc,
                 Filter=FilterSpec(),
             )
+
+    # directive: work-transcode-unified | # see work-bucket.C6
+    def test_filter_search_term_narrows_results(self):
+        Repo = SeriesQueryRepository()
+        All = Repo.ListSeriesByBucket(
+            Bucket=BucketKey.FromUrlKey('Transcode'),
+            Query=PagedQuery(Page=1, PageSize=100),
+            Sort=SortSpec.TotalGbDesc,
+            Filter=FilterSpec(),
+        )
+        if not All.Rows:
+            self.skipTest("No Transcode series in DB")
+        Anchor = All.Rows[0].ShowName
+        Narrowed = Repo.ListSeriesByBucket(
+            Bucket=BucketKey.FromUrlKey('Transcode'),
+            Query=PagedQuery(Page=1, PageSize=100),
+            Sort=SortSpec.TotalGbDesc,
+            Filter=FilterSpec(SearchTerm=Anchor),
+        )
+        self.assertGreaterEqual(len(Narrowed.Rows), 1)
+        for S in Narrowed.Rows:
+            self.assertIn(Anchor.lower(), S.ShowName.lower())
 
 
 if __name__ == '__main__':

@@ -1,4 +1,5 @@
 from Core.Database.DatabaseService import DatabaseService
+from Core.Logging.LoggingService import LoggingService
 from Core.Querying import PagedQuery, PagedQueryResult
 from Features.WorkBucket.Domain.BucketKey import BucketKey
 from Features.WorkBucket.Domain.FilterSpec import FilterSpec
@@ -23,8 +24,11 @@ class SeriesQueryRepository:
         Filter: FilterSpec,
     ) -> PagedQueryResult:
         FilterClause, FilterParams = Filter.ToSqlFragments()
-        Offset = max(0, (Query.Page - 1) * Query.PageSize)
-        Limit = max(1, min(Query.PageSize, 200))
+        Offset = Query.Offset()
+        RequestedLimit = Query.Limit()
+        Limit = min(RequestedLimit, 200)
+        if RequestedLimit > 200:
+            LoggingService.LogWarning(f"PageSize {RequestedLimit} exceeds cap; clamped to 200", "SeriesQueryRepository", "ListSeriesByBucket")
         Sql = (
             "SELECT * FROM ("
             "  SELECT mf.StorageRootId AS StorageRootId,"
