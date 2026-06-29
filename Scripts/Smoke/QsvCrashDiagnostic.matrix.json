@@ -1,0 +1,56 @@
+{
+  "test_name": "QsvCrashDiagnostic-2026-06-29",
+  "output_scale": "1280:-2",
+  "comparison_scale": "1280:720",
+  "vmaf_n_threads": 4,
+  "sources": [
+    {
+      "id": "newgirl_s06e03",
+      "label": "NewGirl S06E03 (live drama)",
+      "path": "/mnt/media_tv/New Girl/Season 6/New Girl - S06E03 - Single and Sufficient WEBDL-720p.mkv",
+      "fps": 23.976,
+      "source_height": 720,
+      "source_codec": "hevc",
+      "source_video_bitrate_kbps": 1440
+    },
+    {
+      "id": "arcane_s01e06",
+      "label": "Arcane S01E06 (animation)",
+      "path": "/mnt/media_tv/Arcane/Season 1/Arcane - S01E06 - When These Walls Come Tumbling Down WEBRip-720p-mv.mp4",
+      "fps": 23.976,
+      "source_height": 720,
+      "source_codec": "h264",
+      "source_video_bitrate_kbps": 607
+    },
+    {
+      "id": "30rock_s06e12",
+      "label": "30 Rock S06E12 (sitcom)",
+      "path": "/mnt/media_tv/30 Rock/Season 6/30 Rock - S06E12 - St. Patrick's Day Bluray-720p-mv.mp4",
+      "fps": 23.976,
+      "source_height": 720,
+      "source_codec": "h264",
+      "source_video_bitrate_kbps": 1295
+    }
+  ],
+  "variants": [
+    {
+      "name": "qsv_canary_parity",
+      "label": "QSV av1_qsv canary parity (480k floor)",
+      "encoder": "av1_qsv",
+      "preset": 1,
+      "rc_mode": "vbr",
+      "rate_pct": 33,
+      "max_multiplier": 2,
+      "extbrc": 1,
+      "look_ahead": 1,
+      "look_ahead_depth": 100,
+      "b_strategy": 1,
+      "adaptive_i": 1,
+      "adaptive_b": 1,
+      "bf": 7,
+      "async_depth": 4,
+      "low_power": 0,
+      "pix_fmt": "p010le"
+    }
+  ]
+}

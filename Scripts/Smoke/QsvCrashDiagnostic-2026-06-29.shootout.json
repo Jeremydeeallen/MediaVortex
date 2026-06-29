@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "test_name": "QsvCrashDiagnostic-2026-06-29",
+  "matrix_file": "/tmp/QsvCrashDiagnostic.matrix.json",
+  "run_started": "2026-06-29T15:59:46",
+  "matrix": {
+    "test_name": "QsvCrashDiagnostic-2026-06-29",
+    "output_scale": "1280:-2",
+    "comparison_scale": "1280:720",
+    "vmaf_n_threads": 4,
+    "sources": [
+      {
+        "id": "newgirl_s06e03",
+        "label": "NewGirl S06E03 (live drama)",
+        "path": "/mnt/media_tv/New Girl/Season 6/New Girl - S06E03 - Single and Sufficient WEBDL-720p.mkv",
+        "fps": 23.976,
+        "source_height": 720,
+        "source_codec": "hevc",
+        "source_video_bitrate_kbps": 1440
+      },
+      {
+        "id": "arcane_s01e06",
+        "label": "Arcane S01E06 (animation)",
+        "path": "/mnt/media_tv/Arcane/Season 1/Arcane - S01E06 - When These Walls Come Tumbling Down WEBRip-720p-mv.mp4",
+        "fps": 23.976,
+        "source_height": 720,
+        "source_codec": "h264",
+        "source_video_bitrate_kbps": 607
+      },
+      {
+        "id": "30rock_s06e12",
+        "label": "30 Rock S06E12 (sitcom)",
+        "path": "/mnt/media_tv/30 Rock/Season 6/30 Rock - S06E12 - St. Patrick's Day Bluray-720p-mv.mp4",
+        "fps": 23.976,
+        "source_height": 720,
+        "source_codec": "h264",
+        "source_video_bitrate_kbps": 1295
+      }
+    ],
+    "variants": [
+      {
+        "name": "qsv_canary_parity",
+        "label": "QSV av1_qsv canary parity (480k floor)",
+        "encoder": "av1_qsv",
+        "preset": 1,
+        "rc_mode": "vbr",
+        "rate_pct": 33,
+        "max_multiplier": 2,
+        "extbrc": 1,
+        "look_ahead": 1,
+        "look_ahead_depth": 100,
+        "b_strategy": 1,
+        "adaptive_i": 1,
+        "adaptive_b": 1,
+        "bf": 7,
+        "async_depth": 4,
+        "low_power": 0,
+        "pix_fmt": "p010le"
+      }
+    ]
+  },
+  "results": {
+    "newgirl_s06e03": [
+      {
+        "source_id": "newgirl_s06e03",
+        "source_label": "NewGirl S06E03 (live drama)",
+        "source_path": "/mnt/media_tv/New Girl/Season 6/New Girl - S06E03 - Single and Sufficient WEBDL-720p.mkv",
+        "source_size_bytes": 235774507,
+        "source_fps": 23.976,
+        "variant_name": "qsv_canary_parity",
+        "variant_label": "QSV av1_qsv canary parity (480k floor)",
+        "variant": {
+          "name": "qsv_canary_parity",
+          "label": "QSV av1_qsv canary parity (480k floor)",
+          "encoder": "av1_qsv",
+          "preset": 1,
+          "rc_mode": "vbr",
+          "rate_pct": 33,
+          "max_multiplier": 2,
+          "extbrc": 1,
+          "look_ahead": 1,
+          "look_ahead_depth": 100,
+          "b_strategy": 1,
+          "adaptive_i": 1,
+          "adaptive_b": 1,
+          "bf": 7,
+          "async_depth": 4,
+          "low_power": 0,
+          "pix_fmt": "p010le"
+        },
+        "output_path": "/tmp/qsv_shootout/shootout_output/newgirl_s06e03__qsv_canary_parity.mp4",
+        "encode_ok": false,
+        "encode_seconds": 80.70623707771301,
+        "size_bytes": 0,
+        "size_mb": 0.0,
+        "bitrate_kbps": 0.0,
+        "vmaf_ok": false,
+        "vmaf_seconds": 0.0,
+        "xml_path": "",
+        "metrics": null
+      }
+    ],
+    "arcane_s01e06": [
+      {
+        "source_id": "arcane_s01e06",
+        "source_label": "Arcane S01E06 (animation)",
+        "source_path": "/mnt/media_tv/Arcane/Season 1/Arcane - S01E06 - When These Walls Come Tumbling Down WEBRip-720p-mv.mp4",
+        "source_size_bytes": 244867834,
+        "source_fps": 23.976,
+        "variant_name": "qsv_canary_parity",
+        "variant_label": "QSV av1_qsv canary parity (480k floor)",
+        "variant": {
+          "name": "qsv_canary_parity",
+          "label": "QSV av1_qsv canary parity (480k floor)",
+          "encoder": "av1_qsv",
+          "preset": 1,
+          "rc_mode": "vbr",
+          "rate_pct": 33,
+          "max_multiplier": 2,
+          "extbrc": 1,
+          "look_ahead": 1,
+          "look_ahead_depth": 100,
+          "b_strategy": 1,
+          "adaptive_i": 1,
+          "adaptive_b": 1,
+          "bf": 7,
+          "async_depth": 4,
+          "low_power": 0,
+          "pix_fmt": "p010le"
+        },
+        "output_path": "/tmp/qsv_shootout/shootout_output/arcane_s01e06__qsv_canary_parity.mp4",
+        "encode_ok": false,
+        "encode_seconds": 1.9683494567871094,
+        "size_bytes": 0,
+        "size_mb": 0.0,
+        "bitrate_kbps": 0.0,
+        "vmaf_ok": false,
+        "vmaf_seconds": 0.0,
+        "xml_path": "",
+        "metrics": null
+      }
+    ],
+    "30rock_s06e12": [
+      {
+        "source_id": "30rock_s06e12",
+        "source_label": "30 Rock S06E12 (sitcom)",
+        "source_path": "/mnt/media_tv/30 Rock/Season 6/30 Rock - S06E12 - St. Patrick's Day Bluray-720p-mv.mp4",
+        "source_size_bytes": 284315003,
+        "source_fps": 23.976,
+        "variant_name": "qsv_canary_parity",
+        "variant_label": "QSV av1_qsv canary parity (480k floor)",
+        "variant": {
+          "name": "qsv_canary_parity",
+          "label": "QSV av1_qsv canary parity (480k floor)",
+          "encoder": "av1_qsv",
+          "preset": 1,
+          "rc_mode": "vbr",
+          "rate_pct": 33,
+          "max_multiplier": 2,
+          "extbrc": 1,
+          "look_ahead": 1,
+          "look_ahead_depth": 100,
+          "b_strategy": 1,
+          "adaptive_i": 1,
+          "adaptive_b": 1,
+          "bf": 7,
+          "async_depth": 4,
+          "low_power": 0,
+          "pix_fmt": "p010le"
+        },
+        "output_path": "/tmp/qsv_shootout/shootout_output/30rock_s06e12__qsv_canary_parity.mp4",
+        "encode_ok": false,
+        "encode_seconds": 41.04907178878784,
+        "size_bytes": 0,
+        "size_mb": 0.0,
+        "bitrate_kbps": 0.0,
+        "vmaf_ok": false,
+        "vmaf_seconds": 0.0,
+        "xml_path": "",
+        "metrics": null
+      }
+    ]
+  },
+  "run_last_update": "2026-06-29T16:01:49",
+  "run_completed": "2026-06-29T16:01:49",
+  "wall_seconds": 123.73514151573181
+}

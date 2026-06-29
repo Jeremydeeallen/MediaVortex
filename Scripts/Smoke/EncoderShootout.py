@@ -318,11 +318,18 @@ def PrintRollup(VariantNames, VariantLabels, AllResults):
 
 
 def Main():
+    global FFMPEG, SMOKE_DIR, OUTPUT_DIR
     Parser = argparse.ArgumentParser(description="SVT-AV1 / av1_nvenc / av1_qsv shootout harness.")
     Parser.add_argument("--matrix", required=True, help="Path to matrix JSON.")
+    Parser.add_argument("--ffmpeg", default=FFMPEG, help="ffmpeg binary path (Linux: /usr/local/bin/ffmpeg).")
+    Parser.add_argument("--smoke-dir", default=str(SMOKE_DIR), help="Directory for VMAF XML logs + sidecar.")
+    Parser.add_argument("--output-dir", default=str(OUTPUT_DIR), help="Directory for encoded mp4 outputs.")
     Parser.add_argument("--keep-encoded", action="store_true", help="Don't delete encoded outputs after VMAF.")
     Parser.add_argument("--keep-xml", action="store_true", help="Don't delete VMAF XML files after parsing.")
     Args = Parser.parse_args()
+    FFMPEG = Args.ffmpeg
+    SMOKE_DIR = Path(Args.smoke_dir)
+    OUTPUT_DIR = Path(Args.output_dir)
 
     if not LocalExists(Args.matrix):
         Log(f"Matrix not found: {Args.matrix}")
