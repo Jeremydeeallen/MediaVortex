@@ -219,15 +219,14 @@ These are R-rule violations the directive's plan touches. Each must be fixed in 
 
 Phase order satisfies hook gating + DDD/SOLID call-graph audit findings. Each phase ends with a live smoke that verifies the seam touched in that phase.
 
-### Phase A — Wakko deployment migration to native systemd (T1-T4)
+### Phase A — Container rebuild on Ubuntu base + Intel stack (T1-T4)
 
-Drops the container on wakko. Host already has libmfx-gen + libvpl + iHD + render group; container was fighting all of these.
+Reversed 2026-06-29 from the initial systemd-native proposal after R1 preread of `deploy/worker-deploy.feature.md` revealed Criterion #1 forbids host-type branching in the deploy script. Container path requires zero deploy-script changes, zero contract amendments. Single Dockerfile edit.
 
-- [ ] T1 — Create `deploy/worker-systemd-template/mediavortex-worker@.service` template unit. Reads worker name from instance (`%i`), uses `CPUAffinity` for cpuset, `Environment=` for DB connection + share mappings, `ExecStart=/opt/mediavortex/venv/bin/python /opt/mediavortex/WorkerService/Main.py`, `Restart=always`, `RestartSec=10`, `KillSignal=SIGINT`, `TimeoutStopSec=1800`.
-- [ ] T2 — Create `deploy/InstallWakkoNativeWorker.sh`: pulls source tree to `/opt/mediavortex/` (via git clone or rsync from I9 SMB), creates venv, installs `requirements.txt`, installs the systemd template, enables `mediavortex-worker@{1..4}` with cpuset 0-3 / 4-7 / 8-11 / 12-15 via per-instance drop-in files.
-- [ ] T3 — Execute T1/T2 on wakko via SSH. `docker compose down` the existing containers (after worker DB rows show no in-flight work). `systemctl enable --now mediavortex-worker@{1..4}`. Confirm 4 process trees via `systemctl status`.
-- [ ] T4 — Live smoke (host-side ffmpeg, NOT via container): worker process picks up source tree, claims a test job, runs `av1_qsv` encode via the in-source `CodecParameterAssembler` (after Phase E ships). For NOW (Phase A close), just verify the systemd workers start clean, register in `Workers` table, and heartbeat. No encoder smoke yet — that comes after Phase E.
-- [ ] T_Decommission — at directive close: remove `mediavortex-worker:latest` containers from wakko; remove `deploy/compose-templates/wakko.yml` (or mark it deprecated with a pointer to the systemd path). Remove `/usr/local/bin/ffmpeg-modern` host-side workaround binary.
+- [ ] T1 — Edit `deploy/Dockerfile`: switch `FROM python:3.12-slim` (Debian 13 trixie base) to `FROM ubuntu:24.04` (noble). Install python3.12 + pip via apt. The FFmpeg static-build stage (BtbN) is base-agnostic and unchanged.
+- [ ] T2 — Add Intel media stack to the application stage: enable Intel kobuk PPA (`kobuk-team/intel-graphics`), `apt install intel-media-va-driver-non-free libva-drm2 libvpl2 libmfx-gen1.2`. Set `ENV LIBVA_DRIVER_NAME=iHD`. Image grows ~150MB; NVENC workers carry inert Intel libs (acceptable cost for fleet uniformity).
+- [ ] T3 — Build + deploy new image via existing `py deploy/deploy-linux-worker.py wakko`. Existing `deploy/compose-templates/wakko.yml` already carries `/dev/dri` passthrough + `group_add [992, 44]` (committed 2026-06-29 ceb6169/91e2bb6).
+- [ ] T4 — Live smoke (in-container): `docker exec mediavortex-worker-1-1 vainfo` succeeds + lists `VAProfileAV1Profile0 EncSlice`. `docker exec mediavortex-worker-1-1 vpl-inspect` reports `mfx-gen` ApiVersion 2.16 DeviceID e20b/0. `docker exec` ffmpeg with `av1_qsv -preset veryslow` on a 5-second synthetic source produces valid AV1 output. Decommission `/usr/local/bin/ffmpeg-modern` host workaround.
 
 ### Phase B — Schema migrations (T5-T9)
 
