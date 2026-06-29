@@ -17,6 +17,8 @@ from Core.Path.LocalPath import LocalExists
 from Services.FileManagerService import FileManagerService
 from Repositories.DatabaseManager import DatabaseManager
 from Features.Profiles.ProfileRepository import ProfileRepository
+# directive: transcode-worker-unification | # see profiles.C23
+from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
 
 
 # directive: path-class-perfection | # see path.C18
@@ -60,16 +62,17 @@ class QueueManagementBusinessService:
     # marginal-savings-gate.feature.md.
     RESOLUTION_RANK = {'480p': 0, '720p': 1, '1080p': 2, '2160p': 3}
 
+    # directive: transcode-worker-unification | # see profiles.C24
     def __init__(self, RepositoryInstance: TranscodeQueueRepository = None, ProfileRepositoryInstance: Optional[ProfileRepository] = None):
         self.Repository = RepositoryInstance or TranscodeQueueRepository()
         self.DatabaseManager = DatabaseManager()
         self.FileManager = FileManagerService()
-        # Data-driven gate config (per marginal-savings-gate.feature.md). Each
-        # call site reads fresh from these repositories; no in-memory caching.
+        # Data-driven gate config per marginal-savings-gate.feature.md; no in-memory caching.
         self.CrfBitrateEstimateRepo = CrfBitrateEstimateRepository()
         self.QueueAdmissionConfigRepo = QueueAdmissionConfigRepository()
         self.CodecCompatibilityRepo = CodecCompatibilityRepository()
         self.ProfileRepository = ProfileRepositoryInstance or ProfileRepository()
+        self.Resolver = EffectiveProfileResolver()
 
     def PopulateQueueFromMediaFiles(self, RootFolderPath: str = None, ProfileId: int = None, CompatibilityOnly: bool = False) -> Dict[str, Any]:
         """Populate transcoding queue from MediaFiles that have assigned profiles, ordered by largest disk space."""
@@ -1444,47 +1447,6 @@ class QueueManagementBusinessService:
                     lookup[(pn, src_res)] = (vk, ak, src_res)
         return lookup
 
-    def _LoadDefaultProfileName(self) -> Optional[str]:
-        """Read SystemSetting('DefaultProfileName'). One query per recompute call."""
-        try:
-            from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
-            return SystemSettingsRepository().GetSystemSetting('DefaultProfileName')
-        except Exception as Ex:
-            LoggingService.LogException(
-                "Failed to read SystemSetting('DefaultProfileName'); compliance evaluation will be undecidable",
-                Ex, "QueueManagementBusinessService", "_LoadDefaultProfileName"
-            )
-            return None
-
-    # directive: path-schema-migration | # see path.S8
-    def _LoadShowProfileOverrides(self) -> Dict[str, str]:
-        """Return {ShowFolder_lower: AssignedProfile}; ShowFolder synthesized from typed pair."""
-        from Core.Database.DatabaseService import DatabaseService
-        try:
-            rows = DatabaseService().ExecuteQuery(
-                "SELECT StorageRootId, RelativePath, AssignedProfile FROM SeriesProfiles WHERE AssignedProfile IS NOT NULL"
-            )
-            Prefixes = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _GetStorageRoots()}
-            Out: Dict[str, str] = {}
-            for r in rows:
-                Sid = r.get('StorageRootId')
-                Rel = r.get('RelativePath')
-                if Sid is None or Rel is None:
-                    continue
-                try:
-                    Display = Path(Sid, Rel or '').CanonicalDisplay(Prefixes)
-                except PathError:
-                    continue
-                if Display:
-                    Out[Display.lower()] = r['AssignedProfile']
-            return Out
-        except Exception as Ex:
-            LoggingService.LogException(
-                "Failed to load SeriesProfiles overrides; per-show overrides will not apply this cycle",
-                Ex, "QueueManagementBusinessService", "_LoadShowProfileOverrides"
-            )
-            return {}
-
     @staticmethod
     def _ResolutionCategoryFromPixels(Resolution: Optional[str]) -> Optional[str]:
         """Derive '480p' / '720p' / '1080p' / '2160p' from a 'WIDTHxHEIGHT' string.
@@ -1531,42 +1493,6 @@ class QueueManagementBusinessService:
         if Height >= 650:
             return '720p'
         return '480p'
-
-    @staticmethod
-    def _ExtractShowFolder(FilePath: Optional[str]) -> Optional[str]:
-        """Extract 'T:\\Survivor' from 'T:\\Survivor\\Season 1\\file.mkv'. Same shape
-        as SeriesProfiles.ShowFolder so a dict lookup matches without normalization."""
-        if not FilePath:
-            return None
-        from Core.PathNormalize import NormalizeCanonical, ExtractShowFolder
-        Normalized = NormalizeCanonical(FilePath)
-        Show = ExtractShowFolder(Normalized)
-        if Show == 'Unknown':
-            return None
-        Parts = Normalized.split('\\', 1)
-        if not Parts or not Parts[0]:
-            return None
-        return Parts[0] + '\\' + Show
-
-    def _GetEffectiveProfileFromCache(
-        self,
-        FilePath: Optional[str],
-        ShowOverrides: Dict[str, str],
-        DefaultProfileName: Optional[str],
-    ) -> Optional[str]:
-        """Resolve the cascade: SeriesProfiles.AssignedProfile -> SystemSettings('DefaultProfileName').
-
-        Pure function over the pre-loaded caches -- no DB calls. Used per row in
-        the bulk RecomputeForFiles loop. Returns None if the SystemSetting is
-        unset (compliance becomes undecidable).
-        """
-        ShowFolder = self._ExtractShowFolder(FilePath)
-        if ShowFolder:
-            Override = ShowOverrides.get(ShowFolder.lower())
-            if Override:
-                return Override
-        return DefaultProfileName
-
 
     # directive: compliance-rip
     def EvaluateCandidateCompliance(self, CandidateRow: Dict[str, Any], EffectiveProfile: Optional[str] = None) -> Dict[str, Any]:
@@ -1884,8 +1810,6 @@ class QueueManagementBusinessService:
             ContainerVertical().RecomputeFor(MediaFileIds)
 
             Lookup = self._LoadPriorityLookupTable()
-            DefaultProfile = self._LoadDefaultProfileName()
-            ShowOverrides = self._LoadShowProfileOverrides()
 
             # AudioFix folder pins (media-tabs-and-loudness.feature.md C22): boost PriorityScore when WorkBucket='AudioFixOnly' and FilePath matches a hint pattern.
             AudioFixPins = []
@@ -1930,8 +1854,9 @@ class QueueManagementBusinessService:
             NoAudioFiles = []  # list of (FilePath, MediaFileId) for ProblemFile flagging
             for r in rows:
                 try:
-                    EffectiveProfile = self._GetEffectiveProfileFromCache(
-                        r.get('FilePath'), ShowOverrides, DefaultProfile
+                    # directive: transcode-worker-unification | # see profiles.C24
+                    EffectiveProfile = self.Resolver.ResolveProfileName(
+                        MediaFileModel(AssignedProfile=r.get('AssignedProfile'))
                     )
 
                     # Priority calc -- prefer ResolutionCategory, derive from

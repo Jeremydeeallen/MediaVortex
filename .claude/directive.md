@@ -229,6 +229,13 @@ Tasks grouped by phase. Each task is a logical change committed atomically.
 ### Files
 
 ```
+# Profile cascade consolidation (T9-T11)
+Tests/Contract/TestNoParallelProfileCascade.py                              -- CREATE: audit test (C25)
+Features/Profiles/EffectiveProfileResolver.py                               -- EDIT: add ResolveProfileName public method (C23/C24)
+Features/QualityTesting/QualityTestController.py                            -- EDIT: drop inline cascade, inject EffectiveProfileResolver (C23)
+Features/TranscodeQueue/QueueManagementBusinessService.py                   -- EDIT: delete _GetEffectiveProfileFromCache/helpers, route through Resolver (C24)
+Features/QualityTesting/qt-queue-visibility-and-override.feature.md         -- EDIT: add stable C1-C7 IDs to Success Criteria
+
 # Migrations
 Scripts/SQLScripts/AddProcessingModesTable.py                              -- CREATE
 Scripts/SQLScripts/RenameAudioFixOnlyBucket.py                             -- CREATE
