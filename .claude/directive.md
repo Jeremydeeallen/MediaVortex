@@ -8,109 +8,134 @@
 
 ## Outcome
 
-The compliance-correction pipeline runs ONE orchestration path regardless of `ProcessingMode`. The three current divergent processors (`TranscodeJobProcessor`, `RemuxJobProcessor`, `SubtitleFixJobProcessor`) collapse into a single `JobProcessor` Template Method with mode-specific Strategy hooks (`BuildCommand`, `HandleResult`). The post-encode audio-policy attestation step runs for every mode that produces ffmpeg output, populating `TranscodeAttempts.AudioPolicyResolved` and `AudioTracksEmittedJson` so the `ComplianceGate` has data to validate against. The parallel `Features/TranscodeQueue/remux.flow.md` collapses into `transcode.flow.md` — one durable flow doc for compliance correction with mode-specific stage variants documented as strategy hooks, not as a separate pipeline.
+The compliance-correction pipeline runs ONE orchestration path regardless of `ProcessingMode`. All five previously-OOS code areas — the worker processors, the FileReplacement post-flight, the ComplianceGate, the TranscodeQueue schema, the worker capability/claim predicates, and the WorkBucket admission integration — converge on Template Method + Strategy throughout. After this directive, adding a new ProcessingMode is a single registry-row INSERT plus one Strategy class. `if Mode == ...` literals do not exist anywhere in the compliance-correction call graph. The `ProcessingModes` table is the single source of truth; claim queries, dispatch, post-flight selection, and admission gates all read from it. The PostEncode audio-policy attestation runs for every mode that produces ffmpeg output, populating `TranscodeAttempts.AudioPolicyResolved` and `AudioTracksEmittedJson` so the `ComplianceGate` has data to validate against. Five parallel FileReplacement feature docs collapse to one feature + one flow. One parallel claim query (`ClaimNextPendingRemuxJob`) collapses into the unified claim. `BucketName='AudioFixOnly'` is renamed to `'AudioFix'` so admission and dispatch agree.
 
 ## Call-Graph Audit
 
-Per `.claude/rules/call-graph-audit.md`. All four signals were FIRING at work-transcode-unified's DELIVERING claim; this directive's outcome closes them.
+Per `.claude/rules/call-graph-audit.md`. 17 signals fire across 5 areas. Every finding is named below; every resolution is reflected in C1-C22.
 
-### Call graph traced (compliance correction lifecycle)
+### Area 1 — `Features/FileReplacement/`
 
-1. Operator clicks Queue All on `/Work/<bucket>` (UI: WorkBucket vertical, delivered by sibling directive `work-transcode-unified`).
-2. `WorkBucketController.queue_series` → `QueueAdmissionAppService.AdmitSeries` → `QueueAdmissionRepository.AdmitSeries` → bulk INSERT TranscodeQueue Pending.
-3. Worker polls `DatabaseManager.ClaimNextPendingTranscodeJob` → returns one TranscodeQueue row.
-4. `WorkerLoopService` dispatches → `ProcessTranscodeQueueService.ProcessJob` (line 348-358).
-5. **CURRENT — orchestration mode-branch (Signal 2 fires):** `if Job.IsRemux: RemuxJobProcessor` else if SubtitleFix: `SubtitleFixJobProcessor` else: `TranscodeJobProcessor`.
-6. Per-mode FFmpeg execution via mode-specific orchestration body.
-7. Per-mode result handling (`HandleRemuxResult` vs `HandleTranscodeResult` vs `HandleSubtitleFixResult`).
-8. **CURRENT — attestation universally missing (Signal 3 fires):** `PostEncodeMeasurementService.Measure` is NEVER called from any processor. `AudioPolicyResolved IS NULL` for all 36000+ TranscodeAttempts.
-9. `FileReplacementBusinessService.ProcessFileReplacement` (mode-aware but at least called from a single library, not duplicated).
-10. `ComplianceGate.Decide` (in `Features/QualityTesting/Disposition/`) → blocks replacement when attestation is empty → falls back to `Disposition='NoReplace', DispositionReason='ComplianceGateFailed'`.
-11. Compliance recompute.
+- **S1 FIRES** — 5 overlapping feature docs (`FileReplacement.feature.md`, `transcoded-output-placement.feature.md`, `compliance-gated-rename.feature.md`, `remuxed-flag.feature.md`, `post-transcode-pipeline.feature.md`). Last one contains R14-violating strikethrough annotation history.
+- **S2 FIRES** — Mode-branching at orchestration in 3 sites: `FileReplacementBusinessService.py:203, 239` and `TranscodedOutputPlacement.py:444`. The list `('Remux','SubtitleFix','AudioFix','Quick')` restated 3x in this vertical + 4x elsewhere.
+- **S3 FIRES** — `_UpdateMediaFilesAfterReplacement` writes ~25 MediaFiles columns regardless of mode; video fields are guaranteed identical to source for Remux/AudioFix/SubtitleFix (interface too wide).
+- **S4 FIRES** — Two near-identical rollback ladders in `TranscodedOutputPlacement.py` (lines 134-149 vs 227-262); `FinalizePartialReplacement` (303-353) is a third copy of the Execute tail; `_NotifyJellyfin` byte-duplicated across two classes.
 
-### Signal findings
+### Area 2 — ComplianceGate logic
 
-**Signal 1 — Multiple flow docs for one conceptual operation: FIRES.**
-- `transcode.flow.md` (ST1-ST9) — describes the full compliance-correction pipeline.
-- `Features/TranscodeQueue/remux.flow.md` (ST1-ST13) — a parallel flow doc for the same conceptual operation, with its OWN stage IDs and seam table.
-- Resolution: collapse `remux.flow.md` content into `transcode.flow.md` as a "Strategy variants" section under ST6 (TRANSCODE stage). `remux.flow.md` file gets deleted; cross-references rewritten.
+- **S1 FIRES** — 3 compliance feature docs (`compliance-gated-rename`, `transcode-vs-remux-routing`, `disposition`) + `2026-06-22-compliance-symmetry-design.md` spec + `compliance.flow.md` + `compliance.feature.md` (aliased SOTs).
+- **S2 PARTIAL** — Gate functions themselves (`PostTranscodeDispositionDecider.Decide`, `ComplianceGate.Evaluate`) are mode-clean. Mode-effect flows in via `RemuxJobProcessor` writing `QualityTestRequired=False`, which the decider branches on. Implicit contract.
+- **S3 FIRES** — Hardcoded VMAF / heartbeat / retry thresholds bypass `PostTranscodeGateConfig`: `RetranscodeDecider.py:43` (`VMAF >= 80`), `FileReplacementBusinessService.py:360` (`VMAF >= 90`), `DispositionDispatcher.py:127` (`INTERVAL '90 seconds'`).
+- **S4 FIRES** — `PostTranscodeDispositionService` is a thin facade wrapping `DispositionDispatcher` for "backward compat" only; pure copy-paste plumbing. Multiple `PostTranscodeGateConfigRepository` instances per dispatch.
 
-**Signal 2 — Mode-branching at orchestration level: FIRES.**
-- `ProcessTranscodeQueueService.ProcessJob` line ~351: `if Job.IsRemux: ProcessRemuxJob` and similar branches to `ProcessSubtitleFix`, `ProcessTranscodeJob`.
-- Three processor classes carry duplicated orchestration: ActiveJob create → mark Running → load MediaFile → setup file preparation → BuildCommand (mode-specific, Strategy) → ExecuteFFmpeg → verify output → HandleResult (mode-specific, Strategy) → cleanup.
-- Resolution: one `JobProcessor` base class owns steps 1-3, 5, 7, 9 (Template Method shape — identical across modes). Mode-specific `BuildCommand` and `HandleResult` become Strategy methods on per-mode subclasses. Existing `JobProcessor.py` at `Features/TranscodeJob/Worker/` is already the abstract base — needs to be extended with the Template Method logic.
+### Area 3 — `TranscodeQueue` schema
 
-**Signal 3 — Shared output columns sparsely populated: FIRES.**
-- `TranscodeAttempts.AudioPolicyResolved IS NOT NULL` count: **0** across the entire DB.
-- `TranscodeAttempts.AudioTracksEmittedJson != '[]'::jsonb` count: **0** across the entire DB.
-- `PostEncodeMeasurementService.Measure` exists at `Features/AudioNormalization/Services/PostEncodeMeasurementService.py` but is not called from any processor. ComplianceGate then fails-closed on Remux output (no attestation = "cannot validate, refuse replace") and fails-open on Transcode output (other compliance signals carry it).
-- Resolution: the unified `JobProcessor.Process` calls `PostEncodeMeasurementService.Measure` AFTER a successful ffmpeg run, BEFORE `HandleResult`. Populates both columns for every mode.
+- **S1 FIRES** — 8 `Features/TranscodeQueue/*.feature.md` + 2 flow docs. Schema columns `TestVariantSetId`, `audiopolicyjson` undocumented.
+- **S2 FIRES** — `BucketName='AudioFixOnly'` vs `ProcessingMode='AudioFix'`: cross-vertical names disagree for the same concept.
+- **S3 FIRES heavily** —
+  - `TestVariantSetId` populated only for variant testing; NULL on every normal row. Belongs in sub-table.
+  - `audiopolicyjson` populated only by `AudioPolicyAdmissionGate.BackfillRecentInserts`; bypassed by `QueueAdmissionRepository`.
+  - `ProcessingMode TEXT DEFAULT 'Transcode'` — open-set string, no FK, no enum constraint, no `ProcessingModes` table.
+  - `RelativePath` / `StorageRootId` NULL in schema but `SaveTranscodeQueueItem` raises if either is None. Schema disagrees with contract.
+- **S4 FIRES** — `ClaimNextPendingTranscodeJob` (TranscodeQueueRepository.py:270-369) and `ClaimNextPendingRemuxJob` (372-432) are 90% duplicated. `ClaimNextPendingTranscodeJob`'s own AcceptsInterlaced True/False branches are 45 lines each, differ by 8 SQL tokens.
 
-**Signal 4 — "Out of Scope" ambiguity: managed.**
-- This directive's OOS list (below) categorizes every item explicitly. Default category: (a) preserve behavior + collapse duplication.
+### Area 4 — `WorkerCapabilityPredicate` and claim queries
+
+- **S1 CLEAN.**
+- **S2 FIRES** — Adding a new ProcessingMode requires editing 6+ files (claim SQL site 1, claim SQL site 2, BucketKey, FileReplacement mode-list, TranscodedOutputPlacement mode-list, ProcessTranscodeQueueService mode-list, AttemptRecordService mode-list). OCP violation.
+- **S3 FIRES** — NVENC gate hand-rolled in `TranscodeQueueRepository.py:283-285` instead of via a `BuildNvencPredicate` sibling helper to `BuildClaimPredicate`. Promise of "one helper" in `db-is-authority.md` partially met.
+- **S4 FIRES** — Three claim queries (transcode / remux / qt) reproduce the same SELECT FOR UPDATE SKIP LOCKED skeleton. RemuxJob claim silently lacks `AllowedProfiles` gate that TranscodeJob claim has — undocumented asymmetry.
+
+### Area 5 — `/Work/<bucket>` UI integration with the new pipeline
+
+- **S1 FIRES** — Two parallel admission entrypoints: `QueueManagementBusinessService.PopulateQueueFromMediaFiles` (canonical, gate-aware) + `QueueAdmissionRepository.AdmitOne/AdmitSeries` (WorkBucket-direct, gate-bypassing).
+- **S2 FIRES via omission** — `QueueAdmissionRepository` writes TranscodeQueue rows without calling `AudioPolicyAdmissionGate`, marginal-savings gate, candidate-compliance evaluator, or AssignedProfile cascade. Bucket name (`'AudioFixOnly'`) vs processing-mode (`'AudioFix'`) disagree.
+- **S3 FIRES** — WorkBucket-admitted rows have NULL `audiopolicyjson` (triggers `PendingQueueWithoutPolicyJson` self-healing invariant on every admission); `Directory=''` violates NOT NULL semantically; `Priority=100` ignores reserved-window model.
+- **S4 FIRES** — `AdmitOne` / `AdmitSeries` SQL identical except WHERE clause; both reproduce the "candidate count -> insert -> after-count -> diff" pattern that `QueueManagementBusinessService.AddSuggestionsToQueue` already implements.
 
 ## Acceptance Criteria
 
-Each criterion passes the five litmus tests in `.claude/rules/feature-criteria.md` (rename / outsider / rewrite / negation / stability).
+All 22 criteria. Each passes the five litmus tests in `.claude/rules/feature-criteria.md`.
 
-**Orchestration unification:**
+**Orchestration unification (the original C1-C10):**
 
-1. **C1.** `Features/TranscodeJob/Worker/` contains exactly ONE concrete processor class hierarchy: an abstract `JobProcessor` base implementing `Process(Job) -> JobResult` as a Template Method, plus per-mode Strategy subclasses (`TranscodeJobStrategy`, `RemuxJobStrategy`, `AudioFixJobStrategy`, `SubtitleFixJobStrategy`) that ONLY implement `BuildCommand(Job, MediaFile, Context) -> CommandSpec` and `HandleResult(Job, Result, AttemptId, ActiveJobId, OutputPath) -> None`. The classes `TranscodeJobProcessor`, `RemuxJobProcessor`, `SubtitleFixJobProcessor` no longer exist. Spot-checkable: `grep -rn "class.*JobProcessor.*JobProcessor" Features/TranscodeJob/Worker/` returns one base + N strategy subclasses, never N processor classes.
-
-2. **C2.** `ProcessTranscodeQueueService.ProcessJob` contains ZERO mode-branching at the orchestration layer. The function body picks the Strategy via a lookup (e.g. `STRATEGIES[Job.ProcessingMode]`) and calls `JobProcessor(strategy).Process(Job)`. Spot-checkable: `grep -nE "if .+\.IsRemux|if .+\.ProcessingMode\b" Features/TranscodeJob/ProcessTranscodeQueueService.py` returns zero hits.
-
-3. **C3.** Identical orchestration steps run for every mode: ActiveJob create → mark Running → load MediaFile → file preparation → BuildCommand (strategy) → ExecuteFFmpeg → verify output → PostEncodeMeasurement → HandleResult (strategy) → cleanup. Verifiable by running a Transcode job, a Remux job, and an AudioFix job through the same processor and confirming each writes the same set of columns to `TranscodeAttempts` (mode-discriminator excepted).
-
-**Post-encode attestation wired:**
-
-4. **C4.** `JobProcessor.Process` invokes `PostEncodeMeasurementService.Measure(OutputPath, TranscodeAttemptId)` after every successful ffmpeg run, BEFORE `HandleResult`. Verifiable: after this directive lands, run one job of each mode and assert `SELECT AudioPolicyResolved, AudioTracksEmittedJson FROM TranscodeAttempts WHERE Id IN (<three new ids>)` returns non-NULL / non-`'[]'` for all three.
-
-5. **C5.** `MediaFileId=621412` (Trolls World Tour Remux that failed under work-transcode-unified) re-runs successfully end-to-end through the unified processor: claim → ffmpeg → measurement → ComplianceGate evaluates against populated attestation → `Disposition='Replace'` → `FileReplaced=True` → `MediaFiles.IsCompliant=True` → `WorkBucket IS NULL`. The 1-of-9 smoke failure becomes 9-of-9.
-
-**Flow doc unification:**
-
-6. **C6.** `Features/TranscodeQueue/remux.flow.md` does not exist. Its content has been absorbed into `transcode.flow.md` as a "Strategy variants" sub-section under ST6 (TRANSCODE), with per-mode notes on what `BuildCommand` and `HandleResult` differ on. All cross-references to `remux.flow.md` in feature docs / code anchors are rewritten to point at `transcode.flow.md` with the relevant ST anchor.
-
-7. **C7.** `transcode.flow.md` `## Seams` table documents the single ST6 transition for compliance correction regardless of mode; mode-specific differences are documented as Strategy-method seams within the same ST6 section, not as parallel pipeline transitions.
-
-**Backward compatibility + safety:**
-
+1. **C1.** `Features/TranscodeJob/Worker/` contains one abstract `JobProcessor` base implementing `Process(Job) -> JobResult` as a Template Method, plus per-mode Strategy subclasses that implement ONLY `BuildCommand(...)` and `HandleResult(...)`. The classes `TranscodeJobProcessor`, `RemuxJobProcessor`, `SubtitleFixJobProcessor` no longer exist.
+2. **C2.** `ProcessTranscodeQueueService.ProcessJob` contains zero mode-branching at the orchestration layer; selects Strategy via a registry lookup keyed on `Job.ProcessingMode`.
+3. **C3.** Identical orchestration steps run for every mode: ActiveJob create → mark Running → load MediaFile → file preparation → BuildCommand (strategy) → ExecuteFFmpeg → verify output → PostEncodeMeasurement → HandleResult (strategy) → cleanup.
+4. **C4.** `JobProcessor.Process` invokes `PostEncodeMeasurementService.Measure(OutputPath, TranscodeAttemptId)` after every successful ffmpeg run, BEFORE `HandleResult`. After this directive, one job of each mode produces a non-NULL `AudioPolicyResolved` and non-`'[]'` `AudioTracksEmittedJson`.
+5. **C5.** `MediaFileId=621412` (the Trolls World Tour file that failed under work-transcode-unified close) re-runs successfully end-to-end: claim → ffmpeg → measurement → ComplianceGate evaluates against populated attestation → `Disposition='Replace'` → `FileReplaced=True` → `MediaFiles.IsCompliant=True` → `WorkBucket IS NULL`. The 1-of-9 smoke failure becomes 9-of-9.
+6. **C6.** `Features/TranscodeQueue/remux.flow.md` does not exist. Its content absorbed into `transcode.flow.md` as a Strategy-variants sub-section under ST6. All cross-references rewritten.
+7. **C7.** `transcode.flow.md` `## Seams` table documents the single ST6 transition for compliance correction regardless of mode; mode-specific differences are Strategy-method seams within ST6, not parallel pipeline transitions.
 8. **C8.** No regression in successful Transcode-mode behavior. `SELECT count(*) FROM TranscodeAttempts WHERE Success=TRUE AND Disposition='Replace' AND ProfileName != 'Remux' AND ProfileName != 'AudioFix' AND AttemptDate > '<directive-start>'` keeps growing post-deploy.
+9. **C9.** No regression in idempotent claim semantics. `TestClaimAuthority` stays green.
+10. **C10.** `TestNoShowSettingsReferences` stays green.
 
-9. **C9.** No regression in idempotent claim semantics. Claim invariants (`db-is-authority.md`) preserved; `TestClaimAuthority` test suite stays green.
+**FileReplacement post-flight collapse (NEW from audit Area 1):**
 
-10. **C10.** Audit test `TestNoShowSettingsReferences` stays green (no resurrection of deleted vertical references during this refactor).
+11. **C11.** `Features/FileReplacement/` has exactly ONE `*.feature.md` (`file-replacement.feature.md`) and ONE `*.flow.md` (`file-replacement.flow.md`). The 5 prior feature docs deleted; their durable content promoted into the unified pair. No R14 annotation lines (`SUPERSEDED`/`removed`/`deprecated` etc) survive.
+12. **C12.** Post-flight is a Strategy-per-mode pattern aligned with `Features/TranscodeJob/Worker/Strategies/`. No `if Mode in (...)` or `isRemux` literals remain in `Features/FileReplacement/`. Verifiable: `grep -nE "in \\('Remux'|isRemux|IsRemux" Features/FileReplacement/` returns 0.
+
+**ComplianceGate config-driven (NEW from audit Area 2):**
+
+13. **C13.** `Features/QualityTesting/PostTranscodeDispositionService.py` is deleted. The 4 callers route through `DispositionDispatcher` directly. `grep -rn "PostTranscodeDispositionService" Features/ Tests/Contract/` returns 0.
+14. **C14.** All VMAF / heartbeat / retry thresholds live in `PostTranscodeGateConfig`. `grep -nE "VMAF >= [0-9]|VMAF < [0-9]|Vmaf >= [0-9]|Vmaf < [0-9]" Features/ Tests/Contract/` returns 0 outside `PostTranscodeDispositionDecider`. `RetranscodeDecider.Decide` reads `VmafAutoReplaceMinThreshold` from injected config (not literal 80). `DispositionDispatcher._QueryVmafCapableWorkerOnline` reads `WorkerHeartbeatWindowSec` from config (not literal 90).
+
+**ProcessingModes registry (NEW from audit Areas 3 + 4):**
+
+15. **C15.** `ProcessingModes` table exists with columns `Name`, `BucketName`, `RequiresVmaf`, `RequiresInterlacedFilter`, `RequiresNvencGate`, `ClaimCapabilityFlag`. `TranscodeQueue.ProcessingMode` is FK-constrained against `ProcessingModes.Name`. `INSERT INTO TranscodeQueue (ProcessingMode) VALUES ('Bogus')` fails with FK violation.
+16. **C16.** `ClaimNextPendingTranscodeJob` and `ClaimNextPendingRemuxJob` collapse into one `ClaimNextPendingJob(WorkerName, AcceptsInterlaced)`; mode filtering is driven by the `ProcessingModes` table. `BuildNvencPredicate(WorkerName)` extracted to `WorkerCapabilityPredicate.py`. Verifiable: only one `def Claim*Job` in `TranscodeQueueRepository`; `grep -n "EXISTS .*nvenccapable" Features/` returns one site.
+
+**TranscodeQueue schema tightening (NEW from audit Area 3):**
+
+17. **C17.** `TestVariantSetId` moves to a `TranscodeQueueTestVariant(QueueId, TestVariantSetId)` sub-table (FK to TranscodeQueue.Id). `TranscodeQueue.TestVariantSetId` column dropped after migration. `VariantJobStrategy` reads via the sub-table.
+18. **C18.** `MediaFiles.WorkBucket='AudioFixOnly'` migrated to `='AudioFix'` so bucket name and processing mode strings agree. `SELECT DISTINCT WorkBucket FROM MediaFiles` matches `SELECT Name FROM ProcessingModes`.
+
+**WorkBucket admission canonicalization (NEW from audit Area 5):**
+
+19. **C19.** `Features/WorkBucket/Repositories/QueueAdmissionRepository.py` deleted. `QueueAdmissionAppService` is a thin wrapper around `QueueManagementBusinessService.AddJobToQueue` (the canonical admission path). `grep -rn "AdmitOne\\|AdmitSeries" Features/WorkBucket/` returns only the delegation call sites.
+20. **C20.** All `TranscodeQueue` admissions (WorkBucket, populate, AddJob) synchronously invoke `AudioPolicyAdmissionGate` at INSERT time. `PendingQueueWithoutPolicyJson` self-healing invariant returns 0 rows in steady state under any admission path.
+
+**Cross-area cleanups (NEW from audit Areas 1+2+4):**
+
+21. **C21.** `_NotifyJellyfin` is deleted from `TranscodedOutputPlacement` and `FileReplacementBusinessService`; both call one `Services.JellyfinNotifyService.NotifyJellyfin` entry. `grep -rn "def _NotifyJellyfin" Features/` returns 0.
+22. **C22.** `FileReplacementBusinessService.GetFileReplacementStatus` reads `PostTranscodeGateConfig.VmafAutoReplaceMinThreshold` instead of hardcoded `VMAF >= 90`.
 
 ## Out of Scope
 
 Categorized per call-graph-audit Signal 4. Default category: (a) behavior preserved AND duplication collapsed in-flight. Items below are explicitly category (b).
 
-- **`FileReplacementBusinessService` rewrite** — category (b). Already a single library (not duplicated per mode); used by all paths. Not touched here. Internal duplication WITHIN that file is OOS.
-- **`ComplianceGate` logic changes** — category (b). The gate's evaluation rules stay unchanged; this directive only ensures the gate has populated attestation columns to evaluate against. C5 verifies the gate flips its verdict (from `NoReplace` to `Replace`) on 621412 strictly because the attestation now exists, not because the gate's rules changed.
-- **TranscodeQueue schema** — category (b). Unchanged.
-- **WorkerCapabilityPredicate / claim queries** — category (b). Unchanged; verified via C9.
-- **`/Work/<bucket>` UI** — category (b). Already delivered by sibling directive `work-transcode-unified` (at DELIVERING). This directive ships under it; UI does not change.
+- **Refactor of the `Profiles` vertical** — category (b). The `ProfileRepository.GetProfileState` / `IsFinalizedActive` helpers were already extracted under work-transcode-unified G6. Further consolidation of `EffectiveProfileResolver` (e.g. merging cascade resolution with `ContentClassifierService`) is genuinely a separate vertical's worth of work and not surfaced by this audit.
+- **Subtitle pipeline shape** — category (b). `SubtitleFix` mode gets a Strategy class per C1-C2, but the subtitle-extraction logic itself (`Features/Subtitles/` if it exists) is not audited here.
+- **WorkBucket UI surface** — category (b). The `/Work/<bucket>` UI was delivered under work-transcode-unified. This directive only touches the admission path that connects WorkBucket to the pipeline (C19-C20), not the UI surface.
+- **Cross-worker race conditions** — category (b). Single-operator dev system; the existing `FOR UPDATE SKIP LOCKED` claim semantics are sufficient and preserved (C9, C16).
+- **Migration of historical TranscodeAttempts** — category (b). Pre-existing TranscodeAttempts with NULL `AudioPolicyResolved` remain NULL. Only attempts created AFTER this directive lands get the attestation. No backfill of historical data.
 
 ## Constraints
 
-- Template Method pattern: ONE base class owns the orchestration; Strategies override per-mode hooks. Liskov substitutable.
-- Behavior-preserving refactor: NO new criteria observable in the operator UI. The system does the same thing; just with shared code.
+- Template Method + Strategy throughout. Single base class owns orchestration; mode-specific behavior lives in Strategy classes; mode-specific config lives in `ProcessingModes` rows.
+- Behavior-preserving refactor for runtime semantics. Observable operator behavior unchanged except where a fix (C5, C20) is explicitly required.
+- Schema migrations: rename-then-drop pattern. Column drops follow the established 2-phase approach (rename to `_DEPRECATED_YYYY_MM_DD`, run, drop in a follow-up).
 - Push every commit on main.
-- Live smoke per phase exit: each major step (collapse processors / wire measurement / consolidate flow doc) ships with a worker-restart + one job of each mode verified end-to-end.
+- Live smoke per phase exit: each major code area (orchestrators / post-flight / claims / admission) ships with a worker-restart + one job of each mode verified end-to-end.
 - R12: no multi-line docstrings.
 - R14: cross-vertical doc sweep deletes obsolete references, no annotation lines.
 
 ## Escalation Defaults
 
-- Tradeoff between behavior-preserving rigor and architectural cleanliness → cleanliness, provided behavior is preserved (verified by C5 + C8).
-- Risk tolerance: low. The compliance correction pipeline is operator-critical; regressions here block production work. Stage changes through one bucket at a time during smoke.
-- Worker restart authority: operator owns it (memory: `feedback_user_starts_webservice.md`); but on I9 dev workstation I have full restart authority (memory: same file, "I control WebService and WorkerService on I9").
+- Tradeoff between behavior-preserving rigor and architectural cleanliness → cleanliness, provided behavior is preserved (verified by C5 + C8 + C20).
+- Risk tolerance: low. The compliance correction pipeline is operator-critical; regressions block production work. Stage changes through one bucket at a time during smoke.
+- Worker restart authority: full on I9 dev workstation per memory.
+- Schema migration authority: operator owns DROP statements; this directive authors them but does not run the destructive phase (rename-then-drop).
 
 ## Engineering Calls Already Made
 
-- Template Method (not Strategy-via-composition-only): `JobProcessor` is already an abstract base class. The cleanest pattern is to fill in its `Process` with the orchestration body and have subclasses override hooks. Strategy-via-composition would mean a separate Strategy interface + a single Processor concrete that holds a Strategy — more indirection for no clearer separation.
-- `PostEncodeMeasurementService.Measure` is called BEFORE `HandleResult` (not inside it). HandleResult is mode-specific; Measure is universal. Order matters because HandleResult's disposition decision needs the attestation populated.
-- Flow doc consolidation direction: `remux.flow.md` → `transcode.flow.md` (collapse the smaller into the larger). Reverse direction (rename transcode → compliance-correction.flow.md) is a bigger doc churn for no semantic gain.
+- Template Method (not Strategy-via-composition): `JobProcessor` is already an abstract base. Filling in `Process` with the orchestration body is cleaner than composing a separate Strategy interface.
+- `ProcessingModes` table is the new SoT for mode metadata. The string field `TranscodeQueue.ProcessingMode` becomes an FK to this table. Adding a mode = INSERT + Strategy class.
+- `PostEncodeMeasurementService.Measure` is called BEFORE `HandleResult` (universal step before mode-specific tail).
+- `_NotifyJellyfin` consolidates on `Services.JellyfinNotifyService` (the existing canonical service).
+- `BucketName='AudioFixOnly'` is renamed (not the reverse, `ProcessingMode='AudioFixOnly'`) to align names with the user-visible URL key `Audio`.
+- The 5 FileReplacement feature docs collapse to ONE feature + ONE flow doc (`file-replacement.feature.md` + `file-replacement.flow.md`); the `compliance-gated-rename`, `transcoded-output-placement`, `remuxed-flag`, `post-transcode-pipeline` files get deleted with their content promoted into the unified pair.
+- Migration order is rename-then-drop for every table/column change. `TranscodeQueue.TestVariantSetId` column survives until a follow-up drop migration (authored, not run, in this directive).
 
 ## Status
 
@@ -120,45 +145,160 @@ Phase machine: `NEEDS_STANDARDS_REVIEW -> NEEDS_PLAN -> NEEDS_DOC_PREREAD -> IMP
 
 ### Progress
 
-- [ ] T1 — Define `JobProcessor` Template Method (`Process` body owns the orchestration)
-- [ ] T2 — Extract `TranscodeJobStrategy` from `TranscodeJobProcessor` (BuildCommand + HandleResult only)
-- [ ] T3 — Extract `RemuxJobStrategy` from `RemuxJobProcessor`
-- [ ] T4 — Extract `AudioFixJobStrategy` (currently embedded in RemuxJobProcessor; pull apart)
-- [ ] T5 — Extract `SubtitleFixJobStrategy` from `SubtitleFixJobProcessor`
-- [ ] T6 — Wire `PostEncodeMeasurementService.Measure` into `JobProcessor.Process` after successful ffmpeg, before HandleResult
-- [ ] T7 — Replace `ProcessJob`'s `if Job.IsRemux: ...` dispatch with `STRATEGIES[Job.ProcessingMode]` lookup → `JobProcessor(strategy).Process(Job)`
-- [ ] T8 — Delete `TranscodeJobProcessor.py`, `RemuxJobProcessor.py`, `SubtitleFixJobProcessor.py` (now redundant)
-- [ ] T9 — Collapse `remux.flow.md` into `transcode.flow.md` (Strategy variants sub-section under ST6); delete `remux.flow.md`; sweep cross-references
-- [ ] T10 — Re-queue MediaFileId=621412 through the unified path; verify C5 end-to-end
-- [ ] T11 — Run each mode (Transcode, Remux, AudioFix, SubtitleFix) once through the unified processor; verify `AudioPolicyResolved` + `AudioTracksEmittedJson` populated for each; verify Disposition matches pre-refactor expectations
-- [ ] T12 — Verify full Tests/Contract/ suite green (no new failures vs. work-transcode-unified close baseline)
-- [ ] T13 — Advance to DELIVERING; populate Promotions + Verification; operator close
+Tasks grouped by phase. Each task is a logical change committed atomically.
+
+**Phase A — Schema foundations (T1-T4)**
+
+- [ ] T1 — Migration: `AddProcessingModesTable.py` creates the `ProcessingModes` table; seeds rows for Transcode/Remux/AudioFix/SubtitleFix/Quick.
+- [ ] T2 — Migration: `RenameAudioFixOnlyBucket.py` rewrites `MediaFiles.WorkBucket='AudioFixOnly'` → `='AudioFix'`. Updates the generated-column logic if applicable.
+- [ ] T3 — Migration: `AddTranscodeQueueTestVariantSubtable.py` creates the sub-table; backfills from existing rows; leaves `TranscodeQueue.TestVariantSetId` column rename-deprecated.
+- [ ] T4 — Migration: `AddPostTranscodeGateConfigColumns.py` adds `WorkerHeartbeatWindowSec`, `RetranscodeVmafThreshold`, `FileReplacementCanReplaceThreshold`; seeds defaults matching today's hardcoded values.
+
+**Phase B — Domain VOs and registries (T5-T7)**
+
+- [ ] T5 — `Features/TranscodeJob/Worker/Strategies/` package + `ITranscodeJobStrategy.py` ABC.
+- [ ] T6 — `Features/TranscodeJob/Worker/Strategies/JobProcessorRegistry.py` reads from `ProcessingModes` table; maps mode name to Strategy class.
+- [ ] T7 — `Features/FileReplacement/PostFlightProcessors/` package + `ITranscodePostFlight.py` ABC + `PostFlightRegistry.py`.
+
+**Phase C — JobProcessor unification (T8-T13)**
+
+- [ ] T8 — Extract `TranscodeJobStrategy.BuildCommand` + `HandleResult` from `TranscodeJobProcessor.py`.
+- [ ] T9 — Extract `RemuxJobStrategy` + `AudioFixJobStrategy` + `QuickJobStrategy` from `RemuxJobProcessor.py` (one class per mode).
+- [ ] T10 — Extract `SubtitleFixJobStrategy` from `SubtitleFixJobProcessor.py`.
+- [ ] T11 — Fill in `JobProcessor.Process` Template Method body (the shared orchestration). Wire in `PostEncodeMeasurementService.Measure` between ExecuteFFmpeg and HandleResult.
+- [ ] T12 — Replace `ProcessJob`'s `if Job.IsRemux:` dispatch with `JobProcessorRegistry.Get(Job.ProcessingMode).Process(Job)`.
+- [ ] T13 — Delete `TranscodeJobProcessor.py`, `RemuxJobProcessor.py`, `SubtitleFixJobProcessor.py`.
+
+**Phase D — FileReplacement post-flight unification (T14-T19)**
+
+- [ ] T14 — Extract `TranscodePostFlight`, `RemuxPostFlight`, `AudioFixPostFlight`, `SubtitleFixPostFlight` from `TranscodedOutputPlacement.py` + `FileReplacementBusinessService.py`.
+- [ ] T15 — Extract `FilesystemRenameWithBackup` shared helper; collapse the two rollback ladders + `FinalizePartialReplacement` tail into one path.
+- [ ] T16 — Delete `_NotifyJellyfin` from both classes; route to `Services.JellyfinNotifyService` (C21).
+- [ ] T17 — Fix `GetFileReplacementStatus` to read `PostTranscodeGateConfig.VmafAutoReplaceMinThreshold` (C22).
+- [ ] T18 — Replace `if Mode in (...)` and `isRemux` literals in `FileReplacementBusinessService.py` and `TranscodedOutputPlacement.py` with Strategy dispatch via PostFlightRegistry.
+- [ ] T19 — Consolidate the 5 FileReplacement feature docs into `file-replacement.feature.md` + create `file-replacement.flow.md`. Delete the 5 originals (C11).
+
+**Phase E — ComplianceGate config-driven (T20-T22)**
+
+- [ ] T20 — Delete `PostTranscodeDispositionService.py`. Migrate the 4 callers to `DispositionDispatcher` directly (C13).
+- [ ] T21 — Fix `RetranscodeDecider.Decide` and `DispositionDispatcher._QueryVmafCapableWorkerOnline` to read from `PostTranscodeGateConfig` (C14).
+- [ ] T22 — Consolidate the 3 compliance feature docs into `Features/Compliance/compliance.feature.md` + `compliance.flow.md`. Sweep cross-references.
+
+**Phase F — Claim unification (T23-T24)**
+
+- [ ] T23 — Add `BuildNvencPredicate(WorkerName)` to `WorkerCapabilityPredicate.py`. Collapse `ClaimNextPendingTranscodeJob` + `ClaimNextPendingRemuxJob` into `ClaimNextPendingJob`; mode filtering reads `ProcessingModes`. Collapse AcceptsInterlaced True/False branches into one parameterized SQL.
+- [ ] T24 — Replace mode-list-string literals in `ProcessTranscodeQueueService.py:908, 1122`, `AttemptRecordService.py:43` with `ProcessingModes` registry lookup.
+
+**Phase G — WorkBucket admission (T25-T27)**
+
+- [ ] T25 — Route `QueueAdmissionAppService.AdmitOne/AdmitSeries` through `QueueManagementBusinessService.AddJobToQueue` (canonical path). Delete `QueueAdmissionRepository.py` (C19).
+- [ ] T26 — Wire `AudioPolicyAdmissionGate` synchronously into the unified admission path (C20).
+- [ ] T27 — Align `BucketKey.BucketName` with `ProcessingModes.Name` post-rename (C18 consequence).
+
+**Phase H — Flow doc consolidation (T28)**
+
+- [ ] T28 — Absorb `remux.flow.md` into `transcode.flow.md` ST6 Strategy-variants sub-section. Delete `remux.flow.md`. Sweep cross-references (C6, C7).
+
+**Phase I — Verification (T29-T32)**
+
+- [ ] T29 — Re-queue MediaFileId=621412 through the unified path; verify C5 end-to-end.
+- [ ] T30 — Run each mode (Transcode, Remux, AudioFix, SubtitleFix, Quick) once; verify `AudioPolicyResolved` + `AudioTracksEmittedJson` populated for each.
+- [ ] T31 — Full Tests/Contract/ suite green (no new failures vs work-transcode-unified close baseline).
+- [ ] T32 — Author `DropDeprecatedTestVariantSetIdColumn.py` migration (authored, not run; operator runs post-soak).
+
+**Phase J — Doc promotion + delivery (T33-T35)**
+
+- [ ] T33 — Promote feature/flow doc rewrites into Promotions table.
+- [ ] T34 — Advance directive to DELIVERING; populate Verification with concrete evidence per C1-C22.
+- [ ] T35 — Operator review and close.
 
 ### Files
 
 ```
-Features/TranscodeJob/Worker/JobProcessor.py                 -- EDIT: fill in Process Template Method
-Features/TranscodeJob/Worker/Strategies/__init__.py          -- CREATE: strategy package
-Features/TranscodeJob/Worker/Strategies/TranscodeJobStrategy.py    -- CREATE: BuildCommand + HandleResult
-Features/TranscodeJob/Worker/Strategies/RemuxJobStrategy.py        -- CREATE
-Features/TranscodeJob/Worker/Strategies/AudioFixJobStrategy.py     -- CREATE
-Features/TranscodeJob/Worker/Strategies/SubtitleFixJobStrategy.py  -- CREATE
-Features/TranscodeJob/Worker/TranscodeJobProcessor.py        -- DELETE
-Features/TranscodeJob/Worker/RemuxJobProcessor.py            -- DELETE
-Features/TranscodeJob/Worker/SubtitleFixJobProcessor.py      -- DELETE
-Features/TranscodeJob/ProcessTranscodeQueueService.py        -- EDIT: ProcessJob dispatch uses strategy lookup
-Features/AudioNormalization/Services/PostEncodeMeasurementService.py -- EDIT (small): expose Measure as the unified entry point
-transcode.flow.md                                            -- EDIT: absorb remux.flow.md ST1-ST13 as ST6 Strategy variants
-Features/TranscodeQueue/remux.flow.md                        -- DELETE
-Features/TranscodeJob/TranscodeJob.feature.md                -- EDIT: document the Template Method + Strategy structure
-Features/TranscodeJob/Worker/worker-loop.feature.md          -- EDIT: rewrite ProcessJob dispatch description
-Tests/Contract/TestUnifiedJobProcessor.py                    -- CREATE: integration test exercising all four modes through the unified processor
-Tests/Contract/TestPostEncodeMeasurementWiring.py            -- CREATE: contract test that every mode populates AudioPolicyResolved
+# Migrations
+Scripts/SQLScripts/AddProcessingModesTable.py                              -- CREATE
+Scripts/SQLScripts/RenameAudioFixOnlyBucket.py                             -- CREATE
+Scripts/SQLScripts/AddTranscodeQueueTestVariantSubtable.py                 -- CREATE
+Scripts/SQLScripts/AddPostTranscodeGateConfigColumns.py                    -- CREATE
+Scripts/SQLScripts/DropDeprecatedTestVariantSetIdColumn.py                 -- CREATE (NOT RUN)
+
+# Worker unification
+Features/TranscodeJob/Worker/JobProcessor.py                               -- EDIT: Template Method body
+Features/TranscodeJob/Worker/Strategies/__init__.py                        -- CREATE
+Features/TranscodeJob/Worker/Strategies/ITranscodeJobStrategy.py           -- CREATE: ABC
+Features/TranscodeJob/Worker/Strategies/JobProcessorRegistry.py            -- CREATE: registry from ProcessingModes table
+Features/TranscodeJob/Worker/Strategies/TranscodeJobStrategy.py            -- CREATE
+Features/TranscodeJob/Worker/Strategies/RemuxJobStrategy.py                -- CREATE
+Features/TranscodeJob/Worker/Strategies/AudioFixJobStrategy.py             -- CREATE
+Features/TranscodeJob/Worker/Strategies/QuickJobStrategy.py                -- CREATE
+Features/TranscodeJob/Worker/Strategies/SubtitleFixJobStrategy.py          -- CREATE
+Features/TranscodeJob/Worker/TranscodeJobProcessor.py                      -- DELETE
+Features/TranscodeJob/Worker/RemuxJobProcessor.py                          -- DELETE
+Features/TranscodeJob/Worker/SubtitleFixJobProcessor.py                    -- DELETE
+Features/TranscodeJob/ProcessTranscodeQueueService.py                      -- EDIT: dispatch via registry; collapse Handle*Result
+Features/TranscodeJob/Worker/AttemptRecordService.py                       -- EDIT: replace mode-list literal at line 43
+
+# FileReplacement post-flight
+Features/FileReplacement/PostFlightProcessors/__init__.py                  -- CREATE
+Features/FileReplacement/PostFlightProcessors/ITranscodePostFlight.py      -- CREATE: ABC
+Features/FileReplacement/PostFlightProcessors/PostFlightRegistry.py        -- CREATE
+Features/FileReplacement/PostFlightProcessors/TranscodePostFlight.py       -- CREATE
+Features/FileReplacement/PostFlightProcessors/RemuxPostFlight.py           -- CREATE
+Features/FileReplacement/PostFlightProcessors/AudioFixPostFlight.py        -- CREATE
+Features/FileReplacement/PostFlightProcessors/SubtitleFixPostFlight.py    -- CREATE
+Features/FileReplacement/FilesystemRenameWithBackup.py                     -- CREATE: shared rollback helper
+Features/FileReplacement/FileReplacementBusinessService.py                 -- EDIT: dispatch via PostFlightRegistry; delete _NotifyJellyfin; fix GetFileReplacementStatus
+Features/FileReplacement/TranscodedOutputPlacement.py                      -- EDIT: collapse rollback to FilesystemRenameWithBackup; delete _NotifyJellyfin
+Features/FileReplacement/FileReplacementSelfHealService.py                 -- EDIT: convert hardcoded INTERVAL '5 minutes' to PostTranscodeGateConfig knob
+Features/FileReplacement/file-replacement.feature.md                       -- CREATE: consolidated
+Features/FileReplacement/file-replacement.flow.md                          -- CREATE
+Features/FileReplacement/FileReplacement.feature.md                        -- DELETE
+Features/FileReplacement/transcoded-output-placement.feature.md            -- DELETE
+Features/FileReplacement/compliance-gated-rename.feature.md                -- DELETE
+Features/FileReplacement/remuxed-flag.feature.md                           -- DELETE
+Features/FileReplacement/post-transcode-pipeline.feature.md                -- DELETE
+
+# ComplianceGate config-driven
+Features/QualityTesting/PostTranscodeDispositionService.py                 -- DELETE
+Features/QualityTesting/Disposition/RetranscodeDecider.py                  -- EDIT: inject PostTranscodeGateConfig
+Features/QualityTesting/Disposition/DispositionDispatcher.py               -- EDIT: read WorkerHeartbeatWindowSec from config
+Features/QualityTesting/PostTranscodeGateConfigRepository.py               -- EDIT: add columns + reads
+Features/QualityTesting/Models/PostTranscodeGateConfigModel.py             -- EDIT: add fields
+Features/Compliance/compliance.feature.md                                  -- CREATE OR EDIT (consolidated)
+Features/Compliance/compliance.flow.md                                     -- CREATE OR EDIT
+Features/FileReplacement/compliance-gated-rename.feature.md                -- (already DELETE above)
+Features/TranscodeQueue/transcode-vs-remux-routing.feature.md              -- EDIT: trim to cross-reference compliance + ProcessingModes table
+Features/QualityTesting/Disposition/disposition.feature.md                 -- EDIT: trim to cross-reference compliance.feature.md
+
+# Claim unification
+Core/Database/WorkerCapabilityPredicate.py                                 -- EDIT: add BuildNvencPredicate
+Features/TranscodeQueue/TranscodeQueueRepository.py                        -- EDIT: collapse Claim*Job into ClaimNextPendingJob; collapse AcceptsInterlaced branches
+
+# Schema documentation
+Features/TranscodeQueue/TranscodeQueue.feature.md                          -- EDIT: document ProcessingModes FK, audiopolicyjson, TestVariantSetId sub-table
+Features/TranscodeQueue/TranscodeQueueRepository.py                        -- (already EDIT above)
+
+# WorkBucket admission canonicalization
+Features/WorkBucket/Repositories/QueueAdmissionRepository.py               -- DELETE
+Features/WorkBucket/Services/QueueAdmissionAppService.py                   -- EDIT: thin wrapper around QueueManagementBusinessService.AddJobToQueue
+Features/WorkBucket/Domain/BucketKey.py                                    -- EDIT: BucketName=='AudioFix' after rename
+Features/WorkBucket/work-bucket.feature.md                                 -- EDIT: cross-references update to ProcessingModes table; admission seam re-described
+Features/TranscodeQueue/QueueManagementBusinessService.py                  -- EDIT: AddJobToQueue accepts ProcessingMode; calls AudioPolicyAdmissionGate synchronously
+
+# Flow doc consolidation
+transcode.flow.md                                                          -- EDIT: absorb remux.flow.md ST1-ST13 as ST6 Strategy variants section
+Features/TranscodeQueue/remux.flow.md                                      -- DELETE
+
+# Audit + verification
+Tests/Contract/TestUnifiedJobProcessor.py                                  -- CREATE: integration test across all modes
+Tests/Contract/TestPostEncodeMeasurementWiring.py                          -- CREATE: per-mode attestation contract
+Tests/Contract/TestNoModeBranchingAtOrchestration.py                       -- CREATE: grep-based audit test for the `if Mode == ...` literals
+Tests/Contract/TestProcessingModesRegistry.py                              -- CREATE: registry-driven claim + strategy lookup
 ```
 
 ### Promotions
 
-Required when phase advances to DELIVERING. Populated incrementally per `feedback_promotions_grow_incrementally.md`.
+Required when phase advances to DELIVERING. Populated incrementally.
 
 | Source artifact | Target file | Commit |
 |---|---|---|
@@ -171,12 +311,24 @@ Required when phase advances to VERIFYING. One entry per acceptance criterion.
 - **C2:** TBD
 - **C3:** TBD
 - **C4:** TBD
-- **C5:** TBD (621412 re-run)
+- **C5:** TBD (MediaFileId=621412 re-run)
 - **C6:** TBD
 - **C7:** TBD
 - **C8:** TBD
 - **C9:** TBD
 - **C10:** TBD
+- **C11:** TBD (5 FileReplacement docs collapsed to 1+1)
+- **C12:** TBD (no mode-branching in FileReplacement)
+- **C13:** TBD (PostTranscodeDispositionService deleted)
+- **C14:** TBD (no hardcoded VMAF/heartbeat thresholds)
+- **C15:** TBD (ProcessingModes table + FK)
+- **C16:** TBD (one ClaimNextPendingJob)
+- **C17:** TBD (TranscodeQueueTestVariant sub-table)
+- **C18:** TBD (AudioFixOnly → AudioFix)
+- **C19:** TBD (QueueAdmissionRepository deleted)
+- **C20:** TBD (AudioPolicyAdmissionGate synchronous)
+- **C21:** TBD (one _NotifyJellyfin path)
+- **C22:** TBD (GetFileReplacementStatus config-driven)
 
 ### Decisions Made
 
