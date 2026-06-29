@@ -8,6 +8,21 @@
 
 **SMB-on-Windows long-handle drops** (Microsoft SMB client EINVAL on long-duration handles under GPU-paced reads -- see memory `feedback_ms_nfs_client_unreliable.md` for the diagnostic pattern) are mitigated by **per-worker local staging** -- `Features/TranscodeJob/local-staging.feature.md`. Enable on Windows + SMB workers; leave OFF on Linux NFS workers.
 
+### [BUG-0069] PopulateQueueForSubtitleFix references undefined `existingFilePaths` (latent NameError)
+**Date:** 2026-06-28 | **Area:** transcodequeue / subtitle-fix
+
+**What breaks:** `Features/TranscodeQueue/QueueManagementBusinessService.py:2489` -- the line `existingFilePaths.add(mediaFile.FilePath)` references a variable name never assigned in the enclosing function `_GetSubtitleFixEligibleFiles` (called from `PopulateQueueForSubtitleFix`). The function will `NameError` the first time `itemsAdded > 0` and the function attempts to track added files for dedup. The only path that imports / calls this is `POST /api/SubtitleFix/PopulateQueue` (operator-driven), so the bug has been latent.
+
+**Look first:** the function uses pair-based dedup (`existingPairs.add((mediaFile.StorageRootId, mediaFile.RelativePath or ''))`) at line 2461. The 2489 `existingFilePaths.add` is dead-code residue from an earlier per-FilePath dedup design.
+
+**Trivial fix:** replace `existingFilePaths.add(mediaFile.FilePath)` with `existingPairs.add((mediaFile.StorageRootId, mediaFile.RelativePath or ''))` -- matches the pair-based dedup already in use.
+
+**Why latent:** the test `Tests/Contract/TestPopulateQueueForSubtitleFix.py` (if it exists) likely covers the path where no files are added (empty result). The crash only fires when at least one file is admitted.
+
+**Fix with:** `/t BUG-0069`.
+
+---
+
 ### [BUG-0067] CLOSED 2026-06-23 -- FileReplacement orphan-on-failure -- TranscodedOutputPlacement leaves transcoded .mp4 on disk when MediaFiles update fails; scanner ingests it as a duplicate row; next encode attempt fails identically; loop snowballs
 **Date:** 2026-06-23 -> Closed 2026-06-23 by `/t BUG-0067` within `worker-runtime-state` directive | **Area:** file-replacement | **Resolution:** `Features/FileReplacement/TranscodedOutputPlacement.Execute` failure branch (post-rename, pre-original-delete) replaced silent `Success=True` + warning with explicit rollback (non-SameSlot: `os.remove(TargetPath)`; SameSlot: `os.rename(TargetPath, LocalStagedPath)` + `os.rename(BackupPath, LocalOriginalPath)` + remove staging) and returns `Success=False` carrying the real `_UpdateMediaFilesAfterReplacement` error. SameSlot eager `os.remove(BackupPath)` moved from inner rename block to after MediaFiles update commits so the rollback path can restore source. `FinalizePartialReplacement` parallel branch returns `Success=False` with the real error rather than masking. C13 + S4 added to `Features/FileReplacement/transcoded-output-placement.feature.md`. Verified by `Tests/Contract/TestFileReplacementRollbackOnUpdateFailure.py` (3/3 PASS: non-SameSlot orphan removed + source intact + bytes match; SameSlot source restored + backup gone + staging gone + bytes match; FinalizePartialReplacement returns Success=False with real error).
 
