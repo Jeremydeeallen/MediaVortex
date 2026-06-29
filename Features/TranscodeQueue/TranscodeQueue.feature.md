@@ -19,6 +19,16 @@ Populates and manages the queue of files awaiting FFmpeg transcoding. Filters fi
 9. The /TranscodeQueue page displays all pending queue items with file details.
 10. **[BUG-0061]** Encode-failure retry has a configurable cap (sibling to `PostTranscodeGateConfig.MaxRequeueAttempts`, default 3) counting consecutive `TranscodeAttempts.Success=FALSE` rows since the last `Success=TRUE` (or since file creation if no prior success). The cap is consulted in BOTH `ClaimNextPendingTranscodeJob` (skip Pending rows whose MediaFile has exceeded cap) AND `QueueManagementBusinessService.RecomputeForFiles` (do not INSERT a new queue row for a MediaFile that has exceeded cap). Capped MediaFiles surface in an operator-visible "Failed Jobs" panel with filename, failure count, last ErrorMessage, last AttemptDate, AssignedProfile, last WorkerName; operator can reset (re-allow next claim) or view full attempt log. Verifiable: live DB query `SELECT MediaFileId, COUNT(*) FROM TranscodeAttempts WHERE Success=FALSE GROUP BY MediaFileId HAVING COUNT(*) > <cap>` returns zero rows that also appear in `TranscodeQueue` with `Status='Pending'`.
 
+## Concurrency Notes
+
+The TranscodeQueue admission path has two known TOCTOU windows that are explicitly accepted as known debt under the single-operator dev-system stance.
+
+1. **AdmitOne check-then-insert race.** `QueueAdmissionRepository.AdmitOne` (deleted; replaced by routing through `QueueManagementBusinessService.AddJobToQueue` per `transcode-worker-unification` directive) performed a SELECT-existing-Pending then INSERT-if-absent without a unique index on (MediaFileId, Status='Pending'). Two concurrent admissions could both INSERT. The replacement `AddJobToQueue` has the same shape; production-safe fix would be a partial unique index `(MediaFileId) WHERE Status='Pending'`. Mitigation: single-operator dev box; one admission UI; not observed in practice.
+
+2. **AdmitSeries candidate-count window.** Before/after candidate counting (`BeforeCandidates - AfterCandidates`) is used to compute `Inserted`. Under concurrent admissions on the same series, the `Inserted` count can over-state actual inserts (concurrent peer admitted a row between our counts; our INSERT-NOT-EXISTS guard prevents duplicates but our count reports the candidate that we DIDN'T actually insert). Mitigation: same as above.
+
+Both windows accept the single-operator dev-system as the mitigation. Multi-operator or production deployments would require partial unique indexes + count-by-rowcount-returning patterns. The accept-as-debt decision is recorded in `.claude/directives/closed/2026-06-28-transcode-worker-unification.md` (will archive there on close).
+
 ## Status
 
 COMPLETE
