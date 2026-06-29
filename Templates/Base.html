@@ -11,8 +11,8 @@
     <link href="{{ url_for('static', filename='css/menu-standards.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/TableRenderer.css') }}" rel="stylesheet">
 </head>
-<body>
-    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+<body hx-boost="true" hx-target="#PageContent" hx-swap="innerHTML show:window:top transition:true" hx-select="#PageContent">
+    <nav class="navbar navbar-expand-lg navbar-light bg-light" hx-preserve="true" id="MvNavbar">
         <div class="container">
             <a class="navbar-brand" href="/">
                 <i class="fas fa-video"></i> MediaVortex
@@ -109,9 +109,12 @@
     <div id="AlertContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 1050;"></div>
 
     <main class="container-fluid mt-4">
-        {% block content %}{% endblock %}
+        <div id="PageContent">
+            {% block content %}{% endblock %}
+        </div>
     </main>
 
+    <script src="{{ url_for('static', filename='vendor/htmx.min.js') }}"></script>
     <script src="{{ url_for('static', filename='vendor/bootstrap.bundle.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/menu-standards.js') }}"></script>
     <script src="{{ url_for('static', filename='js/TranscodeStatus.js') }}"></script>
@@ -189,7 +192,7 @@
             if (alert) alert.remove();
         }, 5000);
     }
-    function updateNavBadges() {
+    window.MvUpdateNavBadges = function() {
         fetch('/api/Activity/NavBadges')
             .then(r => r.json())
             .then(d => {
@@ -209,9 +212,13 @@
                 setBadge('NavAudioCount', data.AudioFix);
             })
             .catch(() => {});
+    };
+    if (!window.MvNavBadgesTimerId) {
+        window.MvUpdateNavBadges();
+        window.MvNavBadgesTimerId = setInterval(window.MvUpdateNavBadges, 10000);
+    } else {
+        window.MvUpdateNavBadges();
     }
-    updateNavBadges();
-    setInterval(updateNavBadges, 10000);
     // Activate Bootstrap tooltips so the nav-item title attributes pop on hover.
     document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
     // Global client-side error reporting

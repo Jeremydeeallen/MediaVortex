@@ -1,11 +1,56 @@
+import json
+import time
 from dataclasses import asdict
-from flask import Blueprint, jsonify
+from flask import Blueprint, Response, jsonify, stream_with_context
 
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 
 
 ActivityBlueprint = Blueprint('Activity', __name__, url_prefix='/api/Activity')
+
+
+def _BuildSnapshotPayload():
+    def _jsonable(D):
+        return {k: (v.isoformat() if hasattr(v, 'isoformat') and v is not None else v) for k, v in D.items()}
+    from Features.Activity.Services.DashboardSnapshotService import DashboardSnapshotService
+    Snap = DashboardSnapshotService().BuildSnapshot()
+    return {
+        'ActiveJobs': [_jsonable(asdict(J)) for J in Snap.ActiveJobs],
+        'ActiveScans': [_jsonable(S) for S in Snap.ActiveScans],
+        'QueueCounts': Snap.QueueCounts,
+        'BadgeState': Snap.BadgeState,
+        'HungAttempts': [_jsonable(H) for H in Snap.HungAttempts],
+        'StaleProgressThresholdSec': Snap.StaleProgressThresholdSec,
+    }
+
+
+# directive: transcode-worker-unification
+@ActivityBlueprint.route('/Stream', methods=['GET'])
+def Stream():
+    """SSE push of dashboard snapshots; replaces 5s polling in Templates/Activity.html with EventSource."""
+    def _Events():
+        LastPayload = None
+        while True:
+            try:
+                Payload = _BuildSnapshotPayload()
+            except Exception as Ex:
+                LoggingService.LogException("Stream snapshot build failed", Ex, "ActivityController", "Stream")
+                yield f": error {str(Ex)[:120]}\n\n"
+                time.sleep(5)
+                continue
+            Serialized = json.dumps(Payload)
+            if Serialized != LastPayload:
+                yield f"data: {Serialized}\n\n"
+                LastPayload = Serialized
+            else:
+                yield ": keepalive\n\n"
+            time.sleep(1.5)
+    Headers = {
+        'Cache-Control': 'no-store',
+        'X-Accel-Buffering': 'no',
+    }
+    return Response(stream_with_context(_Events()), mimetype='text/event-stream', headers=Headers)
 
 
 @ActivityBlueprint.route('/Snapshot', methods=['GET'])

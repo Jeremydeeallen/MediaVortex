@@ -190,17 +190,39 @@ function RenderHungBanner(Hung) {
   });
 }
 
-function LoadActivity() {
+function RenderSnapshot(Data) {
+  if (!Data) return;
+  RenderActiveJobs(Data.ActiveJobs || []);
+  RenderActiveScans(Data.ActiveScans || []);
+  RenderQueueCounts(Data.QueueCounts || {});
+  RenderHungBanner(Data.HungAttempts || []);
+}
+
+function PollOnce() {
   fetch('/api/Activity/Snapshot').then(function(R) { return R.json(); }).then(function(D) {
-    if (!D || !D.Success) return;
-    RenderActiveJobs((D.Data && D.Data.ActiveJobs) || []);
-    RenderActiveScans((D.Data && D.Data.ActiveScans) || []);
-    RenderQueueCounts((D.Data && D.Data.QueueCounts) || {});
-    RenderHungBanner((D.Data && D.Data.HungAttempts) || []);
+    if (D && D.Success) RenderSnapshot(D.Data || {});
   }).catch(function() {});
 }
 
-LoadActivity();
-setInterval(LoadActivity, 5000);
+(function StartLiveStream() {
+  if (window.MvActivityStream) { try { window.MvActivityStream.close(); } catch (e) {} }
+  if (window.MvActivityPollTimerId) { clearInterval(window.MvActivityPollTimerId); window.MvActivityPollTimerId = null; }
+  PollOnce();
+  if (typeof EventSource === 'undefined') {
+    window.MvActivityPollTimerId = setInterval(PollOnce, 5000);
+    return;
+  }
+  var Es = new EventSource('/api/Activity/Stream');
+  window.MvActivityStream = Es;
+  Es.onmessage = function(Ev) {
+    try { RenderSnapshot(JSON.parse(Ev.data)); } catch (e) {}
+  };
+  Es.onerror = function() {
+    try { Es.close(); } catch (e) {}
+    if (!window.MvActivityPollTimerId) {
+      window.MvActivityPollTimerId = setInterval(PollOnce, 5000);
+    }
+  };
+})();
 </script>
 {% endblock %}

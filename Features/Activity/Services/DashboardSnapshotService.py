@@ -161,7 +161,10 @@ class DashboardSnapshotService:
         )
         Out: List[ActiveJobRow] = []
         for R in Rows:
-            AttemptId = int(R['AttemptId'])
+            RawAttemptId = R.get('AttemptId')
+            if RawAttemptId is None:
+                continue
+            AttemptId = int(RawAttemptId)
             Fps, Speed, Eta = self.Smoother.SmoothForAttempt(AttemptId)
             IsStale = (Fps is None)
             SizeBytes = R.get('SizeBytes')

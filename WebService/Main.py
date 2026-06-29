@@ -53,6 +53,7 @@ class WebServiceApp:
         self.App.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000
 
         from flask_compress import Compress
+        self.App.config['COMPRESS_MIMETYPES'] = ['text/html', 'text/css', 'text/xml', 'application/json', 'application/javascript', 'application/xml']
         Compress(self.App)
 
         from flask import request, url_for as _flask_url_for
