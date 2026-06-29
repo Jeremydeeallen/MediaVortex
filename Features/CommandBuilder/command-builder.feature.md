@@ -25,7 +25,7 @@ Three concerns the current sprawl created and this contract resolves:
 
 Internal contract. No direct UI; affects every queued job through the
 worker side of the pipeline. See `Features/TranscodeQueue/transcode.flow.md`
-Stages 5-7 and `Features/TranscodeQueue/remux.flow.md` for the runtime
+Stages 5-7 (and `transcode.flow.md ST6 Strategy variants` for per-mode command shapes) for the runtime
 context this contract serves.
 
 ## Success Criteria
@@ -100,7 +100,7 @@ context this contract serves.
 Models/CommandBuilder.py                         -- becomes single source of FFmpeg command generation
 Services/CommandBuilderService.py                -- (REMOVED) -- wrapper layer no longer needed
 Features/TranscodeJob/ProcessTranscodeQueueService.py -- callers updated to use single builder API
-Features/TranscodeQueue/remux.flow.md            -- Stage 7 wording updated to reference single builder
+transcode.flow.md ST6 Strategy variants          -- remux.flow.md absorbed here; BuildCommand shapes documented per-mode
 Features/TranscodeQueue/transcode.flow.md        -- Stage 5 wording updated to reference single builder
 ```
 

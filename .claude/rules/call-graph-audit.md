@@ -4,7 +4,7 @@ DDD/SOLID is a system property, not a file property. A vertical that is locally 
 
 ## The five signals (run all five before leaving NEEDS_STANDARDS_REVIEW)
 
-1. **Multiple flow docs for one conceptual operation.** Two `*.flow.md` files describing what should be one pipeline (e.g. `transcode.flow.md` + `remux.flow.md` for "compliance correction") is an architectural smell. Either unify or document the carve-out.
+1. **Multiple flow docs for one conceptual operation.** Two `*.flow.md` files describing what should be one pipeline is an architectural smell. Either unify or document the carve-out. Historical example: `transcode.flow.md` + `remux.flow.md` -- the latter was absorbed into `transcode.flow.md ST6 Strategy variants` by the `transcode-worker-unification` directive.
 
 2. **Mode-branching at the orchestration level.** Any `if mode == X` / `if Job.IsRemux` / `if ProcessingMode in (...)` at the orchestration layer is a Template-Method/Strategy violation. Only the strategy hooks (BuildCommand, HandleResult) may differ by mode; the orchestration shape must be identical.
 

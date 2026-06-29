@@ -100,7 +100,7 @@ Features/ShowSettings/smart-populate.flow.md                 -- EDIT: ST<N> + Se
 Features/SystemSettings/display-timezone.flow.md             -- EDIT: ST<N> + Seams
 Features/TeamStatus/TeamStatus.flow.md                       -- EDIT: ST<N> + Seams
 Features/TranscodeQueue/media-tabs.flow.md                   -- EDIT: ST<N> + Seams
-Features/TranscodeQueue/remux.flow.md                        -- EDIT: ST<N> + Seams
+Features/TranscodeQueue/remux.flow.md                        -- EDIT: ST<N> + Seams (later DELETED by transcode-worker-unification T32; content absorbed into transcode.flow.md ST6 Strategy variants)
 WebService/startup.flow.md                                   -- EDIT: ST<N> + Seams
 WorkerService/WorkerService.flow.md                          -- EDIT: ST<N> + Seams
 ```

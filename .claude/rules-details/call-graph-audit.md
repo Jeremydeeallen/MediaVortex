@@ -26,7 +26,7 @@ Glob: **/*.flow.md
 
 For each one in the result, ask: does this describe a stage the feature's call graph touches? If yes, list it.
 
-**Signal 1 fires** if TWO `*.flow.md` files describe what should be one conceptual operation (e.g. `transcode.flow.md` ST6 = "TRANSCODE stage" AND a separate `remux.flow.md` defines its own ST1-ST13 for Remux jobs — that's two flow docs for one conceptual stage).
+**Signal 1 fires** if TWO `*.flow.md` files describe what should be one conceptual operation (e.g. `transcode.flow.md` ST6 = "TRANSCODE stage" AND a separate parallel flow doc defines its own ST1-ST13 for Remux jobs — that's two flow docs for one conceptual stage). Historical example: `remux.flow.md` was absorbed into `transcode.flow.md ST6 Strategy variants` by the `transcode-worker-unification` directive.
 
 When Signal 1 fires, the right options are:
 - (preferred) Absorb the unification into this directive's scope.
@@ -117,7 +117,7 @@ Historical example: work-transcode-unified spec wrote "EffectiveProfileResolver 
 ### Flow docs the feature touches
 
 - `transcode.flow.md` (ST1-ST9)
-- `Features/TranscodeQueue/remux.flow.md` (ST1-ST13) ← **Signal 1 FIRES** (parallel flow for one conceptual operation)
+- `Features/TranscodeQueue/remux.flow.md` (ST1-ST13) ← **Signal 1 FIRED** (parallel flow for one conceptual operation; absorbed into `transcode.flow.md ST6 Strategy variants` by `transcode-worker-unification`)
 - `Features/WorkBucket/work-bucket.flow.md` (new, this directive)
 
 ### Mode branches found

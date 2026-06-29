@@ -27,7 +27,7 @@ After this directive closes (`Status: Closed -- Success`), this file may be dele
 | 15 | `Features/SystemSettings/display-timezone.flow.md` | no | no |
 | 16 | `Features/TeamStatus/TeamStatus.flow.md` | no | no |
 | 17 | `Features/TranscodeQueue/media-tabs.flow.md` | no | no |
-| 18 | `Features/TranscodeQueue/remux.flow.md` | no | no |
+| 18 | `Features/TranscodeQueue/remux.flow.md` | (deleted -- absorbed into `transcode.flow.md ST6 Strategy variants` by `transcode-worker-unification`) | -- |
 | 19 | `WebService/startup.flow.md` | no | no |
 | 20 | `WorkerService/WorkerService.flow.md` | no | no |
 
@@ -52,7 +52,7 @@ Pipelines that might look missing on a casual scan but are intentionally folded 
 - **Marginal-savings gate** -- `transcode.flow.md` Stage 4 (queue-population filter).
 - **Priority materialization** -- `transcode.flow.md` Stage 3.5.
 - **Transcode-vs-remux routing** -- `transcode.flow.md` Stage 4 + Stage 7 post-flight recompute.
-- **FileReplacement** -- `transcode.flow.md` Stage 7 + `remux.flow.md` rename-before-encode safety contract.
+- **FileReplacement** -- `transcode.flow.md` Stage 7 + rename-before-encode safety contract now in `transcode.flow.md ST6 Strategy variants` (remux.flow.md absorbed).
 - **Quality testing (VMAF)** -- `transcode.flow.md` Stage 6.
 - **Windows UNC path translation** -- `path-storage.flow.md` (Windows worker = `StorageRootResolutions.Platform='windows'`; same Resolve seam).
 - **CommandBuilder / nvenc-profiles / nvenc-rate-anchored / Profiles** -- utility / config concerns, not pipeline stages. Stay as `*.feature.md` only.

@@ -211,7 +211,7 @@ Tasks grouped by phase. Each task is a logical change committed atomically.
 
 **Phase H — Flow doc consolidation (T28)**
 
-- [ ] T28 — Absorb `remux.flow.md` into `transcode.flow.md` ST6 Strategy-variants sub-section. Delete `remux.flow.md`. Sweep cross-references (C6, C7).
+- [x] T28/T32 — Absorb `remux.flow.md` into `transcode.flow.md` ST6 Strategy-variants sub-section. Delete `remux.flow.md`. Sweep cross-references (C6, C7). DONE 2026-06-28.
 
 **Phase I — Verification (T29-T32)**
 

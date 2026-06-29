@@ -734,7 +734,7 @@ Operator confirmed 2026-05-18: enabled TranscodeEnabled on I9 to get a Quick row
 
 Verification: running the exact failing command with `-f mp4` added produces a successful 3.3 GB transcode in 2:43 (16.2x realtime), zero errors. Without `-f mp4`, same command fails at muxer init.
 
-**Violates:** `Features/TranscodeQueue/remux.flow.md` Stage 7 (Command build promises a valid command that runs to completion when inputs are healthy). Also blocks `media-tabs-and-loudness.feature.md` criterion 17 verifiability.
+**Violates:** `transcode.flow.md ST6 Strategy variants` (Command build promises a valid command that runs to completion when inputs are healthy; remux.flow.md absorbed). Also blocked `media-tabs-and-loudness.feature.md` criterion 17 verifiability.
 
 **Look first:** `Models/CommandBuilder.py` `BuildRemuxCommand` (line 485), `BuildSubtitleFixCommand` (line 626), and `BuildCommand` (line 28 onwards for the transcode path). Each needs `'-f', 'mp4'` appended to CommandParts before the output filename. Already has `-movflags +faststart` for MP4, but `-movflags` doesn't imply muxer selection.
 

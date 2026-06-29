@@ -241,6 +241,26 @@ Queue admission (whether a file enters the queue at all) is owned by `Features/T
 - CPU thermal management: waits for cool-down between jobs
 - FFmpeg errors captured in TranscodeAttempt.ErrorMessage
 
+### ST6 Strategy variants -- per-ProcessingMode `BuildCommand` + `HandleResult`
+
+ST6 has one orchestration body (`Features/TranscodeJob/Worker/JobProcessor.Process`) and per-mode Strategy classes (`Features/TranscodeJob/Worker/Strategies/<Mode>JobStrategy.py`). Each Strategy implements:
+
+| Mode | Strategy class | BuildCommand emits | HandleResult marks |
+|---|---|---|---|
+| Transcode | `TranscodeJobStrategy` | Full re-encode argv via `EncodeShapeRegistry.Get('Transcode').Build` | `QualityTestRequired=<config>` |
+| Remux | `RemuxJobStrategy` | `-c:v copy` + audio normalize (loudnorm) + mp4 container | `QualityTestRequired=False` (no VMAF; remux quality is byte-defined) |
+| AudioFix | `AudioFixJobStrategy` | Same as Remux but with audio-policy attestation forced | `QualityTestRequired=False` |
+| SubtitleFix | `SubtitleFixJobStrategy` | Subtitle extraction + stream selection per `Services.FFmpegAnalysisService.SelectPreferredSubtitleStream` | `QualityTestRequired=False` |
+| Quick | `RemuxJobStrategy` (alias) | Same as Remux | `QualityTestRequired=False` |
+
+The orchestration shape (ActiveJob create -> Mark Running -> Load MediaFile -> Setup file prep -> BuildCommand -> ExecuteFFmpeg -> Verify output -> `PostEncodeMeasurementService.Measure` -> HandleResult -> Cleanup) is identical for every mode. PostEncode measurement runs universally; per-mode strategies cannot opt out.
+
+Adding a new ProcessingMode is one `INSERT INTO ProcessingModes` row + one `<NewMode>JobStrategy` class + one `Registry.Register('NewMode', NewModeJobStrategy)` line in `ProcessTranscodeQueueService.ProcessJob` registry initialization. No other file changes.
+
+Audio-policy attestation contract (was in `remux.flow.md` ST9): `Strategy.HandleResult` is called AFTER `PostEncodeMeasurementService.Measure` has populated `TranscodeAttempts.AudioPolicyResolved` and `AudioTracksEmittedJson`. Mode-specific HandleResult bodies MUST NOT consume these columns directly -- they belong to the downstream ComplianceGate evaluation.
+
+Same-slot rename safety (was in `remux.flow.md` ST11): all post-flight modes use `Features/FileReplacement/FilesystemRenameWithBackup` with `Apply` -> `Commit` (on success) or `Rollback` (on update failure). Source file is never at the path FFmpeg writes to (PrepareReplacement moves it). Both layers must independently fail before any data loss; the 2026-05-09 bug pattern cannot recur.
+
 ---
 
 ## Stage 6: DISPOSITION -- Post-Transcode Decision (`ST7`)
