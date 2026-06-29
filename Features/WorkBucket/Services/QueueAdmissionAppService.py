@@ -1,43 +1,70 @@
-from typing import Optional
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Features.WorkBucket.Domain.AdmissionResult import AdmissionResult
 from Features.WorkBucket.Domain.AdmitOneResult import AdmitOneResult
 from Features.WorkBucket.Domain.BucketKey import BucketKey
 from Features.WorkBucket.Domain.SeriesIdentity import SeriesIdentity
-from Features.WorkBucket.Repositories.QueueAdmissionRepository import QueueAdmissionRepository
 
 
-# directive: work-transcode-unified | # see work-bucket.C4, work-bucket.C5
+# directive: transcode-worker-unification | # see work-bucket.C4, work-bucket.C5
 class QueueAdmissionAppService:
 
-    # directive: work-transcode-unified | # see work-bucket.C4, work-bucket.C5
-    def __init__(
-        self,
-        Db: Optional[DatabaseService] = None,
-        Repo: Optional[QueueAdmissionRepository] = None,
-    ):
+    # directive: transcode-worker-unification | # see work-bucket.C4, work-bucket.C5
+    def __init__(self, Db: DatabaseService = None):
         self.Db = Db or DatabaseService()
-        self.Repo = Repo or QueueAdmissionRepository(self.Db)
 
-    # directive: work-transcode-unified | # see work-bucket.C5
+    # directive: transcode-worker-unification | # see work-bucket.C5
     def AdmitOne(self, MediaFileId: int, Bucket: BucketKey) -> AdmitOneResult:
         # see work-bucket.C5
-        Result = self.Repo.AdmitOne(MediaFileId, Bucket.ProcessingMode)
+        from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+        Result = QueueManagementBusinessService().AddJobToQueue(
+            MediaFileId=MediaFileId,
+            ProcessingMode=Bucket.ProcessingMode,
+            ForceAdd=True,
+        )
+        if Result.get('AlreadyQueued'):
+            Status = 'already_queued'
+            QueueId = int(Result.get('ItemId', 0))
+        elif Result.get('Success'):
+            Status = 'queued'
+            QueueId = int(Result.get('ItemId', 0))
+        else:
+            Status = 'error'
+            QueueId = 0
         LoggingService.LogInfo(
-            f"Admit one: media_file={MediaFileId} bucket={Bucket.BucketName} status={Result.Status}",
+            f"Admit one: media_file={MediaFileId} bucket={Bucket.BucketName} status={Status}",
             "QueueAdmissionAppService",
             "AdmitOne",
         )
-        return Result
+        return AdmitOneResult(Status=Status, QueueId=QueueId)
 
-    # directive: work-transcode-unified | # see work-bucket.C4
+    # directive: transcode-worker-unification | # see work-bucket.C4
     def AdmitSeries(self, Identity: SeriesIdentity, Bucket: BucketKey) -> AdmissionResult:
         # see work-bucket.C4
-        Result = self.Repo.AdmitSeries(Identity, Bucket)
+        Rows = self.Db.ExecuteQuery(
+            "SELECT mf.Id FROM MediaFiles mf "
+            "WHERE mf.WorkBucket = %s "
+            "  AND mf.StorageRootId = %s "
+            "  AND split_part(mf.RelativePath, '/', 1) = %s",
+            (Bucket.BucketName, Identity.StorageRootId, Identity.RelativePath),
+        )
+        Total = len(Rows)
+        Inserted = 0
+        AlreadyQueued = 0
+        from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+        Svc = QueueManagementBusinessService()
+        for Row in Rows:
+            MediaFileId = int(Row['id'])
+            R = Svc.AddJobToQueue(MediaFileId=MediaFileId, ProcessingMode=Bucket.ProcessingMode, ForceAdd=True)
+            if R.get('AlreadyQueued'):
+                AlreadyQueued += 1
+            elif R.get('Success') and not R.get('Skipped'):
+                Inserted += 1
+            else:
+                AlreadyQueued += 1
         LoggingService.LogInfo(
-            f"Admit series: {Identity.ToCompositeKey()} bucket={Bucket.BucketName} inserted={Result.Inserted} already={Result.AlreadyQueued}",
+            f"Admit series: {Identity.ToCompositeKey()} bucket={Bucket.BucketName} inserted={Inserted} already={AlreadyQueued}",
             "QueueAdmissionAppService",
             "AdmitSeries",
         )
-        return Result
+        return AdmissionResult(Inserted=Inserted, AlreadyQueued=AlreadyQueued, Total=Total)

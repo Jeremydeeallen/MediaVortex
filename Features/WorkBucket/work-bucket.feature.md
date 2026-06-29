@@ -41,7 +41,7 @@ C6. Filters: multi-select drive + free-text series search. Pagination: 25 rows p
 | S3 | Controller -> SeriesProfileService | `WorkBucketController.set_series_profile` | `(SeriesIdentity, RawProfileName: str)` | Raises `InvalidProfileError` on bad input; otherwise returns `FilesAffected: int` | `Tests/Contract/TestSeriesProfileService.py` |
 | S4 | SeriesProfileService -> SeriesProfileRepository | `SeriesProfileService.SetProfile` | UPSERT (StorageRootId, RelativePath, AssignedProfile) | Row present on subsequent `GetProfile` | `Tests/Contract/TestSeriesProfileRepository.py` |
 | S5 | SeriesProfileService -> MediaFiles | `SeriesProfileService.SetProfile` | `UPDATE MediaFiles SET AssignedProfile = ? WHERE ... AND TranscodedByMediaVortex IS NOT TRUE` | `MediaFiles.AssignedProfile` reflects choice for untranscoded files only | `Tests/Contract/TestSeriesProfileService.py::test_set_profile_updates_only_untranscoded_files` |
-| S6 | QueueAdmissionRepository -> TranscodeQueue | `QueueAdmissionRepository.AdmitSeries` | bulk INSERT with `NOT EXISTS` Pending guard | No duplicate Pending row per MediaFileId | `Tests/Contract/TestQueueAdmissionRepository.py::test_admit_series_idempotent` |
+| S6 | QueueAdmissionAppService -> QueueManagementBusinessService -> TranscodeQueue | `QueueAdmissionAppService.AdmitSeries` delegates per-file to `QueueManagementBusinessService.AddJobToQueue` | INSERT via `SaveTranscodeQueueItem`; dedup via `MediaFileId + Status='Pending'` lookup | No duplicate Pending row per MediaFileId; AudioPolicyJson populated at insert time | `Tests/Contract/TestQueueAdmissionAppService.py::test_admit_series_returns_admission_result` |
 | S7 | BackfillProfileAssignments -> SeriesProfiles | `Scripts/SQLScripts/BackfillProfileAssignments.py` | reads sp.AssignedProfile, writes MediaFiles.AssignedProfile | New files in an existing series get the sticky profile | manual smoke: insert a MediaFiles row with the right show folder, run backfill, observe AssignedProfile populated |
 
 ## Status
@@ -55,7 +55,7 @@ C6. Filters: multi-select drive + free-text series search. Pagination: 25 rows p
 - `Features/WorkBucket/Repositories/SeriesQueryRepository.py` -- grouped paged query
 - `Features/WorkBucket/Repositories/FilesInSeriesRepository.py` -- expanded file list
 - `Features/WorkBucket/Repositories/SeriesProfileRepository.py` -- SeriesProfiles CRUD
-- `Features/WorkBucket/Repositories/QueueAdmissionRepository.py` -- TranscodeQueue inserts
+- `Features/TranscodeQueue/QueueManagementBusinessService.py` -- canonical queue admission entry point (AddJobToQueue)
 - `Features/WorkBucket/Services/SeriesProfileService.py` -- validate + persist + propagate
 - `Features/WorkBucket/Services/QueueAdmissionAppService.py` -- queue orchestration
 - `Templates/WorkBucket.html` -- grouped UI

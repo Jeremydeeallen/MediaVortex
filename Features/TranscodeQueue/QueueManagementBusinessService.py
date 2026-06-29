@@ -56,10 +56,7 @@ def _ResolveStorageRootIdForDrivePrefixFn(DrivePrefix: str) -> Optional[int]:
 class QueueManagementBusinessService:
     """Handles transcoding queue operations and population logic."""
 
-    # Resolution rank used by the compliance cascade for "is this a downscale?".
-    # Codec/container/audio acceptability and the savings threshold moved to
-    # normalized DB tables (CodecCompatibility, QueueAdmissionConfig) -- see
-    # marginal-savings-gate.feature.md.
+    # see marginal-savings-gate.feature.md -- resolution rank for downscale check; savings threshold + codec acceptability in DB tables.
     RESOLUTION_RANK = {'480p': 0, '720p': 1, '1080p': 2, '2160p': 3}
 
     # directive: transcode-worker-unification | # see profiles.C24
@@ -1965,8 +1962,11 @@ class QueueManagementBusinessService:
         return self.RecomputeForFiles(MediaFileIds)
 
     # directive: path-schema-migration | # see path.S8
-    def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None, ForceAdd: bool = False) -> Dict[str, Any]:
-        """Add a specific media file to the transcoding queue; dedupe via typed-pair identity."""
+    def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None, ForceAdd: bool = False, ProcessingMode: str = None) -> Dict[str, Any]:
+        """Add a specific media file to the transcoding queue; dedupe via typed-pair identity. ProcessingMode overrides default 'Transcode'; non-Transcode modes skip profile/savings/VMAF gates."""
+        # directive: transcode-worker-unification | # see work-bucket.C4, work-bucket.C5
+        EffectiveMode = ProcessingMode or 'Transcode'
+        IsTranscodeMode = (EffectiveMode == 'Transcode')
         try:
             LoggingService.LogFunctionEntry("AddJobToQueue", "QueueManagementBusinessService", MediaFileId, Priority)
 
@@ -1977,12 +1977,15 @@ class QueueManagementBusinessService:
                 LoggingService.LogError(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
 
-            # Check if already in queue by typed-pair identity
-            existingQueueItems = self.Repository.GetAllTranscodeQueueItems()
-            if any(item.StorageRootId == mediaFile.StorageRootId and item.RelativePath == mediaFile.RelativePath for item in existingQueueItems):
-                errorMsg = f"File {mediaFile.FileName} is already in the transcoding queue"
-                LoggingService.LogWarning(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
-                return {"Success": False, "ErrorMessage": errorMsg}
+            # Targeted per-MediaFileId dedup; returns AlreadyQueued=True with existing row ID so callers can be idempotent.
+            ExistingRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT Id FROM TranscodeQueue WHERE MediaFileId = %s AND Status = 'Pending' LIMIT 1",
+                (int(MediaFileId),),
+            )
+            if ExistingRows:
+                ExistingId = int(ExistingRows[0]['id'])
+                LoggingService.LogWarning(f"File {mediaFile.FileName} already pending (row {ExistingId})", "QueueManagementBusinessService", "AddJobToQueue")
+                return {"Success": True, "AlreadyQueued": True, "ItemId": ExistingId, "FileName": mediaFile.FileName}
 
             # Handle profile assignment if ProfileId is provided (user selected a profile)
             if ProfileId is not None:
@@ -1999,79 +2002,57 @@ class QueueManagementBusinessService:
                 LoggingService.LogInfo(f"Updated media file {mediaFile.FileName} to use profile {profile.ProfileName}", "QueueManagementBusinessService", "AddJobToQueue")
 
             # Check if file has a profile (either existing or just assigned)
-            if not mediaFile.AssignedProfile or mediaFile.AssignedProfile.strip() == '':
+            if IsTranscodeMode and (not mediaFile.AssignedProfile or mediaFile.AssignedProfile.strip() == ''):
                 errorMsg = f"File {mediaFile.FileName} has no profile assigned. Please select a profile first."
                 LoggingService.LogWarning(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
 
-            # Marginal-savings gate (replaces ShouldSkipDueToResolution). The
-            # ForceAdd path bypasses the gate entirely so an operator can pin
-            # a same-resolution compression-only re-encode through the manual
-            # /AddJob endpoint regardless of estimated savings.
-            if not ForceAdd:
-                shouldSkip, skipReason = self.EvaluateQueueAdmissionForProfile(mediaFile, mediaFile.AssignedProfile)
-                if shouldSkip:
-                    errorMsg = f"Cannot add {mediaFile.FileName} to queue: {skipReason}"
-                    LoggingService.LogInfo(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
-                    return {"Success": False, "ErrorMessage": errorMsg, "CanOverride": True}
-            else:
-                LoggingService.LogWarning(f"Force adding {mediaFile.FileName} to queue (admission gate overridden)", "QueueManagementBusinessService", "AddJobToQueue")
+            if IsTranscodeMode:
+                # Marginal-savings gate; ForceAdd bypasses so operator can pin same-resolution re-encodes.
+                if not ForceAdd:
+                    shouldSkip, skipReason = self.EvaluateQueueAdmissionForProfile(mediaFile, mediaFile.AssignedProfile)
+                    if shouldSkip:
+                        errorMsg = f"Cannot add {mediaFile.FileName} to queue: {skipReason}"
+                        LoggingService.LogInfo(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
+                        return {"Success": False, "ErrorMessage": errorMsg, "CanOverride": True}
+                else:
+                    LoggingService.LogWarning(f"Force adding {mediaFile.FileName} to queue (admission gate overridden)", "QueueManagementBusinessService", "AddJobToQueue")
 
-            # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C10
-            from Features.QualityTesting.Disposition.RetranscodeDecider import RetranscodeDecider
-            from Features.TranscodeJob.Adjustments.AdjustmentRegistry import AdjustmentRegistry
-            retranscodeDecider = RetranscodeDecider(AttemptRepository=self.DatabaseManager)
-            adjustmentRegistry = AdjustmentRegistry()
-            shouldRetranscode, previousAttempt = retranscodeDecider.Decide(mediaFile.Id)
+                # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C10
+                from Features.QualityTesting.Disposition.RetranscodeDecider import RetranscodeDecider
+                from Features.TranscodeJob.Adjustments.AdjustmentRegistry import AdjustmentRegistry
+                retranscodeDecider = RetranscodeDecider(AttemptRepository=self.DatabaseManager)
+                adjustmentRegistry = AdjustmentRegistry()
+                shouldRetranscode, previousAttempt = retranscodeDecider.Decide(mediaFile.Id)
 
-            if not shouldRetranscode:
-                # VMAF >= 80, quality already acceptable - skip retranscode
-                skipMsg = f"Quality already acceptable (VMAF >= 80), skipping retranscode for {mediaFile.FileName}"
-                LoggingService.LogInfo(skipMsg, "QueueManagementBusinessService", "AddJobToQueue")
-                return {
-                    "Success": True,
-                    "Skipped": True,
-                    "Message": "Quality already acceptable, skipping retranscode",
-                    "FileName": mediaFile.FileName
-                }
+                if not shouldRetranscode:
+                    skipMsg = f"Quality already acceptable (VMAF >= 80), skipping retranscode for {mediaFile.FileName}"
+                    LoggingService.LogInfo(skipMsg, "QueueManagementBusinessService", "AddJobToQueue")
+                    return {"Success": True, "Skipped": True, "Message": "Quality already acceptable, skipping retranscode", "FileName": mediaFile.FileName}
 
-            # Check if CRF adjustment would fail
-            if previousAttempt:
-                previousCRF = previousAttempt.get('Quality')
-                vmafScore = previousAttempt.get('VMAF')
+                if previousAttempt:
+                    previousCRF = previousAttempt.get('Quality')
+                    vmafScore = previousAttempt.get('VMAF')
 
-                if previousCRF and vmafScore is not None and vmafScore < 80:
-                    # Calculate what the adjusted CRF would be
-                    adjustedCRF = adjustmentRegistry.Get('cq').Calculate(
-                        PreviousAttempt={'Quality': previousCRF, 'VMAF': vmafScore},
-                        ProfileSettings={}, GateThreshold=80.0,
-                    ).CRF
+                    if previousCRF and vmafScore is not None and vmafScore < 80:
+                        adjustedCRF = adjustmentRegistry.Get('cq').Calculate(
+                            PreviousAttempt={'Quality': previousCRF, 'VMAF': vmafScore},
+                            ProfileSettings={}, GateThreshold=80.0,
+                        ).CRF
 
-                    # Validate adjustment
-                    minCRF = 15
-                    if adjustedCRF < minCRF:
-                        # Cannot adjust further - log critical error
-                        errorMsg = f"Cannot adjust CRF further for {mediaFile.FileName}: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Adjusted CRF={adjustedCRF} would be below minimum {minCRF}"
+                        minCRF = 15
+                        if adjustedCRF < minCRF:
+                            errorMsg = f"Cannot adjust CRF further for {mediaFile.FileName}: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Adjusted CRF={adjustedCRF} would be below minimum {minCRF}"
+                            directory = ntpath.dirname(mediaFile.FilePath)  # canonical display
+                            problemFileId = self.Repository.AddProblemFile(
+                                mediaFile.FilePath,
+                                "CRF_Adjustment_Failed",
+                                f"CRF adjustment failed: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Calculated CRF={adjustedCRF} is below minimum threshold (15). Quality threshold unreachable."
+                            )
+                            if problemFileId:
+                                LoggingService.LogError(f"Logged CRF adjustment failure to ProblemFiles (ID: {problemFileId}): {errorMsg}", "QueueManagementBusinessService", "AddJobToQueue")
+                            return {"Success": False, "ErrorMessage": errorMsg}
 
-                        # Extract directory for ProblemFiles
-                        directory = ntpath.dirname(mediaFile.FilePath)  # canonical display
-
-                        # Log to ProblemFiles
-                        problemFileId = self.Repository.AddProblemFile(
-                            mediaFile.FilePath,
-                            "CRF_Adjustment_Failed",
-                            f"CRF adjustment failed: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Calculated CRF={adjustedCRF} is below minimum threshold (15). Quality threshold unreachable."
-                        )
-
-                        if problemFileId:
-                            LoggingService.LogError(f"Logged CRF adjustment failure to ProblemFiles (ID: {problemFileId}): {errorMsg}",
-                                                  "QueueManagementBusinessService", "AddJobToQueue")
-
-                        return {"Success": False, "ErrorMessage": errorMsg}
-
-            # Create queue item -- use the profile-aware path when the MediaFile
-            # has a profile assigned so CalculatePriority can use the deterministic
-            # profile-target formula. Falls back to the Simple path otherwise.
             if mediaFile.AssignedProfile:
                 queueItem = self.CreateQueueItemFromMediaFileWithProfile(mediaFile)
             else:
@@ -2081,23 +2062,27 @@ class QueueManagementBusinessService:
                 LoggingService.LogError(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
 
-            # Override priority if specified (operator can set 1-200 explicitly,
-            # including the 195-200 manual-override window). Otherwise add a small
-            # bonus to acknowledge that the user explicitly clicked + (this file is
-            # more important to them than a generic queue-populate batch).
+            # Stamp the bucket ProcessingMode (Remux, AudioFix, etc.) onto the row. # directive: transcode-worker-unification
+            queueItem.ProcessingMode = EffectiveMode
+
+            # Priority: operator-explicit overrides; otherwise +15 manual bonus capped at 194 (195-200 reserved; see queue-priority.feature.md).
             if Priority is not None:
                 queueItem.Priority = Priority
             else:
-                # +15 bonus, capped at 194 so auto-assignment never leaks into the
-                # manual-override window (195-200 is reserved per queue-priority.feature.md).
                 queueItem.Priority = min(194, queueItem.Priority + 15)
-                LoggingService.LogInfo(
-                    f"Added manual addition bonus (+15, capped at 194) to priority for {mediaFile.FileName}. New priority: {queueItem.Priority}",
-                    "QueueManagementBusinessService", "AddJobToQueue"
-                )
+                LoggingService.LogInfo(f"Added manual addition bonus (+15, capped at 194) to priority for {mediaFile.FileName}. New priority: {queueItem.Priority}", "QueueManagementBusinessService", "AddJobToQueue")
 
             # Save to database
             itemId = self.Repository.SaveTranscodeQueueItem(queueItem)
+
+            # T29: fire AudioPolicyAdmissionGate synchronously at insert time. # directive: transcode-worker-unification | # see work-bucket.C4, work-bucket.C5
+            try:
+                from Features.AudioNormalization.AudioPolicyAdmissionGate import AudioPolicyAdmissionGate
+                Gate = AudioPolicyAdmissionGate()
+                Decision = Gate.AdmitOrDefer(mediaFile, IntendedProcessingMode=EffectiveMode)
+                Gate.SnapshotPolicyOnQueueRow(MediaFileId, Decision.PolicyJson)
+            except Exception as AudioEx:
+                LoggingService.LogWarning(f"Audio policy snapshot failed for MediaFileId={MediaFileId}: {AudioEx}", "QueueManagementBusinessService", "AddJobToQueue")
 
             result = {
                 "Success": True,
