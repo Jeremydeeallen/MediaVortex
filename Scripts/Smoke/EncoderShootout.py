@@ -107,18 +107,16 @@ def BuildEncodeCmd(Source, Variant, OutputPath, OutputScale):
         VideoArgs = [
             "-c:v", "av1_qsv",
             "-preset", str(Variant.get("preset", "veryslow")),
-        ] + RateArgs + [
-            "-extbrc", str(Variant.get("extbrc", 1)),
-            "-look_ahead", str(Variant.get("look_ahead", 1)),
-            "-look_ahead_depth", str(Variant.get("look_ahead_depth", 100)),
-            "-b_strategy", str(Variant.get("b_strategy", 1)),
-            "-adaptive_i", str(Variant.get("adaptive_i", 1)),
-            "-adaptive_b", str(Variant.get("adaptive_b", 1)),
-            "-bf", str(Variant.get("bf", 7)),
-            "-async_depth", str(Variant.get("async_depth", 4)),
-            "-low_power", str(Variant.get("low_power", 0)),
-            "-pix_fmt", Variant.get("pix_fmt", "p010le"),
-        ]
+        ] + RateArgs
+        # BUG-0071: extbrc/look_ahead/b_strategy crash on Arc B580 libmfx-gen 2.16. Only emit when variant explicitly opts in.
+        for ArgName, VKey in [("-extbrc", "extbrc"), ("-look_ahead", "look_ahead"),
+                              ("-look_ahead_depth", "look_ahead_depth"), ("-b_strategy", "b_strategy"),
+                              ("-adaptive_i", "adaptive_i"), ("-adaptive_b", "adaptive_b"),
+                              ("-bf", "bf"), ("-async_depth", "async_depth"),
+                              ("-low_power", "low_power")]:
+            if VKey in Variant and Variant[VKey] is not None:
+                VideoArgs += [ArgName, str(Variant[VKey])]
+        VideoArgs += ["-pix_fmt", Variant.get("pix_fmt", "p010le")]
         if Variant.get("gop"):
             VideoArgs += ["-g", str(Variant["gop"])]
         if Variant.get("tile_cols"):
