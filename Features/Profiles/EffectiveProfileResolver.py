@@ -19,6 +19,11 @@ class EffectiveProfileResolver:
         # directive: resolution-types | # see resolution-types.C6
         self.TierRegistry = TierRegistry or ResolutionTierRegistry()
 
+    # directive: transcode-worker-unification | # see profiles.C23
+    def ResolveProfileName(self, Mf: MediaFileModel) -> Optional[str]:
+        # Name-only cascade entry -- delegates to _ResolveAssignedProfileName; no EffectiveProfile struct needed.
+        return self._ResolveAssignedProfileName(Mf)
+
     # directive: compliance-symmetry
     def Resolve(self, Mf: MediaFileModel) -> Optional[EffectiveProfile]:
         ProfileName = self._ResolveAssignedProfileName(Mf)

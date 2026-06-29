@@ -628,10 +628,10 @@ def QueueTestRun():
             return jsonify({'Success': False, 'ErrorMessage': f'TestVariantSet {VariantSetId} not found'}), 400
         SetName = SetRows[0].get('Name')
 
-        DefaultProfileRows = Db.ExecuteQuery(
-            "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'DefaultProfileName'"
-        )
-        DefaultProfileName = DefaultProfileRows[0].get('SettingValue') if DefaultProfileRows else None
+        # directive: transcode-worker-unification | # see profiles.C23
+        from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
+        from Core.Models.MediaFileModel import MediaFileModel
+        Resolver = EffectiveProfileResolver()
 
         Accepted = []
         Rejected = []
@@ -661,9 +661,10 @@ def QueueTestRun():
                 Rejected.append({'FilePath': Path_, 'Reason': 'MediaFiles row not found (file may not be scanned)'})
                 continue
             Mf = MfRows[0]
-            Profile = Mf.get('AssignedProfile') or DefaultProfileName
+            # directive: transcode-worker-unification | # see profiles.C23
+            Profile = Resolver.ResolveProfileName(MediaFileModel(AssignedProfile=Mf.get('AssignedProfile')))
             if not Profile:
-                Rejected.append({'FilePath': Path_, 'Reason': 'No AssignedProfile on MediaFile and no DefaultProfileName set'})
+                Rejected.append({'FilePath': Path_, 'Reason': 'No resolvable profile for this MediaFile (no assigned profile and no system default)'})
                 continue
             MfStorageRootId = Mf.get('StorageRootId')
             MfRelativePath = Mf.get('RelativePath') or ''
