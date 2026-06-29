@@ -70,13 +70,20 @@ function RenderTile(W, StaleSec, DivergenceSec) {
   const Mount = W.MountValidationError
     ? `<div class="small text-danger mt-1">Mount error: ${W.MountValidationError}</div>`
     : '';
-  const Caps = [
-    W.TranscodeEnabled ? 'T' : '',
-    W.RemuxEnabled ? 'R' : '',
-    W.QualityTestEnabled ? 'Q' : '',
-    W.ScanEnabled ? 'S' : '',
-    W.NvencCapable ? 'NVENC' : '',
-  ].filter(Boolean).join(' ');
+  const NvencBadge = W.NvencCapable ? '<span class="badge bg-info text-dark ms-1">NVENC</span>' : '';
+  const CapToggle = (Cap, Label, Enabled) => `
+    <label class="form-check form-check-inline form-check-reverse mb-0" style="font-size:0.78em;">
+      <input type="checkbox" class="form-check-input cap-toggle" data-worker="${Name}" data-cap="${Cap}" ${Enabled ? 'checked' : ''}>
+      <span class="form-check-label">${Label}</span>
+    </label>`;
+  const CapsRow = `
+    <div class="d-flex flex-wrap align-items-center gap-1 mt-2">
+      ${CapToggle('TranscodeEnabled', 'Transcode', W.TranscodeEnabled)}
+      ${CapToggle('RemuxEnabled', 'Remux', W.RemuxEnabled)}
+      ${CapToggle('QualityTestEnabled', 'Quality', W.QualityTestEnabled)}
+      ${CapToggle('ScanEnabled', 'Scan', W.ScanEnabled)}
+      ${NvencBadge}
+    </div>`;
   const Ver = (W.Version || 'unknown').toString().substring(0, 8);
   const Diverge = W.IntentDiverges === true;
   const Hung = W.IsHung === true;
@@ -96,8 +103,8 @@ function RenderTile(W, StaleSec, DivergenceSec) {
             <strong>${Dot} ${Name}</strong>
             <div class="d-flex gap-1">${Intent}${Truth}</div>
           </div>
-          <div class="small text-muted">${W.Platform || '?'} | ${Caps || 'no capabilities'}</div>
-          <div class="small text-muted">v${Ver}</div>
+          <div class="small text-muted">${W.Platform || '?'} | v${Ver}</div>
+          ${CapsRow}
           ${AttemptLine}
           ${Mount}
           <div class="btn-group btn-group-sm mt-2 w-100" role="group">
@@ -117,6 +124,14 @@ function PostStatus(WorkerName, Status) {
   });
 }
 
+function PostCapability(WorkerName, Cap, Enabled) {
+  return fetch(`/api/TeamStatus/Workers/${encodeURIComponent(WorkerName)}/Capability`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({[Cap]: Enabled})
+  });
+}
+
 function Load() {
   fetch('/api/Admin/Workers/Snapshot')
     .then(r => r.json())
@@ -133,6 +148,13 @@ function Load() {
           const W = btn.getAttribute('data-worker');
           const S = btn.getAttribute('data-action');
           PostStatus(W, S).then(Load);
+        });
+      });
+      Grid.querySelectorAll('input.cap-toggle').forEach(cb => {
+        cb.addEventListener('change', () => {
+          const W = cb.getAttribute('data-worker');
+          const C = cb.getAttribute('data-cap');
+          PostCapability(W, C, cb.checked).then(Load);
         });
       });
     })
