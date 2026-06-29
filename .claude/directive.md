@@ -1,87 +1,116 @@
 # Current Directive
 
 **Set:** 2026-06-28
-**Status:** Active -- phase: DELIVERING
-**Slug:** work-transcode-unified
-**Replaces:** `directives/closed/2026-06-27-worker-runtime-state.md` (closed Success 2026-06-27)
-**Spec:** `Docs/superpowers/specs/2026-06-28-work-transcode-unified-design.md`
-**Plan:** `Docs/superpowers/plans/2026-06-28-work-transcode-unified.md`
+**Status:** Active -- phase: NEEDS_STANDARDS_REVIEW
+**Slug:** transcode-worker-unification
+**Replaces:** in-flight pivot on top of `work-transcode-unified` (at DELIVERING; awaiting operator close)
+**Interrupts:** work-transcode-unified
 
 ## Outcome
 
-The three bucket landing pages -- `/Work/Transcode`, `/Work/Remux`, `/Work/Audio` -- become the single operator surface for browsing files that need work, choosing a profile per series, and admitting work to the queue. They render an always-grouped view by series (first path segment under each StorageRoot), with size-sorted series rows that expand inline to size-sorted file rows. The Media tab (`/ShowSettings`) and every artifact behind it is deleted; the per-series profile data it owned survives as a renamed internal storage table (`SeriesProfiles`) consumed exclusively by the WorkBucket vertical. SQL objects that become unused are renamed with a `_DEPRECATED_2026_06_28` marker first; the drop migration is authored in this directive but only run after operator-approved soak.
+The compliance-correction pipeline runs ONE orchestration path regardless of `ProcessingMode`. The three current divergent processors (`TranscodeJobProcessor`, `RemuxJobProcessor`, `SubtitleFixJobProcessor`) collapse into a single `JobProcessor` Template Method with mode-specific Strategy hooks (`BuildCommand`, `HandleResult`). The post-encode audio-policy attestation step runs for every mode that produces ffmpeg output, populating `TranscodeAttempts.AudioPolicyResolved` and `AudioTracksEmittedJson` so the `ComplianceGate` has data to validate against. The parallel `Features/TranscodeQueue/remux.flow.md` collapses into `transcode.flow.md` — one durable flow doc for compliance correction with mode-specific stage variants documented as strategy hooks, not as a separate pipeline.
+
+## Call-Graph Audit
+
+Per `.claude/rules/call-graph-audit.md`. All four signals were FIRING at work-transcode-unified's DELIVERING claim; this directive's outcome closes them.
+
+### Call graph traced (compliance correction lifecycle)
+
+1. Operator clicks Queue All on `/Work/<bucket>` (UI: WorkBucket vertical, delivered by sibling directive `work-transcode-unified`).
+2. `WorkBucketController.queue_series` → `QueueAdmissionAppService.AdmitSeries` → `QueueAdmissionRepository.AdmitSeries` → bulk INSERT TranscodeQueue Pending.
+3. Worker polls `DatabaseManager.ClaimNextPendingTranscodeJob` → returns one TranscodeQueue row.
+4. `WorkerLoopService` dispatches → `ProcessTranscodeQueueService.ProcessJob` (line 348-358).
+5. **CURRENT — orchestration mode-branch (Signal 2 fires):** `if Job.IsRemux: RemuxJobProcessor` else if SubtitleFix: `SubtitleFixJobProcessor` else: `TranscodeJobProcessor`.
+6. Per-mode FFmpeg execution via mode-specific orchestration body.
+7. Per-mode result handling (`HandleRemuxResult` vs `HandleTranscodeResult` vs `HandleSubtitleFixResult`).
+8. **CURRENT — attestation universally missing (Signal 3 fires):** `PostEncodeMeasurementService.Measure` is NEVER called from any processor. `AudioPolicyResolved IS NULL` for all 36000+ TranscodeAttempts.
+9. `FileReplacementBusinessService.ProcessFileReplacement` (mode-aware but at least called from a single library, not duplicated).
+10. `ComplianceGate.Decide` (in `Features/QualityTesting/Disposition/`) → blocks replacement when attestation is empty → falls back to `Disposition='NoReplace', DispositionReason='ComplianceGateFailed'`.
+11. Compliance recompute.
+
+### Signal findings
+
+**Signal 1 — Multiple flow docs for one conceptual operation: FIRES.**
+- `transcode.flow.md` (ST1-ST9) — describes the full compliance-correction pipeline.
+- `Features/TranscodeQueue/remux.flow.md` (ST1-ST13) — a parallel flow doc for the same conceptual operation, with its OWN stage IDs and seam table.
+- Resolution: collapse `remux.flow.md` content into `transcode.flow.md` as a "Strategy variants" section under ST6 (TRANSCODE stage). `remux.flow.md` file gets deleted; cross-references rewritten.
+
+**Signal 2 — Mode-branching at orchestration level: FIRES.**
+- `ProcessTranscodeQueueService.ProcessJob` line ~351: `if Job.IsRemux: ProcessRemuxJob` and similar branches to `ProcessSubtitleFix`, `ProcessTranscodeJob`.
+- Three processor classes carry duplicated orchestration: ActiveJob create → mark Running → load MediaFile → setup file preparation → BuildCommand (mode-specific, Strategy) → ExecuteFFmpeg → verify output → HandleResult (mode-specific, Strategy) → cleanup.
+- Resolution: one `JobProcessor` base class owns steps 1-3, 5, 7, 9 (Template Method shape — identical across modes). Mode-specific `BuildCommand` and `HandleResult` become Strategy methods on per-mode subclasses. Existing `JobProcessor.py` at `Features/TranscodeJob/Worker/` is already the abstract base — needs to be extended with the Template Method logic.
+
+**Signal 3 — Shared output columns sparsely populated: FIRES.**
+- `TranscodeAttempts.AudioPolicyResolved IS NOT NULL` count: **0** across the entire DB.
+- `TranscodeAttempts.AudioTracksEmittedJson != '[]'::jsonb` count: **0** across the entire DB.
+- `PostEncodeMeasurementService.Measure` exists at `Features/AudioNormalization/Services/PostEncodeMeasurementService.py` but is not called from any processor. ComplianceGate then fails-closed on Remux output (no attestation = "cannot validate, refuse replace") and fails-open on Transcode output (other compliance signals carry it).
+- Resolution: the unified `JobProcessor.Process` calls `PostEncodeMeasurementService.Measure` AFTER a successful ffmpeg run, BEFORE `HandleResult`. Populates both columns for every mode.
+
+**Signal 4 — "Out of Scope" ambiguity: managed.**
+- This directive's OOS list (below) categorizes every item explicitly. Default category: (a) preserve behavior + collapse duplication.
 
 ## Acceptance Criteria
 
-Each criterion passes the five litmus tests in `.claude/rules/feature-criteria.md` (rename / outsider / rewrite / negation / stability). Verbatim from `Docs/superpowers/specs/2026-06-28-work-transcode-unified-design.md`.
+Each criterion passes the five litmus tests in `.claude/rules/feature-criteria.md` (rename / outsider / rewrite / negation / stability).
 
-**Operator-observable (the bar the user set):**
+**Orchestration unification:**
 
-1. C1. `/Work/Transcode`, `/Work/Remux`, and `/Work/Audio` each render only files where `MediaFiles.WorkBucket` matches the URL. No file from another bucket appears anywhere on the page.
-2. C2. Rows are grouped by series (`StorageRootId` + first segment of `RelativePath`). The default sort is series total GB descending. Series rows expand inline to show the files belonging to that series, sorted by size descending.
-3. C3. Each series row has a profile control. Changing it applies the selected profile to every untranscoded file in the series (`MediaFiles.AssignedProfile`) AND persists the choice in `SeriesProfiles` so files scanned later inherit it via the existing `BackfillProfileAssignments` cascade.
-4. C4. A "Queue all" action on a series row inserts a `TranscodeQueue` Pending row for every file in the series with no existing Pending row. Re-clicking it is idempotent.
-5. C5. A per-row Queue button on an expanded file row inserts a single Pending row, idempotently.
-6. C6. The page exposes drive filter, free-text series-name search, sort selection, and 25-per-page server-side pagination.
+1. **C1.** `Features/TranscodeJob/Worker/` contains exactly ONE concrete processor class hierarchy: an abstract `JobProcessor` base implementing `Process(Job) -> JobResult` as a Template Method, plus per-mode Strategy subclasses (`TranscodeJobStrategy`, `RemuxJobStrategy`, `AudioFixJobStrategy`, `SubtitleFixJobStrategy`) that ONLY implement `BuildCommand(Job, MediaFile, Context) -> CommandSpec` and `HandleResult(Job, Result, AttemptId, ActiveJobId, OutputPath) -> None`. The classes `TranscodeJobProcessor`, `RemuxJobProcessor`, `SubtitleFixJobProcessor` no longer exist. Spot-checkable: `grep -rn "class.*JobProcessor.*JobProcessor" Features/TranscodeJob/Worker/` returns one base + N strategy subclasses, never N processor classes.
 
-**Cleanup (deletion is observable):**
+2. **C2.** `ProcessTranscodeQueueService.ProcessJob` contains ZERO mode-branching at the orchestration layer. The function body picks the Strategy via a lookup (e.g. `STRATEGIES[Job.ProcessingMode]`) and calls `JobProcessor(strategy).Process(Job)`. Spot-checkable: `grep -nE "if .+\.IsRemux|if .+\.ProcessingMode\b" Features/TranscodeJob/ProcessTranscodeQueueService.py` returns zero hits.
 
-7. C7. `GET /ShowSettings` returns 404. The top-nav "Media" entry is gone from `Templates/Base.html`.
-8. C8. `Features/ShowSettings/` does not exist (no controller, repository, models, feature docs, flow docs, `__init__.py`, or template).
-9. C9. `Templates/ShowSettings.html` does not exist.
-10. C10. Every `/api/ShowSettings/*` endpoint returns 404 (Flask routes deleted).
-11. C11. The audit test `Tests/Contract/TestNoShowSettingsReferences.py` passes -- no surviving Python or template references to the deleted vertical (rename migration and archived directive docs are the only exemptions).
+3. **C3.** Identical orchestration steps run for every mode: ActiveJob create → mark Running → load MediaFile → file preparation → BuildCommand (strategy) → ExecuteFFmpeg → verify output → PostEncodeMeasurement → HandleResult (strategy) → cleanup. Verifiable by running a Transcode job, a Remux job, and an AudioFix job through the same processor and confirming each writes the same set of columns to `TranscodeAttempts` (mode-discriminator excepted).
 
-**Data-integrity (deletion does not lose operator config):**
+**Post-encode attestation wired:**
 
-12. C12. Every row in the historical `ShowSettings` table (post-rename: `ShowSettings_DEPRECATED_2026_06_28`) has a corresponding row in `SeriesProfiles` after the migration runs. Re-running the migration is a no-op.
-13. C13. `Scripts/SQLScripts/BackfillProfileAssignments.py` continues to function -- it reads `SeriesProfiles` and writes `MediaFiles.AssignedProfile`.
-14. C14. `EffectiveProfileResolver` is unchanged in behavior -- it reads `MediaFiles.AssignedProfile` (already populated by the cascade) and falls back through SystemSettings.DefaultProfileName -> `_PreMigrationDefault`.
+4. **C4.** `JobProcessor.Process` invokes `PostEncodeMeasurementService.Measure(OutputPath, TranscodeAttemptId)` after every successful ffmpeg run, BEFORE `HandleResult`. Verifiable: after this directive lands, run one job of each mode and assert `SELECT AudioPolicyResolved, AudioTracksEmittedJson FROM TranscodeAttempts WHERE Id IN (<three new ids>)` returns non-NULL / non-`'[]'` for all three.
 
-**Rename-then-drop hygiene (operator policy):**
+5. **C5.** `MediaFileId=621412` (Trolls World Tour Remux that failed under work-transcode-unified) re-runs successfully end-to-end through the unified processor: claim → ffmpeg → measurement → ComplianceGate evaluates against populated attestation → `Disposition='Replace'` → `FileReplaced=True` → `MediaFiles.IsCompliant=True` → `WorkBucket IS NULL`. The 1-of-9 smoke failure becomes 9-of-9.
 
-15. C15. After the index-deprecation step, `pg_tables` contains `ShowSettings_DEPRECATED_2026_06_28` (not `ShowSettings`) and `pg_indexes` contains `idx_mediafiles_smartpopulate_DEPRECATED_2026_06_28` (not the original name). The drop migration script `DropDeprecatedShowSettingsArtifacts.py` is committed to `Scripts/SQLScripts/` but not executed by the directive.
-16. C16. The audit test additionally scans for surviving production references to the deprecated names -- code MUST NOT read `ShowSettings_DEPRECATED_*` either. The marker exists for ad-hoc operator visibility only.
+**Flow doc unification:**
+
+6. **C6.** `Features/TranscodeQueue/remux.flow.md` does not exist. Its content has been absorbed into `transcode.flow.md` as a "Strategy variants" sub-section under ST6 (TRANSCODE), with per-mode notes on what `BuildCommand` and `HandleResult` differ on. All cross-references to `remux.flow.md` in feature docs / code anchors are rewritten to point at `transcode.flow.md` with the relevant ST anchor.
+
+7. **C7.** `transcode.flow.md` `## Seams` table documents the single ST6 transition for compliance correction regardless of mode; mode-specific differences are documented as Strategy-method seams within the same ST6 section, not as parallel pipeline transitions.
+
+**Backward compatibility + safety:**
+
+8. **C8.** No regression in successful Transcode-mode behavior. `SELECT count(*) FROM TranscodeAttempts WHERE Success=TRUE AND Disposition='Replace' AND ProfileName != 'Remux' AND ProfileName != 'AudioFix' AND AttemptDate > '<directive-start>'` keeps growing post-deploy.
+
+9. **C9.** No regression in idempotent claim semantics. Claim invariants (`db-is-authority.md`) preserved; `TestClaimAuthority` test suite stays green.
+
+10. **C10.** Audit test `TestNoShowSettingsReferences` stays green (no resurrection of deleted vertical references during this refactor).
 
 ## Out of Scope
 
-- Dropping the deprecated table/index (separate post-soak operator step via `DropDeprecatedShowSettingsArtifacts.py`).
-- `EffectiveProfileResolver` rewrite (it stays — reads `MediaFiles.AssignedProfile`, unchanged behavior).
-- `WorkerCapabilityPredicate` / claim invariants (unchanged).
-- `TranscodeQueue` table shape (same columns, same status machine).
-- `MediaFiles.WorkBucket` generated-column logic (unchanged).
-- Bug, FailureAccounting, ContentClassifier, Profiles verticals as functional units (only their pointers to deleted ShowSettings docs change).
-- SubtitleFix bucket page (not in the user's "all three" scope today).
-- New sort modes beyond Total GB desc / FileCount desc / Series name asc.
+Categorized per call-graph-audit Signal 4. Default category: (a) behavior preserved AND duplication collapsed in-flight. Items below are explicitly category (b).
+
+- **`FileReplacementBusinessService` rewrite** — category (b). Already a single library (not duplicated per mode); used by all paths. Not touched here. Internal duplication WITHIN that file is OOS.
+- **`ComplianceGate` logic changes** — category (b). The gate's evaluation rules stay unchanged; this directive only ensures the gate has populated attestation columns to evaluate against. C5 verifies the gate flips its verdict (from `NoReplace` to `Replace`) on 621412 strictly because the attestation now exists, not because the gate's rules changed.
+- **TranscodeQueue schema** — category (b). Unchanged.
+- **WorkerCapabilityPredicate / claim queries** — category (b). Unchanged; verified via C9.
+- **`/Work/<bucket>` UI** — category (b). Already delivered by sibling directive `work-transcode-unified` (at DELIVERING). This directive ships under it; UI does not change.
 
 ## Constraints
 
-- DDD layering: Domain VOs, SRP-focused repositories, thin services, thin Flask controller. Each file owns one reason to change.
-- Rename-then-drop pattern for every unused SQL object. No same-commit DROP.
-- All migrations idempotent.
-- Contract tests against live dev DB (no DB mocks per `feedback_no_production_value_changes_for_testing.md`).
-- One logical change per commit (helper deletion + every caller in the SAME commit even when cross-file -- per `feedback_one_logical_change_per_commit.md`).
-- Push to origin/main after every commit on main (`feedback_push_after_commit.md`).
-- Live smoke per step (`feedback_smoke_test_per_step_not_at_end.md`): each step's exit gate is a live deploy + browser/curl confirmation, not just unit-test green.
-- R12: no multi-line docstrings/comments in new code.
-- R14: when sweeping cross-vertical doc references, delete sections rather than annotate.
+- Template Method pattern: ONE base class owns the orchestration; Strategies override per-mode hooks. Liskov substitutable.
+- Behavior-preserving refactor: NO new criteria observable in the operator UI. The system does the same thing; just with shared code.
+- Push every commit on main.
+- Live smoke per phase exit: each major step (collapse processors / wire measurement / consolidate flow doc) ships with a worker-restart + one job of each mode verified end-to-end.
+- R12: no multi-line docstrings.
+- R14: cross-vertical doc sweep deletes obsolete references, no annotation lines.
 
 ## Escalation Defaults
 
-- Tradeoff between code complexity and operator visibility -> operator visibility.
-- Tradeoff between scope discipline and "while I'm here" cleanup -> scope discipline.
-- Risk tolerance: low. Destructive operations (DROP) require explicit operator authority post-soak.
-- When a criterion is ambiguous against real-world data, pick one interpretation, proceed, surface the choice in the Verification report.
+- Tradeoff between behavior-preserving rigor and architectural cleanliness → cleanliness, provided behavior is preserved (verified by C5 + C8).
+- Risk tolerance: low. The compliance correction pipeline is operator-critical; regressions here block production work. Stage changes through one bucket at a time during smoke.
+- Worker restart authority: operator owns it (memory: `feedback_user_starts_webservice.md`); but on I9 dev workstation I have full restart authority (memory: same file, "I control WebService and WorkerService on I9").
 
 ## Engineering Calls Already Made
 
-- The directive serves the broader operator goal: unify the "browse what needs work + sort by size + change profile + group by series" workflows currently split between `/Work/<bucket>` and `/ShowSettings`. The /ShowSettings page is deleted entirely; its functional value moves to `/Work/<bucket>`.
-- Per-series profile assignment uses a sticky storage row (renamed `SeriesProfiles` table) so new files scanned into an existing series inherit via the existing `BackfillProfileAssignments` cascade.
-- Always-grouped view (no flat-list toggle). Series rows expand inline. One mental model.
-- Default sort: series total GB desc. Secondary: files-within-expanded-series by size desc.
-- All three /Work/<bucket> pages get the same redesign in one pass (the user explicitly said "all three").
-- DDD layering choice: Domain VOs in `Features/WorkBucket/Domain/`, SRP repositories in `Repositories/`, application services in `Services/`, thin controller. Each file ~one class, one reason to change.
-- Rename-then-drop for every unused SQL object. Operator policy stated 2026-06-28.
+- Template Method (not Strategy-via-composition-only): `JobProcessor` is already an abstract base class. The cleanest pattern is to fill in its `Process` with the orchestration body and have subclasses override hooks. Strategy-via-composition would mean a separate Strategy interface + a single Processor concrete that holds a Strategy — more indirection for no clearer separation.
+- `PostEncodeMeasurementService.Measure` is called BEFORE `HandleResult` (not inside it). HandleResult is mode-specific; Measure is universal. Order matters because HandleResult's disposition decision needs the attestation populated.
+- Flow doc consolidation direction: `remux.flow.md` → `transcode.flow.md` (collapse the smaller into the larger). Reverse direction (rename transcode → compliance-correction.flow.md) is a bigger doc churn for no semantic gain.
 
 ## Status
 
@@ -89,147 +118,66 @@ Phase advances by editing the `**Status:**` header above. PreToolUse hook reads 
 
 Phase machine: `NEEDS_STANDARDS_REVIEW -> NEEDS_PLAN -> NEEDS_DOC_PREREAD -> IMPLEMENTING -> VERIFYING -> DELIVERING`.
 
-This directive starts at `NEEDS_DOC_PREREAD` because the standards review (spec) and plan are both complete and committed. The first IMPLEMENTING task triggers the hook's colocated-doc-preread requirement for `Features/WorkBucket/work-bucket.feature.md` -- the implementer will Read it before its first Edit.
+### Progress
+
+- [ ] T1 — Define `JobProcessor` Template Method (`Process` body owns the orchestration)
+- [ ] T2 — Extract `TranscodeJobStrategy` from `TranscodeJobProcessor` (BuildCommand + HandleResult only)
+- [ ] T3 — Extract `RemuxJobStrategy` from `RemuxJobProcessor`
+- [ ] T4 — Extract `AudioFixJobStrategy` (currently embedded in RemuxJobProcessor; pull apart)
+- [ ] T5 — Extract `SubtitleFixJobStrategy` from `SubtitleFixJobProcessor`
+- [ ] T6 — Wire `PostEncodeMeasurementService.Measure` into `JobProcessor.Process` after successful ffmpeg, before HandleResult
+- [ ] T7 — Replace `ProcessJob`'s `if Job.IsRemux: ...` dispatch with `STRATEGIES[Job.ProcessingMode]` lookup → `JobProcessor(strategy).Process(Job)`
+- [ ] T8 — Delete `TranscodeJobProcessor.py`, `RemuxJobProcessor.py`, `SubtitleFixJobProcessor.py` (now redundant)
+- [ ] T9 — Collapse `remux.flow.md` into `transcode.flow.md` (Strategy variants sub-section under ST6); delete `remux.flow.md`; sweep cross-references
+- [ ] T10 — Re-queue MediaFileId=621412 through the unified path; verify C5 end-to-end
+- [ ] T11 — Run each mode (Transcode, Remux, AudioFix, SubtitleFix) once through the unified processor; verify `AudioPolicyResolved` + `AudioTracksEmittedJson` populated for each; verify Disposition matches pre-refactor expectations
+- [ ] T12 — Verify full Tests/Contract/ suite green (no new failures vs. work-transcode-unified close baseline)
+- [ ] T13 — Advance to DELIVERING; populate Promotions + Verification; operator close
 
 ### Files
 
 ```
-Features/WorkBucket/Domain/__init__.py                         -- CREATE: domain package
-Features/WorkBucket/Domain/SeriesIdentity.py                   -- CREATE: (StorageRootId, RelativePath) VO
-Features/WorkBucket/Domain/BucketKey.py                        -- CREATE: bucket name + URL + ProcessingMode + labels VO
-Features/WorkBucket/Domain/ProfileName.py                      -- CREATE: validated profile VO
-Features/WorkBucket/Domain/SortSpec.py                         -- CREATE: ORDER BY enum
-Features/WorkBucket/Domain/FilterSpec.py                       -- CREATE: drive + search filter VO
-Features/WorkBucket/Domain/AdmissionResult.py                  -- CREATE: queue admission result VO
-Features/WorkBucket/Domain/Series.py                           -- CREATE: aggregate
-Features/WorkBucket/Domain/MediaFileRow.py                     -- CREATE: file-row entity
-Features/WorkBucket/Repositories/__init__.py                   -- CREATE
-Features/WorkBucket/Repositories/SeriesQueryRepository.py      -- CREATE: grouped paged query
-Features/WorkBucket/Repositories/FilesInSeriesRepository.py    -- CREATE: expand-series query
-Features/WorkBucket/Repositories/SeriesProfileRepository.py    -- CREATE: SeriesProfiles CRUD
-Features/WorkBucket/Repositories/QueueAdmissionRepository.py   -- CREATE: TranscodeQueue inserts
-Features/WorkBucket/Services/__init__.py                       -- CREATE
-Features/WorkBucket/Services/SeriesProfileService.py           -- CREATE: validate + persist + propagate
-Features/WorkBucket/Services/QueueAdmissionAppService.py       -- CREATE: queue orchestration
-Features/WorkBucket/WorkBucketController.py                    -- REWRITE: thin HTTP only
-Features/WorkBucket/WorkBucketRepository.py                    -- DELETE: methods split into new repos
-Features/WorkBucket/work-bucket.feature.md                     -- REWRITE: new contract
-Features/WorkBucket/work-bucket.flow.md                        -- CREATE: ST1-ST6 + seams
-Templates/WorkBucket.html                                      -- REWRITE: grouped UI
-Templates/ShowSettings.html                                    -- DELETE
-Templates/Base.html                                            -- EDIT: remove Media nav link
-WebService/Main.py                                             -- EDIT: remove /ShowSettings route + ShowSettings blueprint
-Features/ShowSettings/                                         -- DELETE: entire directory
-Scripts/SQLScripts/CreateSeriesProfilesAndDeprecateShowSettings.py  -- CREATE: atomic migration
-Scripts/SQLScripts/DeprecateSmartPopulateIndex.py              -- CREATE: index rename migration
-Scripts/SQLScripts/DropDeprecatedShowSettingsArtifacts.py      -- CREATE: drop migration (NOT RUN)
-Scripts/SQLScripts/BackfillProfileAssignments.py               -- EDIT: ShowSettings -> SeriesProfiles
-Tests/Contract/TestSeriesIdentityVO.py                         -- CREATE
-Tests/Contract/TestBucketKeyVO.py                              -- CREATE
-Tests/Contract/TestProfileNameVO.py                            -- CREATE
-Tests/Contract/TestSeriesQueryRepository.py                    -- CREATE
-Tests/Contract/TestFilesInSeriesRepository.py                  -- CREATE
-Tests/Contract/TestSeriesProfileRepository.py                  -- CREATE
-Tests/Contract/TestQueueAdmissionRepository.py                 -- CREATE
-Tests/Contract/TestSeriesProfileService.py                     -- CREATE
-Tests/Contract/TestQueueAdmissionAppService.py                 -- CREATE
-Tests/Contract/TestWorkBucketController.py                     -- CREATE (replaces TestWorkBucketRepository.py)
-Tests/Contract/TestNoShowSettingsReferences.py                 -- CREATE: audit grep
-Tests/Contract/TestWorkBucketRepository.py                     -- DELETE: superseded by new tests
-transcode.flow.md                                              -- EDIT: sweep ShowSettings references
-Features/TranscodeQueue/transcode-vs-remux-routing.feature.md  -- EDIT: sweep ShowSettings references
-Features/TranscodeQueue/TranscodeQueue.feature.md              -- EDIT: sweep ShowSettings references
-Features/TranscodeQueue/next-batch-per-drive.feature.md        -- EDIT: sweep ShowSettings references
-Features/TranscodeQueue/media-tabs.flow.md                     -- EDIT: sweep ShowSettings references
-Features/TranscodeQueue/media-tabs-and-loudness.feature.md     -- EDIT: sweep ShowSettings references
-Features/TranscodeQueue/priority-materialization.feature.md    -- EDIT: sweep ShowSettings references
-Features/TranscodeQueue/queue-priority.feature.md              -- EDIT: sweep ShowSettings references
-Features/TranscodeQueue/QueueManagementBusinessService.py      -- EDIT: sweep ShowSettings references
-Features/FailureAccounting/failure-accounting.feature.md       -- EDIT: sweep ShowSettings references
-Features/FailureAccounting/failure-accounting.flow.md          -- EDIT: sweep ShowSettings references
-Features/ContentClassifier/content-classifier.feature.md       -- EDIT: sweep ShowSettings references
-Features/ContentClassifier/content-classifier.flow.md          -- EDIT: sweep ShowSettings references
-Features/FileReplacement/remuxed-flag.feature.md               -- EDIT: sweep ShowSettings references
-Features/SharedTable/shared-table-renderer.feature.md          -- EDIT: sweep ShowSettings references
-Core/Querying/paged-query.feature.md                           -- EDIT: sweep ShowSettings references
+Features/TranscodeJob/Worker/JobProcessor.py                 -- EDIT: fill in Process Template Method
+Features/TranscodeJob/Worker/Strategies/__init__.py          -- CREATE: strategy package
+Features/TranscodeJob/Worker/Strategies/TranscodeJobStrategy.py    -- CREATE: BuildCommand + HandleResult
+Features/TranscodeJob/Worker/Strategies/RemuxJobStrategy.py        -- CREATE
+Features/TranscodeJob/Worker/Strategies/AudioFixJobStrategy.py     -- CREATE
+Features/TranscodeJob/Worker/Strategies/SubtitleFixJobStrategy.py  -- CREATE
+Features/TranscodeJob/Worker/TranscodeJobProcessor.py        -- DELETE
+Features/TranscodeJob/Worker/RemuxJobProcessor.py            -- DELETE
+Features/TranscodeJob/Worker/SubtitleFixJobProcessor.py      -- DELETE
+Features/TranscodeJob/ProcessTranscodeQueueService.py        -- EDIT: ProcessJob dispatch uses strategy lookup
+Features/AudioNormalization/Services/PostEncodeMeasurementService.py -- EDIT (small): expose Measure as the unified entry point
+transcode.flow.md                                            -- EDIT: absorb remux.flow.md ST1-ST13 as ST6 Strategy variants
+Features/TranscodeQueue/remux.flow.md                        -- DELETE
+Features/TranscodeJob/TranscodeJob.feature.md                -- EDIT: document the Template Method + Strategy structure
+Features/TranscodeJob/Worker/worker-loop.feature.md          -- EDIT: rewrite ProcessJob dispatch description
+Tests/Contract/TestUnifiedJobProcessor.py                    -- CREATE: integration test exercising all four modes through the unified processor
+Tests/Contract/TestPostEncodeMeasurementWiring.py            -- CREATE: contract test that every mode populates AudioPolicyResolved
 ```
-
-### Progress
-
-24 tasks per `Docs/superpowers/plans/2026-06-28-work-transcode-unified.md`. Status mirrors the TaskList.
-
-- [ ] T1 SeriesIdentity VO
-- [ ] T2 BucketKey VO
-- [x] T3 ProfileName VO
-- [ ] T4 SortSpec / FilterSpec / AdmissionResult VOs
-- [ ] T5 Series + MediaFileRow aggregates
-- [ ] T6 SeriesQueryRepository
-- [x] T7 FilesInSeriesRepository
-- [x] T8 SeriesProfileRepository
-- [ ] T9 QueueAdmissionRepository
-- [ ] T10 SeriesProfileService
-- [ ] T11 QueueAdmissionAppService
-- [x] T12 Migration: create SeriesProfiles + deprecate ShowSettings
-- [ ] T13 Update BackfillProfileAssignments.py
-- [x] T14 Rewrite WorkBucketController + delete old repo
-- [ ] T15 Rewrite Templates/WorkBucket.html
-- [x] T16 Sweep cross-vertical ShowSettings references
-- [ ] T17 Delete Features/ShowSettings/ directory
-- [ ] T18 Delete template + route + blueprint + nav link
-- [ ] T19 Deprecate idx_mediafiles_smartpopulate
-- [ ] T20 Audit test: no ShowSettings references
-- [ ] T21 Author DropDeprecatedShowSettingsArtifacts.py (NOT RUN)
-- [ ] T22 Rewrite work-bucket.feature.md
-- [ ] T23 New work-bucket.flow.md
-- [ ] T24 Verify criteria + advance directive to DELIVERING
 
 ### Promotions
 
-Required when phase advances to DELIVERING. Populated incrementally per `feedback_promotions_grow_incrementally.md`: every step's commit that lands durable content into a feature/flow doc adds its row in the SAME commit.
+Required when phase advances to DELIVERING. Populated incrementally per `feedback_promotions_grow_incrementally.md`.
 
 | Source artifact | Target file | Commit |
 |---|---|---|
-| DB table `ShowSettings` → `SeriesProfiles` (rename-then-drop pattern) | `Scripts/SQLScripts/CreateSeriesProfilesAndDeprecateShowSettings.py` | a68c10a |
-| WorkBucket vertical contract rewrite | `Features/WorkBucket/work-bucket.feature.md` | efeda4f |
-| WorkBucket pipeline flow doc | `Features/WorkBucket/work-bucket.flow.md` | 5a12e2b |
 
 ### Verification
 
-Required when phase advances to VERIFYING. One entry per acceptance criterion. Concrete evidence (command output, SQL result, file path), per `Docs/superpowers/plans/2026-06-28-work-transcode-unified.md` Task 24.
+Required when phase advances to VERIFYING. One entry per acceptance criterion.
 
-- **C1:** `SELECT DISTINCT WorkBucket FROM MediaFiles WHERE WorkBucket='Transcode'` → single row `Transcode`. Pass.
-- **C2:** `GET /api/Work/Transcode?page=1&pageSize=10` → Total: 364, TotalGB DESC monotonic [2432.4, 200.7, 149.8, 53.8, 44.6]. Pass.
-- **C3:** Series rows include `AssignedProfile` key; `POST /api/Work/<bucket>/Series/<sid>/Profile` route registered in `WorkBucketController._RegisterRoutes`. Pass.
-- **C4:** `POST /api/Work/<bucket>/Series/<sid>/Queue` route registered; `TestQueueAdmissionRepository::test_admit_series_idempotent` PASSED. Pass.
-- **C5:** `POST /api/Work/<bucket>/Queue/<id>` route registered; `TestQueueAdmissionRepository::test_admit_one_is_idempotent` PASSED. Pass.
-- **C6:** `GET /api/Work/Transcode?page=1&pageSize=25&search=two` → Total: 3 (filtered). Pagination: 364 total / 25 per page = 15 pages. All three /Work/* pages return 200. Pass.
-- **C7:** `GET /ShowSettings` → 404. `Templates/Base.html` contains no `ShowSettings` reference. Pass.
-- **C8:** `os.path.exists('Features/ShowSettings')` → False. Pass.
-- **C9:** `os.path.exists('Templates/ShowSettings.html')` → False. Pass.
-- **C10:** `/api/ShowSettings/Shows` 404, `/api/ShowSettings/SmartPopulate` 404, `/api/ShowSettings/NextTranscodeBatch` 404. Pass.
-- **C11:** `TestNoShowSettingsReferences::test_no_references_in_production_tree` PASSED. Pass.
-- **C12:** `SELECT COUNT(*) FROM SeriesProfiles` = 6; `SELECT COUNT(*) FROM ShowSettings_DEPRECATED_2026_06_28` = 6. Row counts match; migration is idempotent (re-run exits early with "already applied" message). Pass.
-- **C13:** `py Scripts/SQLScripts/BackfillProfileAssignments.py` → processed=220, no exception. Pass.
-- **C14:** `TestProfileNameVO` 4/4 PASSED. `EffectiveProfileResolver` unchanged — reads `MediaFiles.AssignedProfile`, falls back via SystemSettings → `_PreMigrationDefault`. Pass.
-- **C15:** `pg_tables` contains `showsettings_deprecated_2026_06_28` and `showsettings_legacy_showfolder_deprecated_2026_06_28`; no bare `showsettings`. `pg_indexes` contains `idx_mediafiles_smartpopulate_deprecated_2026_06_28`. `DropDeprecatedShowSettingsArtifacts.py` committed (not run). Pre-existing 0-row legacy table (showfolder schema) renamed to `showsettings_legacy_showfolder_DEPRECATED_2026_06_28` and added to drop migration. Pass.
-- **C16:** `TestNoShowSettingsReferences` PASSED — audit scans for `ShowSettings_DEPRECATED_` needle in production tree (Features, Templates, WebService, Core, Services, Repositories, Models); 0 violations. Pass.
-
-### R18 overrides
-
-- Features/TranscodeQueue/next-batch-per-drive.feature.md -- T16 ShowSettings sweep; full read required to locate all deletion targets
-- Features/TranscodeQueue/transcode-vs-remux-routing.feature.md -- T16 ShowSettings sweep; full read required
-- Features/TranscodeQueue/media-tabs-and-loudness.feature.md -- T16 ShowSettings sweep; full read required
-- Features/TranscodeQueue/priority-materialization.feature.md -- T16 ShowSettings sweep; full read required
-- Features/SharedTable/shared-table-renderer.feature.md -- T16 ShowSettings sweep; full read required
-- Core/Querying/paged-query.feature.md -- T16 ShowSettings sweep; full read required
-- Core/Path/path.feature.md -- T16 ShowSettings sweep; full read required
-- Features/FailureAccounting/failure-accounting.feature.md -- T16 ShowSettings sweep; full read required
-- Features/TranscodeQueue/media-tabs.flow.md -- T16 ShowSettings sweep; full read required
+- **C1:** TBD
+- **C2:** TBD
+- **C3:** TBD
+- **C4:** TBD
+- **C5:** TBD (621412 re-run)
+- **C6:** TBD
+- **C7:** TBD
+- **C8:** TBD
+- **C9:** TBD
+- **C10:** TBD
 
 ### Decisions Made
 
-Engineering calls made under ambiguity during execution. Empty at start; populated as tasks execute.
-
-- **T3 — ProfileName VO initially duplicated `EffectiveProfileResolver._IsFinalizedActive` SQL.** Operator's "100% clean DDD+SOLID" bar refused the "leave it / centralize later" decision and required full closure within this directive. **Closed under G6.** Added `ProfileRepository.GetProfileState(name) -> Optional[{Draft, Active}]` + `ProfileRepository.IsFinalizedActive(name) -> bool` as the single SQL site for Draft/Active introspection across the codebase. `ProfileName.__init__` now calls `GetProfileState` (preserves granular "does not exist / draft / inactive" error messages). `EffectiveProfileResolver._IsFinalizedActive` now delegates to `ProfileRepository().IsFinalizedActive`. The spec's OOS clause (C14: EffectiveProfileResolver behavior unchanged) is honored — only the internal SQL site re-homed; observable behavior is identical. Verified by 4/4 TestProfileNameVO + 2/2 TestSeriesProfileService pass.
-
-- **GUI smoke caught dropdown gap (post-DELIVERING-claim).** The T15 template called `/api/Profiles/Active` and `/api/StorageRoots`, but neither endpoint existed. Profile dropdown and drive filter rendered empty, breaking C3 (change profile) from the UI even though the route handler underneath worked. I had claimed DELIVERING-ready after HTTP-level smoke; operator ran 9-media GUI smoke through ui-verify which caught the empty dropdown. Added the two missing endpoints to `WorkBucketController.py` as colocated read-only helpers. Re-verified live: `/api/Profiles/Active` returns 27 profiles, `/api/StorageRoots` returns 3 roots, browser-driven assertions confirm 25 series rows + 3 drive options + 28 options per series-row dropdown (1 placeholder + 27 profiles). Lesson: HTTP-level "the page returns 200" is not browser-level "the page works." For UI features, the gate is operator-visible behavior in a real browser, full stop.
+Engineering calls made under ambiguity. Empty at start; populated as tasks execute.
