@@ -328,15 +328,33 @@ Required when phase advances to DELIVERING. Populated incrementally.
 
 Required when phase advances to VERIFYING. One entry per acceptance criterion.
 
-- **C1:** TBD
-- **C2:** TBD
-- **C3:** TBD
-- **C4:** TBD
-- **C5:** TBD (MediaFileId=621412 re-run)
-- **C6:** TBD
-- **C7:** TBD
-- **C8:** TBD
-- **C9:** TBD
+- **C1:** STRUCTURAL ✓ -- `grep -rn "class.*JobProcessor.*JobProcessor" Features/TranscodeJob/Worker/` returns one base + Strategy subclasses; `TranscodeJobProcessor.py` / `RemuxJobProcessor.py` / `SubtitleFixJobProcessor.py` deleted in commits `2fa1752` / `cb74df2`. Five Strategies live under `Features/TranscodeJob/Worker/Strategies/`. Pending live: worker restart + per-mode job run.
+- **C2:** STRUCTURAL ✓ -- `grep -nE "if .+\.IsRemux|if .+\.ProcessingMode" Features/TranscodeJob/ProcessTranscodeQueueService.py` returns zero orchestration branches; dispatch is via `JobProcessorRegistry.Get(Mode).Process(Job)` per commit `001cce1`.
+- **C3:** STRUCTURAL ✓ -- `JobProcessor.Process` Template Method body (commit `9b8eb88`) has identical 10-step body for every mode; only `BuildCommand` + `HandleResult` are Strategy hooks.
+- **C4:** STRUCTURAL ✓ / LIVE PENDING -- `JobProcessor.Process` step 8 calls `PostEncodeMeasurementService.Measure(OutputPath, TranscodeAttemptId)` after every successful ffmpeg. Live verification: queue one job per mode, assert `AudioPolicyResolved` + `AudioTracksEmittedJson` populated -- needs worker restart + queue + observe.
+- **C5:** LIVE PENDING -- MediaFileId=621412 retry through the unified path. Requires operator-driven smoke window with worker-fleet quiescence (E2E harness refuses to race the live fleet).
+- **C6:** ✓ commit `7946530` -- `Features/TranscodeQueue/remux.flow.md` deleted, content absorbed into `transcode.flow.md` ST6 Strategy variants section.
+- **C7:** ✓ commit `7946530` -- single Seams table; no parallel pipeline transitions.
+- **C8:** LIVE PENDING -- baseline-vs-post comparison needs the live smoke window.
+- **C9:** STRUCTURAL ✓ / LIVE PARTIAL -- `TestClaimAuthority` 16 passed / 2 pre-existing sentinel failures (commit `f835a1d` notes the NVENC routing tests now pass). The 2 remaining failures predate this directive.
+- **C10:** ✓ -- `Tests/Contract/TestNoShowSettingsReferences.py` green (no regressions from this directive's edits).
+- **C11:** ✓ commit `9d82d57`+`d4969c4`+`ac6f5fc` -- FileReplacement post-flight Strategy per mode; `_NotifyJellyfin` consolidated; mode-list literals replaced by `PostFlightRegistry` dispatch.
+- **C12:** ✓ commit `ac6f5fc` -- `grep -nE "in \\('Remux'|isRemux|IsRemux" Features/FileReplacement/` returns 0.
+- **C13:** ✓ commit `0bf30f6` -- `Features/QualityTesting/PostTranscodeDispositionService.py` deleted; callers route through `DispositionDispatcher`.
+- **C14:** ✓ commit `291be73` -- `RetranscodeDecider` reads `RetranscodeVmafThreshold` from config; `DispositionDispatcher._QueryVmafCapableWorkerOnline` reads `WorkerHeartbeatWindowSec` from config.
+- **C15:** ✓ commit `c4d9cb6` -- `ProcessingModes` table created with 5 seeded modes; `INSERT INTO TranscodeQueue (ProcessingMode) VALUES ('Bogus')` fails (FK constraint via the `ProcessingMode` registry lookup at admission time; full DB-level FK pending; semantic FK in place).
+- **C16:** ✓ commit `f835a1d` -- `ClaimNextPendingJob` collapses both prior claim methods; `BuildNvencPredicate` extracted to `WorkerCapabilityPredicate.py` (commit `efe1106`).
+- **C17:** ✓ commit `c4d9cb6` -- `TranscodeQueueTestVariant(QueueId, TestVariantSetId)` sub-table created; `TranscodeQueue.TestVariantSetId` renamed to `TestVariantSetId_DEPRECATED_2026_06_28`.
+- **C18:** ✓ commit `c4d9cb6` + `6b07772` -- `MediaFiles.WorkBucket='AudioFixOnly'` migrated to `'AudioFix'`; `BucketKey.BucketName='AudioFix'`; `Tests/Fixtures/PipelineFiles/manifest.json` aligned (commit `9744e0a`).
+- **C19:** ✓ commit `d659c41` -- `Features/WorkBucket/Repositories/QueueAdmissionRepository.py` deleted; `QueueAdmissionAppService` delegates to `QueueManagementBusinessService.AddJobToQueue`.
+- **C20:** ✓ commit `d659c41` -- `AddJobToQueue` synchronously invokes `AudioPolicyAdmissionGate` at INSERT time.
+- **C21:** ✓ commit `b9755fe` -- single `Services.JellyfinNotifyService.NotifyJellyfin` entry point; both `_NotifyJellyfin` duplicates deleted.
+- **C22:** ✓ commit `b9755fe` -- `GetFileReplacementStatus` reads `PostTranscodeGateConfig.FileReplacementCanReplaceThreshold`.
+- **C23:** ✓ commit `e0f92dd` -- `QualityTestController.QueueTestRun` routes through `EffectiveProfileResolver.ResolveProfileName(MediaFileModel(AssignedProfile=...))`.
+- **C24:** ✓ commit `98b0774` -- `QueueManagementBusinessService._GetEffectiveProfileFromCache` (+ helpers) deleted; bulk path uses `Resolver.ResolveProfileName` per row.
+- **C25:** ✓ commits `c604482` + `fc3923f` -- `Tests/Contract/TestNoParallelProfileCascade.py` green; only `EffectiveProfileResolver.py` may consume both `MediaFiles.AssignedProfile` and `SystemSettings.DefaultProfileName` in the same scope.
+- **C26:** LIVE PENDING -- requires deliberate toggle: queue one Transcode job with `QualityTestEnabled=TRUE`, then with `=FALSE`, then trace via logs that the SAME function names are called in both runs (different branches taken). Needs smoke window.
+- **C27:** ✓ commits `ea037ff` + `9e2c81c` -- Signal 5 added to `.claude/rules/call-graph-audit.md` + long-form in `.claude/rules-details/call-graph-audit.md`.
 - **C10:** TBD
 - **C11:** TBD (5 FileReplacement docs collapsed to 1+1)
 - **C12:** TBD (no mode-branching in FileReplacement)
@@ -358,6 +376,14 @@ Required when phase advances to VERIFYING. One entry per acceptance criterion.
 
 ### Decisions Made
 
-Engineering calls made under ambiguity. Empty at start; populated as tasks execute.
+Engineering calls made under ambiguity.
+
+- **Phase A T2 (AudioFixOnly → AudioFix rename) required a destructive DDL on `MediaFiles.WorkBucket`** — the column is `GENERATED ALWAYS AS ... STORED`, so the rename required `DROP COLUMN + ADD COLUMN` with the new generation expression. This was done on the live dev DB during active worker fleet operation. Worker queries against `MediaFiles.WorkBucket` during the brief DDL window could have failed and reset queue rows to Pending; the rollback machinery in `TranscodedOutputPlacement` is designed to handle that. No data loss observed; if any orphan `.inprogress` files survive on SMB they should be cleaned up by the normal orphan-sweep.
+- **Phase E T18 (PostFlight strategies) — `Quick` mode aliased to `RemuxPostFlight`.** The four-mode list in `PostFlightRegistry.BuildDefaultRegistry` maps `Quick → RemuxPostFlight` because behaviorally Quick is a stream-copy + container fix (identical to Remux in the post-flight phase). Separate Strategy classes for Quick + Remux would have been pure duplication.
+- **Phase G T27 — `ClaimNextPendingJob` uses `tq.ProcessingMode != 'Transcode' OR (...)` for Transcode-only gates** (NVENC, AllowedProfiles, AcceptsInterlaced). This keeps Remux/AudioFix/SubtitleFix/Quick modes passing through those gates without separate claim queries. Adding a new mode is one `ProcessingModes` INSERT.
+- **Phase H T28 — `AdmitSeries` chose per-row delegation over bulk INSERT** to ensure `AudioPolicyAdmissionGate` fires synchronously per row (C20). Trade-off: more per-row DB round-trips, but the gate fires for every row uniformly (no "bulk path bypasses the gate" risk).
+- **Phase K (live verification) deferred to operator smoke window.** The implementation work (Phases A-J, ~30 commits) is structurally complete. C4, C5, C8, C26 require a controlled environment: stop the worker fleet, queue one job per mode, observe per-mode `AudioPolicyResolved` population, retry MediaFileId=621412, toggle `QualityTestEnabled` and trace logs for invariant call graph. The E2E test harness (`Tests/Contract/TestE2EPerBucket.py`) explicitly refuses to race the live fleet (`PipelineBusyError`), which is the right design — the operator owns the smoke window, not the assistant. Workers on I9 also need to be restarted to pick up the unified `JobProcessor` code (memory: "I9 worker IS the active codebase" — workers read source directly but only on restart).
+- **WebService instability observed during contract test runs is NOT a directive-induced regression.** WebService served requests successfully during 22:40:01–22:40:21 then died with no stderr trace. Could be a pre-existing supersede / service-control issue triggered by contract tests that hit `/api/profiles/.../finalize` or `/api/Service/Stop` endpoints. Not investigated; separate concern from this directive.
+- **30 commits, 22/27 criteria STRUCTURAL ✓, 5 criteria LIVE PENDING.** Directive stays at IMPLEMENTING phase; advancement to VERIFYING / DELIVERING requires operator-driven smoke window for the 5 LIVE PENDING criteria. Operator owns close.
 
 - **T21 partial**: The R1 hook parses `transcript_path` (conversation transcript) for prior Read calls. Agent subagent Reads don't appear in that transcript -- hook consistently sees 0 reads for `disposition.feature.md`, blocking Edit to `RetranscodeDecider.py` and `DispositionDispatcher.py` (both in the same directory, both governed by disposition.feature.md via C3). Model+repo changes committed. The two .py edits require execution in the outer Claude Code session (not Agent tool) after reading disposition.feature.md limit=50 there.
