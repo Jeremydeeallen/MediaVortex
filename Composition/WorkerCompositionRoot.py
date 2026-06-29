@@ -2,22 +2,26 @@ from typing import Optional
 from Core.Logging.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
 from Features.TranscodeJob.ProcessTranscodeQueueService import ProcessTranscodeQueueService
+from Features.TranscodeJob.Worker.JobProcessor import JobProcessor
 from Features.TranscodeJob.Worker.JobProcessorRegistry import JobProcessorRegistry
-from Features.TranscodeJob.Worker.TranscodeJobProcessor import TranscodeJobProcessor
-from Features.TranscodeJob.Worker.RemuxJobProcessor import RemuxJobProcessor
-from Features.TranscodeJob.Worker.SubtitleFixJobProcessor import SubtitleFixJobProcessor
 from Features.TranscodeJob.Worker.VariantJobProcessor import VariantJobProcessor
+from Features.TranscodeJob.Worker.Strategies.JobProcessorRegistry import JobProcessorRegistry as StrategyRegistry
+from Features.TranscodeJob.Worker.Strategies.TranscodeJobStrategy import TranscodeJobStrategy
+from Features.TranscodeJob.Worker.Strategies.RemuxJobStrategy import RemuxJobStrategy
+from Features.TranscodeJob.Worker.Strategies.AudioFixJobStrategy import AudioFixJobStrategy
+from Features.TranscodeJob.Worker.Strategies.QuickJobStrategy import QuickJobStrategy
+from Features.TranscodeJob.Worker.Strategies.SubtitleFixJobStrategy import SubtitleFixJobStrategy
 from Features.TranscodeJob.Worker.WorkerLoopService import WorkerLoopService
 from Features.TranscodeJob.Worker.StuckJobMonitor import StuckJobMonitor
 
 
-# directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C15
+# directive: transcode-worker-unification | # see worker-loop.C4
 class WorkerCompositionRoot:
     """Single composition root for the worker tier; the only class naming concrete dependency types."""
 
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C15
+    # directive: transcode-worker-unification | # see worker-loop.C4
     def __init__(self, WorkerName: str, WorkerConfig: Optional[dict] = None):
-        """Assemble the entire worker graph: queue service + processors + registry + loop + monitor."""
+        """Assemble the entire worker graph: queue service + strategy registry + unified processor + loop + monitor."""
         self.WorkerName = WorkerName
         self.WorkerConfig = WorkerConfig or {}
         self.DatabaseManager = DatabaseManager()
@@ -27,12 +31,19 @@ class WorkerCompositionRoot:
             WorkerName=self.WorkerName,
             WorkerConfig=self.WorkerConfig,
         )
+        # directive: transcode-worker-unification | # see worker-loop.C4
+        StratReg = StrategyRegistry(Db=self.DatabaseManager.DatabaseService)
+        StratReg.Register('Transcode', TranscodeJobStrategy)
+        StratReg.Register('Remux', RemuxJobStrategy)
+        StratReg.Register('AudioFix', AudioFixJobStrategy)
+        StratReg.Register('Quick', QuickJobStrategy)
+        StratReg.Register('SubtitleFix', SubtitleFixJobStrategy)
         self.JobProcessorRegistry = JobProcessorRegistry({
-            'Transcode': TranscodeJobProcessor(self.QueueService),
-            'Remux': RemuxJobProcessor(self.QueueService),
-            'Quick': RemuxJobProcessor(self.QueueService),
-            'AudioFix': RemuxJobProcessor(self.QueueService),
-            'SubtitleFix': SubtitleFixJobProcessor(self.QueueService),
+            'Transcode': JobProcessor(QueueService=self.QueueService, Registry=StratReg),
+            'Remux': JobProcessor(QueueService=self.QueueService, Registry=StratReg),
+            'Quick': JobProcessor(QueueService=self.QueueService, Registry=StratReg),
+            'AudioFix': JobProcessor(QueueService=self.QueueService, Registry=StratReg),
+            'SubtitleFix': JobProcessor(QueueService=self.QueueService, Registry=StratReg),
             'TestVariant': VariantJobProcessor(self.QueueService),
         })
         self.WorkerLoop = WorkerLoopService(
@@ -47,7 +58,7 @@ class WorkerCompositionRoot:
         )
         self.StuckJobMonitor = StuckJobMonitor(DatabaseManager=self.DatabaseManager, WorkerName=self.WorkerName)
 
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C15
+    # directive: transcode-worker-unification | # see worker-loop.C4
     def _LoadCapabilities(self) -> dict:
         """Read the Workers row for this WorkerName; returns capability flags + concurrency knobs."""
         try:
@@ -62,7 +73,7 @@ class WorkerCompositionRoot:
             LoggingService.LogException(f"_LoadCapabilities failed for {self.WorkerName}; defaulting to no capabilities", Ex, "WorkerCompositionRoot", "_LoadCapabilities")
             return {}
 
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C15
+    # directive: transcode-worker-unification | # see worker-loop.C4
     def Run(self):
         """Boot the worker tier: stuck-job sweep, then start the loop."""
         try:
@@ -71,7 +82,7 @@ class WorkerCompositionRoot:
             LoggingService.LogException("StuckJobMonitor pre-start sweep failed; continuing to Run", Ex, "WorkerCompositionRoot", "Run")
         return self.WorkerLoop.Run()
 
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C15
+    # directive: transcode-worker-unification | # see worker-loop.C4
     def Stop(self):
         """Signal the loop + monitor to stop."""
         try:

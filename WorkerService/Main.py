@@ -365,26 +365,31 @@ class WorkerServiceApp:
             return max(1, min(5, int(Legacy)))
         return Default
 
-    # directive: worker-loop-method-extraction | # see worker-loop.C5
+    # directive: transcode-worker-unification | # see worker-loop.C4
     def _StartTranscodeCapability(self):
-        """Initialize the transcode processing capability via WorkerLoopService + TranscodeJobProcessor strategy."""
+        """Initialize the transcode processing capability via WorkerLoopService + unified JobProcessor template."""
         if self.TranscodeService is not None:
             return
         try:
             from Features.TranscodeJob.Worker.WorkerLoopService import WorkerLoopService
             from Features.TranscodeJob.Worker.JobProcessorRegistry import JobProcessorRegistry
-            from Features.TranscodeJob.Worker.TranscodeJobProcessor import TranscodeJobProcessor
+            from Features.TranscodeJob.Worker.JobProcessor import JobProcessor
             from Features.TranscodeJob.Worker.VariantJobProcessor import VariantJobProcessor
-            from Features.TranscodeJob.Worker.SubtitleFixJobProcessor import SubtitleFixJobProcessor
+            from Features.TranscodeJob.Worker.Strategies.JobProcessorRegistry import JobProcessorRegistry as StrategyRegistry
+            from Features.TranscodeJob.Worker.Strategies.TranscodeJobStrategy import TranscodeJobStrategy
+            from Features.TranscodeJob.Worker.Strategies.SubtitleFixJobStrategy import SubtitleFixJobStrategy
             from Features.TranscodeJob.ProcessTranscodeQueueService import ProcessTranscodeQueueService
             QueueService = ProcessTranscodeQueueService(
                 DatabaseManagerInstance=self.DatabaseManager,
                 WorkerName=self.WorkerName,
                 WorkerConfig=self.WorkerConfig,
             )
+            StratReg = StrategyRegistry(Db=self.DatabaseManager.DatabaseService)
+            StratReg.Register('Transcode', TranscodeJobStrategy)
+            StratReg.Register('SubtitleFix', SubtitleFixJobStrategy)
             Registry = JobProcessorRegistry({
-                'Transcode': TranscodeJobProcessor(QueueService),
-                'SubtitleFix': SubtitleFixJobProcessor(QueueService),
+                'Transcode': JobProcessor(QueueService=QueueService, Registry=StratReg),
+                'SubtitleFix': JobProcessor(QueueService=QueueService, Registry=StratReg),
                 'TestVariant': VariantJobProcessor(QueueService),
             })
             MaxJobs = self.CurrentTranscodeConcurrency
@@ -459,25 +464,33 @@ class WorkerServiceApp:
         except Exception as e:
             LoggingService.LogException("Error stopping quality test capability", e, "WorkerService", "_StopQualityTestCapability")
 
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C16
+    # directive: transcode-worker-unification | # see worker-loop.C4
     def _StartRemuxCapability(self):
-        """Initialize the remux processing capability via WorkerLoopService (replaces ProcessRemuxQueueService)."""
+        """Initialize the remux processing capability via WorkerLoopService + unified JobProcessor template."""
         if self.RemuxService is not None:
             return
         try:
             from Features.TranscodeJob.Worker.WorkerLoopService import WorkerLoopService
             from Features.TranscodeJob.Worker.JobProcessorRegistry import JobProcessorRegistry
-            from Features.TranscodeJob.Worker.RemuxJobProcessor import RemuxJobProcessor
+            from Features.TranscodeJob.Worker.JobProcessor import JobProcessor
+            from Features.TranscodeJob.Worker.Strategies.JobProcessorRegistry import JobProcessorRegistry as StrategyRegistry
+            from Features.TranscodeJob.Worker.Strategies.RemuxJobStrategy import RemuxJobStrategy
+            from Features.TranscodeJob.Worker.Strategies.AudioFixJobStrategy import AudioFixJobStrategy
+            from Features.TranscodeJob.Worker.Strategies.QuickJobStrategy import QuickJobStrategy
             from Features.TranscodeJob.ProcessTranscodeQueueService import ProcessTranscodeQueueService
             QueueService = ProcessTranscodeQueueService(
                 DatabaseManagerInstance=self.DatabaseManager,
                 WorkerName=self.WorkerName,
                 WorkerConfig=self.WorkerConfig,
             )
+            StratReg = StrategyRegistry(Db=self.DatabaseManager.DatabaseService)
+            StratReg.Register('Remux', RemuxJobStrategy)
+            StratReg.Register('AudioFix', AudioFixJobStrategy)
+            StratReg.Register('Quick', QuickJobStrategy)
             Registry = JobProcessorRegistry({
-                'Remux': RemuxJobProcessor(QueueService),
-                'Quick': RemuxJobProcessor(QueueService),
-                'AudioFix': RemuxJobProcessor(QueueService),
+                'Remux': JobProcessor(QueueService=QueueService, Registry=StratReg),
+                'Quick': JobProcessor(QueueService=QueueService, Registry=StratReg),
+                'AudioFix': JobProcessor(QueueService=QueueService, Registry=StratReg),
             })
             MaxJobs = self.CurrentRemuxConcurrency
             self.RemuxService = WorkerLoopService(
