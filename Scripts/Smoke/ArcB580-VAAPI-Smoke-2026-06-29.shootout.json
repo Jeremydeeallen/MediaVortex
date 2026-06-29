@@ -1,0 +1,71 @@
+{
+  "date": "2026-06-29",
+  "host": "client-b450m-01 (wakko)",
+  "gpu": "Intel Arc B580 [8086:e20b] (Battlemage)",
+  "stack": {
+    "kernel": "6.14.0-37-generic",
+    "os": "Linux Mint 22.3 Zena (Ubuntu 24.04)",
+    "iHD_driver": "26.2.2",
+    "libva": "2.23.0 (VA-API 1.23)",
+    "libvpl_dispatcher": "2.16.0",
+    "libmfx_gen": "26.2.2-1~24.04~ppa1 (installed 2026-06-29)",
+    "legacy_libmfx": "22.5.4 (kept for backcompat)",
+    "ffmpeg_modern_path": "/usr/local/bin/ffmpeg-modern (copied from worker container)",
+    "ffmpeg_modern_version": "N-124437-gd01d18ad71-20260512"
+  },
+  "test_source": "/mnt/media_tv/New Girl/Season 6/New Girl - S06E03 - Single and Sufficient WEBDL-720p.mkv (HEVC 720p, 1440kbps total, -ss 60 -t 30 -c copy => clean_src.mkv 34.16s)",
+  "vmaf_chain": {
+    "filter": "fps=24000/1001,setpts=PTS-STARTPTS,scale=1280:720:flags=lanczos,format=yuv420p10le",
+    "model": "libvmaf default (vmaf_v0.6.1)",
+    "n_threads": 4,
+    "fix_applied": "fps lock REQUIRED on both [ref] and [enc] to avoid mkv 1/24000 vs mp4 1/1000 timebase walk-off"
+  },
+  "vmaf_chain_validation": {
+    "identity_clean_src_vs_itself_mean": 98.78,
+    "x264_crf18_near_lossless_mean": 95.01,
+    "comment": "fps-locked chain validated trustworthy"
+  },
+  "qsv_status_journey": [
+    {"step": "first attempt on host Ubuntu stock ffmpeg 6.1.1", "result": "FAIL: Failed to create a VAAPI device"},
+    {"step": "vpl-inspect shows ONE impl: legacy mfxhw64 1.35 only", "result": "no encoders exposed (Version 0.0)"},
+    {"step": "apt install libmfx-gen1.2 26.2.2", "result": "vpl-inspect now shows mfx-gen API 2.16, DeviceID e20b/0"},
+    {"step": "retry with stock ffmpeg 6.1.1", "result": "STILL FAIL: ffmpeg too old"},
+    {"step": "copy modern ffmpeg out of worker container to /usr/local/bin/ffmpeg-modern", "result": "WORKS: av1_qsv encoder produces valid AV1 p010le output"}
+  ],
+  "variants": [
+    {"label": "x264_crf18_ref", "encoder": "libx264", "preset": "medium", "rc": "crf=18", "size_bytes": 7283808, "bitrate_kbps": 1700, "vmaf_mean": 95.01, "vmaf_hmean": 95.00, "vmaf_min": 92.60, "frames": 819, "comment": "sanity reference"},
+    {"label": "qsv_vbr_390k", "encoder": "av1_qsv", "preset": "veryslow", "rc": "vbr=390k,maxrate=780k,bufsize=780k", "extra": "extbrc=1 look_ahead=1 look_ahead_depth=100 b_strategy=1 adaptive_i=1 adaptive_b=1 bf=7 async_depth=4", "size_bytes": 1570642, "bitrate_kbps": 368, "vmaf_mean": 88.22, "vmaf_hmean": 88.12, "vmaf_min": 73.26, "speed_x": 4.1, "comment": "matched-bitrate to NVENC P7 canary envelope"},
+    {"label": "qsv_icq_q23", "encoder": "av1_qsv", "preset": "veryslow", "rc": "icq global_quality=23", "extra": "same as above", "size_bytes": 2821756, "bitrate_kbps": 661, "vmaf_mean": 92.41, "vmaf_hmean": 92.39, "vmaf_min": 86.94, "speed_x": 11.1, "comment": "higher bitrate, beats NVENC ref"}
+  ],
+  "nvenc_reference": {
+    "profile": "NVENC AV1 P7 CANARY VBR -720p",
+    "attempts": 45,
+    "vmaf_score_avg": 90.48,
+    "vmaf_hmean_avg": 87.14,
+    "vmaf_p5_avg": 78.43,
+    "comment": "production data across mixed content; not apples-to-apples single-clip comparison"
+  },
+  "vaapi_findings_archived": {
+    "comment": "VAAPI path tested and DEPRECATED. av1_vaapi ASIC ignores all software quality knobs (preset/qp/rc_mode/b_depth/tiles all no-op; only -b:v responds). Was a forced-pivot when QSV init failed before libmfx-gen install. QSV is the correct path.",
+    "vaapi_vmaf_at_439kbps": 82.72,
+    "vaapi_vmaf_at_818kbps": 86.29
+  },
+  "conclusion": "QSV path validated end-to-end on wakko Arc B580. At matched NVENC bitrate envelope (~390kbps), QSV VMAF Mean 88.22 vs NVENC production avg 90.48 — gap of -2.26. At ICQ q=23 (661kbps, 1.7x bits) QSV beats NVENC reference by +1.93. Pass criterion (+2.0 at matched filesize) needs further QSV knob tuning — try ICQ q=22 with explicit maxrate cap, or LA-VBR mode. Profile 2 (HQ tier) already viable at q=23 if HQ tier accepts the higher bitrate.",
+  "phase_a_status": {
+    "compose_patched": true,
+    "containers_recreated": true,
+    "dev_dri_visible_in_containers": true,
+    "render_group_992_added": true,
+    "video_group_44_added": true,
+    "libmfx_gen_installed_on_host": true,
+    "modern_ffmpeg_on_host": true,
+    "qualitytestenabled_set_TRUE_on_wakko_workers": 4
+  },
+  "next_steps": [
+    "Tune QSV knobs to close -2.26 gap at matched bitrate (try ICQ q=22 + maxrate cap)",
+    "Multi-clip shootout (extend EncoderShootout corpus: anime, live, fast-motion, low-light)",
+    "Add fps-lock to existing EncoderShootout.py harness (canonical VMAF chain fix)",
+    "Rebuild worker container image with proper Intel media stack so QSV transcodes can run inside container, not from host-side ffmpeg-modern",
+    "Schema migrations + GUI + claim predicate per directive plan (Phases B-K)"
+  ]
+}

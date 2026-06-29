@@ -17,15 +17,111 @@ NVENC paths on I9 untouched. Workers can hold both `nvenccapable` and `qsvcapabl
 
 Verified on `ssh root@wakko`:
 
-- Kernel 6.14.0-37-generic, Ubuntu 24.04
+- Kernel 6.14.0-37-generic, Linux Mint 22.3 Zena (Ubuntu 24.04 base)
 - GPU `[8086:e20b]` = Intel Battlemage (Arc B580)
-- `/dev/dri/{card1,renderD128}` present on host (render group)
-- Host ffmpeg 6.1.1 with `--enable-libvpl`; `av1_qsv` + `av1_vaapi` encoders present
+- `/dev/dri/{card1,renderD128}` present on host (render group GID 992, video group GID 44)
+- Host ffmpeg 6.1.1-3ubuntu5 (Ubuntu stock, too old for Battlemage QSV) — replaced/supplemented with modern build during onboarding
 - VA-API 1.23 + iHD driver 26.2.2; `VAProfileAV1Profile0 : VAEntrypointEncSlice` confirmed
 - 4 containers (`mediavortex-worker-N-1`) running, image `mediavortex-worker:latest`
-- Container ffmpeg (build `N-124437-gd01d18ad71-20260512`) has `av1_qsv` encoder
-- Container has **no** `/dev/dri` passthrough — encoder present but cannot reach GPU. Gap.
-- Deployed compose at `/opt/mediavortex/docker-compose.yml` differs from repo template `deploy/compose-templates/wakko.yml` (missing `stop_grace_period: 30m`)
+- Container ffmpeg (build `N-124437-gd01d18ad71-20260512`, BtbN-style static, `--enable-libvpl --enable-libvmaf --enable-vaapi`) has `av1_qsv` encoder
+
+## Infrastructure setup performed on wakko (2026-06-29)
+
+Captured here so the future directive can re-execute or audit. All actions ran via `ssh root@wakko`.
+
+### 1. Docker compose patch (`/opt/mediavortex/docker-compose.yml`)
+
+Added GPU passthrough to the shared `x-worker` anchor:
+
+```yaml
+x-worker: &worker-base
+  image: mediavortex-worker:latest
+  restart: unless-stopped
+  stop_grace_period: 30m
+  devices:
+    - /dev/dri:/dev/dri          # NEW: Arc B580 device passthrough
+  group_add:
+    - 992                         # NEW: render group (matches host /dev/dri/renderD128 GID)
+    - 44                          # NEW: video group (matches host /dev/dri/card1 GID)
+  # ... rest unchanged
+```
+
+Backup preserved at `/opt/mediavortex/docker-compose.yml.bak.20260629`. Containers recreated with `docker compose down && docker compose up -d`. `docker exec mediavortex-worker-1-1 ls /dev/dri/` confirms renderD128 visible to container user (uid 0, groups 44+992).
+
+### 2. Host package: `libmfx-gen1.2` (Intel oneVPL GPU Runtime)
+
+**The missing piece.** Without this, `vpl-inspect` reports only legacy Intel Media SDK 1.35 (libmfxhw64) which lists `mfxEncoderDescription Version: 0.0` — i.e. no encoders exposed. With it, `vpl-inspect` reports a second implementation `mfx-gen` ApiVersion 2.16, DeviceID `e20b/0` (Arc B580), `MediaAdapterType: MFX_MEDIA_DISCRETE`. This is the modern oneVPL 2.x backend required for Battlemage AV1.
+
+Install:
+```bash
+ssh root@wakko apt install -y libmfx-gen1.2
+```
+
+Pre-installed prerequisites confirmed present (from Intel `kobuk-team/intel-graphics` PPA, which Linux Mint pulls via the Ubuntu noble PPA repo):
+- `intel-media-va-driver-non-free` 26.2.2 (iHD VA-API driver)
+- `libva2`, `libva-drm2`, `libva-x11-2` 2.23.0
+- `libvpl2` 2.16.0 (oneVPL dispatcher)
+- `libmfx1` 22.5.4 (legacy MSDK 1.x — kept for backward compat, ignored by oneVPL 2.x path)
+- `onevpl-tools` (provides `vpl-inspect` diagnostic)
+
+Apt repo source on wakko host:
+```
+deb [signed-by=/etc/apt/keyrings/kobuk-team-intel-graphics-noble.gpg] \
+  https://ppa.launchpadcontent.net/kobuk-team/intel-graphics/ubuntu noble main
+```
+
+### 3. Modern ffmpeg on host: `/usr/local/bin/ffmpeg-modern`
+
+Ubuntu stock `/usr/bin/ffmpeg` 6.1.1 (2023-era) is **too old** to negotiate with libmfx-gen 26.2.2 — its av1_qsv path returns `Failed to create a VAAPI device` / `Generic error in an external library` even after libmfx-gen is installed.
+
+Workaround: copied the container's BtbN-style static ffmpeg out of the worker image:
+```bash
+docker cp mediavortex-worker-1-1:/usr/local/bin/ffmpeg /usr/local/bin/ffmpeg-modern
+chmod +x /usr/local/bin/ffmpeg-modern
+```
+
+This binary is `ffmpeg N-124437-gd01d18ad71-20260512`, built 2026-05-12 with libvpl + libvmaf + vaapi enabled. Works with operator's full QSV knob set (preset veryslow, rc icq, look_ahead, adaptive_i/_b, bf, async_depth).
+
+The CONTAINER ffmpeg cannot be used directly for QSV encoding because the container is Debian 13 trixie base and lacks `libmfx-gen1.2` (Intel kobuk PPA targets Ubuntu noble, not Debian trixie). All QSV transcodes must run **from the host** until the worker image is rebuilt with the proper Intel media stack on a Debian-compatible PPA OR rebased on Ubuntu noble.
+
+### 4. Database flips (`Workers` table)
+
+```sql
+UPDATE Workers SET qualitytestenabled = TRUE
+  WHERE workername LIKE 'wakko-worker-%';
+```
+
+All 4 wakko workers (-1..-4) now eligible to run VMAF measurements.
+
+`transcodeenabled` still FALSE pending claim-predicate wiring (`Workers.qsvcapable` + `BuildQsvPredicate` not yet implemented in this directive's Phase D).
+
+### 5. VMAF chain fix (codified for shootout harness)
+
+The standard `setpts=PTS-STARTPTS` + `format=yuv420p10le` chain does **not** correctly align frames between mkv source (1/24000 timebase) and mp4 encoded (1/1000 timebase). Result: VMAF scores ping-pong between high (~95) and low (~0) on alternating frames, dragging Mean and HMean ~30 points below truth.
+
+Fix: prepend `fps=24000/1001` to both `[ref]` and `[enc]` chains. Example working filter:
+```
+[0:v]fps=24000/1001,setpts=PTS-STARTPTS,scale=1280:720:flags=lanczos,format=yuv420p10le[ref];
+[1:v]fps=24000/1001,setpts=PTS-STARTPTS,scale=1280:720:flags=lanczos,format=yuv420p10le[enc];
+[enc][ref]libvmaf=n_threads=4:log_fmt=json:log_path=/tmp/vmaf.json
+```
+
+`EncoderShootout.py` extension for QSV variants must apply this fps-lock. Existing NVENC/SVT shootouts may have been masked from this bug because Windows ffmpeg defaults differently OR existing matrix JSONs already lock fps.
+
+Identity sanity (clean_src vs clean_src) confirmed VMAF=98.78 with fps-lock; x264 CRF18 (near-lossless ref) confirmed VMAF=95.01. Pipeline now trustworthy.
+
+## QSV smoke results (NewGirl S06E03, 30s clean clip, fps-locked VMAF)
+
+| Variant | Bitrate | Size (bytes) | VMAF Mean | HMean | Min | Speed |
+|---|---|---|---|---|---|---|
+| x264 CRF18 (near-lossless ref) | 1700k | 7,283,808 | 95.01 | 95.00 | 92.60 | n/a |
+| **QSV VBR 390k canary envelope** | 368k | 1,570,642 | **88.22** | 88.12 | 73.26 | 4.1x |
+| **QSV ICQ q=23** | 661k | 2,821,756 | **92.41** | 92.39 | 86.94 | 11.1x |
+| NVENC AV1 P7 -720p (production avg, 45 attempts) | ~390k | similar | 90.48 | 87.14 | n/a | ~1x |
+
+**Profile 1 (size match to NVENC P7 -720p) gap: -2.26 VMAF.** Closeable by tuning ICQ q + bitrate cap. Pass criterion (NVENC + 2.0 at ±5% size) requires further tuning iteration on the QSV knobs.
+
+**Profile 2 (HQ tier): QSV ICQ q=23 already beats NVENC reference by +1.93 VMAF at 1.7x bitrate.** If HQ tier accepts higher bitrate budget, this profile is already viable.
 
 ## Acceptance Criteria
 
