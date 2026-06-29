@@ -1,19 +1,4 @@
-"""Decision-table conformance tests for PostTranscodeDispositionService.
-
-Covers feature criteria 4 and 5 of post-transcode-disposition.feature.md:
-  - Every row of the canonical decision table in transcode.flow.md Stage 6 has
-    a corresponding assertion here.
-  - Each row is asserted twice (deterministic re-run) to catch any nondeterminism.
-
-The tests target `_DecideFromInputs` because it is the pure function that encodes
-the table; the surrounding I/O (DB read of TranscodeAttempts, VmafCapableWorkerOnline
-lookup, audit UPDATE) is exercised separately. Decoupling the table from I/O
-keeps the table-conformance test fast and total.
-
-If you change the decision table in the flow doc, update both this test AND
-`PostTranscodeDispositionService._DecideFromInputs` in the same commit.
-"""
-
+# directive: transcode-worker-unification -- decision-table conformance for PostTranscodeDispositionDecider; see disposition.feature.md C2.
 import sys
 import unittest
 from dataclasses import dataclass
@@ -21,8 +6,8 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from Features.QualityTesting.PostTranscodeDispositionService import (
-    PostTranscodeDispositionService,
+from Features.QualityTesting.Disposition.PostTranscodeDispositionDecider import (
+    PostTranscodeDispositionDecider,
 )
 
 
@@ -38,11 +23,11 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
     """One method per row of transcode.flow.md Stage 6 decision table."""
 
     def setUp(self):
-        # Constructed without DB managers -- _DecideFromInputs is pure.
-        self.Service = PostTranscodeDispositionService.__new__(PostTranscodeDispositionService)
+        self.Decider = PostTranscodeDispositionDecider()
         self.DefaultConfig = FakeGateConfig()
 
     def _Decide(self, **Kwargs):
+        GateCfg = Kwargs.pop('GateConfig', self.DefaultConfig)
         Defaults = dict(
             Success=True,
             OldSize=1_000_000_000,
@@ -50,10 +35,16 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
             QualityTestRequired=True,
             VmafScore=None,
             VmafCapableWorkerOnline=True,
-            GateConfig=self.DefaultConfig,
         )
         Defaults.update(Kwargs)
-        return self.Service._DecideFromInputs(**Defaults)
+        GateInput = dict(
+            VmafAutoReplaceMinThreshold=float(GateCfg.VmafAutoReplaceMinThreshold),
+            VmafAutoReplaceMaxThreshold=float(GateCfg.VmafAutoReplaceMaxThreshold),
+            WhenVmafUnavailable=GateCfg.WhenVmafUnavailable,
+            QualityTestEnabled=True,
+        )
+        Outcome = self.Decider.Decide(Defaults, GateInput)
+        return (Outcome.Action, Outcome.Reason)
 
     def _AssertDeterministic(self, Expected, **Kwargs):
         """Run twice, assert identical -- covers criterion 5."""

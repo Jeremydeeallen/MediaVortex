@@ -1,30 +1,4 @@
-"""Post-disposition pipeline smoke test (i9 / single-worker).
-
-Runs against an existing TranscodeAttempt that has VMAF data in
-QualityTestResults but whose disposition is stuck (because of one of the
-order/type bugs that surfaced 2026-05-10 -- now fixed). Verifies the full
-pipeline lands a Replace by:
-
-  1. Lowering PostTranscodeGateConfig.VmafAutoReplaceMinThreshold to 80
-     so the VMAF=84.05 score lands in the Replace band.
-  2. Backfilling TranscodeAttempts.VMAF + QualityTestCompleted from
-     QualityTestResults (in case the bug-fix commit lands but the row is
-     still stuck from a prior failed run).
-  3. Calling DecidePostTranscodeDisposition manually -> expect Replace.
-  4. Calling ProcessFileReplacement manually -> expect Success.
-  5. Verifying MediaFiles row updated, file on disk renamed to `-mv`.
-  6. Restoring the threshold to the prior value.
-
-PRE-REQ: stop the worker before running this script. The script writes to
-TranscodeAttempts and QualityTestingQueue; a running worker poller could
-race against it (per the saved memory rule).
-
-Usage:
-    py Scripts/Smoke/RunPostDispositionPipelineTest.py <TranscodeAttemptId>
-
-Prints each step's outcome and a final PASS / FAIL.
-"""
-
+# directive: transcode-worker-unification -- post-disposition pipeline smoke; uses DispositionDispatcher directly.
 import sys
 import os
 from pathlib import Path
@@ -33,8 +7,12 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from Core.Database.DatabaseService import DatabaseService
+from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalSplitExt
 from Repositories.DatabaseManager import DatabaseManager
-from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
+from Features.QualityTesting.Disposition.AttemptCleanupService import AttemptCleanupService
+from Features.QualityTesting.Disposition.DispositionDispatcher import DispositionDispatcher
+from Features.QualityTesting.Disposition.PostTranscodeDispositionDecider import PostTranscodeDispositionDecider
+from Features.QualityTesting.Disposition.RetryBudgetService import RetryBudgetService
 from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
 from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
 
@@ -46,6 +24,20 @@ def Step(N, Title):
 def Fail(Reason):
     print(f"FAIL: {Reason}")
     sys.exit(1)
+
+
+def _BuildDispatcher(Mgr, Repo):
+    """Compose DispositionDispatcher for the smoke test."""
+    Db = DatabaseService()
+    Cleanup = AttemptCleanupService(Db)
+    Retry = RetryBudgetService(AttemptRepository=Mgr, GateConfigRepository=Repo)
+    return DispositionDispatcher(
+        Decider=PostTranscodeDispositionDecider(),
+        GateConfigRepository=Repo,
+        AttemptCleanupService=Cleanup,
+        DatabaseService=Db,
+        RetryBudgetService=Retry,
+    )
 
 
 def Main(TranscodeAttemptId: int):
@@ -100,15 +92,15 @@ def Main(TranscodeAttemptId: int):
         print(f"    Lowered VmafAutoReplaceMinThreshold from {OriginalMin} -> {NewMin}")
 
     try:
-        Step(4, "Reset Disposition to Pending so the function re-decides")
+        Step(4, "Reset Disposition to Pending so the dispatcher re-decides")
         Db.ExecuteNonQuery(
             "UPDATE TranscodeAttempts SET Disposition = 'Pending', DispositionReason = 'AwaitingVmaf' WHERE Id = %s",
             (TranscodeAttemptId,),
         )
         print("    Disposition -> Pending")
 
-        Step(5, "Call DecidePostTranscodeDisposition")
-        Result = PostTranscodeDispositionService(Mgr).DecidePostTranscodeDisposition(TranscodeAttemptId)
+        Step(5, "Call DispositionDispatcher.Dispatch")
+        Result = _BuildDispatcher(Mgr, Repo).Dispatch(TranscodeAttemptId)
         print(f"    -> Disposition={Result.Disposition}, Reason={Result.Reason}")
         if Result.Disposition not in ('Replace', 'BypassReplace'):
             Fail(f"Expected Replace/BypassReplace; got {Result.Disposition} ({Result.Reason}). "
@@ -133,11 +125,8 @@ def Main(TranscodeAttemptId: int):
 
         Step(8, "Verify on disk -- expect <originalbasename>-mv.<ext> in source folder")
         OrigPath = R['FilePath']
-        Folder = os.path.dirname(OrigPath)
-        OriginalBase = os.path.splitext(os.path.basename(OrigPath))[0]
-        # Filesystem listing -- prefer this over a MediaFiles SELECT (which
-        # is updated by ProcessFileReplacement -> _UpdateMediaFilesAfterReplacement
-        # asynchronously after probe).
+        Folder = LocalDirname(OrigPath)
+        OriginalBase = LocalSplitExt(LocalBasename(OrigPath))[0]
         from Core.WorkerContext import WorkerContext as _Wc
         _Ctx = _Wc.Current()
         LocalFolder = _Ctx.PathTranslation.ToLocalPath(Folder) if _Ctx and _Ctx.PathTranslation else Folder
@@ -163,6 +152,6 @@ def Main(TranscodeAttemptId: int):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print(__doc__)
+        print(f"Usage: py {Path(__file__).name} <TranscodeAttemptId>")
         sys.exit(2)
     Main(int(sys.argv[1]))
