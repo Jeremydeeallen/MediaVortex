@@ -378,6 +378,9 @@ class WorkerServiceApp:
             from Features.TranscodeJob.Worker.Strategies.JobProcessorRegistry import JobProcessorRegistry as StrategyRegistry
             from Features.TranscodeJob.Worker.Strategies.TranscodeJobStrategy import TranscodeJobStrategy
             from Features.TranscodeJob.Worker.Strategies.SubtitleFixJobStrategy import SubtitleFixJobStrategy
+            from Features.TranscodeJob.Worker.Strategies.RemuxJobStrategy import RemuxJobStrategy
+            from Features.TranscodeJob.Worker.Strategies.AudioFixJobStrategy import AudioFixJobStrategy
+            from Features.TranscodeJob.Worker.Strategies.QuickJobStrategy import QuickJobStrategy
             from Features.TranscodeJob.ProcessTranscodeQueueService import ProcessTranscodeQueueService
             QueueService = ProcessTranscodeQueueService(
                 DatabaseManagerInstance=self.DatabaseManager,
@@ -387,9 +390,16 @@ class WorkerServiceApp:
             StratReg = StrategyRegistry(Db=self.DatabaseManager.DatabaseService)
             StratReg.Register('Transcode', TranscodeJobStrategy)
             StratReg.Register('SubtitleFix', SubtitleFixJobStrategy)
+            StratReg.Register('Remux', RemuxJobStrategy)
+            StratReg.Register('AudioFix', AudioFixJobStrategy)
+            StratReg.Register('Quick', QuickJobStrategy)
+            UnifiedJobProcessor = JobProcessor(QueueService=QueueService, Registry=StratReg)
             Registry = JobProcessorRegistry({
-                'Transcode': JobProcessor(QueueService=QueueService, Registry=StratReg),
-                'SubtitleFix': JobProcessor(QueueService=QueueService, Registry=StratReg),
+                'Transcode': UnifiedJobProcessor,
+                'SubtitleFix': UnifiedJobProcessor,
+                'Remux': UnifiedJobProcessor,
+                'AudioFix': UnifiedJobProcessor,
+                'Quick': UnifiedJobProcessor,
                 'TestVariant': VariantJobProcessor(QueueService),
             })
             MaxJobs = self.CurrentTranscodeConcurrency
@@ -474,6 +484,8 @@ class WorkerServiceApp:
             from Features.TranscodeJob.Worker.JobProcessorRegistry import JobProcessorRegistry
             from Features.TranscodeJob.Worker.JobProcessor import JobProcessor
             from Features.TranscodeJob.Worker.Strategies.JobProcessorRegistry import JobProcessorRegistry as StrategyRegistry
+            from Features.TranscodeJob.Worker.Strategies.TranscodeJobStrategy import TranscodeJobStrategy
+            from Features.TranscodeJob.Worker.Strategies.SubtitleFixJobStrategy import SubtitleFixJobStrategy
             from Features.TranscodeJob.Worker.Strategies.RemuxJobStrategy import RemuxJobStrategy
             from Features.TranscodeJob.Worker.Strategies.AudioFixJobStrategy import AudioFixJobStrategy
             from Features.TranscodeJob.Worker.Strategies.QuickJobStrategy import QuickJobStrategy
@@ -484,13 +496,18 @@ class WorkerServiceApp:
                 WorkerConfig=self.WorkerConfig,
             )
             StratReg = StrategyRegistry(Db=self.DatabaseManager.DatabaseService)
+            StratReg.Register('Transcode', TranscodeJobStrategy)
+            StratReg.Register('SubtitleFix', SubtitleFixJobStrategy)
             StratReg.Register('Remux', RemuxJobStrategy)
             StratReg.Register('AudioFix', AudioFixJobStrategy)
             StratReg.Register('Quick', QuickJobStrategy)
+            UnifiedJobProcessor = JobProcessor(QueueService=QueueService, Registry=StratReg)
             Registry = JobProcessorRegistry({
-                'Remux': JobProcessor(QueueService=QueueService, Registry=StratReg),
-                'Quick': JobProcessor(QueueService=QueueService, Registry=StratReg),
-                'AudioFix': JobProcessor(QueueService=QueueService, Registry=StratReg),
+                'Transcode': UnifiedJobProcessor,
+                'SubtitleFix': UnifiedJobProcessor,
+                'Remux': UnifiedJobProcessor,
+                'AudioFix': UnifiedJobProcessor,
+                'Quick': UnifiedJobProcessor,
             })
             MaxJobs = self.CurrentRemuxConcurrency
             self.RemuxService = WorkerLoopService(
