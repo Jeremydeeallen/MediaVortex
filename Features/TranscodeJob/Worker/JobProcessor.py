@@ -121,16 +121,29 @@ class JobProcessor:
                 self.QueueService.HandleJobFailure(Job, f"{Mode} output failed FFprobe verification", TranscodeAttemptId, ActiveJobId)
                 return JobResult(Success=False, ErrorMessage="Output verification failed")
 
-            # PostEncode measurement runs for every mode (non-fatal)
+            # # see local-staging.S4 -- when local-staging is active, ship .inprogress back to canonical before disposition
+            FinalOutputPath = CommandResult.OutputPath
+            _LocalSrc, LocalOut = self.QueueService._GetLocalStagingPathsIfActive(EffectiveInputPath, CommandResult.OutputPath)
+            if LocalOut:
+                CanonicalOut = self.QueueService._ResolveCanonicalOutputPath(OutId, OutRel)
+                if not CanonicalOut or not self.QueueService._CopyBackStagedOutput(LocalOut, CanonicalOut, MediaFile.Id):
+                    self.QueueService._DeleteInProgressFile(CommandResult.OutputPath)
+                    self.QueueService.HandleJobFailure(Job, f"{Mode}: local-staging copy-back to canonical failed", TranscodeAttemptId, ActiveJobId)
+                    return JobResult(Success=False, ErrorMessage="Copy-back failed")
+                FinalOutputPath = CanonicalOut
+
             try:
                 from Features.AudioNormalization.Services.PostEncodeMeasurementService import PostEncodeMeasurementService
-                PostEncodeMeasurementService().Measure(CommandResult.OutputPath, TranscodeAttemptId)
+                PostEncodeMeasurementService(
+                    FFmpegPath=self.QueueService.FFmpegPath,
+                    FFprobePath=self.QueueService.FFprobePath,
+                ).Probe(TranscodeAttemptId, FinalOutputPath)
             except Exception as MeasureEx:
                 LoggingService.LogException(f"PostEncodeMeasurement failed for attempt {TranscodeAttemptId}", MeasureEx, "JobProcessor", "Process")
 
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Finalizing...")
             OwnershipTransferred = True
-            Strategy.HandleResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId, CommandResult.OutputPath, QueueService=self.QueueService)
+            Strategy.HandleResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId, FinalOutputPath, QueueService=self.QueueService)
 
             self.QueueService.CleanupOrContinue(Job)
             LoggingService.LogInfo(f"Completed {Mode} job processing for job ID: {Job.Id}", "JobProcessor", "Process")
