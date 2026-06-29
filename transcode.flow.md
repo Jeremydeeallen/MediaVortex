@@ -261,6 +261,8 @@ Audio-policy attestation contract (was in `remux.flow.md` ST9): `Strategy.Handle
 
 Same-slot rename safety (was in `remux.flow.md` ST11): all post-flight modes use `Features/FileReplacement/FilesystemRenameWithBackup` with `Apply` -> `Commit` (on success) or `Rollback` (on update failure). Source file is never at the path FFmpeg writes to (PrepareReplacement moves it). Both layers must independently fail before any data loss; the 2026-05-09 bug pattern cannot recur.
 
+**Historical-attempt attestation (post-2026-06-28 only).** The `JobProcessor.Process` Template Method calls `PostEncodeMeasurementService.Measure` AFTER every successful FFmpeg run, populating `TranscodeAttempts.AudioPolicyResolved` + `AudioTracksEmittedJson`. Pre-2026-06-28 TranscodeAttempts (created by the deleted three-processor pipeline) have these columns NULL by construction -- they predate the universal attestation hook. Operator-facing analytics that group by attestation should filter `AttemptDate >= '2026-06-28'` or treat NULL as "not measured." No backfill is provided; per the `transcode-worker-unification` directive Out of Scope, historical attempts remain NULL.
+
 ---
 
 ## Stage 6: DISPOSITION -- Post-Transcode Decision (`ST7`)
