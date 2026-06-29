@@ -416,6 +416,21 @@ class FileScanningBusinessService:
                 'Error': 'StopError'
             }
 
+    # see filescanning.C29
+    def _ComputeRealProgress(self) -> float:
+        Floor = float(self.ScanProgress) if self.ScanProgress is not None else 0.0
+        Needed = self._FilesNeedingProbe or 0
+        Probed = self._ProbedFiles or 0
+        if Needed <= 0:
+            return Floor
+        Ratio = min(1.0, max(0.0, Probed / Needed))
+        Phase = self._CurrentPhase or ''
+        if Phase == 'SizeSurvey':
+            return 10.0 + Ratio * 20.0
+        if Phase == 'Probing':
+            return 90.0 + Ratio * 10.0
+        return Floor
+
     def _StartProgressHeartbeat(self, JobId: str, IntervalSec: int = 5):
         """Owns FileScanning.feature.md criterion 17 (producer side).
         Without this loop, ScanJobs only sees writes at start and end -- a
@@ -434,7 +449,7 @@ class FileScanningBusinessService:
                     self.UpdateJobStatus(
                         JobId,
                         Status='Running',
-                        Progress=float(self.ScanProgress) if self.ScanProgress is not None else None,
+                        Progress=self._ComputeRealProgress(),
                         CurrentDirectory=self.CurrentScanDirectory or None,
                         ScanResults=self.ScanResults,
                         Phase=self._CurrentPhase,

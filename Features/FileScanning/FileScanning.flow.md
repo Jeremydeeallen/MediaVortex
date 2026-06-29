@@ -37,7 +37,7 @@ Both paths land in `FileScanningBusinessService.StartScan(rootfolderpath, recurs
 - `Status` -- `Pending` / `Running` / `Stopping` / `Completed` / `Failed` / `Stopped`
 - `Phase` -- `SizeSurvey` / `Walking` / `Reconciling` / `Probing` / `Completing` (NULL on legacy rows and after Status flips terminal); written by `FileScanningBusinessService._SetPhase` at each transition for /Activity-page visibility. SizeSurvey is the new initial phase (directive 2026-05-28); the prior chain (Walking -> Reconciling -> Probing -> Completing) is preserved.
 - `TopFiles` (JSONB) -- array of `{path, fileName, sizeMB, modifiedAt}` for the top-N largest files found by SizeSurvey; surfaced on /Activity under each running scan row. NULL on legacy rows and on scans where SizeSurvey failed (caught + logged; full scan still proceeds).
-- `Progress` (0-100, double) -- updated periodically during the walk
+- `Progress` (0-100, double) -- written by `_StartProgressHeartbeat` via `_ComputeRealProgress()`. Per-phase bands: SizeSurvey 10-30%, Walking 30%, Reconciling 50%, Probing 90-100%, Completing 100%. Phases that carry a `ProbedFiles / FilesNeedingProbe` ratio (SizeSurvey, Probing) interpolate within their band using that ratio so the bar advances continuously instead of stepping in fixed jumps. Owns feature-doc C29.
 - `CurrentDirectory` -- last-seen directory path (truncated for UI)
 - `TotalFiles` / `ProcessedFiles` / `NewFiles` / `UpdatedFiles` / `DeletedFiles` / `SkippedFiles` / `EncodingErrors`
 - `FilesNeedingProbe` / `ProbedFiles` -- populated during `Phase='Probing'` so the Activity page shows a real per-probe bar instead of a spinner
