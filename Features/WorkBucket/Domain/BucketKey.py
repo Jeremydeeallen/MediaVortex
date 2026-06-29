@@ -39,7 +39,7 @@ _REGISTRY = (
     ),
     BucketKey(
         UrlKey='Audio',
-        BucketName='AudioFixOnly',
+        BucketName='AudioFix',
         ProcessingMode='AudioFix',
         Title='Audio',
         Subtitle='Files where audio is the only blocker; container + video stream-copy through.',

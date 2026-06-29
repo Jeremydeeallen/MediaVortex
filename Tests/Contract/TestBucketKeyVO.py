@@ -26,7 +26,7 @@ class TestBucketKeyVO(unittest.TestCase):
         # see work-bucket.C1
         K = BucketKey.FromUrlKey('Audio')
         self.assertIsNotNone(K)
-        self.assertEqual(K.BucketName, 'AudioFixOnly')
+        self.assertEqual(K.BucketName, 'AudioFix')
         self.assertEqual(K.ProcessingMode, 'AudioFix')
 
     # directive: work-transcode-unified
