@@ -22,3 +22,19 @@ class PostFlightRegistry:
         if ModeName not in self._StrategyClasses:
             raise KeyError(f"No post-flight registered for ProcessingMode: {ModeName!r}")
         return self._StrategyClasses[ModeName]()
+
+
+# directive: transcode-worker-unification | # see filereplacement.C12
+def BuildDefaultRegistry() -> PostFlightRegistry:
+    # see filereplacement.C12
+    from Features.FileReplacement.PostFlightProcessors.TranscodePostFlight import TranscodePostFlight
+    from Features.FileReplacement.PostFlightProcessors.RemuxPostFlight import RemuxPostFlight
+    from Features.FileReplacement.PostFlightProcessors.AudioFixPostFlight import AudioFixPostFlight
+    from Features.FileReplacement.PostFlightProcessors.SubtitleFixPostFlight import SubtitleFixPostFlight
+    Reg = PostFlightRegistry()
+    Reg.Register('Transcode', TranscodePostFlight)
+    Reg.Register('Remux', RemuxPostFlight)
+    Reg.Register('Quick', RemuxPostFlight)
+    Reg.Register('AudioFix', AudioFixPostFlight)
+    Reg.Register('SubtitleFix', SubtitleFixPostFlight)
+    return Reg
