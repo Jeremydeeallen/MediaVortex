@@ -11,6 +11,11 @@
 .queue-drag-handle { cursor: grab; user-select: none; color: #6c757d; }
 .queue-drag-handle:active { cursor: grabbing; }
 .queue-drag-handle:hover { color: #0d6efd; }
+.queue-collapse-toggle { cursor: pointer; user-select: none; color: #6c757d; transition: transform 0.15s; }
+.queue-collapse-toggle:hover { color: #0d6efd; }
+.queue-card.collapsed .queue-collapse-toggle { transform: rotate(-90deg); }
+.queue-card.collapsed .card-body { display: none; }
+.queue-summary { color: #6c757d; font-size: 0.85em; }
 </style>
 {% endblock %}
 
@@ -43,7 +48,9 @@
         <div class="card-header d-flex justify-content-between align-items-center">
             <div class="d-flex align-items-center gap-2">
                 <span class="queue-drag-handle" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
+                <span class="queue-collapse-toggle" title="Collapse / expand"><i class="fas fa-chevron-down"></i></span>
                 <h5 class="mb-0 queue-card-title"></h5>
+                <span class="queue-summary ms-2"></span>
             </div>
             <div class="d-flex align-items-center gap-3">
                 <span class="badge bg-secondary queue-count-badge">0 items</span>
@@ -219,6 +226,7 @@ const QUEUE_DEFS = [
 ];
 
 const ORDER_KEY = 'MvQueueOrder';
+const COLLAPSED_KEY = 'MvQueueCollapsed';
 const LoadOrder = () => {
     try {
         const stored = JSON.parse(localStorage.getItem(ORDER_KEY) || 'null');
@@ -230,6 +238,14 @@ const LoadOrder = () => {
     return QUEUE_DEFS.map(q => q.key);
 };
 const SaveOrder = (order) => { try { localStorage.setItem(ORDER_KEY, JSON.stringify(order)); } catch (e) {} };
+const LoadCollapsed = () => {
+    try {
+        const stored = JSON.parse(localStorage.getItem(COLLAPSED_KEY) || 'null');
+        if (stored && typeof stored === 'object') return stored;
+    } catch (e) {}
+    return {};
+};
+const SaveCollapsed = (state) => { try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(state)); } catch (e) {} };
 
 const InitTqTable = (Card, Def) => {
     const Cfg = new TableRendererConfig({ DefaultPageSize: 25, DefaultSortDirection: 'DESC' });
@@ -264,9 +280,15 @@ const InitTqTable = (Card, Def) => {
     const PrevBtn = Card.querySelector('.queue-prev-btn');
     const NextBtn = Card.querySelector('.queue-next-btn');
     const CountBadge = Card.querySelector('.queue-count-badge');
+    const SummaryEl = Card.querySelector('.queue-summary');
     const Sync = () => {
         const P = Pag.GetPage(), Sz = Pag.GetPageSize(), Tot = Pag._TotalCount;
         InfoEl.textContent = PageInfo(Tot, P, Sz); CountBadge.textContent = `${Tot.toLocaleString()} items`;
+        const Rows = (Src && Src.GetCurrentPageRows) ? Src.GetCurrentPageRows() : (Src._CurrentRows || []);
+        let TotPage = 0, Running = 0, Pending = 0;
+        Rows.forEach(R => { TotPage += parseFloat(R.SizeMB) || 0; if (R.Status === 'Running') Running++; else if (R.Status === 'Pending') Pending++; });
+        const PageGB = TotPage / 1024;
+        SummaryEl.textContent = Tot === 0 ? '— empty' : `(${Pending} pending, ${Running} running on page • ${PageGB.toFixed(1)} GB on page)`;
         PrevBtn.disabled = P <= 0; NextBtn.disabled = (P + 1) * Sz >= Tot;
     };
     PrevBtn.addEventListener('click', () => Pag.PrevPage());
@@ -311,9 +333,14 @@ const InitQtTable = (Card, Def) => {
     const PrevBtn = Card.querySelector('.queue-prev-btn');
     const NextBtn = Card.querySelector('.queue-next-btn');
     const CountBadge = Card.querySelector('.queue-count-badge');
+    const SummaryEl = Card.querySelector('.queue-summary');
     const Sync = () => {
         const P = Pag.GetPage(), Sz = Pag.GetPageSize(), Tot = Pag._TotalCount;
         InfoEl.textContent = PageInfo(Tot, P, Sz); CountBadge.textContent = `${Tot.toLocaleString()} items`;
+        const Rows = (Src && Src.GetCurrentPageRows) ? Src.GetCurrentPageRows() : (Src._CurrentRows || []);
+        let Running = 0, Pending = 0, Failed = 0;
+        Rows.forEach(R => { if (R.Status === 'Running') Running++; else if (R.Status === 'Pending') Pending++; else if (R.Status === 'Failed') Failed++; });
+        SummaryEl.textContent = Tot === 0 ? '— empty' : `(${Pending} pending, ${Running} running, ${Failed} failed on page)`;
         PrevBtn.disabled = P <= 0; NextBtn.disabled = (P + 1) * Sz >= Tot;
     };
     PrevBtn.addEventListener('click', () => Pag.PrevPage());
@@ -362,12 +389,22 @@ const BuildCards = () => {
     const Host = document.getElementById('QueueCardsHost');
     const Template = document.getElementById('QueueCardTemplate');
     const order = LoadOrder();
+    const collapsed = LoadCollapsed();
     const orderedDefs = order.map(k => QUEUE_DEFS.find(q => q.key === k)).filter(Boolean);
     const refreshFns = [];
     orderedDefs.forEach(Def => {
         const Card = Template.content.firstElementChild.cloneNode(true);
         Card.dataset.key = Def.key;
         Card.querySelector('.queue-card-title').textContent = Def.title;
+        if (collapsed[Def.key]) Card.classList.add('collapsed');
+        const Toggle = Card.querySelector('.queue-collapse-toggle');
+        Toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            Card.classList.toggle('collapsed');
+            const State = LoadCollapsed();
+            State[Def.key] = Card.classList.contains('collapsed');
+            SaveCollapsed(State);
+        });
         Host.appendChild(Card);
         const Refresh = Def.tableKind === 'qt' ? InitQtTable(Card, Def) : InitTqTable(Card, Def);
         refreshFns.push(Refresh);
