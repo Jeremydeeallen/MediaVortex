@@ -14,11 +14,11 @@ Discovered 2026-05-29 during the NVENC canary. I9 finished a successful transcod
 
 ## Success Criteria
 
-1. **Always enqueue when VMAF required.** `DecidePostTranscodeDisposition` returns `Pending/AwaitingVmaf` whenever `QualityTestRequired=TRUE` and the VMAF score is NULL, regardless of `VmafCapableWorkerOnline`. The post-decision dispatcher in `ProcessTranscodeQueueService.DispatchDisposition` calls `AddToQualityTestQueue(TranscodeAttemptId)` on Pending, which INSERTs the queue row. Verifiable: queue a transcode with every worker's `QualityTestEnabled=FALSE`; after the transcode completes, exactly one `QualityTestingQueue` row exists for that attempt with `Status='Pending'` and `ForceDisposition IS NULL`.
+C1. **Always enqueue when VMAF required.** `DecidePostTranscodeDisposition` returns `Pending/AwaitingVmaf` whenever `QualityTestRequired=TRUE` and the VMAF score is NULL, regardless of `VmafCapableWorkerOnline`. The post-decision dispatcher in `ProcessTranscodeQueueService.DispatchDisposition` calls `AddToQualityTestQueue(TranscodeAttemptId)` on Pending, which INSERTs the queue row. Verifiable: queue a transcode with every worker's `QualityTestEnabled=FALSE`; after the transcode completes, exactly one `QualityTestingQueue` row exists for that attempt with `Status='Pending'` and `ForceDisposition IS NULL`.
 
-2. **Decision table simplified to 8 rows.** The `transcode.flow.md` Stage 6 decision table no longer includes `VmafCapableWorkerOnline` or `WhenVmafUnavailable` as inputs. Rows for `VmafServicePaused` / `VmafServicePausedBypassed` are removed from the active decision set; the reason values remain in the closed enum (`REASONS` in `PostTranscodeDispositionService.py`) for audit-history compatibility on legacy attempts. Verifiable: `grep VmafServicePaused Features/QualityTesting/PostTranscodeDispositionService.py` shows the values only in the REASONS list, not in any `return` statement of `_DecideFromInputs`.
+C2. **Decision table simplified to 8 rows.** The `transcode.flow.md` Stage 6 decision table no longer includes `VmafCapableWorkerOnline` or `WhenVmafUnavailable` as inputs. Rows for `VmafServicePaused` / `VmafServicePausedBypassed` are removed from the active decision set; the reason values remain in the closed enum (`REASONS` in `PostTranscodeDispositionService.py`) for audit-history compatibility on legacy attempts. Verifiable: `grep VmafServicePaused Features/QualityTesting/PostTranscodeDispositionService.py` shows the values only in the REASONS list, not in any `return` statement of `_DecideFromInputs`.
 
-3. **Queue gains override columns.** `QualityTestingQueue` adds three columns via idempotent migration:
+C3. **Queue gains override columns.** `QualityTestingQueue` adds three columns via idempotent migration:
    ```
    Status            TEXT NOT NULL DEFAULT 'Pending'
                      CHECK (Status IN ('Pending','Running','Completed','Cancelled','Failed'))
@@ -28,9 +28,9 @@ Discovered 2026-05-29 during the NVENC canary. I9 finished a successful transcod
    ```
    Existing rows backfill to `Status='Pending'` for rows without `DateStarted`/`DateCompleted`, `Status='Running'` when only `DateStarted` set, `Status='Completed'` when `DateCompleted` set. Verifiable: `\d QualityTestingQueue` shows the columns and CHECK; backfill produces sensible Status values for legacy rows.
 
-4. **Worker poll query honors the override.** `QualityTestingBusinessService.ProcessQualityTestQueue` (and the underlying claim query in `DatabaseManager`) selects only `WHERE Status='Pending' AND ForceDisposition IS NULL`. A row with `ForceDisposition` set is invisible to workers, so a worker can't race the WebService override. Verifiable: set ForceDisposition='Replace' on a pending row, restart a capable worker, observe the worker does not claim that row.
+C4. **Worker poll query honors the override.** `QualityTestingBusinessService.ProcessQualityTestQueue` (and the underlying claim query in `DatabaseManager`) selects only `WHERE Status='Pending' AND ForceDisposition IS NULL`. A row with `ForceDisposition` set is invisible to workers, so a worker can't race the WebService override. Verifiable: set ForceDisposition='Replace' on a pending row, restart a capable worker, observe the worker does not claim that row.
 
-5. **WebService override endpoint.** `POST /api/QualityTest/Override` accepts `{queueId, forceDisposition, reason?}`. The handler runs atomically:
+C5. **WebService override endpoint.** `POST /api/QualityTest/Override` accepts `{queueId, forceDisposition, reason?}`. The handler runs atomically:
    - UPDATE `QualityTestingQueue` SET `ForceDisposition=$forceDisposition`, `OverrideSetAt=NOW()`, `Status='Cancelled'` WHERE `Id=$queueId AND Status='Pending'`
    - UPDATE `TranscodeAttempts` SET `Disposition=$d`, `DispositionReason=$r`, `DispositionDecidedAt=NOW()` where `$d`='BypassReplace' for Replace, 'Discard' for Discard; `$r`='OperatorForcedReplace' or 'OperatorDiscarded'
    - For Replace: call `FileReplacementBusinessService.ProcessFileReplacement(attemptId)` synchronously, return the result
@@ -38,9 +38,9 @@ Discovered 2026-05-29 during the NVENC canary. I9 finished a successful transcod
    - Response: `{Success, AttemptId, Disposition, Reason, FileReplaced?}`
    Verifiable: POST with `forceDisposition='Replace'` on a real pending row; observe the file replaces on disk, MediaFiles re-probed, audit columns set; second POST on the same queueId returns 409 Conflict (Status no longer Pending).
 
-6. **Closed reason vocabulary extended.** Add `OperatorForcedReplace`, `OperatorDiscarded` to the `REASONS` enum in `PostTranscodeDispositionService.py`. The closed-list audit query (post-transcode-disposition.feature.md criterion 10) still passes. Verifiable: `SELECT DISTINCT DispositionReason FROM TranscodeAttempts` returns only values in the enum.
+C6. **Closed reason vocabulary extended.** Add `OperatorForcedReplace`, `OperatorDiscarded` to the `REASONS` enum in `PostTranscodeDispositionService.py`. The closed-list audit query (post-transcode-disposition.feature.md criterion 10) still passes. Verifiable: `SELECT DISTINCT DispositionReason FROM TranscodeAttempts` returns only values in the enum.
 
-7. **Backward compat: no terminal NoReplace from "no worker".** After this ships, the queries
+C7. **Backward compat: no terminal NoReplace from "no worker".** After this ships, the queries
    ```sql
    SELECT COUNT(*) FROM TranscodeAttempts
    WHERE DispositionDecidedAt > '<deploy date>'

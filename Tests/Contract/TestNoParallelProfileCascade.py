@@ -12,10 +12,9 @@ class TestNoParallelProfileCascade(unittest.TestCase):
     SCAN_DIRS = ['Features', 'Templates', 'WebService', 'Core', 'Services', 'Repositories', 'Models']
 
     EXEMPT_FILES = {
-        # The canonical home of the cascade.
-        'Features/Profiles/EffectiveProfileResolver.py',
-        # This audit test itself.
-        'Tests/Contract/TestNoParallelProfileCascade.py',
+        'Features/Profiles/EffectiveProfileResolver.py',  # canonical home of the cascade
+        'Tests/Contract/TestNoParallelProfileCascade.py',  # this test
+        'Features/SystemSettings/SystemSettingsController.py',  # AssignedProfile appears only in a description string, not cascade logic
     }
 
     # directive: transcode-worker-unification | # see profiles.C23
