@@ -1,0 +1,28 @@
+{
+  "test_name": "QsvTuning-kate-2026-06-29",
+  "output_scale": "1280:-2",
+  "comparison_scale": "1280:720",
+  "vmaf_n_threads": 5,
+  "sources": [
+    {
+      "id": "kate_2021_movie",
+      "label": "Kate (2021) movie (action thriller, H264 src 1903 kbps, 106 min)",
+      "path": "/mnt/movies/Kate (2021)/Kate (2021) WEBDL-720p.mkv",
+      "fps": 24,
+      "source_height": 720,
+      "source_codec": "h264",
+      "source_video_bitrate_kbps": 1903
+    }
+  ],
+  "variants": [
+    {"name": "v0_vbr30", "label": "v0: VBR 30pct + adaptive + bf=7 + tile 1x1 (production baseline)", "encoder": "av1_qsv", "preset": 1, "rc_mode": "vbr", "rate_pct": 30, "max_multiplier": 2, "adaptive_i": 1, "adaptive_b": 1, "bf": 7, "tile_cols": 1, "tile_rows": 1, "low_power": 0, "pix_fmt": "p010le"},
+    {"name": "v1_vbr20", "label": "v1: VBR 20pct (aggressive compression)", "encoder": "av1_qsv", "preset": 1, "rc_mode": "vbr", "rate_pct": 20, "max_multiplier": 2, "adaptive_i": 1, "adaptive_b": 1, "bf": 7, "tile_cols": 1, "tile_rows": 1, "low_power": 0, "pix_fmt": "p010le"},
+    {"name": "v2_icq_q25", "label": "v2: ICQ global_quality=25", "encoder": "av1_qsv", "preset": 1, "rc_mode": "icq", "global_quality": 25, "adaptive_i": 1, "adaptive_b": 1, "bf": 7, "tile_cols": 1, "tile_rows": 1, "low_power": 0, "pix_fmt": "p010le"},
+    {"name": "v3_icq_q30", "label": "v3: ICQ global_quality=30 (aggressive quality)", "encoder": "av1_qsv", "preset": 1, "rc_mode": "icq", "global_quality": 30, "adaptive_i": 1, "adaptive_b": 1, "bf": 7, "tile_cols": 1, "tile_rows": 1, "low_power": 0, "pix_fmt": "p010le"},
+    {"name": "v4_vbr30_lowpower", "label": "v4: VBR 30pct + low_power=1 (alt libmfx-gen encoder path)", "encoder": "av1_qsv", "preset": 1, "rc_mode": "vbr", "rate_pct": 30, "max_multiplier": 2, "adaptive_i": 1, "adaptive_b": 1, "bf": 7, "tile_cols": 1, "tile_rows": 1, "low_power": 1, "pix_fmt": "p010le"},
+    {"name": "v5_minimal", "label": "v5: minimal VBR 30pct (no adaptive/bf/tile)", "encoder": "av1_qsv", "preset": 1, "rc_mode": "vbr", "rate_pct": 30, "max_multiplier": 2, "low_power": 0, "pix_fmt": "p010le"},
+    {"name": "v6_vbr30_la40", "label": "v6: VBR 30pct + look_ahead=1 depth=40 (bisect-safe LA)", "encoder": "av1_qsv", "preset": 1, "rc_mode": "vbr", "rate_pct": 30, "max_multiplier": 2, "look_ahead": 1, "look_ahead_depth": 40, "adaptive_i": 1, "adaptive_b": 1, "bf": 7, "tile_cols": 1, "tile_rows": 1, "low_power": 0, "pix_fmt": "p010le"},
+    {"name": "v7_vbr30_la100", "label": "v7: VBR 30pct + look_ahead=1 depth=100 (max LA)", "encoder": "av1_qsv", "preset": 1, "rc_mode": "vbr", "rate_pct": 30, "max_multiplier": 2, "look_ahead": 1, "look_ahead_depth": 100, "adaptive_i": 1, "adaptive_b": 1, "bf": 7, "tile_cols": 1, "tile_rows": 1, "low_power": 0, "pix_fmt": "p010le"},
+    {"name": "v8_icq_q25_la100", "label": "v8: ICQ q=25 + look_ahead=1 depth=100 (quality + max LA)", "encoder": "av1_qsv", "preset": 1, "rc_mode": "icq", "global_quality": 25, "look_ahead": 1, "look_ahead_depth": 100, "adaptive_i": 1, "adaptive_b": 1, "bf": 7, "tile_cols": 1, "tile_rows": 1, "low_power": 0, "pix_fmt": "p010le"}
+  ]
+}
