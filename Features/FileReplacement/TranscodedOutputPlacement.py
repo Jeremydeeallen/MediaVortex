@@ -7,6 +7,8 @@ from Services.FileManagerService import FileManagerService
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
 from Core.Path.LocalPath import LocalBasename, LocalExists, LocalGetSize, LocalGetMTime, LocalSamePath
+from Features.FileReplacement.FilesystemRenameWithBackup import FilesystemRenameWithBackup
+from Features.FileReplacement.PostFlightProcessors.PostFlightRegistry import BuildDefaultRegistry
 
 
 # directive: filereplacement-uses-path | # see path.S5
@@ -17,7 +19,8 @@ class TranscodedOutputPlacement:
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  FileManagerInstance: FileManagerService = None,
                  FFprobePath: str = None, WorkerName: str = None,
-                 worker: Optional[Worker] = None):
+                 worker: Optional[Worker] = None,
+                 PostFlightRegistryInstance=None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or FileManagerService(FFprobePath=FFprobePath)
         if WorkerName is None:
@@ -27,6 +30,7 @@ class TranscodedOutputPlacement:
             WorkerName = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
         self.WorkerName = WorkerName
         self._Worker: Worker = worker if worker is not None else Worker.Current(Db=self.DatabaseManager.DatabaseService)
+        self._PostFlightRegistry = PostFlightRegistryInstance if PostFlightRegistryInstance is not None else BuildDefaultRegistry()
 
     # directive: path-class-perfection | # see path.C26
     def _GetWorker(self) -> Worker:
@@ -37,7 +41,7 @@ class TranscodedOutputPlacement:
         from Core.Path.PathStorageRoots import GetStorageRoots
         return GetStorageRoots()
 
-    # directive: filereplacement-decompose | see transcoded-output-placement.C4 | see transcoded-output-placement.S1
+    # directive: filereplacement-decompose | see transcoded-output-placement.C4 | see transcoded-output-placement.S1 | # see transcode.ST9
     def Execute(self, OriginalFilePath: str, TranscodedFilePath: str, NetworkOriginalPath: str = None,
                 FFmpegCommand: Optional[str] = None, SourceMediaFileId: Optional[int] = None,
                 Mode: str = 'Transcode') -> Dict[str, Any]:
@@ -102,66 +106,35 @@ class TranscodedOutputPlacement:
                         'CascadeReason': CascadeReason,
                     }
 
-            if SameSlotReplacement:
-                BackupPath = LocalOriginalPath + '.replacing.bak'
+            BackupPath = LocalOriginalPath + '.replacing.bak' if SameSlotReplacement else None
+            if SameSlotReplacement and LocalExists(BackupPath):
                 try:
-                    if LocalExists(BackupPath):
-                        try:
-                            os.remove(BackupPath)
-                            LoggingService.LogInfo(
-                                f"Removed pre-existing backup before same-slot replacement: {BackupPath}",
-                                "TranscodedOutputPlacement", "Execute"
-                            )
-                        except Exception as PreBakEx:
-                            ErrorMsg = (
-                                f"Same-slot replacement: pre-existing backup {BackupPath} could not be cleared: {str(PreBakEx)}. "
-                                f"Refusing to proceed."
-                            )
-                            LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
-                            return {'Success': False, 'ErrorMessage': ErrorMsg}
-
-                    os.rename(LocalOriginalPath, BackupPath)
-                    StepsCompleted.append(
-                        f"Same-slot replacement: backed up source to {LocalBasename(BackupPath)}"
+                    os.remove(BackupPath)
+                    LoggingService.LogInfo(
+                        f"Removed pre-existing backup before same-slot replacement: {BackupPath}",
+                        "TranscodedOutputPlacement", "Execute"
                     )
-                    try:
-                        os.rename(LocalStagedPath, TargetPath)
-                        StepsCompleted.append(f"Renamed {LocalBasename(LocalStagedPath)} -> {LocalBasename(TargetPath)}")
-                        LoggingService.LogInfo(
-                            f"Same-slot replacement: dropped .inprogress suffix: {LocalStagedPath} -> {TargetPath}",
-                            "TranscodedOutputPlacement", "Execute"
-                        )
-                    except Exception as RenameEx:
-                        try:
-                            os.rename(BackupPath, LocalOriginalPath)
-                            LoggingService.LogWarning(
-                                f"Same-slot replacement: restored source from backup after rename failure",
-                                "TranscodedOutputPlacement", "Execute"
-                            )
-                        except Exception as RestoreEx:
-                            LoggingService.LogException(
-                                f"Same-slot replacement: rollback FAILED -- source at {BackupPath}, "
-                                f"in-progress at {LocalStagedPath}. Manual recovery required.",
-                                RestoreEx, "TranscodedOutputPlacement", "Execute"
-                            )
-                        ErrorMsg = f"Same-slot replacement: failed to rename .inprogress to target: {str(RenameEx)}"
-                        LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
-                        return {'Success': False, 'ErrorMessage': ErrorMsg}
+                except Exception as PreBakEx:
+                    ErrorMsg = (
+                        f"Same-slot replacement: pre-existing backup {BackupPath} could not be cleared: {str(PreBakEx)}. "
+                        f"Refusing to proceed."
+                    )
+                    LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
+                    return {'Success': False, 'ErrorMessage': ErrorMsg}
 
-                except Exception as e:
-                    ErrorMsg = f"Same-slot replacement: rename dance failed before published: {str(e)}"
-                    LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
-                    return {'Success': False, 'ErrorMessage': ErrorMsg}
-            else:
-                try:
-                    os.rename(LocalStagedPath, TargetPath)
-                    StepsCompleted.append(f"Renamed {LocalBasename(LocalStagedPath)} -> {LocalBasename(TargetPath)}")
-                    LoggingService.LogInfo(f"Dropped .inprogress suffix: {LocalStagedPath} -> {TargetPath}",
-                                         "TranscodedOutputPlacement", "Execute")
-                except Exception as e:
-                    ErrorMsg = f"Failed to rename .inprogress to final target: {str(e)}"
-                    LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
-                    return {'Success': False, 'ErrorMessage': ErrorMsg}
+            Renamer = FilesystemRenameWithBackup(LocalStagedPath, TargetPath, BackupPath)  # see transcoded-output-placement.C13
+            try:
+                Renamer.Apply()
+                StepsCompleted.append(f"Renamed {LocalBasename(LocalStagedPath)} -> {LocalBasename(TargetPath)}")
+                LoggingService.LogInfo(
+                    f"Dropped .inprogress suffix: {LocalStagedPath} -> {TargetPath}",
+                    "TranscodedOutputPlacement", "Execute"
+                )
+            except Exception as RenameEx:
+                Renamer.Rollback()
+                ErrorMsg = f"Failed to rename .inprogress to final target: {str(RenameEx)}"
+                LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
+                return {'Success': False, 'ErrorMessage': ErrorMsg}
 
             try:
                 TargetSize = LocalGetSize(TargetPath)
@@ -186,15 +159,9 @@ class TranscodedOutputPlacement:
                                                                    Mode=Mode)
             if UpdateResult.get('Success', False):
                 StepsCompleted.append("Updated MediaFiles table")
-                if SameSlotReplacement:
-                    try:
-                        os.remove(BackupPath)
-                        StepsCompleted.append(f"Removed backup {LocalBasename(BackupPath)}")
-                    except Exception as DelBakEx:
-                        LoggingService.LogWarning(
-                            f"Same-slot replacement: backup {BackupPath} could not be deleted (operator cleanup): {str(DelBakEx)}",
-                            "TranscodedOutputPlacement", "Execute"
-                        )
+                Renamer.Commit()  # see transcoded-output-placement.C13
+                if SameSlotReplacement and BackupPath:
+                    StepsCompleted.append(f"Removed backup {LocalBasename(BackupPath)}")
                 RecomputeMediaFileId = UpdateResult.get('MediaFileId')
                 if RecomputeMediaFileId:
                     try:
@@ -224,47 +191,24 @@ class TranscodedOutputPlacement:
                     f"MediaFiles update failed after rename to {TargetPath}; rolling back filesystem. Update error: {UpdateError}",
                     "TranscodedOutputPlacement", "Execute"
                 )
-                RollbackSteps = []
-                RollbackErrors = []
-                if SameSlotReplacement:
+                Renamer.Rollback()  # see transcoded-output-placement.C13
+                if SameSlotReplacement and LocalExists(LocalStagedPath):  # allow: local-path; host-resolved
                     try:
-                        os.rename(TargetPath, LocalStagedPath)
-                        RollbackSteps.append(f"Restored {LocalBasename(LocalStagedPath)} from target")
-                    except Exception as RbEx:
-                        RollbackErrors.append(f"restore .inprogress failed: {str(RbEx)}")
-                    try:
-                        os.rename(BackupPath, LocalOriginalPath)
-                        RollbackSteps.append("Restored source from backup")
-                    except Exception as RbEx:
-                        RollbackErrors.append(f"restore source failed: {str(RbEx)}")
-                    try:
-                        if LocalExists(LocalStagedPath):  # allow: local-path; host-resolved
-                            os.remove(LocalStagedPath)
-                            RollbackSteps.append(f"Removed staging artifact {LocalBasename(LocalStagedPath)}")
-                    except Exception as RbEx:
-                        RollbackErrors.append(f"remove staging failed: {str(RbEx)}")
-                else:
-                    try:
-                        if LocalExists(TargetPath):  # allow: local-path; host-resolved
-                            os.remove(TargetPath)
-                            RollbackSteps.append(f"Removed orphan {LocalBasename(TargetPath)}")
-                    except Exception as RbEx:
-                        RollbackErrors.append(f"remove target failed: {str(RbEx)}")
-                if RollbackErrors:
-                    LoggingService.LogError(
-                        f"Rollback after MediaFiles update failure encountered errors: {'; '.join(RollbackErrors)}. Filesystem may need manual recovery.",
-                        "TranscodedOutputPlacement", "Execute"
-                    )
-                else:
-                    LoggingService.LogInfo(
-                        f"Rollback after MediaFiles update failure completed cleanly: {', '.join(RollbackSteps)}",
-                        "TranscodedOutputPlacement", "Execute"
-                    )
+                        os.remove(LocalStagedPath)
+                    except Exception as CleanEx:
+                        LoggingService.LogException(
+                            f"Rollback: could not remove staging artifact {LocalStagedPath}",
+                            CleanEx, "TranscodedOutputPlacement", "Execute"
+                        )
+                LoggingService.LogInfo(
+                    f"Rollback after MediaFiles update failure completed via FilesystemRenameWithBackup",
+                    "TranscodedOutputPlacement", "Execute"
+                )
                 return {
                     'Success': False,
                     'ErrorMessage': f'MediaFiles update failed: {UpdateError}',
-                    'StepsCompleted': StepsCompleted + [f"Rollback: {s}" for s in RollbackSteps],
-                    'RollbackErrors': RollbackErrors if RollbackErrors else None,
+                    'StepsCompleted': StepsCompleted,
+                    'RollbackErrors': None,
                 }
 
             if LocalSamePath(LocalOriginalPath, TargetPath):
@@ -342,7 +286,15 @@ class TranscodedOutputPlacement:
             else:
                 StepsCompleted.append("Original already absent")
 
-            self._NotifyJellyfin(CanonicalOriginalPath, CanonicalNewPath)
+            try:  # see jellyfin-push-notify.C1
+                from Services.JellyfinNotifyService import NotifyJellyfin
+                if CanonicalNewPath:
+                    NotifyJellyfin([{'Path': CanonicalNewPath, 'UpdateType': 'Modified'}], self.DatabaseManager.DatabaseService)
+            except Exception as NfEx:
+                LoggingService.LogException(
+                    "Jellyfin notify swallowed at FinalizePartialReplacement boundary",
+                    NfEx, "TranscodedOutputPlacement", "FinalizePartialReplacement",
+                )
 
             return {'Success': True, 'StepsCompleted': StepsCompleted}
         except Exception as e:
@@ -441,11 +393,7 @@ class TranscodedOutputPlacement:
                 except (ValueError, IndexError):
                     pass
 
-            if Mode in ('Remux', 'SubtitleFix', 'AudioFix', 'Quick'):
-                media_file.RemuxedByMediaVortex = True
-                media_file.RemuxedByMediaVortexDate = datetime.now(timezone.utc)
-            else:
-                media_file.TranscodedByMediaVortex = True
+            self._PostFlightRegistry.Get(Mode).Execute(media_file, 0, NewFilePath)  # see remuxed-flag.C4
 
             NewFieldOrder = (metadata.get('FieldOrder') or '').strip().lower()
             if NewFieldOrder:
@@ -508,17 +456,3 @@ class TranscodedOutputPlacement:
                 'ErrorMessage': f'Exception updating MediaFiles: {str(e)}'
             }
 
-    # directive: filereplacement-decompose | see jellyfin-push-notify.C1
-    def _NotifyJellyfin(self, CanonicalOriginalPath: str, CanonicalNewPath: str) -> None:
-        """Fire-and-forget Jellyfin notify; see jellyfin-push-notify.C1."""
-        try:
-            from Services.JellyfinNotifyService import NotifyJellyfin
-            if not CanonicalNewPath:
-                return
-            Updates = [{'Path': CanonicalNewPath, 'UpdateType': 'Modified'}]
-            NotifyJellyfin(Updates, self.DatabaseManager.DatabaseService)
-        except Exception as Ex:
-            LoggingService.LogException(
-                "Jellyfin notify swallowed at FileReplacement boundary",
-                Ex, "TranscodedOutputPlacement", "_NotifyJellyfin",
-            )
