@@ -16,4 +16,6 @@ class PostTranscodeGateConfigModel:
     WhenVmafUnavailable: str = "block"  # 'block' | 'bypass'
     QualityTestEnabled: bool = True  # operator master switch; FALSE = bypass VMAF for every successful transcode
     MaxRequeueAttempts: int = 3  # see perfect-solid-transcode-pipeline.C1 / C7
+    WorkerHeartbeatWindowSec: int = 90  # see transcode-worker-unification.T25
+    RetranscodeVmafThreshold: int = 80  # see transcode-worker-unification.T25
     LastUpdated: Optional[datetime] = None
