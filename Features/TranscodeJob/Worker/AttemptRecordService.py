@@ -40,7 +40,9 @@ class AttemptRecordService:
 
             # directive: failure-accounting | # see failure-accounting.C5
             JobMode = (getattr(Job, 'ProcessingMode', None) or 'Transcode').strip()
-            if JobMode in ('Remux', 'AudioFix', 'Quick', 'SubtitleFix') and not ProfileName:
+            # directive: transcode-worker-unification | # see transcode.ST6
+            RemuxModes = frozenset(R['Name'] for R in self.DatabaseManager.ExecuteQuery("SELECT Name FROM ProcessingModes WHERE ClaimCapabilityFlag = 'RemuxEnabled'"))
+            if JobMode in RemuxModes and not ProfileName:
                 ProfileName = JobMode
 
             Attempt = TranscodeAttemptModel(

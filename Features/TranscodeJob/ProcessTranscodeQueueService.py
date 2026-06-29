@@ -379,7 +379,7 @@ class ProcessTranscodeQueueService:
         Uses SELECT FOR UPDATE SKIP LOCKED for safe distributed operation.
         Respects AcceptsInterlaced worker setting to skip interlaced files."""
         try:
-            return self.DatabaseManager.ClaimNextPendingTranscodeJob(self.WorkerName, AcceptsInterlaced=self.AcceptsInterlaced)
+            return self.DatabaseManager.ClaimNextPendingJob(self.WorkerName, AcceptsInterlaced=self.AcceptsInterlaced)
         except Exception as e:
             LoggingService.LogException("Exception getting next job", e, "ProcessTranscodeQueueService", "GetNextJob")
             return None
@@ -905,7 +905,9 @@ class ProcessTranscodeQueueService:
 
             # directive: failure-accounting | # see failure-accounting.C5
             JobMode = (getattr(Job, 'ProcessingMode', None) or 'Transcode').strip()
-            if JobMode in ('Remux', 'AudioFix', 'Quick', 'SubtitleFix') and not ProfileName:
+            # directive: transcode-worker-unification | # see transcode.ST6
+            RemuxModes = frozenset(R['Name'] for R in self.DatabaseManager.ExecuteQuery("SELECT Name FROM ProcessingModes WHERE ClaimCapabilityFlag = 'RemuxEnabled'"))
+            if JobMode in RemuxModes and not ProfileName:
                 ProfileName = JobMode
 
             Attempt = TranscodeAttemptModel(
@@ -1119,7 +1121,9 @@ class ProcessTranscodeQueueService:
             else:
                 # directive: failure-accounting | # see failure-accounting.C5
                 JobMode = (getattr(Job, 'ProcessingMode', None) or 'Transcode').strip()
-                if JobMode in ('Remux', 'AudioFix', 'Quick', 'SubtitleFix'):
+                # directive: transcode-worker-unification | # see transcode.ST6
+                RemuxModes = frozenset(R['Name'] for R in self.DatabaseManager.ExecuteQuery("SELECT Name FROM ProcessingModes WHERE ClaimCapabilityFlag = 'RemuxEnabled'"))
+                if JobMode in RemuxModes:
                     ResolvedProfileName = JobMode
                 else:
                     ResolvedProfileName = getattr(Job, 'AssignedProfile', None) or None
