@@ -2,6 +2,34 @@
 
 ## Active
 
+### audio-quality
+
+### [BUG-0070] Detect transcoded files affected by deprecated 96 kbps audio bitrate -- "robotic" audio across the library
+**Date:** 2026-06-29 | **Area:** audio-quality
+
+**What breaks:** Earlier in the month, profiles were configured with an audio bitrate limit at 96 kbps. Files transcoded under that policy ship with audibly degraded audio (robotic / artifact-laden output across the program). Audio settings have since been changed but the affected outputs were already replaced -- the operator wants a way to identify the affected set so they can be flagged for re-transcode at the corrected bitrate.
+
+**Repro:** Play any media file whose successful TranscodeAttempt completed during the 96 kbps window. Robotic / metallic artifacts audible throughout.
+
+**Evidence:**
+- Operator reports "robotic sounds throughout the media" on multiple recently-transcoded files.
+- Profile `AudioBitrateKbps` history shows a prior 96 kbps setting (now changed).
+- `TranscodeAttempts.FfpmpegCommand` captures the actual `-b:a` argument used per encode -- the signal for which attempts ran under the 96 kbps cap.
+
+**First place to look:**
+- `TranscodeAttempts.FfpmpegCommand` -- grep for `-b:a 96k` (or `-b:a:0 96k`) in completed-and-replaced rows.
+- `TranscodeAttempts.AudioBitrateKbps` (if populated) -- WHERE `AudioBitrateKbps <= 96 AND FileReplaced=TRUE`.
+- `Profiles` history -- when was the AudioBitrateKbps changed and which profile was in effect during the window?
+- Cross-reference with `MediaFiles.TranscodedByMediaVortex=TRUE` AND replacement-date inside the 96 kbps window.
+
+**Proposed criterion (to be added to `Features/AudioNormalization/audio-normalization.feature.md` as C30 when `/t BUG-0070` runs):** "Provide a query/report that identifies every MediaFile whose latest replaced TranscodeAttempt was emitted at the deprecated 96 kbps audio bitrate (parse FfpmpegCommand for `-b:a 96k` OR check AudioBitrateKbps <= 96). Operator uses the list to flag affected files for re-transcode."
+
+**Out of scope for /b:** feature-doc criterion add (cross-directive R14 refusal); will land with the dedicated /t session.
+
+**Fix with:** `/t BUG-0070`.
+
+---
+
 ### uncategorized
 
 *Per-entry area subsection assignment deferred to follow-up directive `migrate-bugs-compliance-deep`. Consult `memory/BUG-INDEX.md` for per-bug area metadata and the operationally-correct active/resolved classification (several entries below still bear `RESOLVED`/`FIXED` annotations in their headers despite living under `## Active`; the INDEX classifies them correctly).*
