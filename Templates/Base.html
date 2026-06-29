@@ -10,6 +10,7 @@
     <link href="{{ url_for('static', filename='css/common.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/menu-standards.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/TableRenderer.css') }}" rel="stylesheet">
+    {% block head %}{% endblock %}
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-light bg-light">
