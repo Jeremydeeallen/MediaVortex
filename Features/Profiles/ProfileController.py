@@ -182,10 +182,12 @@ class ProfileController:
                 PROFILE_COLS = {
                     'ProfileName', 'Description',
                     'Codec', 'Preset', 'FilmGrain',
-                    'YadifMode', 'YadifParity', 'YadifDeint', 'UseNvidiaHardware',
+                    'YadifMode', 'YadifParity', 'YadifDeint',
+                    'UseNvidiaHardware', 'UseIntelHardware',
                     'Tune', 'Multipass', 'PixelFormat',
                     'AudioCodec', 'AudioBitrateKbps', 'AudioChannels', 'AudioFilter',
                     'Container', 'FastStart', 'RateControlMode', 'AqStrength',
+                    'SpatialAq', 'TemporalAq', 'WeightedPred', 'LowPower',
                     'QualityTestRequired',
                     'StreamCodecName', 'TargetResolutionCategory', 'TargetVideoKbps',
                     'AllowUpscale', 'TargetAudioKbps', 'Active',
@@ -202,6 +204,8 @@ class ProfileController:
                     'RcLookahead', 'BFrames', 'BRefMode',
                     'ScaleHeight', 'MaxBitrateMultiplier',
                     'SourceBitratePercent', 'MinBitrateKbps', 'MaxBitrateKbps', 'Gop',
+                    'QsvExtBrc', 'QsvAdaptiveI', 'QsvAdaptiveB', 'QsvLookaheadDepth',
+                    'QsvBStrategy', 'QsvTileCols', 'QsvTileRows',
                 }
                 from Core.Database.DatabaseService import DatabaseService
                 Db = DatabaseService()

@@ -44,6 +44,21 @@ class EncoderKnobs:  # see transcode.ST6
     BFrames: Optional[int]
     BRefMode: Optional[str]
     ScaleHeight: Optional[int]
+    # NVENC advanced knobs surfaced 2026-06-29 (Phase B of wakko onboarding); previously hardcoded.
+    SpatialAq: Optional[int] = None
+    TemporalAq: Optional[int] = None
+    WeightedPred: Optional[int] = None
+    # QSV (av1_qsv) Profile-level flag + low-power switch.
+    UseIntelHardware: Optional[int] = None
+    LowPower: Optional[int] = None
+    # QSV (av1_qsv) per-threshold knobs.
+    QsvExtBrc: Optional[int] = None
+    QsvAdaptiveI: Optional[int] = None
+    QsvAdaptiveB: Optional[int] = None
+    QsvLookaheadDepth: Optional[int] = None
+    QsvBStrategy: Optional[int] = None
+    QsvTileCols: Optional[int] = None
+    QsvTileRows: Optional[int] = None
 
     # directive: nvenc-rate-anchored-remediation
     def ToDict(self) -> Dict[str, Any]:
@@ -68,15 +83,18 @@ class EncoderKnobRepository(BaseRepository):
             Query = (
                 "SELECT p.Id AS ProfileId, p.ProfileName, "
                 "       p.Codec, p.Preset, p.FilmGrain, "
-                "       p.YadifMode, p.YadifParity, p.YadifDeint, p.UseNvidiaHardware, "
+                "       p.YadifMode, p.YadifParity, p.YadifDeint, p.UseNvidiaHardware, p.UseIntelHardware, "
                 "       p.Tune, p.Multipass, p.PixelFormat, "
                 "       p.AudioCodec, p.AudioBitrateKbps, p.AudioChannels, p.AudioFilter, "
                 "       p.Container, p.FastStart, p.AqStrength, p.RateControlMode, "
+                "       p.SpatialAq, p.TemporalAq, p.WeightedPred, p.LowPower, "
                 "       pt.Resolution, pt.Quality, pt.VideoBitrateKbps, pt.ContainerType, "
                 "       pt.SourceBitratePercent, pt.MinBitrateKbps, pt.MaxBitrateKbps, "
                 "       pt.MaxBitrateMultiplier, pt.Gop, "
                 "       pt.RcLookahead, pt.BFrames, pt.BRefMode, "
-                "       pt.ScaleHeight "
+                "       pt.ScaleHeight, "
+                "       pt.QsvExtBrc, pt.QsvAdaptiveI, pt.QsvAdaptiveB, pt.QsvLookaheadDepth, "
+                "       pt.QsvBStrategy, pt.QsvTileCols, pt.QsvTileRows "
                 "FROM Profiles p "
                 "JOIN ProfileThresholds pt ON pt.ProfileId = p.Id "
                 "WHERE p.ProfileName = %s AND pt.Resolution = %s "
@@ -126,6 +144,18 @@ class EncoderKnobRepository(BaseRepository):
                 BFrames=Row.get('BFrames'),
                 BRefMode=Row.get('BRefMode'),
                 ScaleHeight=Row.get('ScaleHeight'),
+                SpatialAq=Row.get('SpatialAq'),
+                TemporalAq=Row.get('TemporalAq'),
+                WeightedPred=Row.get('WeightedPred'),
+                UseIntelHardware=Row.get('UseIntelHardware'),
+                LowPower=Row.get('LowPower'),
+                QsvExtBrc=Row.get('QsvExtBrc'),
+                QsvAdaptiveI=Row.get('QsvAdaptiveI'),
+                QsvAdaptiveB=Row.get('QsvAdaptiveB'),
+                QsvLookaheadDepth=Row.get('QsvLookaheadDepth'),
+                QsvBStrategy=Row.get('QsvBStrategy'),
+                QsvTileCols=Row.get('QsvTileCols'),
+                QsvTileRows=Row.get('QsvTileRows'),
             )
         except Exception as e:
             LoggingService.LogException(

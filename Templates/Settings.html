@@ -783,6 +783,7 @@ function SaveDefaultProfile() {
 function BuildProfileKnobChips(Profile) {
     const Bits = [];
     if (Profile.UseNvidiaHardware === 1) Bits.push('<span class="badge bg-success me-1">NVENC</span>');
+    if (Profile.UseIntelHardware === 1) Bits.push('<span class="badge bg-primary me-1">QSV</span>');
     if (Profile.RateControlMode) Bits.push(`<span class="badge bg-secondary me-1">rc=${Profile.RateControlMode}</span>`);
     if (Profile.Tune) Bits.push(`<span class="badge bg-info text-dark me-1">tune=${Profile.Tune}</span>`);
     if (Profile.Multipass) Bits.push(`<span class="badge bg-info text-dark me-1">multipass=${Profile.Multipass}</span>`);
@@ -814,7 +815,7 @@ function ShowProfileKnobs(ProfileId) {
             {name: 'ProfileName', kind: 'text', group: 'Identity'},
             {name: 'Description', kind: 'text', group: 'Identity'},
             {name: 'Active', kind: 'bool', group: 'Identity'},
-            {name: 'Codec', kind: 'select', options: ['libsvtav1','av1_nvenc'], group: 'Compliance Bar'},
+            {name: 'Codec', kind: 'select', options: ['libsvtav1','av1_nvenc','av1_qsv'], group: 'Compliance Bar'},
             {name: 'StreamCodecName', kind: 'select', options: ['av1','hevc','h265','h264'], group: 'Compliance Bar'},
             {name: 'TargetResolutionCategory', kind: 'select', options: ['480p','540p','720p','1080p','1440p','2160p'], group: 'Compliance Bar'},
             {name: 'TargetVideoKbps', kind: 'int', group: 'Compliance Bar'},
@@ -822,14 +823,19 @@ function ShowProfileKnobs(ProfileId) {
             {name: 'AudioCodec', kind: 'select', options: ['aac','flac','ac3','eac3','opus'], group: 'Compliance Bar'},
             {name: 'TargetAudioKbps', kind: 'int', group: 'Compliance Bar'},
             {name: 'Container', kind: 'select', options: ['mp4','mkv','m4v','mov'], group: 'Compliance Bar'},
-            {name: 'Preset', kind: 'int', group: 'Encoder'},
-            {name: 'UseNvidiaHardware', kind: 'bool_int', group: 'Encoder'},
-            {name: 'RateControlMode', kind: 'select', options: ['cq','vbr'], group: 'Encoder'},
+            {name: 'Preset', kind: 'text', group: 'Encoder'},
+            {name: 'RateControlMode', kind: 'select', options: ['cq','vbr','icq'], group: 'Encoder'},
             {name: 'FilmGrain', kind: 'int', group: 'Encoder'},
-            {name: 'Tune', kind: 'text', group: 'NVENC'},
-            {name: 'Multipass', kind: 'select', options: ['fullres','qres','disabled','2pass'], group: 'NVENC'},
-            {name: 'PixelFormat', kind: 'text', group: 'NVENC'},
-            {name: 'AqStrength', kind: 'int', group: 'NVENC'},
+            {name: 'PixelFormat', kind: 'text', group: 'Encoder'},
+            {name: 'UseNvidiaHardware', kind: 'bool_int', group: 'NVIDIA NVENC'},
+            {name: 'Tune', kind: 'text', group: 'NVIDIA NVENC'},
+            {name: 'Multipass', kind: 'select', options: ['fullres','qres','disabled','2pass'], group: 'NVIDIA NVENC'},
+            {name: 'AqStrength', kind: 'int', group: 'NVIDIA NVENC'},
+            {name: 'SpatialAq', kind: 'bool_int', group: 'NVIDIA NVENC'},
+            {name: 'TemporalAq', kind: 'bool_int', group: 'NVIDIA NVENC'},
+            {name: 'WeightedPred', kind: 'bool_int', group: 'NVIDIA NVENC'},
+            {name: 'UseIntelHardware', kind: 'bool_int', group: 'Intel QSV'},
+            {name: 'LowPower', kind: 'bool_int', group: 'Intel QSV'},
             {name: 'YadifMode', kind: 'int', group: 'Deinterlace'},
             {name: 'YadifParity', kind: 'int', group: 'Deinterlace'},
             {name: 'YadifDeint', kind: 'int', group: 'Deinterlace'},
@@ -859,6 +865,13 @@ function ShowProfileKnobs(ProfileId) {
             {name: 'BRefMode', kind: 'select', options: ['middle','each','disabled']},
             {name: 'ScaleHeight', kind: 'int'},
             {name: 'Gop', kind: 'int'},
+            {name: 'QsvExtBrc', kind: 'bool_int'},
+            {name: 'QsvAdaptiveI', kind: 'bool_int'},
+            {name: 'QsvAdaptiveB', kind: 'bool_int'},
+            {name: 'QsvLookaheadDepth', kind: 'int'},
+            {name: 'QsvBStrategy', kind: 'int'},
+            {name: 'QsvTileCols', kind: 'int'},
+            {name: 'QsvTileRows', kind: 'int'},
         ];
 
         function CellInput(Col, Val, FieldId) {
