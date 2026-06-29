@@ -32,6 +32,8 @@ C5. Per-row Queue is idempotent. Returns `'queued'` first time, `'already_queued
 
 C6. Filters: multi-select drive + free-text series search. Pagination: 25 rows per page server-side via `Core.Querying.PagedQueryBuilder`.
 
+**Admission canonicalization (2026-06-28):** WorkBucket's `QueueAdmissionAppService` no longer writes `TranscodeQueue` rows directly. All admissions now route through `Features/TranscodeQueue/QueueManagementBusinessService.AddJobToQueue` (the canonical admission entry point) which synchronously invokes `AudioPolicyAdmissionGate` at INSERT time, marginal-savings gate, candidate-compliance evaluator, and AssignedProfile cascade validation. See `transcode-worker-unification` directive Phase H (T28-T30) + criteria C19-C20.
+
 ## Seams
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
