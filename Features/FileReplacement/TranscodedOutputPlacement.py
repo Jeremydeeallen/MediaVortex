@@ -80,7 +80,7 @@ class TranscodedOutputPlacement:
                 LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
                 return {'Success': False, 'ErrorMessage': ErrorMsg}
 
-            if SourceMediaFileId is not None:
+            if SourceMediaFileId is not None and Mode == 'Transcode':
                 from Features.FileReplacement.ComplianceGate import ComplianceGate
                 GateResult = ComplianceGate(self.DatabaseManager, self.FileManager).Evaluate(LocalStagedPath, SourceMediaFileId, FFmpegCommand)
                 if not GateResult.get('Compliant', False):
