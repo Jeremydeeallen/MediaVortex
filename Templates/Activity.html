@@ -43,6 +43,25 @@
 
   <div class="card mb-4">
     <div class="card-header py-2 d-flex justify-content-between align-items-center">
+      <h6 class="mb-0"><i class="fas fa-chart-line me-2"></i>Active Quality Tests <span id="ActiveQTCount" class="text-muted small"></span></h6>
+    </div>
+    <div class="card-body p-0">
+      <div id="NoActiveQT" class="text-muted py-3 px-3"><em>No active quality tests</em></div>
+      <div id="ActiveQTWrapper" class="d-none">
+        <table class="activity-tbl">
+          <thead><tr>
+            <th>File</th><th>Worker</th>
+            <th class="text-end">Speed</th><th class="text-end">Progress</th><th class="text-end">ETA</th>
+            <th class="text-end">Old → New</th>
+          </tr></thead>
+          <tbody id="ActiveQTBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
       <h6 class="mb-0"><i class="fas fa-search me-2"></i>Active Scans <span id="ActiveScansCount" class="text-muted small"></span></h6>
     </div>
     <div class="card-body p-0">
@@ -126,6 +145,32 @@ function RenderActiveJobs(Jobs) {
     '<span>' + Jobs.length + ' running</span>';
 }
 
+function RenderActiveQualityTests(Tests) {
+  var Body = document.getElementById('ActiveQTBody');
+  var Wrapper = document.getElementById('ActiveQTWrapper');
+  var Empty = document.getElementById('NoActiveQT');
+  var Cnt = document.getElementById('ActiveQTCount');
+  if (!Tests || Tests.length === 0) {
+    Wrapper.classList.add('d-none'); Empty.classList.remove('d-none'); Cnt.textContent = '';
+    return;
+  }
+  Wrapper.classList.remove('d-none'); Empty.classList.add('d-none');
+  Cnt.textContent = '(' + Tests.length + ' running)';
+  var FmtBytes = function(B) { if (B == null) return '-'; var n = Number(B); if (!isFinite(n)) return '-'; if (n >= 1073741824) return (n/1073741824).toFixed(2) + ' GB'; if (n >= 1048576) return (n/1048576).toFixed(1) + ' MB'; return n + ' B'; };
+  Body.innerHTML = Tests.map(function(T) {
+    var Old = T.OldSizeBytes != null ? FmtBytes(T.OldSizeBytes) : '-';
+    var New = T.NewSizeBytes != null ? FmtBytes(T.NewSizeBytes) : '-';
+    return '<tr>' +
+      '<td title="' + EscapeHtml(T.OriginalFilePath || '') + '">' + EscapeHtml((T.FileName || '').substring(0, 70)) + '</td>' +
+      '<td>' + EscapeHtml(T.WorkerName || T.ClaimedBy || '?') + '</td>' +
+      '<td class="text-end">' + EscapeHtml(T.ProcessingSpeed || '-') + '</td>' +
+      '<td class="text-end">' + (T.ProgressPercentage != null ? T.ProgressPercentage + '%' : '-') + '</td>' +
+      '<td class="text-end">' + FormatEtaSec(T.EtaSeconds) + '</td>' +
+      '<td class="text-end">' + Old + ' → ' + New + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
 function RenderActiveScans(Scans) {
   var Body = document.getElementById('ActiveScansBody');
   var Wrapper = document.getElementById('ActiveScansWrapper');
@@ -193,6 +238,7 @@ function RenderHungBanner(Hung) {
 function RenderSnapshot(Data) {
   if (!Data) return;
   RenderActiveJobs(Data.ActiveJobs || []);
+  RenderActiveQualityTests(Data.ActiveQualityTests || []);
   RenderActiveScans(Data.ActiveScans || []);
   RenderQueueCounts(Data.QueueCounts || {});
   RenderHungBanner(Data.HungAttempts || []);

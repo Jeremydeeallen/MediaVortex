@@ -49,15 +49,15 @@ class DashboardSnapshotService:
         except (TypeError, ValueError):
             return Default
 
-    # directive: worker-runtime-state | # see activity.C5
+    # directive: transcode-worker-unification | # see activity.C5
     def BuildSnapshot(self) -> DashboardSnapshot:
-        """Single-pass build. Active Jobs + Active Scans + Queue Counts + Badge State + Hung Attempts."""
         Workers = self._BuildWorkers()
         ActiveJobs = self._BuildActiveJobs()
         ActiveScans = self._BuildActiveScans()
         QueueCounts = self._BuildQueueCounts()
         BadgeState = self._BuildBadgeState(ActiveJobs)
         HungAttempts = self._BuildHungAttempts()
+        ActiveQualityTests = self._BuildActiveQualityTests()
         return DashboardSnapshot(
             Workers=Workers,
             ActiveJobs=ActiveJobs,
@@ -65,9 +65,19 @@ class DashboardSnapshotService:
             QueueCounts=QueueCounts,
             BadgeState=BadgeState,
             HungAttempts=HungAttempts,
+            ActiveQualityTests=ActiveQualityTests,
             StaleProgressThresholdSec=self.StaleSec,
             HeartbeatStaleThresholdSec=self.HeartSec,
         )
+
+    # directive: transcode-worker-unification | # see activity.C5
+    def _BuildActiveQualityTests(self):
+        try:
+            from Features.QualityTesting.QualityTestRepository import QualityTestRepository
+            Rows = QualityTestRepository().GetRunningQualityTestProgress() or []
+            return [dict(R) if not isinstance(R, dict) else R for R in Rows]
+        except Exception:
+            return []
 
     # directive: worker-runtime-state | # see admin-workers.C9
     def _BuildHungAttempts(self):

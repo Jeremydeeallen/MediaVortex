@@ -21,6 +21,7 @@ def _BuildSnapshotPayload():
         'QueueCounts': Snap.QueueCounts,
         'BadgeState': Snap.BadgeState,
         'HungAttempts': [_jsonable(H) for H in Snap.HungAttempts],
+        'ActiveQualityTests': [_jsonable(Q) for Q in Snap.ActiveQualityTests],
         'StaleProgressThresholdSec': Snap.StaleProgressThresholdSec,
     }
 
@@ -71,6 +72,7 @@ def Snapshot():
                 'QueueCounts': Snap.QueueCounts,
                 'BadgeState': Snap.BadgeState,
                 'HungAttempts': [_jsonable(H) for H in Snap.HungAttempts],
+                'ActiveQualityTests': [_jsonable(Q) for Q in Snap.ActiveQualityTests],
                 'StaleProgressThresholdSec': Snap.StaleProgressThresholdSec,
             },
         })
