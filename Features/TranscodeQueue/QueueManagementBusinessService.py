@@ -633,7 +633,7 @@ class QueueManagementBusinessService:
                 "WHERE m.Id = ANY(%s) "
                 "AND m.SizeMB > 0 "
                 "AND " + CapPredicateFragment + " "
-                "AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.StorageRootId = m.StorageRootId AND tq.RelativePath = m.RelativePath)"
+                "ON CONFLICT (MediaFileId) WHERE Status = 'Pending' AND TestVariantSetId IS NULL DO NOTHING"
             )
 
             Connection = Db.GetConnection()
@@ -724,7 +724,7 @@ class QueueManagementBusinessService:
                 "%s, "
                 "m.Id "
                 "FROM MediaFiles m"
-            ) + WhereSql
+            ) + WhereSql + " ON CONFLICT (MediaFileId) WHERE Status = 'Pending' AND TestVariantSetId IS NULL DO NOTHING"
 
             Db = DatabaseService()
             Connection = Db.GetConnection()

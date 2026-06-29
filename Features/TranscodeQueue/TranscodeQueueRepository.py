@@ -113,6 +113,7 @@ class TranscodeQueueRepository(BaseRepository):
                         "(StorageRootId, RelativePath, FileName, Directory, SizeBytes, SizeMB, "
                         "Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId) "
                         "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                        "ON CONFLICT (MediaFileId) WHERE Status = 'Pending' AND TestVariantSetId IS NULL DO NOTHING "
                         "RETURNING Id"
                     )
                     parameters = (
@@ -123,8 +124,12 @@ class TranscodeQueueRepository(BaseRepository):
                         QueueItem.ProcessingMode, MediaFileId
                     )
                     cursor.execute(query, parameters)
-                    itemId = cursor.fetchone()[0]
+                    InsertedRow = cursor.fetchone()
                     connection.commit()
+                    if InsertedRow is None:
+                        LoggingService.LogInfo(f"Queue admission skipped: MediaFileId={MediaFileId} already has a Pending row (race-safe ON CONFLICT)", "TranscodeQueueRepository", "SaveTranscodeQueueItem")
+                        return 0
+                    itemId = InsertedRow[0]
                     LoggingService.LogInfo(f"Queue item inserted with ID: {itemId}", "TranscodeQueueRepository", "SaveTranscodeQueueItem")
                     return itemId
                 else:
@@ -200,13 +205,15 @@ class TranscodeQueueRepository(BaseRepository):
                     "(StorageRootId, RelativePath, FileName, Directory, "
                     "SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, "
                     "ProcessingMode, MediaFileId) "
-                    "VALUES %s",
+                    "VALUES %s "
+                    "ON CONFLICT (MediaFileId) WHERE Status = 'Pending' AND TestVariantSetId IS NULL DO NOTHING",
                     Values,
                     page_size=500
                 )
                 Inserted = Cursor.rowcount
+                Skipped = len(Values) - Inserted
                 Connection.commit()
-                LoggingService.LogInfo(f"Bulk-inserted {Inserted} queue items in one transaction", "TranscodeQueueRepository", "BulkInsertQueueItems")
+                LoggingService.LogInfo(f"Bulk-inserted {Inserted} queue items in one transaction (skipped {Skipped} as already-Pending)", "TranscodeQueueRepository", "BulkInsertQueueItems")
                 return Inserted
             finally:
                 self.DatabaseService.CloseConnection(Connection)

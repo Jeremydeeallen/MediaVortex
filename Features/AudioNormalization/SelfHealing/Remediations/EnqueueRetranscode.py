@@ -15,10 +15,7 @@ INSERT_QUEUE_SQL = (
     "'Transcode', m.Id "
     "FROM MediaFiles m "
     "WHERE m.Id = ANY(%s) "
-    "AND NOT EXISTS ("
-    "SELECT 1 FROM TranscodeQueue tq "
-    "WHERE tq.MediaFileId = m.Id AND tq.Status = 'Pending'"
-    ")"
+    "ON CONFLICT (MediaFileId) WHERE Status = 'Pending' AND TestVariantSetId IS NULL DO NOTHING"
 )
 
 
