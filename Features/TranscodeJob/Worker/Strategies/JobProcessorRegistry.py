@@ -19,14 +19,14 @@ class JobProcessorRegistry:
         self._StrategyClasses[ModeName] = StrategyClass
 
     # directive: transcode-worker-unification | # see worker-loop.C3
-    def Get(self, ModeName: str) -> ITranscodeJobStrategy:
+    def Get(self, ModeName: str, QueueService=None) -> ITranscodeJobStrategy:
         # see worker-loop.C3
         Rows = self.Db.ExecuteQuery("SELECT Name FROM ProcessingModes WHERE Name = %s LIMIT 1", (ModeName,))
         if not Rows:
             raise KeyError(f"Unknown ProcessingMode: {ModeName!r}")
         if ModeName not in self._StrategyClasses:
             raise KeyError(f"No strategy registered for ProcessingMode: {ModeName!r}")
-        return self._StrategyClasses[ModeName]()
+        return self._StrategyClasses[ModeName](QueueService=QueueService)
 
     # directive: transcode-worker-unification | # see worker-loop.C3
     def IsModeKnown(self, ModeName: str) -> bool:
