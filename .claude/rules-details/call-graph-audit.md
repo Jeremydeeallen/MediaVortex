@@ -105,7 +105,7 @@ Historical example: work-transcode-unified spec wrote "EffectiveProfileResolver 
 1. Operator clicks Queue All on `/Work/<bucket>` →
 2. `WorkBucketController.queue_series` →
 3. `QueueAdmissionAppService.AdmitSeries` →
-4. `QueueAdmissionRepository.AdmitSeries` → bulk INSERT TranscodeQueue Pending
+4. `QueueAdmissionAppService.AdmitSeries` → `QueueManagementBusinessService.AddJobToQueue` (per-file) → bulk INSERT TranscodeQueue Pending (ON CONFLICT DO NOTHING against partial unique index `idx_transcodequeue_pending_per_mediafile`)
 5. Worker polls `DatabaseManager.ClaimNextPendingTranscodeJob` →
 6. `ProcessTranscodeQueueService.ProcessJob` →
 7. **Mode branch:** `if Job.IsRemux: RemuxJobProcessor else: TranscodeJobProcessor` ← **Signal 2 FIRES**

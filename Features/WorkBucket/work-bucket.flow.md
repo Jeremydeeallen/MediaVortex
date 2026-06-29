@@ -54,11 +54,11 @@ Entry: `POST /api/Work/<bucket>/Series/<sid>/Profile` or `DELETE .../Profile`
 
 Entry: `POST /api/Work/<bucket>/Series/<sid>/Queue` or `POST /api/Work/<bucket>/Queue/<id>`
 
-**Series path:** Loads all file IDs in the series via `FilesInSeriesRepository`. For each file, calls `QueueAdmissionRepository.AdmitOne`. Returns `AdmissionResult(Inserted, AlreadyQueued, Total)`.
+**Series path:** Loads all file IDs in the series via `FilesInSeriesRepository`. For each file, calls `QueueAdmissionAppService.AdmitOne` (the wrapper delegates to `QueueManagementBusinessService.AddJobToQueue`). Returns `AdmissionResult(Inserted, AlreadyQueued, Total)`.
 
-**Single-file path:** Calls `QueueAdmissionRepository.AdmitOne` directly. Returns `{'queued'|'already_queued'}`.
+**Single-file path:** Calls `QueueAdmissionAppService.AdmitOne` directly. Returns `{'queued'|'already_queued'}`.
 
-`QueueAdmissionRepository.AdmitOne` uses a conditional INSERT: `INSERT INTO TranscodeQueue ... WHERE NOT EXISTS (Pending row for this MediaFileId)`. Idempotent by construction.
+The underlying `QueueManagementBusinessService.AddJobToQueue` uses `INSERT ... ON CONFLICT (MediaFileId) WHERE Status='Pending' AND TestVariantSetId IS NULL DO NOTHING RETURNING Id`. The partial unique index `idx_transcodequeue_pending_per_mediafile` enforces "at most one non-variant Pending row per MediaFileId" atomically at the DB level; PostgreSQL serializes concurrent INSERTs and silently no-ops the losers. Caller distinguishes via `fetchone()`: row returned → inserted; `None` → already-queued. Race-safe by construction (see `TranscodeQueue.feature.md` Concurrency Notes).
 
 ## Seams
 
@@ -69,4 +69,4 @@ Entry: `POST /api/Work/<bucket>/Series/<sid>/Queue` or `POST /api/Work/<bucket>/
 | S3 | ST1 -> ST5 | `WorkBucketController.set_series_profile` | `(SeriesIdentity, RawProfileName: str)` from request body | `SeriesProfileService.SetProfile` raises `InvalidProfileError` on bad name; returns `FilesAffected: int` on success | `Tests/Contract/TestSeriesProfileService.py` |
 | S4 | ST5 -> DB SeriesProfiles | `SeriesProfileService.SetProfile` | UPSERT `(StorageRootId, RelativePath, AssignedProfile)` ON CONFLICT DO UPDATE | `SeriesProfileRepository.GetProfile` returns the upserted row on subsequent call | `Tests/Contract/TestSeriesProfileRepository.py` |
 | S5 | ST5 -> DB MediaFiles | `SeriesProfileService.SetProfile` | `UPDATE MediaFiles SET AssignedProfile=? WHERE StorageRootId=? AND first-segment(RelativePath)=? AND TranscodedByMediaVortex IS NOT TRUE` | All untranscoded files in the series reflect new profile; transcoded files unchanged | `Tests/Contract/TestSeriesProfileService.py::test_set_profile_updates_only_untranscoded_files` |
-| S6 | ST6 -> DB TranscodeQueue | `QueueAdmissionRepository.AdmitOne` | `INSERT INTO TranscodeQueue (...) SELECT ... WHERE NOT EXISTS (SELECT 1 FROM TranscodeQueue WHERE MediaFileId=? AND Status='Pending')` | No duplicate Pending row per MediaFileId; second call returns `already_queued` | `Tests/Contract/TestQueueAdmissionRepository.py::test_admit_series_idempotent` and `::test_admit_one_is_idempotent` |
+| S6 | ST6 -> DB TranscodeQueue | `QueueAdmissionAppService.AdmitOne` → `QueueManagementBusinessService.AddJobToQueue` | `INSERT INTO TranscodeQueue (...) VALUES (...) ON CONFLICT (MediaFileId) WHERE Status='Pending' AND TestVariantSetId IS NULL DO NOTHING RETURNING Id` against partial unique index `idx_transcodequeue_pending_per_mediafile` | `fetchone()` returns row → inserted; returns `None` → already-queued. Atomic at DB level; concurrent admissions serialized by PostgreSQL's unique-index conflict handling without raising an exception | `Tests/Contract/TestQueueAdmissionAppService.py::test_admit_one_is_idempotent` and `::test_admit_series_idempotent` + 10-thread concurrent admission stress test (1 winner, 9 silent no-ops, exactly 1 final Pending row) |

@@ -43,7 +43,7 @@ C6. Filters: multi-select drive + free-text series search. Pagination: 25 rows p
 | S3 | Controller -> SeriesProfileService | `WorkBucketController.set_series_profile` | `(SeriesIdentity, RawProfileName: str)` | Raises `InvalidProfileError` on bad input; otherwise returns `FilesAffected: int` | `Tests/Contract/TestSeriesProfileService.py` |
 | S4 | SeriesProfileService -> SeriesProfileRepository | `SeriesProfileService.SetProfile` | UPSERT (StorageRootId, RelativePath, AssignedProfile) | Row present on subsequent `GetProfile` | `Tests/Contract/TestSeriesProfileRepository.py` |
 | S5 | SeriesProfileService -> MediaFiles | `SeriesProfileService.SetProfile` | `UPDATE MediaFiles SET AssignedProfile = ? WHERE ... AND TranscodedByMediaVortex IS NOT TRUE` | `MediaFiles.AssignedProfile` reflects choice for untranscoded files only | `Tests/Contract/TestSeriesProfileService.py::test_set_profile_updates_only_untranscoded_files` |
-| S6 | QueueAdmissionAppService -> QueueManagementBusinessService -> TranscodeQueue | `QueueAdmissionAppService.AdmitSeries` delegates per-file to `QueueManagementBusinessService.AddJobToQueue` | INSERT via `SaveTranscodeQueueItem`; dedup via `MediaFileId + Status='Pending'` lookup | No duplicate Pending row per MediaFileId; AudioPolicyJson populated at insert time | `Tests/Contract/TestQueueAdmissionAppService.py::test_admit_series_returns_admission_result` |
+| S6 | QueueAdmissionAppService -> QueueManagementBusinessService -> TranscodeQueue | `QueueAdmissionAppService.AdmitSeries` delegates per-file to `QueueManagementBusinessService.AddJobToQueue` | INSERT via `SaveTranscodeQueueItem` with `ON CONFLICT (MediaFileId) WHERE Status='Pending' AND TestVariantSetId IS NULL DO NOTHING RETURNING Id` against partial unique index `idx_transcodequeue_pending_per_mediafile` | Atomic dedup at DB level (concurrent admissions serialized by PG without exceptions); AudioPolicyJson populated at insert time | `Tests/Contract/TestQueueAdmissionAppService.py::test_admit_series_returns_admission_result` |
 | S7 | BackfillProfileAssignments -> SeriesProfiles | `Scripts/SQLScripts/BackfillProfileAssignments.py` | reads sp.AssignedProfile, writes MediaFiles.AssignedProfile | New files in an existing series get the sticky profile | manual smoke: insert a MediaFiles row with the right show folder, run backfill, observe AssignedProfile populated |
 
 ## Status
@@ -71,7 +71,7 @@ C6. Filters: multi-select drive + free-text series search. Pagination: 25 rows p
 |---|---|
 | `SeriesProfiles.AssignedProfile` | `SeriesProfileService.SetProfile` |
 | `MediaFiles.AssignedProfile`, `MediaFiles.AssignedProfileSource`, `MediaFiles.LastModifiedDate` | `SeriesProfileService.SetProfile` (untranscoded only) |
-| `TranscodeQueue` row INSERT (`ProcessingMode`, `Status='Pending'`, ...) | `QueueAdmissionRepository.AdmitOne` / `AdmitSeries` |
+| `TranscodeQueue` row INSERT (`ProcessingMode`, `Status='Pending'`, ...) | `QueueAdmissionAppService.AdmitOne` / `AdmitSeries` → `QueueManagementBusinessService.AddJobToQueue` (canonical admission path; ON CONFLICT DO NOTHING against `idx_transcodequeue_pending_per_mediafile`) |
 
 ### Columns READ
 

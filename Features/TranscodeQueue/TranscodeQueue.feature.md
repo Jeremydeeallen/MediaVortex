@@ -21,13 +21,13 @@ Populates and manages the queue of files awaiting FFmpeg transcoding. Filters fi
 
 ## Concurrency Notes
 
-The TranscodeQueue admission path has two known TOCTOU windows that are explicitly accepted as known debt under the single-operator dev-system stance.
+The TranscodeQueue admission path is race-safe by construction. The invariant is **at most one Pending non-variant TranscodeQueue row per MediaFileId**, enforced atomically by a partial unique index plus `INSERT ... ON CONFLICT DO NOTHING`.
 
-1. **AdmitOne check-then-insert race.** `QueueAdmissionRepository.AdmitOne` (deleted; replaced by routing through `QueueManagementBusinessService.AddJobToQueue` per `transcode-worker-unification` directive) performed a SELECT-existing-Pending then INSERT-if-absent without a unique index on (MediaFileId, Status='Pending'). Two concurrent admissions could both INSERT. The replacement `AddJobToQueue` has the same shape; production-safe fix would be a partial unique index `(MediaFileId) WHERE Status='Pending'`. Mitigation: single-operator dev box; one admission UI; not observed in practice.
+- **Partial unique index** `idx_transcodequeue_pending_per_mediafile` (`Scripts/SQLScripts/AddTranscodeQueuePendingUniqueIndex_2026_06_29.py`): `UNIQUE (MediaFileId) WHERE Status='Pending' AND TestVariantSetId IS NULL`. Multi-variant testing rows (where the same MediaFileId may have multiple Pending entries — one per variant set) are not gated; the partial index scope excludes them.
+- **Admission INSERTs** in `TranscodeQueueRepository.SaveTranscodeQueueItem` + `.BulkInsertQueueItems`, `QueueManagementBusinessService.AddSuggestionsToQueue` + `.QueueAllMatching`, and `Features/AudioNormalization/SelfHealing/Remediations/EnqueueRetranscode.py` all carry `ON CONFLICT (MediaFileId) WHERE Status='Pending' AND TestVariantSetId IS NULL DO NOTHING RETURNING Id`. The PostgreSQL engine serializes concurrent INSERTs at the unique-index level; the winner gets the new Id back from `RETURNING`, every loser returns `None`/zero rowcount silently — no exception path involved.
+- **Caller signal**: `fetchone()` returns row → inserted; returns `None` → already-queued. Bulk paths read `cursor.rowcount` to count successes vs ON-CONFLICT no-ops.
 
-2. **AdmitSeries candidate-count window.** Before/after candidate counting (`BeforeCandidates - AfterCandidates`) is used to compute `Inserted`. Under concurrent admissions on the same series, the `Inserted` count can over-state actual inserts (concurrent peer admitted a row between our counts; our INSERT-NOT-EXISTS guard prevents duplicates but our count reports the candidate that we DIDN'T actually insert). Mitigation: same as above.
-
-Both windows accept the single-operator dev-system as the mitigation. Multi-operator or production deployments would require partial unique indexes + count-by-rowcount-returning patterns. The accept-as-debt decision is recorded in `.claude/directives/closed/2026-06-28-transcode-worker-unification.md` (will archive there on close).
+Stress-tested by 10 concurrent threads admitting the same MediaFileId: 1 winner, 9 silent no-ops, 0 exceptions, exactly 1 final Pending row. The prior "single-operator dev box mitigates this in practice" stance was retired after the race was observed in production (Love Island S01E34 admitted twice on 2026-06-29; both queue rows claimed, both transcoded, both ran VMAF — wasted compute, no data loss).
 
 ## Status
 
