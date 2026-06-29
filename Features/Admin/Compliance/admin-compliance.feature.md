@@ -4,7 +4,7 @@
 
 ## What It Does
 
-Renders the operator-facing compliance overview at `/Admin/Compliance`. Surfaces library-wide compliance counts (Compliant / Non-compliant / Undecided), WorkBucket breakdown (Transcode / Remux / AudioFixOnly / none), and audio state breakdown (AudioComplete true/false/null, AudioCorruptSuspect).
+Renders the operator-facing compliance overview at `/Admin/Compliance`. Surfaces library-wide compliance counts (Compliant / Non-compliant / Undecided), WorkBucket breakdown (Transcode / Remux / AudioFix / none), and audio state breakdown (AudioComplete true/false/null, AudioCorruptSuspect).
 
 Top-level `/Compliance` URL responds with HTTP 301 redirect to `/Admin/Compliance`.
 
@@ -23,7 +23,7 @@ C2. `/api/Admin/Compliance/Snapshot` returns `{Success, Data: {Compliance, Mode,
 
 C3. `Compliance` counts: `Total`, `True`, `False`, `Null`. Sourced from `MediaFiles.IsCompliant` aggregations.
 
-C4. `Mode` counts: `Transcode`, `Remux`, `AudioFixOnly`, `None`. Sourced from `MediaFiles.WorkBucket` GROUP BY.
+C4. `Mode` counts: `Transcode`, `Remux`, `AudioFix`, `None`. Sourced from `MediaFiles.WorkBucket` GROUP BY.
 
 C5. `Audio` counts: `CompleteTrue`, `CompleteFalse`, `CompleteNull`, `Suspect`. Sourced from `MediaFiles.AudioComplete` + `AudioCorruptSuspect`.
 

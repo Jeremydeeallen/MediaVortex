@@ -173,8 +173,8 @@ class ActivityRepository(BaseRepository):
             "SELECT "
             "SUM(CASE WHEN WorkBucket = 'Transcode' THEN 1 ELSE 0 END) AS Transcode, "
             "SUM(CASE WHEN WorkBucket = 'Remux' THEN 1 ELSE 0 END) AS Remux, "
-            "SUM(CASE WHEN WorkBucket = 'AudioFixOnly' THEN 1 ELSE 0 END) AS AudioFix, "
-            "SUM(CASE WHEN WorkBucket = 'SubtitleFixOnly' THEN 1 ELSE 0 END) AS SubtitleFix, "
+            "SUM(CASE WHEN WorkBucket = 'AudioFix' THEN 1 ELSE 0 END) AS AudioFix, "
+            "SUM(CASE WHEN WorkBucket = 'SubtitleFix' THEN 1 ELSE 0 END) AS SubtitleFix, "
             "SUM(CASE WHEN WorkBucket IS NULL AND IsCompliant IS FALSE THEN 1 ELSE 0 END) AS NoMode "
             "FROM MediaFiles"
         )

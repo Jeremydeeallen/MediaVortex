@@ -91,7 +91,7 @@ class AudioOperatorReviewService:
         Groups = Db.ExecuteQuery(
             "SELECT AdmissionDeferReason AS reason, "
             "COUNT(*)::int AS total, "
-            "COUNT(*) FILTER (WHERE WorkBucket = 'AudioFixOnly')::int AS audio_only, "
+            "COUNT(*) FILTER (WHERE WorkBucket = 'AudioFix')::int AS audio_only, "
             "COUNT(*) FILTER (WHERE VideoCompliant = FALSE)::int AS needs_transcode, "
             "COUNT(*) FILTER (WHERE ContainerCompliant = FALSE)::int AS needs_remux, "
             "COUNT(*) FILTER (WHERE WorkBucket IS NULL)::int AS no_bucket "

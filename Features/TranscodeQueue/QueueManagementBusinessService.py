@@ -319,13 +319,13 @@ class QueueManagementBusinessService:
 
             # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
             if Mode == 'Quick':
-                WhereSql += " AND m.WorkBucket IN ('Remux', 'AudioFixOnly')"
+                WhereSql += " AND m.WorkBucket IN ('Remux', 'AudioFix')"
             elif Mode == 'Transcode':
                 WhereSql += " AND m.WorkBucket = 'Transcode'"
             elif Mode == 'Remux':
                 WhereSql += " AND m.WorkBucket = 'Remux'"
             elif Mode == 'AudioFix':
-                WhereSql += " AND m.WorkBucket = 'AudioFixOnly'"
+                WhereSql += " AND m.WorkBucket = 'AudioFix'"
 
             if Drive:
                 DrivePrefix = Drive.rstrip(':\\/') + ':'
@@ -669,10 +669,10 @@ class QueueManagementBusinessService:
             from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
             # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
-            ModeToBucket = {'Transcode': 'Transcode', 'Remux': 'Remux', 'AudioFix': 'AudioFixOnly'}
+            ModeToBucket = {'Transcode': 'Transcode', 'Remux': 'Remux', 'AudioFix': 'AudioFix'}
             Params: list = [Mode]
             if Mode == 'Quick':
-                BucketSql = "AND m.WorkBucket IN ('Remux', 'AudioFixOnly') "
+                BucketSql = "AND m.WorkBucket IN ('Remux', 'AudioFix') "
             else:
                 BucketSql = "AND m.WorkBucket = %s "
                 Params.append(ModeToBucket[Mode])
@@ -1508,7 +1508,7 @@ class QueueManagementBusinessService:
         elif not ContainerOk:
             WorkBucket, IsCompliant, RefusalReason = 'Remux', False, ContainerReason
         elif not AudioOk:
-            WorkBucket, IsCompliant, RefusalReason = 'AudioFixOnly', False, AudioReason
+            WorkBucket, IsCompliant, RefusalReason = 'AudioFix', False, AudioReason
         else:
             WorkBucket, IsCompliant, RefusalReason = None, True, None
         CandidateRow['_RefusalReason'] = RefusalReason
@@ -1808,7 +1808,7 @@ class QueueManagementBusinessService:
 
             Lookup = self._LoadPriorityLookupTable()
 
-            # AudioFix folder pins (media-tabs-and-loudness.feature.md C22): boost PriorityScore when WorkBucket='AudioFixOnly' and FilePath matches a hint pattern.
+            # AudioFix folder pins (media-tabs-and-loudness.feature.md C22): boost PriorityScore when WorkBucket='AudioFix' and FilePath matches a hint pattern.
             AudioFixPins = []
             try:
                 AudioFixPins = [
@@ -1889,7 +1889,7 @@ class QueueManagementBusinessService:
 
                     # AudioFix folder-pin boost: see media-tabs-and-loudness.feature.md C22
                     FinalScore = int(Score)
-                    if WorkBucket == 'AudioFixOnly' and AudioFixPins:
+                    if WorkBucket == 'AudioFix' and AudioFixPins:
                         FilePathLower = (r.get('FilePath') or '').lower()
                         for Pattern, Boost in AudioFixPins:
                             if Pattern and Pattern in FilePathLower:

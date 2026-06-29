@@ -78,7 +78,7 @@ def _DeriveBucket(VideoCompliant, ContainerCompliant, AudioCompliant):
     if ContainerCompliant is False:
         return 'Remux'
     if AudioCompliant is False:
-        return 'AudioFixOnly'
+        return 'AudioFix'
     return None
 
 
@@ -97,7 +97,7 @@ def _PlannedOps(Bucket, VideoCompliant, ContainerCompliant, AudioCompliant):
         Ops.append('container_rewrite')
         if AudioCompliant is False:
             Ops.append('audio_reencode_loudnorm')
-    elif Bucket == 'AudioFixOnly':
+    elif Bucket == 'AudioFix':
         Ops.append('audio_reencode_loudnorm')
     return Ops
 

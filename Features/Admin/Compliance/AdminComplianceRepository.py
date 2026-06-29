@@ -37,7 +37,7 @@ class AdminComplianceRepository:
         Rows = self._Db.ExecuteQuery(
             "SELECT WorkBucket, COUNT(*) AS cnt FROM MediaFiles GROUP BY WorkBucket"
         )
-        Result = {'Transcode': 0, 'Remux': 0, 'AudioFixOnly': 0, 'None': 0}
+        Result = {'Transcode': 0, 'Remux': 0, 'AudioFix': 0, 'None': 0}
         for R in (Rows or []):
             Bucket = R.get('workbucket')
             Cnt = int(R['cnt'])

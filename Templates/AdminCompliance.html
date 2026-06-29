@@ -30,7 +30,7 @@
             <tbody>
               <tr><td><span class="badge bg-primary">Transcode</span></td><td class="text-end" id="ModeTranscode">-</td></tr>
               <tr><td><span class="badge bg-info">Remux</span></td><td class="text-end" id="ModeRemux">-</td></tr>
-              <tr><td><span class="badge bg-warning text-dark">AudioFixOnly</span></td><td class="text-end" id="ModeAudioFix">-</td></tr>
+              <tr><td><span class="badge bg-warning text-dark">AudioFix</span></td><td class="text-end" id="ModeAudioFix">-</td></tr>
               <tr><td><em>(no bucket)</em></td><td class="text-end" id="ModeNone">-</td></tr>
             </tbody>
           </table>
@@ -197,7 +197,7 @@ function LoadCompliance() {
       const M = data.Data.Mode || {};
       document.getElementById('ModeTranscode').textContent = (M.Transcode || 0).toLocaleString();
       document.getElementById('ModeRemux').textContent = (M.Remux || 0).toLocaleString();
-      document.getElementById('ModeAudioFix').textContent = (M.AudioFixOnly || 0).toLocaleString();
+      document.getElementById('ModeAudioFix').textContent = (M.AudioFix || 0).toLocaleString();
       document.getElementById('ModeNone').textContent = (M.None || 0).toLocaleString();
       const A = data.Data.Audio || {};
       document.getElementById('AudioCompleteTrue').textContent = (A.CompleteTrue || 0).toLocaleString();
