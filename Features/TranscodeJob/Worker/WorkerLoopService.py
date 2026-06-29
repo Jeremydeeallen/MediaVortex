@@ -70,32 +70,27 @@ class WorkerLoopService:
             "ActiveRemuxJobs": len([T for T in self.ActiveRemuxJobs if T.is_alive()]),
         }
 
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    # directive: transcode-worker-unification | # see transcode.ST6
     def ProcessQueueLoop(self):
-        """Main loop: alternates between Transcode + Remux claim queries per worker capability."""
+        """Main loop: polls ClaimNextPendingJob for all enabled modes; dispatches via JobProcessorRegistry."""
         try:
             LoggingService.LogInfo("WorkerLoopService.ProcessQueueLoop entering", "WorkerLoopService", "ProcessQueueLoop")
             while not self.StopRequested:
                 ClaimedAny = False
-                if self.TranscodeEnabled and len([T for T in self.ActiveTranscodeJobs if T.is_alive()]) < self.MaxConcurrentTranscodeJobs:
-                    Job = self._ClaimTranscodeJob()
+                ActiveCount = len([T for T in self.ActiveTranscodeJobs + self.ActiveRemuxJobs if T.is_alive()])
+                MaxSlots = self.MaxConcurrentTranscodeJobs + self.MaxConcurrentRemuxJobs
+                if ActiveCount < MaxSlots:
+                    Job = self._ClaimJob()
                     if Job:
                         Thread = threading.Thread(target=self._DispatchJob, args=(Job,), daemon=True)
                         Thread.start()
                         self.ActiveTranscodeJobs.append(Thread)
                         ClaimedAny = True
-                if self.RemuxEnabled and len([T for T in self.ActiveRemuxJobs if T.is_alive()]) < self.MaxConcurrentRemuxJobs:
-                    Job = self._ClaimRemuxJob()
-                    if Job:
-                        Thread = threading.Thread(target=self._DispatchJob, args=(Job,), daemon=True)
-                        Thread.start()
-                        self.ActiveRemuxJobs.append(Thread)
-                        ClaimedAny = True
                 if not ClaimedAny:
                     time.sleep(2)
-                self.ActiveTranscodeJobs = [T for T in self.ActiveTranscodeJobs if T.is_alive()]
-                self.ActiveRemuxJobs = [T for T in self.ActiveRemuxJobs if T.is_alive()]
-            for T in self.ActiveTranscodeJobs + self.ActiveRemuxJobs:
+                self.ActiveTranscodeJobs = [T for T in self.ActiveTranscodeJobs + self.ActiveRemuxJobs if T.is_alive()]
+                self.ActiveRemuxJobs = []
+            for T in self.ActiveTranscodeJobs:
                 if T.is_alive():
                     T.join(timeout=300)
             LoggingService.LogInfo("WorkerLoopService.ProcessQueueLoop exiting", "WorkerLoopService", "ProcessQueueLoop")
@@ -104,22 +99,13 @@ class WorkerLoopService:
         finally:
             self.IsProcessing = False
 
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
-    def _ClaimTranscodeJob(self):
-        """Claim the next pending Transcode job via TranscodeQueueRepository."""
+    # directive: transcode-worker-unification | # see transcode.ST6
+    def _ClaimJob(self):
+        """Claim the next pending job across all enabled modes via ClaimNextPendingJob."""
         try:
-            return self.DatabaseManager.ClaimNextPendingTranscodeJob(self.WorkerName, AcceptsInterlaced=self.AcceptsInterlaced)
+            return self.DatabaseManager.ClaimNextPendingJob(self.WorkerName, AcceptsInterlaced=self.AcceptsInterlaced)
         except Exception as Ex:
-            LoggingService.LogException("Failed to claim Transcode job", Ex, "WorkerLoopService", "_ClaimTranscodeJob")
-            return None
-
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
-    def _ClaimRemuxJob(self):
-        """Claim the next pending Remux job via TranscodeQueueRepository."""
-        try:
-            return self.DatabaseManager.ClaimNextPendingRemuxJob(self.WorkerName)
-        except Exception as Ex:
-            LoggingService.LogException("Failed to claim Remux job", Ex, "WorkerLoopService", "_ClaimRemuxJob")
+            LoggingService.LogException("Failed to claim job", Ex, "WorkerLoopService", "_ClaimJob")
             return None
 
     # directive: worker-runtime-state | # see workerservice.S8

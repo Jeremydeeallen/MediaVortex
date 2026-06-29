@@ -266,83 +266,65 @@ class TranscodeQueueRepository(BaseRepository):
             return None
         return self._MapRowToQueueItem(rows[0])
 
-    # directive: worker-routing | # see worker-routing.C2
-    def ClaimNextPendingTranscodeJob(self, WorkerName: str, AcceptsInterlaced: bool = True) -> Optional[TranscodeQueueModel]:
-        """Atomically claim the next pending Transcode-mode job (NULL or 'Transcode'); honors capability + NVENC + AllowedProfiles gates."""
+    # directive: transcode-worker-unification | # see transcode.ST6
+    def ClaimNextPendingJob(self, WorkerName: str, AcceptsInterlaced: bool = False) -> Optional[TranscodeQueueModel]:
+        """Unified claim: ProcessingModes registry + Workers capability gate inline in SQL; Transcode-only gates conditional on ProcessingMode='Transcode'. See db-is-authority.md."""
         try:
             import psycopg2.extras
-            from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate, BuildAllowedProfilesPredicate
+            from Core.Database.WorkerCapabilityPredicate import BuildNvencPredicate, BuildAllowedProfilesPredicate
             # directive: failure-accounting | # see failure-accounting.C6
             from Core.Database.FailureBudgetPredicate import BuildCapPredicate
-            CapabilityFragment, CapabilityParams = BuildClaimPredicate(WorkerName, "TranscodeEnabled")
+            NvencFragment, NvencParams = BuildNvencPredicate(WorkerName)
             AllowedProfilesFragment, AllowedProfilesParams = BuildAllowedProfilesPredicate(WorkerName)
             CapPredicateFragment, _CapParams = BuildCapPredicate("tq.MediaFileId")
-            NvencGate = (
-                "p.profilename IS NOT NULL "
-                "AND (p.usenvidiahardware = 0 "
-                "OR EXISTS (SELECT 1 FROM Workers w2 "
-                "WHERE w2.WorkerName = %s AND w2.nvenccapable = TRUE))"
-            )
             ReturningCols = (
                 "Id, StorageRootId, RelativePath, FileName, Directory, "
                 "SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, "
-                "ProcessingMode, ClaimedBy, MediaFileId, TestVariantSetId"
+                "ProcessingMode, ClaimedBy, MediaFileId"
             )
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                if AcceptsInterlaced:
-                    query = (
-                        "UPDATE TranscodeQueue "
-                        "SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW() "
-                        "WHERE Id = ( "
-                        "  SELECT tq.Id FROM TranscodeQueue tq "
-                        "  LEFT JOIN MediaFiles mf ON tq.MediaFileId = mf.Id "
-                        "  LEFT JOIN Profiles p ON p.profilename = mf.AssignedProfile "
-                        "  WHERE tq.Status = 'Pending' "
-                        "    AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode = 'Transcode') "
-                        f"    AND {CapabilityFragment} "
-                        f"    AND {NvencGate} "
-                        f"    AND {AllowedProfilesFragment} "
-                        f"    AND {CapPredicateFragment} "
-                        "  ORDER BY (CASE WHEN tq.Priority >= 195 THEN tq.Priority ELSE 0 END) DESC, tq.SizeMB DESC NULLS LAST, tq.DateAdded ASC "
-                        "  LIMIT 1 "
-                        "  FOR UPDATE OF tq SKIP LOCKED "
-                        ") "
-                        f"RETURNING {ReturningCols}"
-                    )
-                else:
-                    query = (
-                        "UPDATE TranscodeQueue "
-                        "SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW() "
-                        "WHERE Id = ( "
-                        "  SELECT tq.Id FROM TranscodeQueue tq "
-                        "  JOIN MediaFiles mf ON tq.MediaFileId = mf.Id "
-                        "  LEFT JOIN Profiles p ON p.profilename = mf.AssignedProfile "
-                        "  WHERE tq.Status = 'Pending' "
-                        "    AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode = 'Transcode') "
-                        "    AND (mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0') "
-                        f"    AND {CapabilityFragment} "
-                        f"    AND {NvencGate} "
-                        f"    AND {AllowedProfilesFragment} "
-                        f"    AND {CapPredicateFragment} "
-                        "  ORDER BY (CASE WHEN tq.Priority >= 195 THEN tq.Priority ELSE 0 END) DESC, tq.SizeMB DESC NULLS LAST, tq.DateAdded ASC "
-                        "  LIMIT 1 "
-                        "  FOR UPDATE OF tq SKIP LOCKED "
-                        ") "
-                        f"RETURNING {ReturningCols}"
-                    )
-                cursor.execute(query, (WorkerName,) + CapabilityParams + (WorkerName,) + AllowedProfilesParams)
+                query = (
+                    "UPDATE TranscodeQueue "
+                    "SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW() "
+                    "WHERE Id = ( "
+                    "  SELECT tq.Id FROM TranscodeQueue tq "
+                    "  LEFT JOIN MediaFiles mf ON tq.MediaFileId = mf.Id "
+                    "  LEFT JOIN Profiles p ON p.profilename = mf.AssignedProfile "
+                    "  WHERE tq.Status = 'Pending' "
+                    "    AND EXISTS ( "
+                    "      SELECT 1 FROM ProcessingModes pm "
+                    "      INNER JOIN Workers w ON ( "
+                    "        (pm.ClaimCapabilityFlag = 'TranscodeEnabled' AND w.TranscodeEnabled = TRUE) "
+                    "        OR (pm.ClaimCapabilityFlag = 'RemuxEnabled' AND w.RemuxEnabled = TRUE) "
+                    "      ) "
+                    "      WHERE pm.Name = tq.ProcessingMode "
+                    "        AND w.WorkerName = %s "
+                    "        AND w.Status = 'Online' "
+                    "    ) "
+                    "    AND (tq.ProcessingMode != 'Transcode' OR mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0' OR %s::boolean) "
+                    f"    AND (tq.ProcessingMode != 'Transcode' OR ({NvencFragment})) "
+                    f"    AND (tq.ProcessingMode != 'Transcode' OR ({AllowedProfilesFragment})) "
+                    f"    AND {CapPredicateFragment} "
+                    "  ORDER BY (CASE WHEN tq.Priority >= 195 THEN tq.Priority ELSE 0 END) DESC, tq.SizeMB DESC NULLS LAST, tq.DateAdded ASC "
+                    "  LIMIT 1 "
+                    "  FOR UPDATE OF tq SKIP LOCKED "
+                    ") "
+                    f"RETURNING {ReturningCols}"
+                )
+                cursor.execute(
+                    query,
+                    (WorkerName, WorkerName, AcceptsInterlaced) + NvencParams + AllowedProfilesParams,
+                )
                 row = cursor.fetchone()
                 connection.commit()
 
                 if row:
-                    cursor.execute("SELECT mf.AssignedProfile AS pn, w.AllowedProfiles AS ap FROM MediaFiles mf, Workers w WHERE mf.Id = %s AND w.WorkerName = %s", (row.get('mediafileid'), WorkerName))
-                    _Meta = cursor.fetchone()
-                    _Pn = (_Meta.get('pn') if _Meta else None) or '<unknown>'
-                    _Ap = _Meta.get('ap') if _Meta else None
-                    _ApDisplay = '<all>' if _Ap is None else ('<none>' if _Ap == '' else _Ap)
-                    LoggingService.LogInfo(f"Claimed JobId={row['id']} WorkerName={WorkerName} ProfileName={_Pn} WorkerAllowedProfiles={_ApDisplay}", "TranscodeQueueRepository", "ClaimNextPendingTranscodeJob")
+                    LoggingService.LogInfo(
+                        f"Claimed JobId={row['id']} Mode={row.get('processingmode')} WorkerName={WorkerName}",
+                        "TranscodeQueueRepository", "ClaimNextPendingJob",
+                    )
                     NormalizedRow = {
                         'Id': row['id'],
                         'StorageRootId': row.get('storagerootid'),
@@ -358,77 +340,14 @@ class TranscodeQueueRepository(BaseRepository):
                         'ProcessingMode': row.get('processingmode') or 'Transcode',
                         'ClaimedBy': row.get('claimedby'),
                         'MediaFileId': row.get('mediafileid'),
-                        'TestVariantSetId': row.get('testvariantsetid'),
+                        'TestVariantSetId': None,
                     }
                     return self._MapRowToQueueItem(NormalizedRow)
                 return None
             finally:
                 self.DatabaseService.CloseConnection(connection)
         except Exception as e:
-            LoggingService.LogException("Exception in ClaimNextPendingTranscodeJob", e, "TranscodeQueueRepository", "ClaimNextPendingTranscodeJob")
-            return None
-
-    # directive: path-schema-migration | # see path.S8
-    def ClaimNextPendingRemuxJob(self, WorkerName: str) -> Optional[TranscodeQueueModel]:
-        """Atomically claim the next Remux-class job (Remux/Quick/AudioFix); gated on RemuxEnabled."""
-        try:
-            import psycopg2.extras
-            from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate
-            # directive: failure-accounting | # see failure-accounting.C6
-            from Core.Database.FailureBudgetPredicate import BuildCapPredicate
-            CapabilityFragment, CapabilityParams = BuildClaimPredicate(WorkerName, "RemuxEnabled")
-            CapPredicateFragment, _CapParams = BuildCapPredicate("TranscodeQueue.MediaFileId")
-            ReturningCols = (
-                "Id, StorageRootId, RelativePath, FileName, Directory, "
-                "SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, "
-                "ProcessingMode, ClaimedBy, MediaFileId, TestVariantSetId"
-            )
-            connection = self.DatabaseService.GetConnection()
-            try:
-                cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                query = (
-                    "UPDATE TranscodeQueue "
-                    "SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW() "
-                    "WHERE Id = ( "
-                    "  SELECT Id FROM TranscodeQueue "
-                    "  WHERE Status = 'Pending' "
-                    "    AND ProcessingMode IN ('Remux', 'Quick', 'AudioFix') "
-                    f"   AND {CapabilityFragment} "
-                    f"   AND {CapPredicateFragment} "
-                    "  ORDER BY (CASE WHEN Priority >= 195 THEN Priority ELSE 0 END) DESC, SizeMB DESC NULLS LAST, DateAdded ASC "
-                    "  LIMIT 1 "
-                    "  FOR UPDATE SKIP LOCKED "
-                    ") "
-                    f"RETURNING {ReturningCols}"
-                )
-                cursor.execute(query, (WorkerName,) + CapabilityParams)
-                row = cursor.fetchone()
-                connection.commit()
-
-                if row:
-                    NormalizedRow = {
-                        'Id': row['id'],
-                        'StorageRootId': row.get('storagerootid'),
-                        'RelativePath': row.get('relativepath') or '',
-                        'FileName': row['filename'],
-                        'Directory': row['directory'],
-                        'SizeBytes': row['sizebytes'],
-                        'SizeMB': row['sizemb'],
-                        'Priority': row['priority'],
-                        'Status': row['status'],
-                        'DateAdded': row['dateadded'],
-                        'DateStarted': row['datestarted'],
-                        'ProcessingMode': row.get('processingmode') or 'Remux',
-                        'ClaimedBy': row.get('claimedby'),
-                        'MediaFileId': row.get('mediafileid'),
-                        'TestVariantSetId': row.get('testvariantsetid'),
-                    }
-                    return self._MapRowToQueueItem(NormalizedRow)
-                return None
-            finally:
-                self.DatabaseService.CloseConnection(connection)
-        except Exception as e:
-            LoggingService.LogException("Exception in ClaimNextPendingRemuxJob", e, "TranscodeQueueRepository", "ClaimNextPendingRemuxJob")
+            LoggingService.LogException("Exception in ClaimNextPendingJob", e, "TranscodeQueueRepository", "ClaimNextPendingJob")
             return None
 
     QueueItemsSortWhitelist = {

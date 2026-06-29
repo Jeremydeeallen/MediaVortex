@@ -140,7 +140,7 @@ SENTINEL_FILE_TRANSCODE = "_test-claim-authority-transcode.mkv"
 
 
 class TestTranscodeClaimAuthority(unittest.TestCase):
-    """ClaimNextPendingTranscodeJob must honor Workers.Status + Workers.TranscodeEnabled; sentinel queue row at Priority=-1000 with MediaFileId=NULL for safety."""
+    """ClaimNextPendingJob must honor Workers.Status + Workers.TranscodeEnabled; sentinel queue row at Priority=-1000 with MediaFileId=NULL for safety."""
 
     @classmethod
     def setUpClass(cls):
@@ -151,7 +151,7 @@ class TestTranscodeClaimAuthority(unittest.TestCase):
             "INSERT INTO Workers (WorkerName, Platform, Status, "
             "TranscodeEnabled, QualityTestEnabled, RemuxEnabled, ScanEnabled, "
             "Enabled, AcceptsInterlaced, LastHeartbeat) "
-            "VALUES (%s, 'linux', 'Online', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, NOW())",
+            "VALUES (%s, 'linux', 'Online', TRUE, TRUE, FALSE, TRUE, TRUE, TRUE, NOW())",
             (SENTINEL_WORKER,),
         )
 
@@ -165,7 +165,7 @@ class TestTranscodeClaimAuthority(unittest.TestCase):
 
     def setUp(self):
         self.Db.ExecuteNonQuery(
-            "UPDATE Workers SET Status='Online', TranscodeEnabled=TRUE, LastHeartbeat=NOW() WHERE WorkerName=%s",
+            "UPDATE Workers SET Status='Online', TranscodeEnabled=TRUE, RemuxEnabled=FALSE, LastHeartbeat=NOW() WHERE WorkerName=%s",
             (SENTINEL_WORKER,),
         )
         # Clear any stale sentinel rows from a prior failed run.
@@ -190,7 +190,7 @@ class TestTranscodeClaimAuthority(unittest.TestCase):
         self.Db.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE Id = %s", (self.QueueId,))
 
     def test_eligible_worker_claims(self):
-        Job = self.Dm.ClaimNextPendingTranscodeJob(SENTINEL_WORKER, AcceptsInterlaced=True)
+        Job = self.Dm.ClaimNextPendingJob(SENTINEL_WORKER, AcceptsInterlaced=True)
         # production rows outrank our Priority=-1000 sentinel; only verify claim shape when sentinel wins
         if Job is None:
             ProdPending = self.Db.ExecuteQuery(
@@ -213,15 +213,15 @@ class TestTranscodeClaimAuthority(unittest.TestCase):
         self.Db.ExecuteNonQuery(
             "UPDATE Workers SET Status='Paused' WHERE WorkerName=%s", (SENTINEL_WORKER,),
         )
-        Job = self.Dm.ClaimNextPendingTranscodeJob(SENTINEL_WORKER, AcceptsInterlaced=True)
+        Job = self.Dm.ClaimNextPendingJob(SENTINEL_WORKER, AcceptsInterlaced=True)
         self.assertIsNone(Job, "Paused worker MUST NOT claim")
 
     def test_transcode_disabled_refused(self):
         self.Db.ExecuteNonQuery(
             "UPDATE Workers SET TranscodeEnabled=FALSE WHERE WorkerName=%s", (SENTINEL_WORKER,),
         )
-        Job = self.Dm.ClaimNextPendingTranscodeJob(SENTINEL_WORKER, AcceptsInterlaced=True)
-        self.assertIsNone(Job, "TranscodeEnabled=FALSE worker MUST NOT claim")
+        Job = self.Dm.ClaimNextPendingJob(SENTINEL_WORKER, AcceptsInterlaced=True)
+        self.assertIsNone(Job, "TranscodeEnabled=FALSE worker MUST NOT claim Transcode row")
 
 
 # Remux claim authority
@@ -230,7 +230,7 @@ SENTINEL_FILE_REMUX = "_test-claim-authority-remux.mkv"
 
 
 class TestRemuxClaimAuthority(unittest.TestCase):
-    """ClaimNextPendingRemuxJob must honor Workers.Status + Workers.RemuxEnabled."""
+    """ClaimNextPendingJob must honor Workers.Status + Workers.RemuxEnabled for Remux-mode rows."""
 
     @classmethod
     def setUpClass(cls):
@@ -241,7 +241,7 @@ class TestRemuxClaimAuthority(unittest.TestCase):
             "INSERT INTO Workers (WorkerName, Platform, Status, "
             "TranscodeEnabled, QualityTestEnabled, RemuxEnabled, ScanEnabled, "
             "Enabled, AcceptsInterlaced, LastHeartbeat) "
-            "VALUES (%s, 'linux', 'Online', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, NOW())",
+            "VALUES (%s, 'linux', 'Online', FALSE, TRUE, TRUE, TRUE, TRUE, TRUE, NOW())",
             (SENTINEL_WORKER,),
         )
 
@@ -255,7 +255,7 @@ class TestRemuxClaimAuthority(unittest.TestCase):
 
     def setUp(self):
         self.Db.ExecuteNonQuery(
-            "UPDATE Workers SET Status='Online', RemuxEnabled=TRUE, LastHeartbeat=NOW() WHERE WorkerName=%s",
+            "UPDATE Workers SET Status='Online', TranscodeEnabled=FALSE, RemuxEnabled=TRUE, LastHeartbeat=NOW() WHERE WorkerName=%s",
             (SENTINEL_WORKER,),
         )
         self.Db.ExecuteNonQuery(
@@ -279,12 +279,12 @@ class TestRemuxClaimAuthority(unittest.TestCase):
         self.Db.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE Id = %s", (self.QueueId,))
 
     def test_eligible_worker_claims(self):
-        Job = self.Dm.ClaimNextPendingRemuxJob(SENTINEL_WORKER)
+        Job = self.Dm.ClaimNextPendingJob(SENTINEL_WORKER)
         if Job is None:
             ProdPending = self.Db.ExecuteQuery(
                 "SELECT COUNT(*) AS n FROM TranscodeQueue "
                 "WHERE Status='Pending' AND Priority > -1000 "
-                "AND ProcessingMode IN ('Remux','Quick','AudioFix')",
+                "AND ProcessingMode IN ('Remux','Quick','AudioFix','SubtitleFix')",
             )
             self.assertGreater(
                 ProdPending[0]["n"], 0,
@@ -302,15 +302,15 @@ class TestRemuxClaimAuthority(unittest.TestCase):
         self.Db.ExecuteNonQuery(
             "UPDATE Workers SET Status='Paused' WHERE WorkerName=%s", (SENTINEL_WORKER,),
         )
-        Job = self.Dm.ClaimNextPendingRemuxJob(SENTINEL_WORKER)
+        Job = self.Dm.ClaimNextPendingJob(SENTINEL_WORKER)
         self.assertIsNone(Job, "Paused worker MUST NOT claim remux")
 
     def test_remux_disabled_refused(self):
         self.Db.ExecuteNonQuery(
             "UPDATE Workers SET RemuxEnabled=FALSE WHERE WorkerName=%s", (SENTINEL_WORKER,),
         )
-        Job = self.Dm.ClaimNextPendingRemuxJob(SENTINEL_WORKER)
-        self.assertIsNone(Job, "RemuxEnabled=FALSE worker MUST NOT claim remux")
+        Job = self.Dm.ClaimNextPendingJob(SENTINEL_WORKER)
+        self.assertIsNone(Job, "RemuxEnabled=FALSE worker with TranscodeEnabled=FALSE MUST NOT claim any row")
 
 
 # directive: worker-routing | # see worker-routing.C15 -- NVENC routing truth-table
@@ -325,7 +325,7 @@ NVENC_TEST_FILE_CPU = "_test-nvenc-routing-cpu-file.mkv"
 
 # directive: worker-routing | # see worker-routing.C15
 class TestNvencRouting(unittest.TestCase):
-    """ClaimNextPendingTranscodeJob NVENC truth table: 2 sentinel workers x 2 sentinel profiles x 2 sentinel media files; Priority=+10000 so sentinels outrank production."""
+    """ClaimNextPendingJob NVENC truth table: 2 sentinel workers x 2 sentinel profiles x 2 sentinel media files; Priority=+10000 so sentinels outrank production."""
 
     @classmethod
     def setUpClass(cls):
@@ -417,7 +417,7 @@ class TestNvencRouting(unittest.TestCase):
         """NVENC profile + nvenccapable=TRUE -> claim succeeds."""
         QId = self._EnqueueRow(NVENC_TEST_FILE_NVENC)
         try:
-            Job = self.Dm.ClaimNextPendingTranscodeJob(NVENC_TEST_WORKER_CAPABLE, AcceptsInterlaced=True)
+            Job = self.Dm.ClaimNextPendingJob(NVENC_TEST_WORKER_CAPABLE, AcceptsInterlaced=True)
             self.assertIsNotNone(Job, "nvenccapable=TRUE worker MUST claim NVENC profile row")
             self.assertEqual(Job.Id, QId, "Claimed row Id mismatch -- expected sentinel queue row")
         finally:
@@ -427,7 +427,7 @@ class TestNvencRouting(unittest.TestCase):
         """NVENC profile + nvenccapable=FALSE -> claim refused (NvencGate blocks)."""
         QId = self._EnqueueRow(NVENC_TEST_FILE_NVENC)
         try:
-            Job = self.Dm.ClaimNextPendingTranscodeJob(NVENC_TEST_WORKER_NOT_CAPABLE, AcceptsInterlaced=True)
+            Job = self.Dm.ClaimNextPendingJob(NVENC_TEST_WORKER_NOT_CAPABLE, AcceptsInterlaced=True)
             self.assertIsNone(Job, "nvenccapable=FALSE worker MUST NOT claim NVENC profile row")
         finally:
             self._DeleteQueueRow(QId)
@@ -436,7 +436,7 @@ class TestNvencRouting(unittest.TestCase):
         """Non-NVENC profile + nvenccapable=TRUE -> claim succeeds."""
         QId = self._EnqueueRow(NVENC_TEST_FILE_CPU)
         try:
-            Job = self.Dm.ClaimNextPendingTranscodeJob(NVENC_TEST_WORKER_CAPABLE, AcceptsInterlaced=True)
+            Job = self.Dm.ClaimNextPendingJob(NVENC_TEST_WORKER_CAPABLE, AcceptsInterlaced=True)
             self.assertIsNotNone(Job, "nvenccapable=TRUE worker MUST claim CPU profile row")
             self.assertEqual(Job.Id, QId, "Claimed row Id mismatch -- expected sentinel queue row")
         finally:
@@ -446,7 +446,7 @@ class TestNvencRouting(unittest.TestCase):
         """Non-NVENC profile + nvenccapable=FALSE -> claim succeeds (NvencGate inactive when usenvidiahardware=0)."""
         QId = self._EnqueueRow(NVENC_TEST_FILE_CPU)
         try:
-            Job = self.Dm.ClaimNextPendingTranscodeJob(NVENC_TEST_WORKER_NOT_CAPABLE, AcceptsInterlaced=True)
+            Job = self.Dm.ClaimNextPendingJob(NVENC_TEST_WORKER_NOT_CAPABLE, AcceptsInterlaced=True)
             self.assertIsNotNone(Job, "nvenccapable=FALSE worker MUST claim CPU profile row (NVENC gate not applicable)")
             self.assertEqual(Job.Id, QId, "Claimed row Id mismatch -- expected sentinel queue row")
         finally:

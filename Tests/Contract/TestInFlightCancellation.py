@@ -63,7 +63,7 @@ class TestRemuxLoopStopsOnStopRequested(unittest.TestCase):
         from Features.TranscodeJob.Worker.WorkerLoopService import WorkerLoopService
         from unittest.mock import MagicMock
         Db = MagicMock()
-        Db.ClaimNextPendingRemuxJob.return_value = None
+        Db.ClaimNextPendingJob.return_value = None
         Registry = MagicMock()
         Svc = WorkerLoopService(DatabaseManager=Db, JobProcessorRegistryInstance=Registry, WorkerName="test", TranscodeEnabled=False, RemuxEnabled=True)
         Exited = _RunLoopAndStop(Svc.ProcessQueueLoop, lambda: setattr(Svc, "StopRequested", True))
