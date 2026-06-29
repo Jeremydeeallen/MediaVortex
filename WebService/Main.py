@@ -359,13 +359,18 @@ class WebServiceApp:
                 LoggingService.LogException("Error rendering Settings page", e, "WebService", "settings")
                 return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
 
-        @self.App.route('/TranscodeQueue')
-        def transcode_queue():
+        @self.App.route('/Queue')
+        def queue_page():
             try:
                 return render_template('Queue.html')
             except Exception as e:
-                LoggingService.LogException("Error rendering Queue page", e, "WebService", "transcode_queue")
+                LoggingService.LogException("Error rendering Queue page", e, "WebService", "queue_page")
                 return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+
+        @self.App.route('/TranscodeQueue')
+        def transcode_queue():
+            from flask import redirect
+            return redirect('/Queue', code=301)
 
         @self.App.route('/Activity')
         def activity():

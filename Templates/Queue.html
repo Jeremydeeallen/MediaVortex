@@ -3,96 +3,66 @@
 {% block title %}Queue - MediaVortex{% endblock %}
 
 {% block head %}
-<!-- Page-specific styles moved to common.css for better architecture -->
+<style>
+.queue-card { transition: opacity 0.15s, transform 0.15s; }
+.queue-card.dragging { opacity: 0.55; }
+.queue-card.drag-over-top { box-shadow: 0 -3px 0 0 #0d6efd inset; }
+.queue-card.drag-over-bottom { box-shadow: 0 3px 0 0 #0d6efd inset; }
+.queue-drag-handle { cursor: grab; user-select: none; color: #6c757d; }
+.queue-drag-handle:active { cursor: grabbing; }
+.queue-drag-handle:hover { color: #0d6efd; }
+</style>
 {% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h1 class="h3 mb-0">Queue</h1>
-            <div class="page-action-buttons">
-                    <button type="button" class="btn btn-outline-danger" id="CleanupDuplicatesBtn">
-                        <i class="fas fa-broom"></i> <span class="btn-text">Cleanup Duplicates</span>
-                    </button>
-                    <div class="input-group" style="width: auto;">
-                        <input type="number" class="form-control form-control-sm" id="RemoveBySizeInput"
-                               placeholder="MB" style="width: 80px;" min="1" step="1">
-                        <button type="button" class="btn btn-outline-warning btn-sm" id="RemoveBySizeBtn">
-                            <i class="fas fa-filter"></i> Remove &lt; Size
-                        </button>
-                    </div>
-                    <button type="button" class="btn btn-warning" id="ClearQueueBtn">
-                        <i class="fas fa-trash"></i> <span class="btn-text">Clear Queue</span>
-                    </button>
-                    <button type="button" class="btn btn-secondary" id="RefreshBtn">
-                        <i class="fas fa-sync-alt"></i> <span class="btn-text">Refresh</span>
-                    </button>
-                </div>
-            </div>
-
-            <!-- Quality Testing Queue (moved from /Activity 2026-05-10) -->
-            <div class="card mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <div class="d-flex align-items-center gap-2">
-                        <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i>Quality Testing Queue</h5>
-                    </div>
-                    <div class="d-flex align-items-center gap-3">
-                        <span class="badge bg-secondary" id="QTQueueCount">0 items</span>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="RefreshQualityTestingBtn">
-                            <i class="fas fa-sync-alt"></i> Refresh
-                        </button>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div id="QualityTestingTableMount"></div>
-                    <nav aria-label="Quality testing queue pagination" class="mt-3">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <span id="QTPaginationInfo" class="text-muted">-</span>
-                            <div class="btn-group btn-group-sm" role="group">
-                                <button type="button" class="btn btn-outline-secondary" id="QTPrevBtn" disabled>Previous</button>
-                                <button type="button" class="btn btn-outline-secondary" id="QTNextBtn" disabled>Next</button>
-                            </div>
-                        </div>
-                    </nav>
-                </div>
-            </div>
-
-            <!-- Queue Table -->
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <div class="d-flex align-items-center gap-2">
-                        <h5 class="mb-0">Transcode Queue</h5>
-                    </div>
-                    <div class="d-flex align-items-center gap-3">
-                        <div class="d-flex align-items-center gap-2">
-                            <label for="PageSizeSelect" class="form-label mb-0">Show:</label>
-                            <select class="form-select form-select-sm" id="PageSizeSelect" style="width: auto;">
-                                <option value="10">10</option>
-                                <option value="25" selected>25</option>
-                                <option value="50">50</option>
-                                <option value="100">100</option>
-                            </select>
-                        </div>
-                        <span class="badge bg-secondary" id="QueueItemCount">0 items</span>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div id="QueueTableMount"></div>
-                    <nav aria-label="Queue pagination" class="mt-3">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <span id="PaginationInfo" class="text-muted">-</span>
-                            <div class="btn-group btn-group-sm" role="group">
-                                <button type="button" class="btn btn-outline-secondary" id="QueuePrevBtn" disabled>Previous</button>
-                                <button type="button" class="btn btn-outline-secondary" id="QueueNextBtn" disabled>Next</button>
-                            </div>
-                        </div>
-                    </nav>
-                </div>
-            </div>
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h3 mb-0">Queue</h1>
+    <div class="page-action-buttons d-flex gap-2 align-items-center">
+        <button type="button" class="btn btn-outline-danger btn-sm" id="CleanupDuplicatesBtn">
+            <i class="fas fa-broom"></i> Cleanup Duplicates
+        </button>
+        <div class="input-group" style="width: auto;">
+            <input type="number" class="form-control form-control-sm" id="RemoveBySizeInput" placeholder="MB" style="width: 80px;" min="1" step="1">
+            <button type="button" class="btn btn-outline-warning btn-sm" id="RemoveBySizeBtn">
+                <i class="fas fa-filter"></i> Remove &lt; Size
+            </button>
         </div>
+        <button type="button" class="btn btn-warning btn-sm" id="ClearQueueBtn">
+            <i class="fas fa-trash"></i> Clear Queue
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" id="RefreshBtn">
+            <i class="fas fa-sync-alt"></i> Refresh
+        </button>
     </div>
 </div>
+
+<div id="QueueCardsHost"></div>
+
+<template id="QueueCardTemplate">
+    <div class="card mb-4 queue-card" draggable="true">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center gap-2">
+                <span class="queue-drag-handle" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
+                <h5 class="mb-0 queue-card-title"></h5>
+            </div>
+            <div class="d-flex align-items-center gap-3">
+                <span class="badge bg-secondary queue-count-badge">0 items</span>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="queue-table-mount"></div>
+            <nav class="mt-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted queue-pagination-info">-</span>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" class="btn btn-outline-secondary queue-prev-btn" disabled>Previous</button>
+                        <button type="button" class="btn btn-outline-secondary queue-next-btn" disabled>Next</button>
+                    </div>
+                </div>
+            </nav>
+        </div>
+    </div>
+</template>
 
 <!-- Priority Update Modal -->
 <div class="modal fade" id="PriorityModal" tabindex="-1">
@@ -106,7 +76,7 @@
                 <div class="mb-3">
                     <label for="NewPriorityInput" class="form-label">New Priority</label>
                     <input type="number" class="form-control" id="NewPriorityInput" min="1" max="200">
-                    <div class="form-text">1-194 = auto-assigned by impact score. 195-200 = reserved for manual override (always wins over auto).</div>
+                    <div class="form-text">1-194 = auto-assigned by impact score. 195-200 = reserved for manual override.</div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -117,253 +87,83 @@
     </div>
 </div>
 
-<!-- Add Job with Options Modal -->
-<div class="modal fade" id="AddJobOptionsModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Add Job with Options</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label for="StartTimeInput" class="form-label">Start Time (Optional)</label>
-                    <input type="text" class="form-control" id="StartTimeInput" placeholder="HH:MM:SS or seconds (e.g., 00:02:30 or 150)">
-                    <div class="form-text">Time offset to start transcoding from (e.g., 00:02:30 for 2 minutes 30 seconds, or 150 for 150 seconds)</div>
-                </div>
-                <div class="mb-3">
-                    <label for="JobPriorityInput" class="form-label">Priority (Optional)</label>
-                    <input type="number" class="form-control" id="JobPriorityInput" min="1" max="200" placeholder="(auto)">
-                    <div class="form-text">Leave empty for impact-based auto-priority (1-194). Set 195-200 to manually jump the queue.</div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="ConfirmAddJobBtn">Add to Queue</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Reset All Queues Modal -->
-<div class="modal fade" id="ResetAllQueuesModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">
-                    <i class="fas fa-redo text-danger"></i> Reset Running Tasks
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="alert alert-warning">
-                    <h6><i class="fas fa-warning"></i> Warning: This action will reset running tasks back to pending!</h6>
-                    <p class="mb-0">This will:</p>
-                    <ul class="mb-0">
-                        <li>Reset running transcoding jobs back to pending (so they can be picked up again)</li>
-                        <li>Reset testing quality testing jobs back to pending</li>
-                        <li>Cancel all running transcoding attempts</li>
-                        <li>Clear all progress tracking</li>
-                        <li>Cancel all pending service commands</li>
-                    </ul>
-                </div>
-                <div class="mb-3">
-                    <label for="ResetTypeSelect" class="form-label">Reset Type</label>
-                    <select class="form-select" id="ResetTypeSelect">
-                        <option value="All">All Queues (Transcode + Quality + Service)</option>
-                        <option value="Transcode">Transcode Queues Only</option>
-                        <option value="Quality">Quality Testing Queues Only</option>
-                        <option value="Service">Service Commands Only</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="ConfirmResetCheckbox">
-                        <label class="form-check-label" for="ConfirmResetCheckbox">
-                            I understand this will reset running tasks back to pending so they can be picked up again
-                        </label>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-danger" id="ConfirmResetBtn" disabled>
-                    <i class="fas fa-redo"></i> Reset Running Tasks
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
 <script>
-// Lightweight non-table actions (modals, bulk buttons). Table rendering is handled
-// by the module-script block below via TableRenderer.
-class TranscodeQueueActions {
+class QueueActions {
     constructor() {
         this.currentItemId = null;
-        this.initializeEventListeners();
-    }
-
-    initializeEventListeners() {
         document.getElementById('CleanupDuplicatesBtn').addEventListener('click', () => this.cleanupDuplicates());
         document.getElementById('ClearQueueBtn').addEventListener('click', () => this.clearQueue());
         document.getElementById('RemoveBySizeBtn').addEventListener('click', () => this.removeBySize());
-        document.getElementById('RemoveBySizeInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') this.removeBySize();
-        });
-        document.getElementById('RefreshBtn').addEventListener('click', () => {
-            if (window.RefreshTranscodeTable) window.RefreshTranscodeTable();
-            if (window.RefreshQualityTable) window.RefreshQualityTable();
-        });
+        document.getElementById('RemoveBySizeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') this.removeBySize(); });
+        document.getElementById('RefreshBtn').addEventListener('click', () => this.refreshAll());
         document.getElementById('ConfirmPriorityBtn').addEventListener('click', () => this.updatePriority());
-        document.getElementById('ConfirmAddJobBtn').addEventListener('click', () => this.addJobWithOptions());
-        document.getElementById('ConfirmResetCheckbox').addEventListener('change', (e) => {
-            document.getElementById('ConfirmResetBtn').disabled = !e.target.checked;
-        });
     }
-
+    refreshAll() { (window.MvQueueRefreshFns || []).forEach(fn => { try { fn(); } catch (e) {} }); }
     async clearQueue() {
         try {
-            const response = await fetch('/api/TranscodeQueue/ClearQueue', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }
-            });
-            const data = await response.json();
-            if (data.Success) {
-                const itemsCleared = data.ItemsCleared || 0;
-                const message = data.Message || `Successfully cleared ${itemsCleared} items from the queue`;
-                this.showAlert(message, 'success');
-                if (window.RefreshTranscodeTable) window.RefreshTranscodeTable();
-            } else {
-                this.showAlert('Error clearing queue: ' + data.ErrorMessage, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error clearing queue: ' + error.message, 'danger');
-        }
+            const r = await fetch('/api/TranscodeQueue/ClearQueue', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+            const d = await r.json();
+            if (d.Success) { this.showAlert(d.Message || `Cleared ${d.ItemsCleared || 0} items`, 'success'); this.refreshAll(); }
+            else this.showAlert('Error clearing queue: ' + d.ErrorMessage, 'danger');
+        } catch (e) { this.showAlert('Error clearing queue: ' + e.message, 'danger'); }
     }
-
     async removeBySize() {
         const input = document.getElementById('RemoveBySizeInput');
         const maxSizeMB = parseFloat(input.value);
-        if (!maxSizeMB || maxSizeMB <= 0) {
-            this.showAlert('Enter a valid size in MB', 'warning');
-            input.focus();
-            return;
-        }
+        if (!maxSizeMB || maxSizeMB <= 0) { this.showAlert('Enter a valid size in MB', 'warning'); input.focus(); return; }
         if (!confirm(`Remove all pending queue items smaller than ${maxSizeMB} MB?`)) return;
         try {
-            const response = await fetch('/api/TranscodeQueue/RemoveBySize', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ MaxSizeMB: maxSizeMB })
-            });
-            const data = await response.json();
-            if (data.Success) {
-                const removed = data.ItemsRemoved || 0;
-                this.showAlert(`Removed ${removed} items smaller than ${maxSizeMB} MB`, 'success');
-                input.value = '';
-                if (window.RefreshTranscodeTable) window.RefreshTranscodeTable();
-            } else {
-                this.showAlert('Error: ' + (data.ErrorMessage || 'Unknown error'), 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error removing items: ' + error.message, 'danger');
-        }
+            const r = await fetch('/api/TranscodeQueue/RemoveBySize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ MaxSizeMB: maxSizeMB }) });
+            const d = await r.json();
+            if (d.Success) { this.showAlert(`Removed ${d.ItemsRemoved || 0} items smaller than ${maxSizeMB} MB`, 'success'); input.value = ''; this.refreshAll(); }
+            else this.showAlert('Error: ' + (d.ErrorMessage || 'Unknown'), 'danger');
+        } catch (e) { this.showAlert('Error removing items: ' + e.message, 'danger'); }
     }
-
     async cleanupDuplicates() {
-        if (!confirm('This will remove duplicate MediaFile entries from the database (keeping the oldest record for each file path). Continue?')) return;
+        if (!confirm('Remove duplicate MediaFile entries from the database (keep oldest per path). Continue?')) return;
         try {
-            const response = await fetch('/api/Scan/CleanupDuplicates', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }
-            });
-            const data = await response.json();
-            if (data.Success) {
-                const removed = data.DuplicatesRemoved || 0;
-                this.showAlert(`Cleanup complete: ${removed} duplicate records removed`, 'success');
-                if (window.RefreshTranscodeTable) window.RefreshTranscodeTable();
-            } else {
-                this.showAlert('Error cleaning up duplicates: ' + (data.Message || 'Unknown error'), 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error cleaning up duplicates: ' + error.message, 'danger');
-        }
+            const r = await fetch('/api/Scan/CleanupDuplicates', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+            const d = await r.json();
+            if (d.Success) { this.showAlert(`Cleanup complete: ${d.DuplicatesRemoved || 0} duplicates removed`, 'success'); this.refreshAll(); }
+            else this.showAlert('Error: ' + (d.Message || 'Unknown'), 'danger');
+        } catch (e) { this.showAlert('Error cleaning up duplicates: ' + e.message, 'danger'); }
     }
-
     async removeJob(itemId, status) {
-        const isRunning = status === 'Running';
-        const confirmMsg = isRunning
-            ? 'This job is currently running. This will stop FFmpeg and remove the job. Continue?'
-            : 'Are you sure you want to remove this job from the queue?';
-        if (!confirm(confirmMsg)) return;
+        const msg = status === 'Running' ? 'This job is running. This will stop FFmpeg and remove the job. Continue?' : 'Remove this job from the queue?';
+        if (!confirm(msg)) return;
         try {
-            const response = await fetch('/api/TranscodeQueue/RemoveJob', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ItemId: itemId })
-            });
-            const data = await response.json();
-            if (data.Success) {
-                this.showAlert(isRunning ? 'Running job cancelled and removed' : 'Job removed from queue successfully', 'success');
-                if (window.RefreshTranscodeTable) window.RefreshTranscodeTable();
-            } else {
-                this.showAlert('Error removing job: ' + data.ErrorMessage, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error removing job: ' + error.message, 'danger');
-        }
+            const r = await fetch('/api/TranscodeQueue/RemoveJob', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ItemId: itemId }) });
+            const d = await r.json();
+            if (d.Success) { this.showAlert(status === 'Running' ? 'Running job cancelled and removed' : 'Job removed', 'success'); this.refreshAll(); }
+            else this.showAlert('Error removing job: ' + d.ErrorMessage, 'danger');
+        } catch (e) { this.showAlert('Error removing job: ' + e.message, 'danger'); }
     }
-
     updatePriorityModal(itemId, currentPriority) {
         this.currentItemId = itemId;
         document.getElementById('NewPriorityInput').value = currentPriority;
-        const modal = new bootstrap.Modal(document.getElementById('PriorityModal'));
-        modal.show();
+        new bootstrap.Modal(document.getElementById('PriorityModal')).show();
     }
-
     async updatePriority() {
         const newPriority = parseInt(document.getElementById('NewPriorityInput').value);
         try {
-            const response = await fetch('/api/TranscodeQueue/PrioritizeJob', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ItemId: this.currentItemId, NewPriority: newPriority })
-            });
-            const data = await response.json();
-            if (data.Success) {
-                this.showAlert('Priority updated successfully', 'success');
-                bootstrap.Modal.getInstance(document.getElementById('PriorityModal')).hide();
-                if (window.RefreshTranscodeTable) window.RefreshTranscodeTable();
-            } else {
-                this.showAlert('Error updating priority: ' + data.ErrorMessage, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error updating priority: ' + error.message, 'danger');
-        }
+            const r = await fetch('/api/TranscodeQueue/PrioritizeJob', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ItemId: this.currentItemId, NewPriority: newPriority }) });
+            const d = await r.json();
+            if (d.Success) { this.showAlert('Priority updated', 'success'); bootstrap.Modal.getInstance(document.getElementById('PriorityModal')).hide(); this.refreshAll(); }
+            else this.showAlert('Error: ' + d.ErrorMessage, 'danger');
+        } catch (e) { this.showAlert('Error: ' + e.message, 'danger'); }
     }
-
     async retryQualityTest(jobId) {
         try {
-            const response = await fetch('/api/QualityTest/Retry', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ JobId: jobId })
-            });
-            const data = await response.json();
-            if (data && data.Success) {
-                this.showAlert('Quality test retry initiated for job ' + jobId, 'success');
-                if (window.RefreshQualityTable) window.RefreshQualityTable();
-            } else if (data) {
-                this.showAlert('Failed to retry quality test: ' + data.Message, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error retrying quality test: ' + error.message, 'danger');
-        }
+            const r = await fetch('/api/QualityTest/Retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ JobId: jobId }) });
+            const d = await r.json();
+            if (d && d.Success) { this.showAlert(`Quality test retry queued for job ${jobId}`, 'success'); this.refreshAll(); }
+            else if (d) this.showAlert('Retry failed: ' + d.Message, 'danger');
+        } catch (e) { this.showAlert('Retry error: ' + e.message, 'danger'); }
     }
-
-    addJobWithOptions() { /* preserved for modal wire-up; no-op here */ }
-
-    showAlert(message, type) { showToastAlert(message, type); }
+    showAlert(message, type) { if (typeof showToastAlert === 'function') showToastAlert(message, type); else alert(message); }
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-    window.queueManager = new TranscodeQueueActions();
-});
+document.addEventListener('DOMContentLoaded', function() { window.queueManager = new QueueActions(); });
 </script>
 
 <script type="module">
@@ -377,265 +177,68 @@ import { FilterController } from "/static/js/TableRenderer/FilterController.js";
 import { ColumnDefinition } from "/static/js/TableRenderer/ColumnDefinition.js";
 import { ICellRenderer } from "/static/js/TableRenderer/Interfaces/ICellRenderer.js";
 
-const EscapeText = (Text) => {
-    const Div = document.createElement('div');
-    Div.textContent = Text == null ? '' : String(Text);
-    return Div.innerHTML;
-};
+const FormatDate = (s) => { if (!s) return '-'; return window.formatTime ? window.formatTime(s, 'datetime') : new Date(s).toLocaleString(); };
+const FormatSize = (mb) => { const n = parseFloat(mb) || 0; return n >= 1024 ? (n/1024).toFixed(2) + ' GB' : n.toFixed(2) + ' MB'; };
+const PageInfo = (Total, Page, PageSize) => { const s = Total === 0 ? 0 : (Page * PageSize) + 1; const e = Math.min((Page + 1) * PageSize, Total); return `Showing ${s} to ${e} of ${Total.toLocaleString()} entries`; };
+const Badge = (Text, Map, Fallback) => { const s = document.createElement('span'); s.className = 'badge ' + (Map[Text] || Fallback || 'bg-secondary'); s.textContent = Text == null ? '' : String(Text); return s; };
 
-const FormatDate = (DateString) => {
-    if (!DateString) return '-';
-    return window.formatTime ? window.formatTime(DateString, 'datetime') : new Date(DateString).toLocaleString();
-};
+class TextR extends ICellRenderer { Render(v) { const s = document.createElement('span'); s.textContent = v == null ? '' : String(v); return s; } }
+class SizeR extends ICellRenderer { Render(v) { const s = document.createElement('span'); s.textContent = FormatSize(v); return s; } }
+class DateR extends ICellRenderer { Render(v) { const s = document.createElement('span'); s.textContent = FormatDate(v); return s; } }
+class StatusR extends ICellRenderer { Render(v) { return Badge(v, {'Pending':'bg-warning','Running':'bg-info','Completed':'bg-success','Failed':'bg-danger','Cancelled':'bg-secondary'}); } }
+class PriorityR extends ICellRenderer { Render(v) { const p = Number(v) || 0; let c = 'bg-secondary'; if (p >= 195) c = 'bg-danger'; else if (p >= 150) c = 'bg-warning'; else if (p >= 75) c = 'bg-info'; const s = document.createElement('span'); s.className = 'badge ' + c; s.textContent = String(p); return s; } }
+class ClaimR extends ICellRenderer { Render(v) { if (!v) { const s = document.createElement('span'); s.className = 'text-muted'; s.textContent = '-'; return s; } const s = document.createElement('small'); s.textContent = String(v); return s; } }
+class TQActionsR extends ICellRenderer { Render(_v, Row) {
+    const g = document.createElement('div'); g.className = 'btn-group btn-group-sm';
+    const e = document.createElement('button'); e.type = 'button'; e.className = 'btn btn-outline-primary'; e.title = 'Update Priority'; e.innerHTML = '<i class="fas fa-edit"></i>';
+    e.addEventListener('click', (ev) => { ev.stopPropagation(); if (window.queueManager) window.queueManager.updatePriorityModal(Row.Id, Row.Priority); });
+    const d = document.createElement('button'); d.type = 'button'; d.className = 'btn btn-outline-danger'; d.title = Row.Status === 'Running' ? 'Cancel & Remove' : 'Remove'; d.innerHTML = '<i class="fas fa-trash"></i>';
+    d.addEventListener('click', (ev) => { ev.stopPropagation(); if (window.queueManager) window.queueManager.removeJob(Row.Id, Row.Status); });
+    g.appendChild(e); g.appendChild(d); return g;
+} }
+class VmafR extends ICellRenderer { Render(v) { if (v == null) { const s = document.createElement('span'); s.textContent = '-'; return s; } const n = Number(v); const c = n >= 80 ? 'bg-success' : (n >= 60 ? 'bg-warning' : 'bg-danger'); const s = document.createElement('span'); s.className = 'badge ' + c; s.textContent = n.toFixed(2); return s; } }
+class QtStatusR extends ICellRenderer { Render(v) { return Badge(v, {'Pending':'bg-warning','Running':'bg-info','Completed':'bg-success','Failed':'bg-danger'}); } }
+class QtPriR extends ICellRenderer { Render(v) { const p = Number(v) || 50; let c = 'bg-secondary'; if (p >= 80) c = 'bg-danger'; else if (p >= 60) c = 'bg-warning'; else if (p >= 40) c = 'bg-info'; const s = document.createElement('span'); s.className = 'badge ' + c; s.textContent = String(p); return s; } }
+class QtFileR extends ICellRenderer { Render(_v, Row) { const fn = Row.FileName || (Row.OriginalFilePath ? Row.OriginalFilePath.split('\\').pop() : 'Unknown'); const d = document.createElement('div'); d.className = 'text-truncate'; d.style.maxWidth = '250px'; d.title = Row.OriginalFilePath || ''; d.textContent = fn; return d; } }
+class QtProgressR extends ICellRenderer { Render(_v, Row) { const w = document.createElement('span'); if (Row.Status === 'Running') w.innerHTML = '<div class="d-flex align-items-center"><div class="spinner-border spinner-border-sm text-info me-2"></div><small class="text-muted">Loading...</small></div>'; else if (Row.Status === 'Completed') w.innerHTML = '<span class="badge bg-success"><i class="fas fa-check"></i> Done</span>'; else if (Row.Status === 'Failed') w.innerHTML = '<span class="badge bg-danger"><i class="fas fa-times"></i> Failed</span>'; else w.textContent = '-'; return w; } }
+class QtActionsR extends ICellRenderer { Render(_v, Row) {
+    const w = document.createElement('span'); const retries = Row.RetryCount || 0; const max = Row.MaxRetries || 3;
+    if (Row.Status === 'Failed' && retries < max) {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-sm btn-outline-warning'; b.title = 'Retry'; b.innerHTML = '<i class="fas fa-redo"></i>';
+        b.addEventListener('click', (ev) => { ev.stopPropagation(); if (window.queueManager) window.queueManager.retryQualityTest(Row.Id); }); w.appendChild(b);
+    } else if (Row.ErrorMessage) { const s = document.createElement('span'); s.className = 'text-danger'; s.title = String(Row.ErrorMessage); s.innerHTML = '<i class="fas fa-exclamation-triangle"></i>'; w.appendChild(s); }
+    else w.textContent = '-'; return w;
+} }
 
-const FormatFileSize = (sizeMB) => {
-    const size = parseFloat(sizeMB) || 0;
-    if (size >= 1024) return (size / 1024).toFixed(2) + ' GB';
-    return size.toFixed(2) + ' MB';
-};
+// Definitions for each queue (mode = TranscodeQueue.ProcessingMode; null for VMAF/QualityTest)
+const QUEUE_DEFS = [
+    { key: 'Transcode', title: 'Transcode Queue', endpoint: '/api/TranscodeQueue/GetQueue?mode=Transcode', tableKind: 'tq' },
+    { key: 'Remux',     title: 'Remux Queue',     endpoint: '/api/TranscodeQueue/GetQueue?mode=Remux',     tableKind: 'tq' },
+    { key: 'Audio',     title: 'Audio Queue',     endpoint: '/api/TranscodeQueue/GetQueue?mode=AudioFix',  tableKind: 'tq' },
+    { key: 'VMAF',      title: 'VMAF Queue',      endpoint: '/api/QualityTest/Queue',                     tableKind: 'qt' },
+];
 
-const PageStateBadge = (Total, Page, PageSize) => {
-    const Start = Total === 0 ? 0 : (Page * PageSize) + 1;
-    const End = Math.min((Page + 1) * PageSize, Total);
-    return `Showing ${Start} to ${End} of ${Total.toLocaleString()} entries`;
-};
-
-const BadgeFor = (Text, ClassMap, Fallback) => {
-    const Span = document.createElement('span');
-    Span.className = 'badge ' + (ClassMap[Text] || Fallback || 'bg-secondary');
-    Span.textContent = Text == null ? '' : String(Text);
-    return Span;
-};
-
-class _TranscodeStatusBadgeRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(Value) {
-        return BadgeFor(Value, {
-            'Pending': 'bg-warning',
-            'Running': 'bg-info',
-            'Completed': 'bg-success',
-            'Failed': 'bg-danger',
-            'Cancelled': 'bg-secondary'
-        });
-    }
-}
-
-class _PriorityBadgeRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(Value) {
-        const P = Number(Value) || 0;
-        let Cls = 'bg-secondary';
-        if (P >= 195) Cls = 'bg-danger';
-        else if (P >= 150) Cls = 'bg-warning';
-        else if (P >= 75) Cls = 'bg-info';
-        const Span = document.createElement('span');
-        Span.className = 'badge ' + Cls;
-        Span.textContent = String(P);
-        return Span;
-    }
-}
-
-class _ModeBadgeRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(_Value, Row) {
-        const Mode = Row.ProcessingMode || 'Transcode';
-        const Map = { 'Transcode': 'bg-primary', 'Remux': 'bg-info', 'AudioFix': 'bg-warning text-dark', 'Quick': 'bg-secondary' };
-        return BadgeFor(Mode, Map, 'bg-primary');
-    }
-}
-
-class _ClaimedByRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(Value) {
-        if (!Value) {
-            const Span = document.createElement('span');
-            Span.className = 'text-muted';
-            Span.textContent = '-';
-            return Span;
+const ORDER_KEY = 'MvQueueOrder';
+const LoadOrder = () => {
+    try {
+        const stored = JSON.parse(localStorage.getItem(ORDER_KEY) || 'null');
+        if (Array.isArray(stored) && stored.length === QUEUE_DEFS.length) {
+            const knownKeys = new Set(QUEUE_DEFS.map(q => q.key));
+            if (stored.every(k => knownKeys.has(k))) return stored;
         }
-        const Small = document.createElement('small');
-        Small.textContent = String(Value);
-        return Small;
-    }
-}
+    } catch (e) {}
+    return QUEUE_DEFS.map(q => q.key);
+};
+const SaveOrder = (order) => { try { localStorage.setItem(ORDER_KEY, JSON.stringify(order)); } catch (e) {} };
 
-class _SizeRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(Value) {
-        const Span = document.createElement('span');
-        Span.textContent = FormatFileSize(Value);
-        return Span;
-    }
-}
-
-class _DateRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(Value) {
-        const Span = document.createElement('span');
-        Span.textContent = FormatDate(Value);
-        return Span;
-    }
-}
-
-class _TextRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(Value) {
-        const Span = document.createElement('span');
-        Span.textContent = Value == null ? '' : String(Value);
-        return Span;
-    }
-}
-
-class _TranscodeActionsRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(_Value, Row) {
-        const Group = document.createElement('div');
-        Group.className = 'btn-group btn-group-sm';
-        Group.setAttribute('role', 'group');
-
-        const EditBtn = document.createElement('button');
-        EditBtn.type = 'button';
-        EditBtn.className = 'btn btn-outline-primary';
-        EditBtn.title = 'Update Priority';
-        EditBtn.innerHTML = '<i class="fas fa-edit"></i>';
-        EditBtn.addEventListener('click', (E) => {
-            E.stopPropagation();
-            if (window.queueManager) window.queueManager.updatePriorityModal(Row.Id, Row.Priority);
-        });
-
-        const DelBtn = document.createElement('button');
-        DelBtn.type = 'button';
-        DelBtn.className = 'btn btn-outline-danger';
-        DelBtn.title = Row.Status === 'Running' ? 'Cancel & Remove Job' : 'Remove Job';
-        DelBtn.innerHTML = '<i class="fas fa-trash"></i>';
-        DelBtn.addEventListener('click', (E) => {
-            E.stopPropagation();
-            if (window.queueManager) window.queueManager.removeJob(Row.Id, Row.Status);
-        });
-
-        Group.appendChild(EditBtn);
-        Group.appendChild(DelBtn);
-        return Group;
-    }
-}
-
-class _VMAFBadgeRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(Value) {
-        if (Value == null) {
-            const Span = document.createElement('span');
-            Span.textContent = '-';
-            return Span;
-        }
-        const Score = Number(Value);
-        const Cls = Score >= 80 ? 'bg-success' : (Score >= 60 ? 'bg-warning' : 'bg-danger');
-        const Span = document.createElement('span');
-        Span.className = 'badge ' + Cls;
-        Span.textContent = Score.toFixed(2);
-        return Span;
-    }
-}
-
-class _QTStatusBadgeRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(Value) {
-        return BadgeFor(Value, {
-            'Pending': 'bg-warning',
-            'Running': 'bg-info',
-            'Completed': 'bg-success',
-            'Failed': 'bg-danger'
-        });
-    }
-}
-
-class _QTPriorityBadgeRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(Value) {
-        const P = Number(Value) || 50;
-        let Cls = 'bg-secondary';
-        if (P >= 80) Cls = 'bg-danger';
-        else if (P >= 60) Cls = 'bg-warning';
-        else if (P >= 40) Cls = 'bg-info';
-        const Span = document.createElement('span');
-        Span.className = 'badge ' + Cls;
-        Span.textContent = String(P);
-        return Span;
-    }
-}
-
-class _QTFileNameRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(_Value, Row) {
-        const FileName = Row.FileName || (Row.OriginalFilePath ? Row.OriginalFilePath.split('\\').pop() : 'Unknown');
-        const Div = document.createElement('div');
-        Div.className = 'text-truncate';
-        Div.style.maxWidth = '250px';
-        Div.title = Row.OriginalFilePath || '';
-        Div.textContent = FileName;
-        return Div;
-    }
-}
-
-class _QTProgressRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(_Value, Row) {
-        const Wrap = document.createElement('span');
-        if (Row.Status === 'Running') {
-            Wrap.innerHTML = '<div class="d-flex align-items-center"><div class="spinner-border spinner-border-sm text-info me-2" role="status"></div><small class="text-muted">Loading...</small></div>';
-        } else if (Row.Status === 'Completed') {
-            Wrap.innerHTML = '<span class="badge bg-success"><i class="fas fa-check"></i> Done</span>';
-        } else if (Row.Status === 'Failed') {
-            Wrap.innerHTML = '<span class="badge bg-danger"><i class="fas fa-times"></i> Failed</span>';
-        } else {
-            Wrap.textContent = '-';
-        }
-        return Wrap;
-    }
-}
-
-class _QTActionsRenderer extends ICellRenderer {
-    constructor() { super(); }
-    Render(_Value, Row) {
-        const Wrap = document.createElement('span');
-        const Retries = Row.RetryCount || 0;
-        const Max = Row.MaxRetries || 3;
-        if (Row.Status === 'Failed' && Retries < Max) {
-            const Btn = document.createElement('button');
-            Btn.type = 'button';
-            Btn.className = 'btn btn-sm btn-outline-warning';
-            Btn.title = 'Retry Quality Test';
-            Btn.innerHTML = '<i class="fas fa-redo"></i>';
-            Btn.addEventListener('click', (E) => {
-                E.stopPropagation();
-                if (window.queueManager) window.queueManager.retryQualityTest(Row.Id);
-            });
-            Wrap.appendChild(Btn);
-        } else if (Row.ErrorMessage) {
-            const Span = document.createElement('span');
-            Span.className = 'text-danger';
-            Span.title = String(Row.ErrorMessage);
-            Span.innerHTML = '<i class="fas fa-exclamation-triangle"></i>';
-            Wrap.appendChild(Span);
-        } else {
-            Wrap.textContent = '-';
-        }
-        return Wrap;
-    }
-}
-
-const InitTranscodeQueueTable = () => {
+const InitTqTable = (Card, Def) => {
     const Cfg = new TableRendererConfig({ DefaultPageSize: 25, DefaultSortDirection: 'DESC' });
     const Bus = new EventBus();
-    const Src = new ServerPagedDataSource('/api/TranscodeQueue/GetQueue', {
-        Fetch: fetch.bind(window),
-        RowsKey: 'Rows',
-        TotalKey: 'TotalCount'
-    });
+    const Src = new ServerPagedDataSource(Def.endpoint, { Fetch: fetch.bind(window), RowsKey: 'Rows', TotalKey: 'TotalCount' });
     const Sort = new SortController(Src, Bus, Cfg);
     const Pag = new PaginationController(Src, Bus, Cfg);
     const Filt = new FilterController(Src, Bus, Cfg);
     Sort.SetSort('Priority', 'DESC');
-
     const Cols = [
         new ColumnDefinition({ Key: 'Id', Header: 'ID', CellRendererName: 'Text', Width: '70px' }),
         new ColumnDefinition({ Key: 'FileName', Header: 'File Name', CellRendererName: 'Text', Sortable: true }),
@@ -644,138 +247,135 @@ const InitTranscodeQueueTable = () => {
         new ColumnDefinition({ Key: 'Priority', Header: 'Priority', CellRendererName: 'PriorityBadge', Sortable: true, Width: '90px' }),
         new ColumnDefinition({ Key: 'Status', Header: 'Status', CellRendererName: 'StatusBadge', Width: '100px' }),
         new ColumnDefinition({ Key: 'ClaimedBy', Header: 'Worker', CellRendererName: 'ClaimedBy', Width: '120px' }),
-        new ColumnDefinition({ Key: 'ProcessingMode', Header: 'Mode', CellRendererName: 'ModeBadge', Width: '100px' }),
         new ColumnDefinition({ Key: 'DateAdded', Header: 'Date Added', CellRendererName: 'Date', Sortable: true, Width: '160px' }),
-        new ColumnDefinition({ Key: '__Actions', Header: 'Actions', CellRendererName: 'Actions', Width: '110px' })
+        new ColumnDefinition({ Key: '__Actions', Header: 'Actions', CellRendererName: 'TqActions', Width: '110px' })
     ];
+    const Mount = Card.querySelector('.queue-table-mount');
+    const T = new TableRenderer({ Container: Mount, DataSource: Src, Columns: Cols, Config: Cfg, Bus, Capabilities: { Sortable: true, Paginatable: true, Filterable: true, Virtualized: false }, SortController: Sort, PaginationController: Pag, FilterController: Filt });
+    T._CellRegistry.Register('Text', TextR);
+    T._CellRegistry.Register('Size', SizeR);
+    T._CellRegistry.Register('Date', DateR);
+    T._CellRegistry.Register('PriorityBadge', PriorityR);
+    T._CellRegistry.Register('StatusBadge', StatusR);
+    T._CellRegistry.Register('ClaimedBy', ClaimR);
+    T._CellRegistry.Register('TqActions', TQActionsR);
 
-    const Mount = document.getElementById('QueueTableMount');
-    const T = new TableRenderer({
-        Container: Mount,
-        DataSource: Src,
-        Columns: Cols,
-        Config: Cfg,
-        Bus,
-        Capabilities: { Sortable: true, Paginatable: true, Filterable: true, Virtualized: false },
-        SortController: Sort,
-        PaginationController: Pag,
-        FilterController: Filt
-    });
-    T._CellRegistry.Register('Text', _TextRenderer);
-    T._CellRegistry.Register('Size', _SizeRenderer);
-    T._CellRegistry.Register('Date', _DateRenderer);
-    T._CellRegistry.Register('PriorityBadge', _PriorityBadgeRenderer);
-    T._CellRegistry.Register('StatusBadge', _TranscodeStatusBadgeRenderer);
-    T._CellRegistry.Register('ClaimedBy', _ClaimedByRenderer);
-    T._CellRegistry.Register('ModeBadge', _ModeBadgeRenderer);
-    T._CellRegistry.Register('Actions', _TranscodeActionsRenderer);
-
-    const InfoEl = document.getElementById('PaginationInfo');
-    const PrevBtn = document.getElementById('QueuePrevBtn');
-    const NextBtn = document.getElementById('QueueNextBtn');
-    const CountBadge = document.getElementById('QueueItemCount');
-    const PageSizeSel = document.getElementById('PageSizeSelect');
-
+    const InfoEl = Card.querySelector('.queue-pagination-info');
+    const PrevBtn = Card.querySelector('.queue-prev-btn');
+    const NextBtn = Card.querySelector('.queue-next-btn');
+    const CountBadge = Card.querySelector('.queue-count-badge');
     const Sync = () => {
-        const Page = Pag.GetPage();
-        const Size = Pag.GetPageSize();
-        const Total = Pag._TotalCount;
-        InfoEl.textContent = PageStateBadge(Total, Page, Size);
-        CountBadge.textContent = `${Total} items`;
-        PrevBtn.disabled = Page <= 0;
-        NextBtn.disabled = (Page + 1) * Size >= Total;
+        const P = Pag.GetPage(), Sz = Pag.GetPageSize(), Tot = Pag._TotalCount;
+        InfoEl.textContent = PageInfo(Tot, P, Sz); CountBadge.textContent = `${Tot.toLocaleString()} items`;
+        PrevBtn.disabled = P <= 0; NextBtn.disabled = (P + 1) * Sz >= Tot;
     };
     PrevBtn.addEventListener('click', () => Pag.PrevPage());
     NextBtn.addEventListener('click', () => Pag.NextPage());
-    PageSizeSel.addEventListener('change', () => {
-        Pag.SetPageSize(parseInt(PageSizeSel.value, 10) || 25);
-    });
     Bus.Subscribe('PageChanged', Sync);
     Bus.Subscribe('SortChanged', () => Pag.GoTo(0));
     Bus.Subscribe('FilterChanged', () => Pag.GoTo(0));
-
-    window.RefreshTranscodeTable = () => T.Refresh().then(Sync);
-    window.TranscodeQueueTable = T;
-
     T.Render().then(Sync);
+    return () => T.Refresh().then(Sync);
 };
 
-const InitQualityTestingTable = () => {
+const InitQtTable = (Card, Def) => {
     const Cfg = new TableRendererConfig({ DefaultPageSize: 25, DefaultSortDirection: 'ASC' });
     const Bus = new EventBus();
-    const Src = new ServerPagedDataSource('/api/QualityTest/Queue', {
-        Fetch: fetch.bind(window),
-        RowsKey: 'Rows',
-        TotalKey: 'TotalCount'
-    });
+    const Src = new ServerPagedDataSource(Def.endpoint, { Fetch: fetch.bind(window), RowsKey: 'Rows', TotalKey: 'TotalCount' });
     const Sort = new SortController(Src, Bus, Cfg);
     const Pag = new PaginationController(Src, Bus, Cfg);
     const Filt = new FilterController(Src, Bus, Cfg);
     Sort.SetSort('DateAdded', 'ASC');
-
     const Cols = [
         new ColumnDefinition({ Key: 'Id', Header: 'ID', CellRendererName: 'Text', Width: '70px' }),
-        new ColumnDefinition({ Key: 'FileName', Header: 'File Name', CellRendererName: 'QTFile' }),
-        new ColumnDefinition({ Key: 'Status', Header: 'Status', CellRendererName: 'QTStatus', Width: '100px' }),
-        new ColumnDefinition({ Key: 'Priority', Header: 'Priority', CellRendererName: 'QTPriority', Width: '90px' }),
-        new ColumnDefinition({ Key: 'VMAFScore', Header: 'VMAF Score', CellRendererName: 'VMAF', Width: '100px' }),
-        new ColumnDefinition({ Key: '__Progress', Header: 'Progress', CellRendererName: 'QTProgress', Width: '140px' }),
+        new ColumnDefinition({ Key: 'FileName', Header: 'File Name', CellRendererName: 'QtFile' }),
+        new ColumnDefinition({ Key: 'Status', Header: 'Status', CellRendererName: 'QtStatus', Width: '100px' }),
+        new ColumnDefinition({ Key: 'Priority', Header: 'Priority', CellRendererName: 'QtPri', Width: '90px' }),
+        new ColumnDefinition({ Key: 'VMAFScore', Header: 'VMAF', CellRendererName: 'Vmaf', Width: '100px' }),
+        new ColumnDefinition({ Key: '__Progress', Header: 'Progress', CellRendererName: 'QtProgress', Width: '140px' }),
         new ColumnDefinition({ Key: 'DateAdded', Header: 'Date Added', CellRendererName: 'Date', Sortable: true, Width: '160px' }),
-        new ColumnDefinition({ Key: '__Actions', Header: 'Actions', CellRendererName: 'QTActions', Width: '90px' })
+        new ColumnDefinition({ Key: '__Actions', Header: 'Actions', CellRendererName: 'QtActions', Width: '90px' })
     ];
+    const Mount = Card.querySelector('.queue-table-mount');
+    const T = new TableRenderer({ Container: Mount, DataSource: Src, Columns: Cols, Config: Cfg, Bus, Capabilities: { Sortable: true, Paginatable: true, Filterable: false, Virtualized: false }, SortController: Sort, PaginationController: Pag, FilterController: Filt });
+    T._CellRegistry.Register('Text', TextR);
+    T._CellRegistry.Register('Date', DateR);
+    T._CellRegistry.Register('QtFile', QtFileR);
+    T._CellRegistry.Register('QtStatus', QtStatusR);
+    T._CellRegistry.Register('QtPri', QtPriR);
+    T._CellRegistry.Register('Vmaf', VmafR);
+    T._CellRegistry.Register('QtProgress', QtProgressR);
+    T._CellRegistry.Register('QtActions', QtActionsR);
 
-    const Mount = document.getElementById('QualityTestingTableMount');
-    const T = new TableRenderer({
-        Container: Mount,
-        DataSource: Src,
-        Columns: Cols,
-        Config: Cfg,
-        Bus,
-        Capabilities: { Sortable: true, Paginatable: true, Filterable: false, Virtualized: false },
-        SortController: Sort,
-        PaginationController: Pag,
-        FilterController: Filt
-    });
-    T._CellRegistry.Register('Text', _TextRenderer);
-    T._CellRegistry.Register('Date', _DateRenderer);
-    T._CellRegistry.Register('QTFile', _QTFileNameRenderer);
-    T._CellRegistry.Register('QTStatus', _QTStatusBadgeRenderer);
-    T._CellRegistry.Register('QTPriority', _QTPriorityBadgeRenderer);
-    T._CellRegistry.Register('VMAF', _VMAFBadgeRenderer);
-    T._CellRegistry.Register('QTProgress', _QTProgressRenderer);
-    T._CellRegistry.Register('QTActions', _QTActionsRenderer);
-
-    const InfoEl = document.getElementById('QTPaginationInfo');
-    const PrevBtn = document.getElementById('QTPrevBtn');
-    const NextBtn = document.getElementById('QTNextBtn');
-    const CountBadge = document.getElementById('QTQueueCount');
-
+    const InfoEl = Card.querySelector('.queue-pagination-info');
+    const PrevBtn = Card.querySelector('.queue-prev-btn');
+    const NextBtn = Card.querySelector('.queue-next-btn');
+    const CountBadge = Card.querySelector('.queue-count-badge');
     const Sync = () => {
-        const Page = Pag.GetPage();
-        const Size = Pag.GetPageSize();
-        const Total = Pag._TotalCount;
-        InfoEl.textContent = PageStateBadge(Total, Page, Size);
-        CountBadge.textContent = `${Total} items`;
-        PrevBtn.disabled = Page <= 0;
-        NextBtn.disabled = (Page + 1) * Size >= Total;
+        const P = Pag.GetPage(), Sz = Pag.GetPageSize(), Tot = Pag._TotalCount;
+        InfoEl.textContent = PageInfo(Tot, P, Sz); CountBadge.textContent = `${Tot.toLocaleString()} items`;
+        PrevBtn.disabled = P <= 0; NextBtn.disabled = (P + 1) * Sz >= Tot;
     };
     PrevBtn.addEventListener('click', () => Pag.PrevPage());
     NextBtn.addEventListener('click', () => Pag.NextPage());
     Bus.Subscribe('PageChanged', Sync);
     Bus.Subscribe('SortChanged', () => Pag.GoTo(0));
-
-    const RefreshBtn = document.getElementById('RefreshQualityTestingBtn');
-    if (RefreshBtn) RefreshBtn.addEventListener('click', () => T.Refresh().then(Sync));
-
-    window.RefreshQualityTable = () => T.Refresh().then(Sync);
-    window.QualityTestingTable = T;
-
     T.Render().then(Sync);
+    return () => T.Refresh().then(Sync);
 };
 
-window.addEventListener('DOMContentLoaded', () => {
-    InitTranscodeQueueTable();
-    InitQualityTestingTable();
-});
+const SetupDragReorder = (Host) => {
+    let Dragging = null;
+    Host.addEventListener('dragstart', (e) => {
+        const Card = e.target.closest('.queue-card');
+        if (!Card) return;
+        Dragging = Card; Card.classList.add('dragging');
+        try { e.dataTransfer.setData('text/plain', Card.dataset.key); e.dataTransfer.effectAllowed = 'move'; } catch (err) {}
+    });
+    Host.addEventListener('dragend', () => {
+        if (Dragging) Dragging.classList.remove('dragging');
+        Host.querySelectorAll('.queue-card').forEach(c => c.classList.remove('drag-over-top', 'drag-over-bottom'));
+        Dragging = null;
+    });
+    Host.addEventListener('dragover', (e) => {
+        const Target = e.target.closest('.queue-card');
+        if (!Target || Target === Dragging) return;
+        e.preventDefault();
+        const Rect = Target.getBoundingClientRect();
+        const TopHalf = (e.clientY - Rect.top) < (Rect.height / 2);
+        Host.querySelectorAll('.queue-card').forEach(c => c.classList.remove('drag-over-top', 'drag-over-bottom'));
+        Target.classList.add(TopHalf ? 'drag-over-top' : 'drag-over-bottom');
+    });
+    Host.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const Target = e.target.closest('.queue-card');
+        if (!Target || !Dragging || Target === Dragging) return;
+        const Rect = Target.getBoundingClientRect();
+        const TopHalf = (e.clientY - Rect.top) < (Rect.height / 2);
+        Target.parentNode.insertBefore(Dragging, TopHalf ? Target : Target.nextSibling);
+        const newOrder = Array.from(Host.querySelectorAll('.queue-card')).map(c => c.dataset.key);
+        SaveOrder(newOrder);
+    });
+};
+
+const BuildCards = () => {
+    const Host = document.getElementById('QueueCardsHost');
+    const Template = document.getElementById('QueueCardTemplate');
+    const order = LoadOrder();
+    const orderedDefs = order.map(k => QUEUE_DEFS.find(q => q.key === k)).filter(Boolean);
+    const refreshFns = [];
+    orderedDefs.forEach(Def => {
+        const Card = Template.content.firstElementChild.cloneNode(true);
+        Card.dataset.key = Def.key;
+        Card.querySelector('.queue-card-title').textContent = Def.title;
+        Host.appendChild(Card);
+        const Refresh = Def.tableKind === 'qt' ? InitQtTable(Card, Def) : InitTqTable(Card, Def);
+        refreshFns.push(Refresh);
+    });
+    window.MvQueueRefreshFns = refreshFns;
+    SetupDragReorder(Host);
+};
+
+window.addEventListener('DOMContentLoaded', BuildCards);
 </script>
 {% endblock %}
