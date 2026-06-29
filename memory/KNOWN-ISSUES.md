@@ -4,6 +4,23 @@
 
 ### audio-quality
 
+### [BUG-0071] av1_qsv crashes mid-encode on Arc B580 + libmfx-gen 2.16 when `-extbrc` or `-look_ahead` are set
+**Date:** 2026-06-29 | **Area:** transcode-encoder
+
+**What breaks:** `av1_qsv` running on Intel Arc B580 (Battlemage `[8086:e20b]`) with libmfx-gen `26.2.2-1~24.04~ppa1` + libvpl `2.16.0-1~24.04~ppa1` + iHD `26.2.2-1~24.04~ppa1` (Intel kobuk PPA for Ubuntu noble) crashes at a non-deterministic frame past the first ~2 seconds with `[av1_qsv] Invalid FrameType:0` followed by `Error submitting video frame to the encoder` -> `Error encoding a frame: Invalid data found when processing input` (`-1094995529 / 0xBEBBB1B7`). ffmpeg muxes the partial output and prints `Conversion failed!`. Exit code 183.
+
+**Repro:** Documented in `Scripts/Smoke/QsvCrashDiagnostic-2026-06-29.shootout.json`. 3-source matrix (NewGirl S06E03 live drama at HEVC 720p / Arcane S01E06 animation at H264 720p / 30 Rock S06E12 sitcom at H264 720p) all crash at distinct frame counts (8064 / 69 / 3835). Pattern is reproducible across content types -- not source-specific. Knob bisect (`Scripts/Smoke/_qsv_isolate.sh`): minimal `-c:v av1_qsv -b:v 480k -pix_fmt p010le` encodes the full Arcane episode cleanly (143 MB output). Adding `-extbrc 1 -look_ahead 1 -look_ahead_depth 40` to the same minimal set reproduces the crash within seconds.
+
+**Trigger isolated:** `-extbrc 1` AND/OR `-look_ahead 1` (with any look_ahead_depth value). These knobs route encoding through the libmfx-gen look-ahead BRC path, which appears to mis-handle the Battlemage AV1 ASIC frame typing.
+
+**Workaround in production:** Phase G seed (`Scripts/SQLScripts/AddQsvProfiles.py`) sets `QsvExtBrc=NULL`, `QsvLookaheadDepth=NULL`, `QsvBStrategy=NULL` on every threshold row of the two seeded QSV profiles. `QsvEncoderArgsStrategy.AddCodecParameters` omits the corresponding ffmpeg flags when ProfileSettings hold None. Live verification 2026-06-29: Arcane S01E06 transcoded end-to-end on wakko-worker-3 (TranscodeAttempts.id 40792, Success=TRUE, output 218 MB).
+
+**Cost of the workaround:** loses bitrate-distribution optimization from look-ahead. Quality at matched bitrate may drop ~1-2 VMAF vs the look-ahead path. Acceptable until upstream fix.
+
+**Upstream path:** report to Intel `kobuk-team/intel-graphics` PPA + ffmpeg-libvpl issue tracker. Revisit when libmfx-gen ships a fix. Test re-enable per `Scripts/Smoke/_qsv_isolate.sh`.
+
+**See also:** `Docs/superpowers/specs/2026-06-29-wakko-arc-b580-onboarding-design.md` Phase H findings.
+
 ### [BUG-0070] Detect transcoded files affected by deprecated 96 kbps audio bitrate -- "robotic" audio across the library
 **Date:** 2026-06-29 | **Area:** audio-quality
 

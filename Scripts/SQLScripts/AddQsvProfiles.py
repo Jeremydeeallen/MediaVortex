@@ -1,4 +1,4 @@
-# Seeds two av1_qsv production profiles + per-resolution thresholds. # from: Docs/superpowers/specs/2026-06-29-wakko-arc-b580-onboarding-design.md
+# Seeds two av1_qsv production profiles + per-resolution thresholds. # from: Docs/superpowers/specs/2026-06-29-wakko-arc-b580-onboarding-design.md ; BUG-0071 (extbrc+look_ahead crashes Arc B580 libmfx-gen 2.16)
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -61,6 +61,7 @@ def UpsertProfile(Db, Name, Description):
 
 
 def UpsertThreshold(Db, ProfileId, Resolution, TranscodeDownTo, ScaleHeight, MinKbps, MaxKbps):
+    # BUG-0071: qsvextbrc, qsvlookaheaddepth, qsvbstrategy must stay NULL (crash on long encodes).
     Existing = Db.ExecuteQuery(
         "SELECT Id FROM ProfileThresholds WHERE ProfileId=%s AND Resolution=%s",
         (ProfileId, Resolution),
@@ -74,13 +75,13 @@ def UpsertThreshold(Db, ProfileId, Resolution, TranscodeDownTo, ScaleHeight, Min
             " FallbackVideoBitrateKbps=%s, FallbackAudioBitrateKbps=%s, "
             " Under30MinMB=%s, Under65MinMB=%s, Over65MinMB=%s, "
             " BFrames=%s, ContainerType=%s, "
-            " QsvExtBrc=%s, QsvAdaptiveI=%s, QsvAdaptiveB=%s, QsvLookaheadDepth=%s, "
-            " QsvBStrategy=%s, QsvTileCols=%s, QsvTileRows=%s "
+            " QsvExtBrc=NULL, QsvAdaptiveI=%s, QsvAdaptiveB=%s, QsvLookaheadDepth=NULL, "
+            " QsvBStrategy=NULL, QsvTileCols=%s, QsvTileRows=%s "
             "WHERE Id=%s",
             (TranscodeDownTo, ScaleHeight, 30, MinKbps, MaxKbps, 2.0,
              0, 0, 0, 0, 0, 0, 0,
              7, 'mp4',
-             1, 1, 1, 100, 1, 1, 1,
+             1, 1, 1, 1,
              Existing[0]['id']),
         )
         return Existing[0]['id']
@@ -92,15 +93,14 @@ def UpsertThreshold(Db, ProfileId, Resolution, TranscodeDownTo, ScaleHeight, Min
         " FallbackVideoBitrateKbps, FallbackAudioBitrateKbps, "
         " Under30MinMB, Under65MinMB, Over65MinMB, "
         " BFrames, ContainerType, "
-        " QsvExtBrc, QsvAdaptiveI, QsvAdaptiveB, QsvLookaheadDepth, "
-        " QsvBStrategy, QsvTileCols, QsvTileRows) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        " QsvAdaptiveI, QsvAdaptiveB, QsvTileCols, QsvTileRows) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
         "ON CONFLICT DO NOTHING",
         (ProfileId, Resolution, TranscodeDownTo, ScaleHeight,
          30, MinKbps, MaxKbps, 2.0,
          0, 0, 0, 0, 0, 0, 0,
          7, 'mp4',
-         1, 1, 1, 100, 1, 1, 1),
+         1, 1, 1, 1),
     )
 
 
