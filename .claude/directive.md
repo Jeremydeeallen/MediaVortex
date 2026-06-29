@@ -1,14 +1,14 @@
 # Current Directive
 
 **Set:** 2026-06-28
-**Status:** Active -- phase: NEEDS_STANDARDS_REVIEW
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** transcode-worker-unification
 **Replaces:** in-flight pivot on top of `work-transcode-unified` (at DELIVERING; awaiting operator close)
 **Interrupts:** work-transcode-unified
 
 ## Outcome
 
-The compliance-correction pipeline runs ONE orchestration path regardless of `ProcessingMode`. All five previously-OOS code areas — the worker processors, the FileReplacement post-flight, the ComplianceGate, the TranscodeQueue schema, the worker capability/claim predicates, and the WorkBucket admission integration — converge on Template Method + Strategy throughout. After this directive, adding a new ProcessingMode is a single registry-row INSERT plus one Strategy class. `if Mode == ...` literals do not exist anywhere in the compliance-correction call graph. The `ProcessingModes` table is the single source of truth; claim queries, dispatch, post-flight selection, and admission gates all read from it. The PostEncode audio-policy attestation runs for every mode that produces ffmpeg output, populating `TranscodeAttempts.AudioPolicyResolved` and `AudioTracksEmittedJson` so the `ComplianceGate` has data to validate against. Five parallel FileReplacement feature docs collapse to one feature + one flow. One parallel claim query (`ClaimNextPendingRemuxJob`) collapses into the unified claim. `BucketName='AudioFixOnly'` is renamed to `'AudioFix'` so admission and dispatch agree.
+The compliance-correction pipeline runs ONE orchestration path regardless of `ProcessingMode` AND regardless of feature-flag state. All five previously-OOS code areas — the worker processors, the FileReplacement post-flight, the ComplianceGate, the TranscodeQueue schema, the worker capability/claim predicates, and the WorkBucket admission integration — converge on Template Method + Strategy throughout. After this directive, adding a new ProcessingMode is a single registry-row INSERT plus one Strategy class. `if Mode == ...` literals do not exist anywhere in the compliance-correction call graph. **The call graph shape is independent of feature-flag state (per Signal 5 in `call-graph-audit.md`): the same functions are called regardless of `QualityTestEnabled`, `RemuxEnabled`, `TranscodeEnabled`; flags drive DATA flowing through fixed nodes, not which nodes exist.** The `ProcessingModes` table is the single source of truth; claim queries, dispatch, post-flight selection, and admission gates all read from it. The PostEncode audio-policy attestation runs for every mode that produces ffmpeg output, populating `TranscodeAttempts.AudioPolicyResolved` and `AudioTracksEmittedJson` so the `ComplianceGate` has data to validate against. Five parallel FileReplacement feature docs collapse to one feature + one flow. One parallel claim query (`ClaimNextPendingRemuxJob`) collapses into the unified claim. `BucketName='AudioFixOnly'` is renamed to `'AudioFix'` so admission and dispatch agree. **The Profile cascade has exactly one implementation (`EffectiveProfileResolver.Resolve`); every consumer routes through it; raw cascade SQL elsewhere is forbidden and enforced by contract test.**
 
 ## Call-Graph Audit
 
@@ -99,6 +99,20 @@ All 22 criteria. Each passes the five litmus tests in `.claude/rules/feature-cri
 
 21. **C21.** `_NotifyJellyfin` is deleted from `TranscodedOutputPlacement` and `FileReplacementBusinessService`; both call one `Services.JellyfinNotifyService.NotifyJellyfin` entry. `grep -rn "def _NotifyJellyfin" Features/` returns 0.
 22. **C22.** `FileReplacementBusinessService.GetFileReplacementStatus` reads `PostTranscodeGateConfig.VmafAutoReplaceMinThreshold` instead of hardcoded `VMAF >= 90`.
+
+**Profile cascade single-implementation (NEW from /Work/Transcode call-graph trace):**
+
+23. **C23.** `QualityTestController:631-667` does not implement its own profile cascade. The controller injects `EffectiveProfileResolver` and calls `.Resolve(mediaFile)`. `grep -nE "AssignedProfile.*DefaultProfileName|DefaultProfileName.*AssignedProfile" Features/QualityTesting/` returns 0 results outside `Features/Profiles/EffectiveProfileResolver.py`.
+
+24. **C24.** `QueueManagementBusinessService._GetEffectiveProfileFromCache:1551` is deleted. The bulk admission path also routes through `EffectiveProfileResolver.Resolve`. The Profile cascade has exactly ONE implementation across the entire codebase.
+
+25. **C25.** Contract test `TestNoParallelProfileCascade` enforces the invariant: only `Features/Profiles/EffectiveProfileResolver.py` may contain SQL referencing both `MediaFiles.AssignedProfile` AND `SystemSettings.DefaultProfileName` in the same function scope. Any production file violating this fails the test. Test is added under `Tests/Contract/`.
+
+**Call-graph-shape invariance under feature flags (NEW from Signal 5 discussion):**
+
+26. **C26.** Turning `PostTranscodeGateConfig.QualityTestEnabled` on or off (and similarly `RemuxEnabled`, `TranscodeEnabled`) does NOT change which functions are called during a job's lifecycle; flags only change which branches the data takes within fixed code paths. Verifiable by tracing one Transcode job with each flag setting and asserting the call graph (function names entered) is identical.
+
+27. **C27.** Signal 5 is added to `.claude/rules/call-graph-audit.md` and `.claude/rules-details/call-graph-audit.md`. The five-signal check becomes mandatory at NEEDS_STANDARDS_REVIEW going forward.
 
 ## Out of Scope
 
@@ -329,6 +343,11 @@ Required when phase advances to VERIFYING. One entry per acceptance criterion.
 - **C20:** TBD (AudioPolicyAdmissionGate synchronous)
 - **C21:** TBD (one _NotifyJellyfin path)
 - **C22:** TBD (GetFileReplacementStatus config-driven)
+- **C23:** TBD (QualityTestController routes through EffectiveProfileResolver)
+- **C24:** TBD (QMBS._GetEffectiveProfileFromCache deleted; one cascade implementation)
+- **C25:** TBD (TestNoParallelProfileCascade contract test green)
+- **C26:** TBD (call-graph shape independent of feature flags)
+- **C27:** TBD (Signal 5 added to call-graph-audit rule)
 
 ### Decisions Made
 
