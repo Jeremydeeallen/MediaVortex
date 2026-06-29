@@ -11,8 +11,23 @@ from Features.Profiles.EffectiveProfile import EffectiveProfile
 # directive: compliance-symmetry
 _BITRATE_ROUNDING_TOLERANCE = 1.05
 
-# directive: worker-runtime-state
-_PIXEL_COUNTS = {'480p': 345600, '720p': 921600, '1080p': 2073600, '2160p': 8294400}
+
+# directive: transcode-worker-unification
+def _ComputeBpp(Mf) -> Optional[float]:
+    Kbps = getattr(Mf, 'VideoBitrateKbps', None)
+    Fps = getattr(Mf, 'FrameRate', None)
+    Resolution = getattr(Mf, 'Resolution', None) or ''
+    if not Kbps or not Fps or 'x' not in Resolution:
+        return None
+    try:
+        W, H = Resolution.split('x', 1)
+        Pixels = int(W) * int(H)
+        FpsF = float(Fps)
+    except (ValueError, TypeError):
+        return None
+    if Pixels <= 0 or FpsF < 1.0 or FpsF > 120.0:
+        return None
+    return (float(Kbps) * 1000.0) / (Pixels * FpsF)
 
 
 # directive: compliance-symmetry
@@ -25,10 +40,10 @@ class VideoVertical:
         self._Resolver = ProfileResolver or EffectiveProfileResolver()
         self._TierRegistry = TierRegistry or ResolutionTierRegistry()
 
-    # directive: worker-runtime-state
+    # directive: transcode-worker-unification
     def _LoadRules(self):
         Rows = self._Db.ExecuteQuery(
-            "SELECT AcceptableVideoCodecsCsv, MinSourceBpp, MaxSourceBpp, ResolutionExceedsProfileTarget "
+            "SELECT AcceptableVideoCodecsCsv, BppTranscodeThreshold, ResolutionExceedsProfileTarget "
             "FROM VideoComplianceRules ORDER BY Id LIMIT 1"
         )
         if not Rows:
@@ -36,14 +51,13 @@ class VideoVertical:
         R = Rows[0]
         Csv = (R.get('AcceptableVideoCodecsCsv') or R.get('acceptablevideocodecscsv') or '').strip()
         Allowed = [C.strip().lower() for C in Csv.split(',') if C.strip()]
-        MinBpp = R.get('MinSourceBpp') if 'MinSourceBpp' in R else R.get('minsourcebpp')
-        MaxBpp = R.get('MaxSourceBpp') if 'MaxSourceBpp' in R else R.get('maxsourcebpp')
+        Threshold = R.get('BppTranscodeThreshold') if 'BppTranscodeThreshold' in R else R.get('bpptranscodethreshold')
         ResExceeds = R.get('ResolutionExceedsProfileTarget') if 'ResolutionExceedsProfileTarget' in R else R.get('resolutionexceedsprofiletarget')
-        return Allowed, (float(MinBpp) if MinBpp is not None else 0.0), (float(MaxBpp) if MaxBpp is not None else 0.0), bool(ResExceeds)
+        return Allowed, (float(Threshold) if Threshold is not None else 0.0), bool(ResExceeds)
 
-    # directive: worker-runtime-state
+    # directive: transcode-worker-unification
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
-        AllowedCodecs, MinBpp, MaxBpp, ResExceeds = self._LoadRules()
+        AllowedCodecs, BppThreshold, ResExceeds = self._LoadRules()
 
         Profile = self._Resolver.Resolve(Mf)
         if Profile is None:
@@ -53,16 +67,9 @@ class VideoVertical:
         if SrcCodec and AllowedCodecs and SrcCodec not in AllowedCodecs:
             return (False, f'codec:{SrcCodec}')
 
-        SrcKbps = getattr(Mf, 'VideoBitrateKbps', None)
-        ResCat = getattr(Mf, 'ResolutionCategory', None)
-        Pixels = _PIXEL_COUNTS.get((ResCat or '').lower())
-        Bpp = (float(SrcKbps) * 1000.0) / (Pixels * 24.0) if (SrcKbps and Pixels) else None
-
-        if Bpp is not None and MinBpp > 0 and Bpp < MinBpp:
-            return (True, 'efficient_bpp_override')
-
-        if Bpp is not None and MaxBpp > 0 and Bpp > MaxBpp:
-            return (False, f'high_bpp_excessive:{Bpp:.3f}>{MaxBpp:.3f}')
+        Bpp = _ComputeBpp(Mf)
+        if Bpp is not None and BppThreshold > 0 and Bpp > BppThreshold:
+            return (False, f'high_bpp_excessive:{Bpp:.3f}>{BppThreshold:.3f}')
 
         if ResExceeds and Profile.TargetResolutionCategory is not None:
             SrcTier = self._TierRegistry.FromCategory(getattr(Mf, 'ResolutionCategory', None))
