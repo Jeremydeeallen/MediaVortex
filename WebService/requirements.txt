@@ -8,6 +8,9 @@ flask-cors
 # Production WSGI server (replaces Flask dev server -- handles concurrent requests cleanly)
 waitress>=2.1.0
 
+# Transparent gzip/brotli compression for text responses (RFC 9111 Content-Encoding)
+flask-compress>=1.13
+
 # HTTP requests
 requests
 

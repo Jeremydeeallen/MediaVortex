@@ -49,6 +49,39 @@ class WebServiceApp:
                         static_folder=static_dir)
         self.App.config['SECRET_KEY'] = 'mediavortex-secret-key-2024'
 
+        self._StaticDir = static_dir
+        self.App.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000
+
+        from flask_compress import Compress
+        Compress(self.App)
+
+        from flask import request, url_for as _flask_url_for
+
+        @self.App.after_request
+        def _RegisterResponseHeaders(response):
+            Path = request.path or ''
+            if Path.startswith('/static/'):
+                response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+            elif Path.startswith('/api/'):
+                response.headers['Cache-Control'] = 'no-store'
+            else:
+                response.headers['Cache-Control'] = 'no-cache, private'
+            return response
+
+        @self.App.context_processor
+        def _OverrideUrlFor():
+            def _DatedUrlFor(endpoint, **values):
+                if endpoint == 'static':
+                    Filename = values.get('filename')
+                    if Filename:
+                        FilePath = os.path.join(self._StaticDir, Filename)
+                        try:
+                            values['v'] = int(os.stat(FilePath).st_mtime)
+                        except OSError:
+                            pass
+                return _flask_url_for(endpoint, **values)
+            return dict(url_for=_DatedUrlFor)
+
         # Serialize every datetime in JSON responses as UTC ISO-8601 with the
         # explicit `Z` suffix. Templates/JS can then parse and convert to the
         # configured display timezone via formatTime() -- see Static/js/timezone.js.

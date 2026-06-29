@@ -387,3 +387,55 @@ Engineering calls made under ambiguity.
 - **30 commits, 22/27 criteria STRUCTURAL ✓, 5 criteria LIVE PENDING.** Directive stays at IMPLEMENTING phase; advancement to VERIFYING / DELIVERING requires operator-driven smoke window for the 5 LIVE PENDING criteria. Operator owns close.
 
 - **T21 partial**: The R1 hook parses `transcript_path` (conversation transcript) for prior Read calls. Agent subagent Reads don't appear in that transcript -- hook consistently sees 0 reads for `disposition.feature.md`, blocking Edit to `RetranscodeDecider.py` and `DispositionDispatcher.py` (both in the same directory, both governed by disposition.feature.md via C3). Model+repo changes committed. The two .py edits require execution in the outer Claude Code session (not Agent tool) after reading disposition.feature.md limit=50 there.
+
+---
+
+## Web-Performance Design (L1 -- HTTP standards compliance)
+
+**Promotes to `WebService/web-performance.feature.md` at DELIVERING.** Operator reported /Activity loads instantly on first visit but ~10 seconds on repeat navigation. Root cause (curl-confirmed): MediaVortex violates four HTTP standards (RFC 9111).
+
+### Violations observed against running WebService
+
+| RFC 9111 expectation | Actual MediaVortex response |
+|---|---|
+| Static immutable assets: `Cache-Control: public, max-age=<long>, immutable` | `Cache-Control: no-cache` -- forces revalidation every navigation |
+| Conditional GET returns `304 Not Modified` on unchanged file | Returns `200 OK` with full body (revalidation broken) |
+| `Content-Encoding: gzip` when `Accept-Encoding: gzip` advertised | Header absent; 720 KB transferred uncompressed per navigation |
+| HTML pages: explicit `Cache-Control` (typically `no-cache, private`) | No header set; browser falls back to heuristic caching |
+| API endpoints: `Cache-Control: no-store` (live data) | No header set; browsers may cache live data |
+
+### Target criteria (will land as C1-C10 in `web-performance.feature.md` at DELIVERING)
+
+C1. Static `/static/*` Cache-Control = `public, max-age=31536000, immutable`.
+C2. Cache-bust via `?v=<mtime>` appended in `url_for('static', ...)` so file edits invalidate browser cache automatically.
+C3. HTML pages Cache-Control = `no-cache, private`.
+C4. `/api/*` Cache-Control = `no-store`.
+C5. Conditional GET returns 304 on unchanged static.
+C6. Text responses (CSS/JS/JSON/HTML) compressed via `flask-compress` when client advertises.
+C7. ONE aggregate endpoint `/api/Layout/NavBadges` replaces the 4 parallel polls in Base.html (`/api/TranscodeQueue/Count`, `/api/SQLQueries/GetActiveJobs`, `/api/FailedJobs/Count`, `/api/Activity/LibraryCompliance`); nav polls it every 30s.
+C8. Zero external origins in `Templates/*.html` (already done in commit `dcf866b`).
+C9. Production WSGI (waitress, not Flask dev). (already done in commit `e9f4ce8`).
+C10. Cold first /Activity load < 1.5s; warm-cache navigation < 500ms.
+
+### Seams (will land in C5 -> S1..S4 of the feature doc)
+
+| ID | Seam | Producer | Wire shape |
+|---|---|---|---|
+| S1 | WSGI response -> Cache-Control | `_RegisterResponseHeaders` (Flask `@after_request` hook) keyed on `request.path` prefix | header per path-class: `/static/*` immutable, `/api/*` no-store, else no-cache,private |
+| S2 | WSGI body -> gzipped | `flask-compress` middleware (`Compress(app)`) | `Content-Encoding: gzip` on text responses |
+| S3 | Template -> versioned static URL | `_DatedUrlFor` overrides `url_for('static',...)` to append `?v=<mtime>` | `{{ url_for('static', filename='foo.css') }}` -> `/static/foo.css?v=1782748006` |
+| S4 | Base.html -> NavBadges aggregate | `Templates/Base.html` `updateNavBadges` setInterval@30s | `GET /api/Layout/NavBadges` -> `{Success, Data: {QueueCount, ActiveJobsCount, FailedJobsCount, Transcode, Remux, AudioFix}}` |
+
+### Files (will land in the feature doc's ## Files table)
+
+| File | Role |
+|---|---|
+| `WebService/Main.py` | new: `_RegisterResponseHeaders` + `_DatedUrlFor` + flask-compress init; existing: `Run()` already calls `waitress.serve` |
+| `WebService/requirements.txt` | add `flask-compress>=1.13` |
+| `Features/Layout/LayoutController.py` (new) | new `/api/Layout/NavBadges` aggregate endpoint -- joins existing repository calls into one payload |
+| `Templates/Base.html` | replace 4 fetches in nav-update IIFE with single `/api/Layout/NavBadges` poll |
+
+### Out of L1 scope (deferred, may land as separate directives)
+
+- **L2 -- HTMX-driven navigation.** Replace full-page-reload nav with partial DOM swap. Eliminates re-rendering of layout/CSS/JS on every nav. Requires per-template `hx-get` annotation + content-area target. Right answer for the inherent multi-page nav cost; not required to close the 10-second complaint (L1 fixes that).
+- **L3 -- SSE (Server-Sent Events) for live progress.** Replace 5-second polling with server-push. The right standard for "live in-flight" data. Flask supports SSE natively. Out of scope unless operator wants instant ETA / progress feedback.

@@ -34,6 +34,36 @@ def Snapshot():
         return jsonify({'Success': False, 'Message': str(Ex)}), 500
 
 
+# directive: transcode-worker-unification | # see activity.W5
+@ActivityBlueprint.route('/NavBadges', methods=['GET'])
+def NavBadges():
+    """Single aggregate of every nav-bar badge -- replaces the 4 parallel polls in Base.html."""
+    try:
+        Db = DatabaseService()
+        QueueRow = Db.ExecuteQuery("SELECT COUNT(*)::int AS n FROM TranscodeQueue WHERE Status='Pending'")
+        QueueCount = int((QueueRow or [{}])[0].get('n') or 0)
+        ActiveRow = Db.ExecuteQuery("SELECT COUNT(*)::int AS n FROM ActiveJobs")
+        ActiveJobsCount = int((ActiveRow or [{}])[0].get('n') or 0)
+        from Features.FailureAccounting.Repositories.FailedJobsRepository import FailedJobsRepository
+        FailedJobsCount = int(FailedJobsRepository(Db).CountCapped())
+        from Features.Activity.ActivityRepository import ActivityRepository
+        Mode = ActivityRepository().GetWorkBucketBreakdown() or {}
+        return jsonify({
+            'Success': True,
+            'Data': {
+                'QueueCount': QueueCount,
+                'ActiveJobsCount': ActiveJobsCount,
+                'FailedJobsCount': FailedJobsCount,
+                'Transcode': int(Mode.get('Transcode') or 0),
+                'Remux': int(Mode.get('Remux') or 0),
+                'AudioFix': int(Mode.get('AudioFix') or 0),
+            },
+        })
+    except Exception as Ex:
+        LoggingService.LogException("NavBadges endpoint failed", Ex, "ActivityController", "NavBadges")
+        return jsonify({'Success': False, 'Message': str(Ex)}), 500
+
+
 # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
 @ActivityBlueprint.route('/LibraryCompliance', methods=['GET'])
 def LibraryCompliance():

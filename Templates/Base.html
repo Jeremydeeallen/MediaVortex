@@ -189,76 +189,29 @@
             if (alert) alert.remove();
         }, 5000);
     }
-    // Fetch queue count for nav badge
-    function updateNavQueueCount() {
-        fetch('/api/TranscodeQueue/Count')
-            .then(r => r.json())
-            .then(data => {
-                const badge = document.getElementById('NavQueueCount');
-                const count = data.Count || 0;
-                if (count > 0) {
-                    badge.textContent = count;
-                    badge.classList.remove('d-none');
-                } else {
-                    badge.classList.add('d-none');
-                }
-            })
-            .catch(() => {});
-    }
-    updateNavQueueCount();
-    setInterval(updateNavQueueCount, 30000);
-    // Fetch active jobs count for nav badge
-    function updateNavActiveJobsCount() {
-        fetch('/api/SQLQueries/GetActiveJobs')
-            .then(r => r.json())
-            .then(data => {
-                const badge = document.getElementById('NavActiveJobsCount');
-                const count = data.Count || 0;
-                if (count > 0) {
-                    badge.textContent = count;
-                    badge.classList.remove('d-none');
-                } else {
-                    badge.classList.add('d-none');
-                }
-            })
-            .catch(() => {});
-    }
-    updateNavActiveJobsCount();
-    setInterval(updateNavActiveJobsCount, 10000);
-    // Failed Jobs nav badge
-    function updateNavFailedJobsCount() {
-        fetch('/api/FailedJobs/Count')
+    function updateNavBadges() {
+        fetch('/api/Activity/NavBadges')
             .then(r => r.json())
             .then(d => {
-                const badge = document.getElementById('NavFailedJobsCount');
-                const count = (d && d.Data && d.Data.Count) || 0;
-                if (count > 0) { badge.textContent = count; badge.classList.remove('d-none'); }
-                else { badge.classList.add('d-none'); }
-            })
-            .catch(() => {});
-    }
-    updateNavFailedJobsCount();
-    setInterval(updateNavFailedJobsCount, 30000);
-
-    function updateNavWorkBucketCounts() {
-        fetch('/api/Activity/LibraryCompliance')
-            .then(r => r.json())
-            .then(d => {
-                const mode = (d && d.Mode) || {};
+                const data = (d && d.Data) || {};
                 const setBadge = (id, count) => {
                     const badge = document.getElementById(id);
                     if (!badge) return;
-                    if (count > 0) { badge.textContent = count.toLocaleString(); badge.classList.remove('d-none'); }
+                    const n = Number(count) || 0;
+                    if (n > 0) { badge.textContent = n.toLocaleString(); badge.classList.remove('d-none'); }
                     else { badge.classList.add('d-none'); }
                 };
-                setBadge('NavTranscodeCount', mode.Transcode || 0);
-                setBadge('NavRemuxCount', mode.Remux || 0);
-                setBadge('NavAudioCount', mode.AudioFix || 0);
+                setBadge('NavQueueCount', data.QueueCount);
+                setBadge('NavActiveJobsCount', data.ActiveJobsCount);
+                setBadge('NavFailedJobsCount', data.FailedJobsCount);
+                setBadge('NavTranscodeCount', data.Transcode);
+                setBadge('NavRemuxCount', data.Remux);
+                setBadge('NavAudioCount', data.AudioFix);
             })
             .catch(() => {});
     }
-    updateNavWorkBucketCounts();
-    setInterval(updateNavWorkBucketCounts, 30000);
+    updateNavBadges();
+    setInterval(updateNavBadges, 10000);
     // Activate Bootstrap tooltips so the nav-item title attributes pop on hover.
     document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
     // Global client-side error reporting
