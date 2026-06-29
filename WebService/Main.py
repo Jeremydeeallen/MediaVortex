@@ -684,13 +684,14 @@ class WebServiceApp:
         except Exception as e:
             LoggingService.LogException("Error updating service status (heartbeat)", e, "WebService", "PrivateUpdateServiceStatus")
     
+    # see startup.ST8
     def Run(self):
-        """Run the Flask application."""
         try:
-            print("Starting WebService Flask application...")
-            self.App.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+            from waitress import serve
+            print("Starting WebService via waitress (production WSGI, 32 threads)...")
+            serve(self.App, host='0.0.0.0', port=5000, threads=32, ident='MediaVortex-WebService')
         except Exception as e:
-            LoggingService.LogException("Error running WebService Flask application", e, "WebService", "Run")
+            LoggingService.LogException("Error running WebService", e, "WebService", "Run")
     
     def Shutdown(self):
         """Gracefully shutdown the service."""

@@ -5,6 +5,9 @@
 flask>=2.3.0
 flask-cors
 
+# Production WSGI server (replaces Flask dev server -- handles concurrent requests cleanly)
+waitress>=2.1.0
+
 # HTTP requests
 requests
 

@@ -15,7 +15,7 @@ Entry point: `WebService/Main.py:Main()` -> `WebServiceApp.__init__()`.
 | ST5 | Register controllers + blueprints | Standard Flask wiring. | Import error -> propagates, exit 1. |
 | ST6 | Register with ServiceStatusService | `ServiceStatusService.RegisterServiceStartup('WebService', MaxConcurrentJobs=1)` writes the NEW process's PID to `ServiceStatus`. | DB error -> log + continue (heartbeat will retry). |
 | ST7 | Start background threads | `ServiceStatusTracker` (heartbeat every 30s), `StatusPoller` (control-plane every 5s), `JellyfinSync` (one-shot). | Thread launch error -> log + continue. |
-| ST8 | `app.run(host='0.0.0.0', port=5000)` | Flask binds the socket and serves. | Bind error -> propagates (means ST2's wait was too short OR an unrelated process now holds 5000). |
+| ST8 | `waitress.serve(app, host='0.0.0.0', port=5000, threads=32)` | Production WSGI binds the socket and serves; 32-thread pool handles concurrent endpoint calls cleanly. Replaced Flask dev server's `app.run(threaded=True)` because the dev server serialized concurrent requests under GIL contention (10 parallel snapshots took 3.8s vs 0.29s solo). | Bind error -> propagates (means ST2's wait was too short OR an unrelated process now holds 5000). |
 
 ## Seams
 
