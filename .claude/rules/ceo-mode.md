@@ -35,6 +35,7 @@ During a directive: design content accretes in the directive doc. Code carries o
 - Define "done" -- Claude does not declare done unless every criterion met or waived in writing
 - Define escalation surface -- ambiguous criteria escalate; unambiguous criteria are decided
 - Pass `feature-criteria.md` litmus tests (rename / outsider / rewrite / negation / stability)
+- Pass `call-graph-audit.md` four-signal check (multiple flow docs / orchestration mode-branch / mode-sparse output columns / ambiguous OOS) -- a directive that ships locally clean atop a divergent pipeline is not clean
 
 ## Escalation rules
 
