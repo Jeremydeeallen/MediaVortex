@@ -437,5 +437,44 @@ C10. Cold first /Activity load < 1.5s; warm-cache navigation < 500ms.
 
 ### Out of L1 scope (deferred, may land as separate directives)
 
-- **L2 -- HTMX-driven navigation.** Replace full-page-reload nav with partial DOM swap. Eliminates re-rendering of layout/CSS/JS on every nav. Requires per-template `hx-get` annotation + content-area target. Right answer for the inherent multi-page nav cost; not required to close the 10-second complaint (L1 fixes that).
-- **L3 -- SSE (Server-Sent Events) for live progress.** Replace 5-second polling with server-push. The right standard for "live in-flight" data. Flask supports SSE natively. Out of scope unless operator wants instant ETA / progress feedback.
+- **L2 -- HTMX-driven navigation.** Attempted via `hx-boost="true"` on Base.html body; reverted in commit `8894d20` because existing page templates use `$(document).ready()` or inline `<script>` that bootstraps via the browser's full-load lifecycle. HTMX swaps the content area without firing those events, so page-specific data fetches never re-init (operator confirmed broken on /Queue immediately). Reintroduction requires per-template HTMX-aware init refactor (listen to `htmx:afterSwap`) — out of L1 scope; the documented design stays here as the next standards-correct upgrade after each page is audited.
+- **L3 -- SSE (Server-Sent Events) for live progress.** Implemented for `/Activity` in commit `2f2b7d6`: `GET /api/Activity/Stream` returns `text/event-stream`; the generator pushes the snapshot JSON every 1.5s when the payload differs from the prior push (else `: keepalive`). Activity.html replaced `setInterval(LoadActivity, 5000)` with `EventSource('/api/Activity/Stream')`; auto-fallback to 5s polling on `EventSource` undefined or `onerror`. Same shape ready to apply to `/Admin/Workers` (live worker state) and `/Admin/Compliance` (library counts) -- not yet wired.
+
+---
+
+## Queue Page Redesign
+
+**Promotes to existing `Features/TranscodeQueue/TranscodeQueue.feature.md` C9 (replaced 2026-06-29) + `Features/QualityTesting/qt-queue-visibility-and-override.feature.md` Progress checklist (VMAF card partial).** Operator asked for a multi-queue Queue page with reorderable + collapsible sections.
+
+### What landed
+
+- **Route**: new `GET /Queue` renders `Templates/Queue.html`; legacy `/TranscodeQueue` 301-redirects to `/Queue`. Base.html nav link points at `/Queue` and matches the `queue_page` endpoint for active-class highlighting.
+- **Layout**: four stacked cards in one host container, in default order `Transcode → Remux → Audio → VMAF`. Each card has its own `data-key` (`Transcode` / `Remux` / `Audio` / `VMAF`), drag handle, chevron toggle, summary line, count badge, paged table body.
+- **Per-mode data sources**: TranscodeQueue cards filter the existing `/api/TranscodeQueue/GetQueue` endpoint via the `mode=` query param (`Transcode`, `Remux`, `AudioFix`); VMAF card uses `/api/QualityTest/Queue`.
+- **Aggregate stats endpoints** (new for accurate summary text):
+  - `GET /api/TranscodeQueue/AggregateStats?mode=<Transcode|Remux|AudioFix|Quick>` -- one query, `GROUP BY Status + SUM(SizeMB)`. Returns `{TotalCount, PendingCount, RunningCount, FailedCount, TotalSizeMB}`.
+  - `GET /api/QualityTest/AggregateStats` -- VMAF-side equivalent. Returns `{TotalCount, PendingCount, RunningCount, FailedCount, CompletedCount}`.
+  - Stats are whole-queue aggregates -- NOT page-scoped -- so summary text is correct regardless of which page the operator is viewing.
+- **Drag-reorder**: native HTML5 draggable; `dragover` highlights drop-edge; `drop` reorders DOM and persists the new key order to `localStorage['MvQueueOrder']`.
+- **Collapse**: per-card chevron toggle; `localStorage['MvQueueCollapsed']` stores `{key: bool}`. **Default state is all-collapsed** when no prior state exists; operator expands the queues they want to act on. CSS `.queue-card.collapsed .card-body { display: none; }`.
+
+### Files (will land in the feature doc's ## Files table at DELIVERING)
+
+| File | Role |
+|---|---|
+| `Templates/Queue.html` | Rewritten as four-card layout with drag-reorder + collapse + summary; replaces the prior 1-table + 1-quality-testing-table page |
+| `Features/TranscodeQueue/TranscodeQueueController.py` | New `/api/TranscodeQueue/AggregateStats` endpoint |
+| `Features/QualityTesting/QualityTestController.py` | New `/api/QualityTest/AggregateStats` endpoint |
+| `WebService/Main.py` | New `/Queue` route; legacy `/TranscodeQueue` 301-redirects |
+| `Templates/Base.html` | Nav link points at `/Queue`; active match on `queue_page` endpoint |
+| `Features/TranscodeQueue/TranscodeQueue.feature.md` | C9 rewritten to describe four-card contract |
+| `Features/QualityTesting/qt-queue-visibility-and-override.feature.md` | Progress checklist updated: VMAF card portion delivered, per-row override buttons still deferred |
+
+### ui-verify evidence (commit `cdb244b` follow-up)
+
+Headless Chromium against the live `/Queue` page confirmed:
+- 4 cards rendered with `data-key` values `Transcode`, `Remux`, `Audio`, `VMAF`
+- 4 cards default to `.collapsed`
+- Audio card summary text reads `(45 pending • 11 running • 3.4 GB total)` from `AggregateStats`
+- Clicking the Audio card's chevron removes `.collapsed` -- table expands
+- Screenshots: `~/.claude/ui-verify/screenshots/queue-collapsed.png` and `queue-audio-expanded.png`

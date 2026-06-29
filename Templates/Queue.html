@@ -219,11 +219,30 @@ class QtActionsR extends ICellRenderer { Render(_v, Row) {
 
 // Definitions for each queue (mode = TranscodeQueue.ProcessingMode; null for VMAF/QualityTest)
 const QUEUE_DEFS = [
-    { key: 'Transcode', title: 'Transcode Queue', endpoint: '/api/TranscodeQueue/GetQueue?mode=Transcode', tableKind: 'tq' },
-    { key: 'Remux',     title: 'Remux Queue',     endpoint: '/api/TranscodeQueue/GetQueue?mode=Remux',     tableKind: 'tq' },
-    { key: 'Audio',     title: 'Audio Queue',     endpoint: '/api/TranscodeQueue/GetQueue?mode=AudioFix',  tableKind: 'tq' },
-    { key: 'VMAF',      title: 'VMAF Queue',      endpoint: '/api/QualityTest/Queue',                     tableKind: 'qt' },
+    { key: 'Transcode', title: 'Transcode Queue', endpoint: '/api/TranscodeQueue/GetQueue?mode=Transcode', statsEndpoint: '/api/TranscodeQueue/AggregateStats?mode=Transcode', tableKind: 'tq' },
+    { key: 'Remux',     title: 'Remux Queue',     endpoint: '/api/TranscodeQueue/GetQueue?mode=Remux',     statsEndpoint: '/api/TranscodeQueue/AggregateStats?mode=Remux',     tableKind: 'tq' },
+    { key: 'Audio',     title: 'Audio Queue',     endpoint: '/api/TranscodeQueue/GetQueue?mode=AudioFix',  statsEndpoint: '/api/TranscodeQueue/AggregateStats?mode=AudioFix',  tableKind: 'tq' },
+    { key: 'VMAF',      title: 'VMAF Queue',      endpoint: '/api/QualityTest/Queue',                     statsEndpoint: '/api/QualityTest/AggregateStats',                   tableKind: 'qt' },
 ];
+
+const FormatGB = (mb) => { const n = parseFloat(mb) || 0; const gb = n / 1024; return gb >= 1 ? `${gb.toFixed(1)} GB` : `${n.toFixed(0)} MB`; };
+
+const FetchAndApplyStats = (Card, Def) => {
+    const SummaryEl = Card.querySelector('.queue-summary');
+    const CountBadge = Card.querySelector('.queue-count-badge');
+    fetch(Def.statsEndpoint)
+        .then(r => r.json())
+        .then(d => {
+            const s = (d && d.Data) || {};
+            CountBadge.textContent = `${(s.TotalCount || 0).toLocaleString()} items`;
+            if (Def.tableKind === 'qt') {
+                SummaryEl.textContent = s.TotalCount === 0 ? '— empty' : `(${s.PendingCount || 0} pending • ${s.RunningCount || 0} running • ${s.FailedCount || 0} failed)`;
+            } else {
+                SummaryEl.textContent = s.TotalCount === 0 ? '— empty' : `(${s.PendingCount || 0} pending • ${s.RunningCount || 0} running • ${FormatGB(s.TotalSizeMB || 0)} total)`;
+            }
+        })
+        .catch(() => {});
+};
 
 const ORDER_KEY = 'MvQueueOrder';
 const COLLAPSED_KEY = 'MvQueueCollapsed';
@@ -243,7 +262,9 @@ const LoadCollapsed = () => {
         const stored = JSON.parse(localStorage.getItem(COLLAPSED_KEY) || 'null');
         if (stored && typeof stored === 'object') return stored;
     } catch (e) {}
-    return {};
+    const defaultAllCollapsed = {};
+    QUEUE_DEFS.forEach(q => { defaultAllCollapsed[q.key] = true; });
+    return defaultAllCollapsed;
 };
 const SaveCollapsed = (state) => { try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(state)); } catch (e) {} };
 
@@ -279,25 +300,20 @@ const InitTqTable = (Card, Def) => {
     const InfoEl = Card.querySelector('.queue-pagination-info');
     const PrevBtn = Card.querySelector('.queue-prev-btn');
     const NextBtn = Card.querySelector('.queue-next-btn');
-    const CountBadge = Card.querySelector('.queue-count-badge');
-    const SummaryEl = Card.querySelector('.queue-summary');
     const Sync = () => {
         const P = Pag.GetPage(), Sz = Pag.GetPageSize(), Tot = Pag._TotalCount;
-        InfoEl.textContent = PageInfo(Tot, P, Sz); CountBadge.textContent = `${Tot.toLocaleString()} items`;
-        const Rows = (Src && Src.GetCurrentPageRows) ? Src.GetCurrentPageRows() : (Src._CurrentRows || []);
-        let TotPage = 0, Running = 0, Pending = 0;
-        Rows.forEach(R => { TotPage += parseFloat(R.SizeMB) || 0; if (R.Status === 'Running') Running++; else if (R.Status === 'Pending') Pending++; });
-        const PageGB = TotPage / 1024;
-        SummaryEl.textContent = Tot === 0 ? '— empty' : `(${Pending} pending, ${Running} running on page • ${PageGB.toFixed(1)} GB on page)`;
+        InfoEl.textContent = PageInfo(Tot, P, Sz);
         PrevBtn.disabled = P <= 0; NextBtn.disabled = (P + 1) * Sz >= Tot;
+        FetchAndApplyStats(Card, Def);
     };
     PrevBtn.addEventListener('click', () => Pag.PrevPage());
     NextBtn.addEventListener('click', () => Pag.NextPage());
     Bus.Subscribe('PageChanged', Sync);
     Bus.Subscribe('SortChanged', () => Pag.GoTo(0));
     Bus.Subscribe('FilterChanged', () => Pag.GoTo(0));
+    FetchAndApplyStats(Card, Def);
     T.Render().then(Sync);
-    return () => T.Refresh().then(Sync);
+    return () => { FetchAndApplyStats(Card, Def); return T.Refresh().then(Sync); };
 };
 
 const InitQtTable = (Card, Def) => {
@@ -332,23 +348,19 @@ const InitQtTable = (Card, Def) => {
     const InfoEl = Card.querySelector('.queue-pagination-info');
     const PrevBtn = Card.querySelector('.queue-prev-btn');
     const NextBtn = Card.querySelector('.queue-next-btn');
-    const CountBadge = Card.querySelector('.queue-count-badge');
-    const SummaryEl = Card.querySelector('.queue-summary');
     const Sync = () => {
         const P = Pag.GetPage(), Sz = Pag.GetPageSize(), Tot = Pag._TotalCount;
-        InfoEl.textContent = PageInfo(Tot, P, Sz); CountBadge.textContent = `${Tot.toLocaleString()} items`;
-        const Rows = (Src && Src.GetCurrentPageRows) ? Src.GetCurrentPageRows() : (Src._CurrentRows || []);
-        let Running = 0, Pending = 0, Failed = 0;
-        Rows.forEach(R => { if (R.Status === 'Running') Running++; else if (R.Status === 'Pending') Pending++; else if (R.Status === 'Failed') Failed++; });
-        SummaryEl.textContent = Tot === 0 ? '— empty' : `(${Pending} pending, ${Running} running, ${Failed} failed on page)`;
+        InfoEl.textContent = PageInfo(Tot, P, Sz);
         PrevBtn.disabled = P <= 0; NextBtn.disabled = (P + 1) * Sz >= Tot;
+        FetchAndApplyStats(Card, Def);
     };
     PrevBtn.addEventListener('click', () => Pag.PrevPage());
     NextBtn.addEventListener('click', () => Pag.NextPage());
     Bus.Subscribe('PageChanged', Sync);
     Bus.Subscribe('SortChanged', () => Pag.GoTo(0));
+    FetchAndApplyStats(Card, Def);
     T.Render().then(Sync);
-    return () => T.Refresh().then(Sync);
+    return () => { FetchAndApplyStats(Card, Def); return T.Refresh().then(Sync); };
 };
 
 const SetupDragReorder = (Host) => {

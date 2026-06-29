@@ -60,7 +60,7 @@ COMPLETE 2026-05-29.
 - [x] `ProcessQualityTestQueue` claim query gains `AND ForceDisposition IS NULL`
 - [x] WebService endpoint `POST /api/QualityTest/Override` wired in `QualityTestController`
 - [x] Reason audit verified: zero new VmafServicePaused-class decisions post-deploy
-- [ ] UI surface (Queue page card showing pending QT rows with per-row Force-Replace / Force-Discard buttons) -- DEFERRED to a follow-up; the endpoint is callable via the existing SQL Queries page or curl until then
+- [x] UI surface partial: the QT queue is rendered as the "VMAF Queue" card on `/Queue` (collapsible by default; summary shows `(pending • running • failed)` from `/api/QualityTest/AggregateStats`; table body shows pending QT rows with Retry button on failed rows). Per-row Force-Replace / Force-Discard buttons still DEFERRED to a follow-up; the endpoint remains callable via the SQL Queries page or curl until those buttons land.
 
 ## Scope
 

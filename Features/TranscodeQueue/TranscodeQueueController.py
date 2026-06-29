@@ -11,6 +11,44 @@ from datetime import datetime, timezone
 TranscodeQueueBlueprint = Blueprint('TranscodeQueue', __name__, url_prefix='/api/TranscodeQueue')
 
 
+# directive: transcode-worker-unification
+@TranscodeQueueBlueprint.route('/AggregateStats', methods=['GET'])
+def AggregateStats():
+    """Per-mode queue aggregates for the Queue page card summary rows -- TotalCount + PendingCount + RunningCount + FailedCount + TotalSizeMB. Filters by ?mode= (Transcode|Remux|AudioFix|Quick) when supplied."""
+    try:
+        from Core.Database.DatabaseService import DatabaseService
+        Mode = (request.args.get('mode') or '').strip() or None
+        if Mode is not None and Mode not in ('Transcode', 'Quick', 'Remux', 'AudioFix'):
+            return jsonify({'Success': False, 'Message': 'Invalid mode'}), 400
+        Db = DatabaseService()
+        if Mode:
+            Rows = Db.ExecuteQuery(
+                "SELECT Status, COUNT(*)::int AS Count, COALESCE(SUM(SizeMB), 0)::float AS Size FROM TranscodeQueue WHERE ProcessingMode = %s GROUP BY Status",
+                (Mode,),
+            )
+        else:
+            Rows = Db.ExecuteQuery(
+                "SELECT Status, COUNT(*)::int AS Count, COALESCE(SUM(SizeMB), 0)::float AS Size FROM TranscodeQueue GROUP BY Status",
+            )
+        Stats = {'TotalCount': 0, 'PendingCount': 0, 'RunningCount': 0, 'FailedCount': 0, 'TotalSizeMB': 0.0}
+        for R in (Rows or []):
+            S = R.get('Status') or R.get('status')
+            C = int(R.get('Count') or R.get('count') or 0)
+            Sz = float(R.get('Size') or R.get('size') or 0.0)
+            Stats['TotalCount'] += C
+            Stats['TotalSizeMB'] += Sz
+            if S == 'Pending':
+                Stats['PendingCount'] = C
+            elif S == 'Running':
+                Stats['RunningCount'] = C
+            elif S == 'Failed':
+                Stats['FailedCount'] = C
+        return jsonify({'Success': True, 'Data': Stats})
+    except Exception as Ex:
+        LoggingService.LogException("AggregateStats endpoint failed", Ex, "TranscodeQueueController", "AggregateStats")
+        return jsonify({'Success': False, 'Message': str(Ex)}), 500
+
+
 @TranscodeQueueBlueprint.route('/GetQueue', methods=['GET'])
 # directive: table-renderer-service | # see shared-table-renderer.S9
 def GetQueue():

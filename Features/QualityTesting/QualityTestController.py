@@ -263,6 +263,35 @@ def GetQualityTestServiceStatus():
         LoggingService.LogException(ErrorMsg, e, "QualityTestController", "GetQualityTestServiceStatus")
         return jsonify({"Success": False, "Message": "Failed to get service status", "Error": ErrorMsg}), 500
 
+@QualityTestBlueprint.route('/api/QualityTest/AggregateStats', methods=['GET'])
+# directive: transcode-worker-unification
+def GetQualityTestAggregateStats():
+    """VMAF queue aggregates for the /Queue page card summary row."""
+    try:
+        from Core.Database.DatabaseService import DatabaseService
+        Db = DatabaseService()
+        Rows = Db.ExecuteQuery(
+            "SELECT Status, COUNT(*)::int AS Count FROM QualityTestingQueue GROUP BY Status",
+        )
+        Stats = {'TotalCount': 0, 'PendingCount': 0, 'RunningCount': 0, 'FailedCount': 0, 'CompletedCount': 0}
+        for R in (Rows or []):
+            S = R.get('Status') or R.get('status')
+            C = int(R.get('Count') or R.get('count') or 0)
+            Stats['TotalCount'] += C
+            if S == 'Pending':
+                Stats['PendingCount'] = C
+            elif S == 'Running':
+                Stats['RunningCount'] = C
+            elif S == 'Failed':
+                Stats['FailedCount'] = C
+            elif S == 'Completed':
+                Stats['CompletedCount'] = C
+        return jsonify({'Success': True, 'Data': Stats})
+    except Exception as e:
+        LoggingService.LogException(f"Exception in GetQualityTestAggregateStats: {str(e)}", e, "QualityTestController", "GetQualityTestAggregateStats")
+        return jsonify({'Success': False, 'Message': str(e)}), 500
+
+
 @QualityTestBlueprint.route('/api/QualityTest/Queue', methods=['GET'])
 # directive: table-renderer-service | # see shared-table-renderer.S9
 def GetQualityTestQueue():
