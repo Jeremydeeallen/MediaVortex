@@ -118,13 +118,15 @@ class DispositionDispatcher:
             AuditPayload={'TranscodeAttemptId': TranscodeAttemptId, 'TestVariantSetId': TestVariantSetId, 'shortCircuit': True},
         )
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
+    # directive: transcode-worker-unification | # see disposition.S1
     def _QueryVmafCapableWorkerOnline(self) -> bool:
         """Probe whether any VMAF-capable worker is online within the heartbeat window."""
         try:
+            HeartbeatSec = self.GateConfigRepository.Get().WorkerHeartbeatWindowSec
             Rows = self.DatabaseService.ExecuteQuery(
                 "SELECT 1 FROM Workers WHERE QualityTestEnabled = TRUE AND Status = 'Online' "
-                "AND LastHeartbeat > NOW() - INTERVAL '90 seconds' LIMIT 1",
+                "AND LastHeartbeat > NOW() - (INTERVAL '1 second' * %s) LIMIT 1",
+                (HeartbeatSec,),
             )
             return bool(Rows)
         except Exception as Ex:

@@ -2,14 +2,15 @@ from typing import Tuple, Optional, Dict, Any
 from Core.Logging.LoggingService import LoggingService
 
 
-# directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C6
+# directive: transcode-worker-unification | # see disposition.W5
 class RetranscodeDecider:
     """Decides whether to re-transcode based on the prior attempt's VMAF outcome."""
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C6
-    def __init__(self, AttemptRepository):
-        """Stash the injected attempt repository (DIP)."""
+    # directive: transcode-worker-unification | # see disposition.W5
+    def __init__(self, AttemptRepository, GateConfigRepository=None):
+        """Stash the injected attempt repository and optional gate-config repo (DIP)."""
         self.AttemptRepository = AttemptRepository
+        self.GateConfigRepository = GateConfigRepository
 
     # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C6
     def Decide(self, MediaFileId: int) -> Tuple[bool, Optional[Dict[str, Any]]]:
@@ -40,9 +41,11 @@ class RetranscodeDecider:
                 )
                 return True, PreviousAttempt
 
-            if Vmaf >= 80:
+            VmafThreshold = (self.GateConfigRepository.Get().RetranscodeVmafThreshold
+                             if self.GateConfigRepository else 80)
+            if Vmaf >= VmafThreshold:
                 LoggingService.LogInfo(
-                    f"VMAF {Vmaf:.2f} acceptable, skipping",
+                    f"VMAF {Vmaf:.2f} >= {VmafThreshold}, skipping",
                     "RetranscodeDecider", "Decide",
                 )
                 return False, PreviousAttempt
