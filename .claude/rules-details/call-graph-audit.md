@@ -55,6 +55,34 @@ py Scripts/SQLScripts/QueryDatabase.py sql "SELECT count(*) FILTER (WHERE <col> 
 
 Historical example from work-transcode-unified close: `SELECT count(*) FROM TranscodeAttempts WHERE AudioPolicyResolved IS NOT NULL` returned 0 across ALL attempts. Every mode was missing the attestation step. The ComplianceGate was then failing-closed on remux because there was no attestation to validate. Caught only via 9-media smoke; should have been caught at audit time.
 
+### Signal 5 — Config-driven call-graph shape
+
+Feature flags, runtime config, and toggles must drive DATA, never ORCHESTRATION. If turning a flag off REMOVES a node from the call graph (vs short-circuits a path through it), that's a violation. The call graph is a static property of the code; the same functions are called regardless of config -- config only changes which values flow through them and which branches the data takes.
+
+#### Detection commands
+
+For each feature flag identified in `SystemSettings`, `PostTranscodeGateConfig`, `Workers.*Enabled`, etc., grep for branches that depend on the flag:
+
+```
+grep -rnE "if .*Enabled.*:|if not .*Enabled.*:" Features/ Core/ Services/ Repositories/ --include="*.py"
+```
+
+For each hit, classify:
+- **Data-driven (acceptable):** the flag sets a value that downstream functions consume (e.g. `QualityTestRequired=True` written to a TranscodeAttempts row; the disposition decider reads it and branches on the column value). The flag flowed through; the orchestration shape is identical.
+- **Code-driven (violation):** the flag selects which function to call (e.g. `if QualityTestEnabled: RunQualityTest() else: pass`). Turning off the flag erases the QualityTest node from the call graph.
+
+The fix for violations is to make the flag a runtime parameter consumed at a fixed node, not a branch that wraps the node itself.
+
+#### Example from this directive
+
+`QualityTestController:631-667` (pre-fix) had its own inline cascade for "what profile applies" that ONLY ran when QT was enabled. With QT disabled, the cascade was dormant code that grep would never find via runtime tracing. After T11 fix, the controller injects `EffectiveProfileResolver` and calls `.Resolve(mediafile)` unconditionally; the QT enabled/disabled flag only controls whether the SCORING step downstream consumes the result.
+
+This catches latent-landmine code that activates the moment a flag flips back.
+
+#### When this signal fires hardest
+
+Look for "feature parity" claims in docs -- they're usually code-driven branches dressed up as data-driven. If the spec says "when X is enabled, the system does A; when X is disabled, the system does B" -- that's two different orchestrations. The right design is "the system always does C, where C is parameterized by X."
+
 ### Step 5 — Categorize every Out of Scope item
 
 For each item the spec puts in `## Out of Scope`, decide which category applies:
