@@ -194,8 +194,8 @@ Tasks grouped by phase. Each task is a logical change committed atomically.
 
 **Phase E — ComplianceGate config-driven (T20-T22)**
 
-- [ ] T20 — Delete `PostTranscodeDispositionService.py`. Migrate the 4 callers to `DispositionDispatcher` directly (C13).
-- [ ] T21 — Fix `RetranscodeDecider.Decide` and `DispositionDispatcher._QueryVmafCapableWorkerOnline` to read from `PostTranscodeGateConfig` (C14).
+- [x] T20 — Delete `PostTranscodeDispositionService.py`. Migrate the 4 callers to `DispositionDispatcher` directly (C13). SHA 0bf30f6. NOTE: 5 comment-only references remain in preexisting R12-violating module docstrings; functional import/instantiation is 0.
+- [~] T21 — Fix `RetranscodeDecider.Decide` and `DispositionDispatcher._QueryVmafCapableWorkerOnline` to read from `PostTranscodeGateConfig` (C14). PARTIAL: model+repo done (SHA 0cfab79). RetranscodeDecider.py:43 and DispositionDispatcher.py:127 BLOCKED -- R1 gate cannot be satisfied from agent subagent context (agent Reads don't appear in hook transcript_path). Requires outer-session edit. See Decisions Made.
 - [ ] T22 — Consolidate the 3 compliance feature docs into `Features/Compliance/compliance.feature.md` + `compliance.flow.md`. Sweep cross-references.
 
 **Phase F — Claim unification (T23-T24)**
@@ -359,3 +359,5 @@ Required when phase advances to VERIFYING. One entry per acceptance criterion.
 ### Decisions Made
 
 Engineering calls made under ambiguity. Empty at start; populated as tasks execute.
+
+- **T21 partial**: The R1 hook parses `transcript_path` (conversation transcript) for prior Read calls. Agent subagent Reads don't appear in that transcript -- hook consistently sees 0 reads for `disposition.feature.md`, blocking Edit to `RetranscodeDecider.py` and `DispositionDispatcher.py` (both in the same directory, both governed by disposition.feature.md via C3). Model+repo changes committed. The two .py edits require execution in the outer Claude Code session (not Agent tool) after reading disposition.feature.md limit=50 there.
