@@ -33,6 +33,7 @@ _ALLOWED_CAPABILITIES = frozenset({
     "ScanEnabled",
     "AcceptsInterlaced",  # routing flag, not pure capability, but uses same pattern
     "nvenccapable",  # hardware encoder flag; lowercase matches actual Workers column name
+    "qsvcapable",  # Intel QSV hardware encoder flag (av1_qsv profiles); parallels nvenccapable
 })  # see transcode.ST6
 
 
@@ -90,5 +91,17 @@ def BuildNvencPredicate(WorkerName: str) -> Tuple[str, tuple]:
         "AND (p.usenvidiahardware = 0 "
         "OR EXISTS (SELECT 1 FROM Workers w2 "
         "WHERE w2.WorkerName = %s AND w2.nvenccapable = TRUE))"
+    )
+    return Fragment, (WorkerName,)
+
+
+# directive: transcode-worker-unification | # see transcode.ST6
+def BuildQsvPredicate(WorkerName: str) -> Tuple[str, tuple]:
+    """Single source for the Intel QSV hardware gate; outer query joins Profiles p on profilename = mf.AssignedProfile."""
+    Fragment = (
+        "p.profilename IS NOT NULL "
+        "AND (COALESCE(p.useintelhardware, 0) = 0 "
+        "OR EXISTS (SELECT 1 FROM Workers w4 "
+        "WHERE w4.WorkerName = %s AND w4.qsvcapable = TRUE))"
     )
     return Fragment, (WorkerName,)

@@ -271,10 +271,11 @@ class TranscodeQueueRepository(BaseRepository):
         """Unified claim: ProcessingModes registry + Workers capability gate inline in SQL; Transcode-only gates conditional on ProcessingMode='Transcode'. See db-is-authority.md."""
         try:
             import psycopg2.extras
-            from Core.Database.WorkerCapabilityPredicate import BuildNvencPredicate, BuildAllowedProfilesPredicate
+            from Core.Database.WorkerCapabilityPredicate import BuildNvencPredicate, BuildQsvPredicate, BuildAllowedProfilesPredicate
             # directive: failure-accounting | # see failure-accounting.C6
             from Core.Database.FailureBudgetPredicate import BuildCapPredicate
             NvencFragment, NvencParams = BuildNvencPredicate(WorkerName)
+            QsvFragment, QsvParams = BuildQsvPredicate(WorkerName)
             AllowedProfilesFragment, AllowedProfilesParams = BuildAllowedProfilesPredicate(WorkerName)
             CapPredicateFragment, _CapParams = BuildCapPredicate("tq.MediaFileId")
             ReturningCols = (
@@ -305,6 +306,7 @@ class TranscodeQueueRepository(BaseRepository):
                     "    ) "
                     "    AND (tq.ProcessingMode != 'Transcode' OR mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0' OR %s::boolean) "
                     f"    AND (tq.ProcessingMode != 'Transcode' OR ({NvencFragment})) "
+                    f"    AND (tq.ProcessingMode != 'Transcode' OR ({QsvFragment})) "
                     f"    AND (tq.ProcessingMode != 'Transcode' OR ({AllowedProfilesFragment})) "
                     f"    AND {CapPredicateFragment} "
                     "  ORDER BY (CASE WHEN tq.Priority >= 195 THEN tq.Priority ELSE 0 END) DESC, tq.SizeMB DESC NULLS LAST, tq.DateAdded ASC "
@@ -315,7 +317,7 @@ class TranscodeQueueRepository(BaseRepository):
                 )
                 cursor.execute(
                     query,
-                    (WorkerName, WorkerName, AcceptsInterlaced) + NvencParams + AllowedProfilesParams,
+                    (WorkerName, WorkerName, AcceptsInterlaced) + NvencParams + QsvParams + AllowedProfilesParams,
                 )
                 row = cursor.fetchone()
                 connection.commit()
