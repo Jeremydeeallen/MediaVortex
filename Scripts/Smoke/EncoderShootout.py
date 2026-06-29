@@ -1,22 +1,4 @@
-"""Encoder shootout harness: SVT-AV1 vs av1_nvenc head-to-head.
-
-Reads a matrix JSON declaring sources and variants, runs every (source, variant)
-pair, scores each with libvmaf (production-equivalent chain + motion-filter
-pooling), and emits a per-source table, cross-source rollup, and persisted
-sidecar.
-
-No source probing at run time. Every parameter that affects output is in the
-matrix; the same matrix file produces the same numbers on every run.
-
-Usage:
-    py Scripts/Smoke/EncoderShootout.py --matrix Scripts/Smoke/NvencVsSvtAv1.matrix.json
-
-Optional:
-    --keep-encoded     Don't delete encoded mp4 outputs after VMAF
-    --resume           Skip (source, variant) pairs that already have a passing
-                       result in the sidecar (re-run only failures)
-"""
-
+# Encoder shootout harness: SVT-AV1 / av1_nvenc / av1_qsv on a fixed corpus, libvmaf-scored. See EncoderShootout.feature.md.
 import argparse
 import json
 import math
@@ -30,6 +12,10 @@ from datetime import datetime
 from pathlib import Path
 from statistics import median
 
+# Harness file paths are LOCAL (ffmpeg binary, shootout output mp4s, matrix JSON on disk, libvmaf XML log).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from Core.Path.LocalPath import LocalExists, LocalGetSize
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 FFMPEG = str(ROOT / "FFmpegMaster" / "bin" / "ffmpeg.exe")
 SMOKE_DIR = ROOT / "Scripts" / "Smoke"
@@ -41,13 +27,7 @@ def Log(Msg):
 
 
 def BuildEncodeCmd(Source, Variant, OutputPath, OutputScale):
-    """Return the full ffmpeg arg list for one (source, variant) encode.
-
-    Source is the source dict from the matrix (has `path`, `fps`,
-    `source_video_bitrate_kbps`, etc). Variant declares either CQ-anchored
-    (`cq: N`) or rate-anchored (`rc_mode: vbr`, `rate_pct: N`) mode for
-    NVENC. SVT-AV1 stays CRF-anchored.
-    """
+    """Return ffmpeg arg list for one (source, variant) encode."""
     SourcePath = Source["path"]
     Common = [
         FFMPEG, "-hide_banner", "-loglevel", "warning", "-stats",
@@ -102,6 +82,47 @@ def BuildEncodeCmd(Source, Variant, OutputPath, OutputScale):
         ]
         if Variant.get("gop"):
             VideoArgs += ["-g", str(Variant["gop"])]
+    elif Enc == "av1_qsv":
+        # QSV needs LIBVA_DRIVER_NAME=iHD env + libmfx-gen1.2 (oneVPL 2.x) at runtime. Container or host with Intel kobuk PPA.
+        RcMode = Variant.get("rc_mode", "vbr")
+        if RcMode == "vbr":
+            SrcKbps = Source.get("source_video_bitrate_kbps")
+            if not SrcKbps or SrcKbps <= 0:
+                raise ValueError(f"VBR variant {Variant['name']} requires source_video_bitrate_kbps on source {Source['id']}")
+            TargetKbps = int(round(SrcKbps * Variant["rate_pct"] / 100))
+            MaxKbps = TargetKbps * int(Variant.get("max_multiplier", 2))
+            BufKbps = MaxKbps
+            RateArgs = [
+                "-b:v", f"{TargetKbps}k",
+                "-maxrate:v", f"{MaxKbps}k",
+                "-bufsize:v", f"{BufKbps}k",
+            ]
+        elif RcMode == "icq":
+            RateArgs = [
+                "-rc", "icq",
+                "-global_quality", str(Variant["global_quality"]),
+            ]
+        else:
+            raise ValueError(f"av1_qsv rc_mode={RcMode} not implemented")
+        VideoArgs = [
+            "-c:v", "av1_qsv",
+            "-preset", str(Variant.get("preset", "veryslow")),
+        ] + RateArgs + [
+            "-extbrc", str(Variant.get("extbrc", 1)),
+            "-look_ahead", str(Variant.get("look_ahead", 1)),
+            "-look_ahead_depth", str(Variant.get("look_ahead_depth", 100)),
+            "-b_strategy", str(Variant.get("b_strategy", 1)),
+            "-adaptive_i", str(Variant.get("adaptive_i", 1)),
+            "-adaptive_b", str(Variant.get("adaptive_b", 1)),
+            "-bf", str(Variant.get("bf", 7)),
+            "-async_depth", str(Variant.get("async_depth", 4)),
+            "-low_power", str(Variant.get("low_power", 0)),
+            "-pix_fmt", Variant.get("pix_fmt", "p010le"),
+        ]
+        if Variant.get("gop"):
+            VideoArgs += ["-g", str(Variant["gop"])]
+        if Variant.get("tile_cols"):
+            VideoArgs += ["-tile_cols", str(Variant["tile_cols"]), "-tile_rows", str(Variant.get("tile_rows", 1))]
     else:
         raise ValueError(f"Unknown encoder: {Enc}")
 
@@ -120,11 +141,7 @@ def BuildEncodeCmd(Source, Variant, OutputPath, OutputScale):
 
 
 def Encode(SourceDict, Variant, OutputPath, OutputScale):
-    """Run one encode. Returns (success_bool, encode_seconds, size_bytes).
-
-    SourceDict is the matrix source dict (has path + metadata). Required
-    for VBR variants that compute target bitrate from source bitrate.
-    """
+    """Run one encode. Returns (success_bool, encode_seconds, size_bytes)."""
     Cmd = BuildEncodeCmd(SourceDict, Variant, OutputPath, OutputScale)
     Log(f"  ENCODE {Variant['label']}")
     T0 = time.time()
@@ -134,27 +151,21 @@ def Encode(SourceDict, Variant, OutputPath, OutputScale):
         Log(f"    encode failed (rc={R.returncode}). stderr tail:")
         print((R.stderr or "")[-1500:])
         return False, Dt, 0
-    Size = os.path.getsize(OutputPath) if os.path.exists(OutputPath) else 0
+    Size = LocalGetSize(OutputPath) if LocalExists(OutputPath) else 0
     Log(f"    done in {Dt/60:.1f} min, size={Size/(1024*1024):.1f} MB")
     return True, Dt, Size
 
 
-def RunVmaf(EncodedPath, SourcePath, XmlBareName, CompareScale, NThreads):
-    """Run libvmaf with the production-equivalent filter chain.
-
-    Both inputs: setpts reset, scaled to compare resolution with lanczos and
-    explicit limited-range output, 10-bit precision. libvmaf writes XML to a
-    BARE filename in SMOKE_DIR (absolute Windows paths break the filtergraph
-    parser); we run cwd=SMOKE_DIR so the bare filename resolves.
-
-    Returns (success_bool, vmaf_seconds, abs_xml_path).
-    """
+def RunVmaf(EncodedPath, SourcePath, XmlBareName, CompareScale, NThreads, SourceFps=None):
+    """Score (encoded vs source) with libvmaf; production-equivalent chain. XML written bare-name in SMOKE_DIR (absolute Windows paths break filtergraph parser)."""
     AbsXml = SMOKE_DIR / XmlBareName
     if AbsXml.exists():
         AbsXml.unlink()
+    # fps=<source.fps> lock prevents mkv 1/24000 vs mp4 1/1000 timebase walk-off in libvmaf frame pairing.
+    FpsLock = f"fps={SourceFps}," if SourceFps else ""
     Filter = (
-        f"[0:v]setpts=PTS-STARTPTS,scale={CompareScale}:flags=lanczos:in_range=auto:out_range=tv,format=yuv420p10le[dist];"
-        f"[1:v]setpts=PTS-STARTPTS,scale={CompareScale}:flags=lanczos:in_range=auto:out_range=tv,format=yuv420p10le[ref];"
+        f"[0:v]{FpsLock}setpts=PTS-STARTPTS,scale={CompareScale}:flags=lanczos:in_range=auto:out_range=tv,format=yuv420p10le[dist];"
+        f"[1:v]{FpsLock}setpts=PTS-STARTPTS,scale={CompareScale}:flags=lanczos:in_range=auto:out_range=tv,format=yuv420p10le[ref];"
         f"[dist][ref]libvmaf=log_fmt=xml:log_path={XmlBareName}:n_threads={NThreads}"
     )
     Cmd = [
@@ -177,21 +188,14 @@ def RunVmaf(EncodedPath, SourcePath, XmlBareName, CompareScale, NThreads):
 
 
 def ParseMetricsFromXml(XmlPath):
-    """Parse pooled VMAF metrics with held-frame motion filtering.
-
-    Ported verbatim from EncodeAndVmaf.ParseMetricsFromXml which mirrors
-    Features/QualityTesting/QualityTestingBusinessService.ParseVMAFMetrics.
-    When >15% of source frames have integer_motion < 0.5, Mean / StdDev /
-    percentiles are pooled over only the motion>=0.5 frames so libvmaf's
-    bimodal scoring on held-frame content doesn't poison the headline metric.
-    """
+    """Parse pooled VMAF metrics with held-frame motion filtering (see feature md criterion 6)."""
     Result = {
         "Mean": 0.0, "Min": None, "Max": None, "HarmonicMean": None,
         "StdDev": None, "P1": None, "P5": None, "P10": None, "P25": None,
         "MotionZeroFraction": None, "MotionFilterApplied": False,
         "FrameCount": 0,
     }
-    if not os.path.exists(XmlPath):
+    if not LocalExists(XmlPath):
         return Result
     try:
         Root = ET.parse(XmlPath).getroot()
@@ -283,7 +287,7 @@ def PrintSourceTable(SrcLabel, Results):
 
 
 def PrintRollup(VariantNames, VariantLabels, AllResults):
-    """Cross-source rollup: per-variant median size / encode time / VMAF Mean / P5."""
+    """Cross-source rollup: per-variant medians of size, encode time, VMAF Mean / P5."""
     print()
     print("=" * 130)
     print("  CROSS-SOURCE ROLLUP (medians across all sources where encode + VMAF succeeded)")
@@ -314,13 +318,13 @@ def PrintRollup(VariantNames, VariantLabels, AllResults):
 
 
 def Main():
-    Parser = argparse.ArgumentParser(description="SVT-AV1 vs av1_nvenc shootout harness.")
+    Parser = argparse.ArgumentParser(description="SVT-AV1 / av1_nvenc / av1_qsv shootout harness.")
     Parser.add_argument("--matrix", required=True, help="Path to matrix JSON.")
     Parser.add_argument("--keep-encoded", action="store_true", help="Don't delete encoded outputs after VMAF.")
     Parser.add_argument("--keep-xml", action="store_true", help="Don't delete VMAF XML files after parsing.")
     Args = Parser.parse_args()
 
-    if not os.path.exists(Args.matrix):
+    if not LocalExists(Args.matrix):
         Log(f"Matrix not found: {Args.matrix}")
         sys.exit(1)
 
@@ -340,21 +344,19 @@ def Main():
     Log(f"Output: {OutputScale}  Compare: {CompareScale}  VMAF threads: {NThreads}")
     Log(f"Sources: {len(Sources)}  Variants: {len(Variants)}  Total encodes: {len(Sources) * len(Variants)}")
 
-    # Pre-flight: every declared source must exist on disk now. Better to fail
-    # before the first 30-min encode than after.
-    MissingSources = [S for S in Sources if not os.path.exists(S["path"])]
+    MissingSources = [S for S in Sources if not LocalExists(S["path"])]
     if MissingSources:
         Log("Missing sources -- aborting:")
         for S in MissingSources:
             Log(f"  - {S['path']}")
         sys.exit(2)
 
-    AllResults = {}  # source_id -> list of result dicts
+    AllResults = {}
     SidecarPath = SMOKE_DIR / f"{TestName}.shootout.json"
     Sidecar = {
         "schema_version": 1,
         "test_name": TestName,
-        "matrix_file": os.path.abspath(Args.matrix),
+        "matrix_file": str(Path(Args.matrix).resolve()),
         "run_started": datetime.now().isoformat(timespec="seconds"),
         "matrix": Matrix,
         "results": {},
@@ -365,7 +367,7 @@ def Main():
         SrcId = Src["id"]
         SrcLabel = Src["label"]
         SrcPath = Src["path"]
-        SrcSize = os.path.getsize(SrcPath)
+        SrcSize = LocalGetSize(SrcPath)
         Log("")
         Log(f"[{SrcIdx}/{len(Sources)}] {SrcLabel}")
         Log(f"  source: {SrcPath}")
@@ -406,7 +408,7 @@ def Main():
             Result["size_mb"] = round(SizeB / (1024 * 1024), 2)
 
             if EncodeOk and SizeB > 0:
-                VmafOk, VmafDt, XmlPath = RunVmaf(OutPath, SrcPath, XmlBare, CompareScale, NThreads)
+                VmafOk, VmafDt, XmlPath = RunVmaf(OutPath, SrcPath, XmlBare, CompareScale, NThreads, Src.get("fps"))
                 Result["vmaf_ok"] = VmafOk
                 Result["vmaf_seconds"] = VmafDt
                 Result["xml_path"] = XmlPath
@@ -425,8 +427,6 @@ def Main():
                 except OSError: pass
 
             SrcResults.append(Result)
-            # Persist after every (source, variant) so a crash mid-run doesn't
-            # lose results.
             Sidecar["results"][SrcId] = SrcResults
             Sidecar["run_last_update"] = datetime.now().isoformat(timespec="seconds")
             with open(SidecarPath, "w", encoding="utf-8") as F:
