@@ -82,7 +82,7 @@ class FileReplacementBusinessService:
                                      "FileReplacementBusinessService", "GetFailedFileReplacements")
             return []
 
-    # directive: filereplacement-decompose | see FileReplacement.W1
+    # directive: filereplacement-decompose | see FileReplacement.W1 | # see transcode.ST9
     def ProcessFileReplacement(self, TranscodeAttemptId: int) -> Dict[str, Any]:
         """Orchestrate file replacement for an attempt; see FileReplacement.W1."""
         try:
@@ -200,7 +200,8 @@ class FileReplacementBusinessService:
                 }
 
             # directive: filereplacement-drain-bug | # see filereplacement.C11
-            isRemux = (transcode_attempt.ProfileName or '') in ('Remux', 'SubtitleFix', 'Quick', 'AudioFix')
+            AttemptMode = (transcode_attempt.ProfileName or 'Transcode')
+            isRemux = (AttemptMode != 'Transcode')  # registry: non-Transcode modes skip size guard; see transcode.ST9
             EffectiveOldBytes = transcode_attempt.OldSizeBytes
             if (not isRemux) and (EffectiveOldBytes is None or EffectiveOldBytes <= 0):
                 try:
@@ -235,8 +236,6 @@ class FileReplacementBusinessService:
 
             self._ArchiveOriginalFileDetails(OriginalPath, TranscodeAttemptId)
 
-            AttemptProfileName = (transcode_attempt.ProfileName or '')
-            ReplacementMode = 'Remux' if AttemptProfileName in ('Remux', 'SubtitleFix', 'AudioFix', 'Quick') else 'Transcode'
             from Features.FileReplacement.TranscodedOutputPlacement import TranscodedOutputPlacement
             replacement_result = TranscodedOutputPlacement(
                 self.DatabaseManager, self.FileManager, WorkerName=self.WorkerName
@@ -244,7 +243,7 @@ class FileReplacementBusinessService:
                 OriginalPath, TranscodedPath, OriginalPath,
                 FFmpegCommand=getattr(transcode_attempt, 'FfpmpegCommand', None),
                 SourceMediaFileId=SourceMediaFileId,
-                Mode=ReplacementMode,
+                Mode=AttemptMode,
             )
 
             if replacement_result.get('Success', False):
@@ -266,10 +265,16 @@ class FileReplacementBusinessService:
                     "FileReplacementBusinessService", "ProcessFileReplacement",
                 )
 
-                self._NotifyJellyfinOfReplacement(
-                    replacement_result.get('CanonicalOriginalPath') or OriginalPath,
-                    replacement_result.get('CanonicalNewPath'),
-                )
+                try:  # see jellyfin-push-notify.C1
+                    from Services.JellyfinNotifyService import NotifyJellyfin
+                    _NewPath = replacement_result.get('CanonicalNewPath')
+                    if _NewPath:
+                        NotifyJellyfin([{'Path': _NewPath, 'UpdateType': 'Modified'}], self.DatabaseManager.DatabaseService)
+                except Exception as NfEx:
+                    LoggingService.LogException(
+                        "Jellyfin notify swallowed at ProcessFileReplacement boundary",
+                        NfEx, "FileReplacementBusinessService", "ProcessFileReplacement",
+                    )
 
                 return {
                     'Success': True,
@@ -347,6 +352,12 @@ class FileReplacementBusinessService:
             original_exists = self.FileManager.ValidateFileExists(transcode_attempt.FilePath)
             transcoded_exists = self.FileManager.ValidateFileExists(transcoded_path)
 
+            # read threshold fresh from DB per db-is-authority.md; see transcode.ST9
+            ThresholdRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT FileReplacementCanReplaceThreshold FROM PostTranscodeGateConfig WHERE Id = 1"
+            )
+            CanReplaceThreshold = float(ThresholdRows[0]['FileReplacementCanReplaceThreshold']) if ThresholdRows else 90.0
+
             return {
                 'Success': True,
                 'TranscodeAttemptId': TranscodeAttemptId,
@@ -357,7 +368,7 @@ class FileReplacementBusinessService:
                 'TranscodedFileExists': transcoded_exists,
                 'FileReplaced': getattr(transcode_attempt, 'FileReplaced', False),
                 'FileReplacementDate': getattr(transcode_attempt, 'FileReplacementDate', None),
-                'CanReplace': original_exists and transcoded_exists and transcode_attempt.VMAF and transcode_attempt.VMAF >= 90
+                'CanReplace': original_exists and transcoded_exists and transcode_attempt.VMAF and transcode_attempt.VMAF >= CanReplaceThreshold
             }
 
         except Exception as e:
@@ -367,21 +378,6 @@ class FileReplacementBusinessService:
                 'Success': False,
                 'ErrorMessage': f'Exception getting status: {str(e)}'
             }
-
-    # directive: filereplacement-decompose | see jellyfin-push-notify.C1
-    def _NotifyJellyfinOfReplacement(self, CanonicalOriginalPath: str, CanonicalNewPath: str) -> None:
-        """Fire-and-forget Jellyfin notify; see jellyfin-push-notify.C1."""
-        try:
-            from Services.JellyfinNotifyService import NotifyJellyfin
-            if not CanonicalNewPath:
-                return
-            Updates = [{'Path': CanonicalNewPath, 'UpdateType': 'Modified'}]
-            NotifyJellyfin(Updates, self.DatabaseManager.DatabaseService)
-        except Exception as Ex:
-            LoggingService.LogException(
-                "Jellyfin notify swallowed at FileReplacement boundary",
-                Ex, "FileReplacementBusinessService", "_NotifyJellyfinOfReplacement",
-            )
 
     # directive: filereplacement-decompose
     def _ArchiveOriginalFileDetails(self, FilePath: str, TranscodeAttemptId: int) -> bool:
