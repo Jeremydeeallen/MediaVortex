@@ -42,7 +42,7 @@ def test_manifest_includes_all_buckets():
         import pytest
         pytest.skip("manifest.json missing -- run RegenerateFromLive.py")
     assert set(M['Fixtures'].keys()) == set(_BUCKETS), f"Manifest missing buckets: {set(_BUCKETS) - set(M['Fixtures'].keys())}"
-    Expected = {'Transcode': 'Transcode', 'Remux': 'Remux', 'AudioFixOnly': 'AudioFixOnly', 'Compliant': None}
+    Expected = {'Transcode': 'Transcode', 'Remux': 'Remux', 'AudioFixOnly': 'AudioFix', 'Compliant': None}
     for B, V in M['Fixtures'].items():
         if 'Error' in V:
             import pytest
@@ -54,7 +54,7 @@ def test_manifest_includes_all_buckets():
 def test_fixture_source_rows_still_match_expected_bucket():
     """The MediaFile row each fixture was captured from STILL sits in its expected bucket. If a row has been processed since capture, RegenerateFromLive needs to re-run."""
     Db = DatabaseService()
-    Expected = {'Transcode': 'Transcode', 'Remux': 'Remux', 'AudioFixOnly': 'AudioFixOnly', 'Compliant': None}
+    Expected = {'Transcode': 'Transcode', 'Remux': 'Remux', 'AudioFixOnly': 'AudioFix', 'Compliant': None}
     Stale = []
     for B in _BUCKETS:
         if not PermanentFixtures.IsAvailable(B):

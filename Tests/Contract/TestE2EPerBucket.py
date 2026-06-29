@@ -123,7 +123,7 @@ def test_audiofixonly_bucket_e2e():
             "SELECT WorkBucket, AudioCompliant, VideoCompliant, ContainerCompliant FROM MediaFiles WHERE Id = %s",
             (MediaFileId,),
         )[0]
-        assert Pre['WorkBucket'] == 'AudioFixOnly'
+        assert Pre['WorkBucket'] == 'AudioFix'
         assert Pre['AudioCompliant'] is False
         assert Pre['VideoCompliant'] is True
         assert Pre['ContainerCompliant'] is True

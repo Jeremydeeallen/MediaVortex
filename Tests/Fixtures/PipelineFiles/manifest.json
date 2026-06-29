@@ -14,7 +14,7 @@
     "AudioFixOnly": {
       "FixtureLocalPath": "C:\\Code\\MediaVortex\\Tests\\Fixtures\\PipelineFiles\\AudioFixOnly\\Exclusive Interview With The Sopranos.mp4",
       "SourceMediaFileId": 8408,
-      "ExpectedBucket": "AudioFixOnly"
+      "ExpectedBucket": "AudioFix"
     },
     "Compliant": {
       "FixtureLocalPath": "C:\\Code\\MediaVortex\\Tests\\Fixtures\\PipelineFiles\\Compliant\\Adam Baldwin Sings the Hero of Canton Theme-mv.mp4",

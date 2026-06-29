@@ -17,7 +17,7 @@ class TestWorkBucketDerivation(unittest.TestCase):
         self.assertEqual(Rows[0]['is_generated'], 'ALWAYS')
         Expr = (Rows[0]['generation_expression'] or '').lower()
         for Need in ('videocompliant', 'containercompliant', 'audiocompliant',
-                     'transcode', 'remux', 'audiofixonly', 'is null'):
+                     'transcode', 'remux', 'audiofix', 'is null'):
             self.assertIn(Need, Expr, f'Generation expression missing token: {Need}')
 
     # directive: compliance-symmetry
@@ -28,7 +28,7 @@ class TestWorkBucketDerivation(unittest.TestCase):
             (True, True, True, None),
             (False, True, True, 'Transcode'),
             (True, False, True, 'Remux'),
-            (True, True, False, 'AudioFixOnly'),
+            (True, True, False, 'AudioFix'),
             (False, False, False, 'Transcode'),
             (True, False, False, 'Remux'),
             (None, True, True, None),
@@ -42,7 +42,7 @@ class TestWorkBucketDerivation(unittest.TestCase):
                     "WHEN %s::boolean IS NULL OR %s::boolean IS NULL OR %s::boolean IS NULL THEN NULL "
                     "WHEN %s::boolean = FALSE THEN 'Transcode' "
                     "WHEN %s::boolean = FALSE THEN 'Remux' "
-                    "WHEN %s::boolean = FALSE THEN 'AudioFixOnly' "
+                    "WHEN %s::boolean = FALSE THEN 'AudioFix' "
                     "ELSE NULL END AS bucket",
                     (V, C, A, V, C, A),
                 )
