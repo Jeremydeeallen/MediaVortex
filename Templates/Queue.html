@@ -245,7 +245,8 @@ const FetchAndApplyStats = (Card, Def) => {
 };
 
 const ORDER_KEY = 'MvQueueOrder';
-const COLLAPSED_KEY = 'MvQueueCollapsed';
+const COLLAPSED_KEY = 'MvQueueCollapsed_v2';
+try { localStorage.removeItem('MvQueueCollapsed'); } catch (e) {}
 const LoadOrder = () => {
     try {
         const stored = JSON.parse(localStorage.getItem(ORDER_KEY) || 'null');
