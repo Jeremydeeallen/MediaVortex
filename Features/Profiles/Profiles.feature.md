@@ -35,6 +35,23 @@ Defines transcode encoding profiles with per-resolution thresholds. Each profile
 
 9. **Source-resolution bucketing is letterbox-safe.** `EncoderKnobRepository._NormalizeResolution` buckets `WIDTHxHEIGHT` pixel strings by long-edge (`max(W, H)`), not height alone, so wide-aspect cinematic crops (1920x802 Bluray, 3840x1600 4K letterbox) bucket to the tier their canvas implies (1080p, 2160p) rather than to the tier their letterboxed height implies (720p, 1080p). Verifiable: a `MediaFiles` row with `Resolution='1920x802'` assigned a profile whose 1080p `TranscodeDownTo='720p'` produces a job whose `FfpmpegCommand` contains `-vf "scale=w=1280:h=-2"`. Negation: a row with `Resolution='1920x802'` no longer resolves to the 720p threshold row's "No downscaling" default.
 
+## Known Gaps
+
+Architectural debts in the Profiles vertical not addressed by `transcode-worker-unification` (2026-06-28). All are durable doc records, not bug filings.
+
+1. **ProfileThresholds JOIN triplication.** Three SQL sites do `JOIN ProfileThresholds pt ON pt.ProfileId = p.Id WHERE p.ProfileName = ?`:
+   - `EffectiveProfileResolver._LookupThresholdsRow` (`Features/Profiles/EffectiveProfileResolver.py:101`)
+   - `QueueManagementBusinessService._LoadResolutionLookup` (`Features/TranscodeQueue/QueueManagementBusinessService.py:1422` — survived the cascade dedup because it loads resolutions, not just profile names)
+   - `ProfileRepository.GetProfileSettingsForTargetResolution` (`Features/Profiles/ProfileRepository.py:501`, the single-file path with VR-resolution fallback)
+
+   The three serve different access patterns (single-file with fallback, single-file without, bulk). A unified `ProfileRepository.GetThresholds(ProfileName, Resolution)` method with a `IncludeVrFallback` flag could collapse them. Deferred to future directive `profiles-threshold-unification`.
+
+2. **`ProfileName` VO placement.** The validated VO lives at `Features/WorkBucket/Domain/ProfileName.py` but validates a Profiles-vertical concept (queries `Profiles` table for finalized+active state). Layering inversion. The right placement is `Features/Profiles/Domain/ProfileName.py`; consumers in WorkBucket / QualityTesting / etc. import from Profiles. Move deferred — would touch all consumers, separate scope from the current directive.
+
+3. **Vestigial threshold columns.** `ProfileThresholds.{Under30MinMB, Under65MinMB, Over65MinMB, FallbackVideoBitrateKbps, FallbackAudioBitrateKbps}` and `Profiles.KeepSource` are round-tripped by the editor UI but read by no production consumer. Schema cleanup candidate. Deferred to future `profiles-schema-prune` directive.
+
+4. **Three parallel profile-cascade implementations -- RESOLVED 2026-06-28** by `transcode-worker-unification` Phase C (T9-T11). `EffectiveProfileResolver.Resolve` / `ResolveProfileName` is now the single home; `QualityTestController:631-667` inline cascade deleted; `QueueManagementBusinessService._GetEffectiveProfileFromCache` (+ helpers) deleted. Enforced by `Tests/Contract/TestNoParallelProfileCascade.py`.
+
 ## Status
 
 COMPLETE
