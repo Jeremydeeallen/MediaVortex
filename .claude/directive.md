@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-29
-**Status:** Active -- phase: NEEDS_PLAN
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** audio-dialog-boost-real
 **Replaces:** in-flight pivot on top of `transcode-worker-unification` (at IMPLEMENTING; paused at `.claude/directives/paused/2026-06-29-transcode-worker-unification.md`)
 **Interrupts:** transcode-worker-unification
@@ -96,7 +96,7 @@ CREATE:
 Features/AudioNormalization/audio-normalization.flow.md             -- CREATE: new flow doc; per-encode pipeline stages incl. Demucs pre-pass
 Features/AudioNormalization/Services/DemucsVocalIsolationService.py -- CREATE: wraps Demucs subprocess; returns vocals.wav + instrumental.wav paths + vocals RMS dBFS
 Tests/Contract/TestTwoTrackContract.py                              -- CREATE: per-criterion G1..G6 contract test
-Scripts/SQLScripts/SimplifyAudioPolicyTables_2026_06_30.py          -- CREATE: drop EnableDialogBoostTrack column + orphan knob columns; collapse AudioPolicyResolved enum
+# Scripts/SQLScripts/SimplifyAudioPolicyTables_2026_06_30.py -- DROPPED: schema migration deferred; orphan columns left dead, follow-up cleanup directive will drop them. AudioPolicyResolved already all-NULL.
 
 EDIT:
 Features/AudioNormalization/AudioFilterEmitter.py                   -- EDIT: rewrite to emit two-track Source of Truth shape unconditionally; delete legacy strategy branches
