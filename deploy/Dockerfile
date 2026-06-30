@@ -71,7 +71,7 @@ RUN pip install --no-cache-dir --break-system-packages \
         && rm -rf /var/lib/apt/lists/* \
         && pip install --no-cache-dir --break-system-packages \
             --index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/ \
-            torch==2.6.0+xpu torchaudio==2.6.0+xpu intel-extension-for-pytorch==2.6.10+xpu; \
+            torch==2.5.1+cxx11.abi torchaudio==2.5.1+cxx11.abi intel-extension-for-pytorch==2.5.10+xpu; \
     else \
         pip install --no-cache-dir --break-system-packages \
             --index-url https://download.pytorch.org/whl/${TORCH_VARIANT} \
