@@ -289,10 +289,6 @@ def _DetectTorchVariant(Target: str) -> str:
     Out = (R.stdout or '').strip()
     if Out:
         return "cu124"
-    R = _RunSsh(Target, "lspci -nn 2>/dev/null | grep -iE 'vga|3d|display' | grep -i 'intel' | grep -iE 'arc|battlemage|alchemist|\\[8086:e' | head -1", Timeout=10)
-    Out = (R.stdout or '').strip()
-    if Out:
-        return "xpu"
     return "cpu"
 
 
