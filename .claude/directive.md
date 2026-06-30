@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-29
-**Status:** Active -- phase: NEEDS_STANDARDS_REVIEW
+**Status:** Active -- phase: NEEDS_PLAN
 **Slug:** audio-dialog-boost-real
 **Replaces:** in-flight pivot on top of `transcode-worker-unification` (at IMPLEMENTING; paused at `.claude/directives/paused/2026-06-29-transcode-worker-unification.md`)
 **Interrupts:** transcode-worker-unification
@@ -43,13 +43,17 @@ G6. **GUI surfaces the two-track design literally.** `/AudioNormalization` page 
 
 ## Call-Graph Audit
 
-Per `.claude/rules/call-graph-audit.md`. To be completed during NEEDS_STANDARDS_REVIEW before phase advance.
+Per `.claude/rules/call-graph-audit.md`.
 
-- Multiple flow docs for one conceptual operation: TBD (audio-normalization.flow.md exists?)
-- Mode-branching at orchestration level: TBD (does any code branch on track-count or codec-name today?)
-- Shared output columns sparsely populated: TBD (AudioTracksEmittedJson population audit)
-- OOS items categorized: all (a) above (behavior preserved, no debt accreted)
-- Config-driven call-graph shape: TBD (does `EnableDialogBoostTrack` toggle remove nodes from graph? if yes, that's a Signal 5 violation and the toggle is removed)
+1. **Multiple flow docs for one conceptual operation.** `Features/TranscodeQueue/audio-fix-priority-hints.flow.md` exists for the AudioFix WorkBucket priority pipeline (queue ordering concern). No `audio-normalization.flow.md` exists for the per-encode track-emission pipeline. Resolution: CREATE `Features/AudioNormalization/audio-normalization.flow.md` to document the per-encode pipeline (Demucs pre-pass -> Track 0 emit -> Track 1 emit -> mux). The two flow docs cover distinct pipelines and coexist.
+
+2. **Mode-branching at orchestration level.** `AudioStrategyClassifier` classifies into five strategies (LINEAR/ADAPTIVE/LIMITER/SKIP/REVIEW); `AudioFilterEmitter` branches on the strategy enum to produce different filter chains. Under the Source of Truth, ONE orchestration always emits two tracks: Track 0 = linear loudnorm, Track 1 = Demucs+boost+tight loudnorm. Resolution: collapse `AudioStrategyClassifier` (delete the strategy enum or reduce it to a single classification); `AudioFilterEmitter` emits the two-track shape unconditionally; per-file variance lives in DATA (the measured LUFS values flowing through fixed filter slots, the vocals-stem RMS gate in G5), not orchestration branches.
+
+3. **Shared output columns sparsely populated.** `TranscodeAttempts.AudioPolicyResolved` currently holds multiple enum values reflecting the legacy strategy variants; `TranscodeAttempts.AudioTracksEmittedJson` records per-track strategy + achieved loudness. Audit pending — to be executed at IMPLEMENTING with: `SELECT AudioPolicyResolved, count(*) FROM TranscodeAttempts WHERE AttemptDate > '2026-06-01' GROUP BY AudioPolicyResolved`. Resolution: under Source of Truth, only `two_track_original_and_boost` is valid; the deletion-in-scope section already names this. Migration script drops conflicting enum values.
+
+4. **OOS items categorized.** All OOS items above are category (a): behavior preserved, duplication not introduced. Pre-directive damaged files (BUG-0070), Atmos object audio, per-language OFF switch, Demucs model picker, Demucs runtime picker -- none of these introduce silent debt.
+
+5. **Config-driven call-graph shape.** `AudioComplianceRules.EnableDialogBoostTrack` is a Signal 5 violation: when FALSE the second-track emit code path is skipped = different nodes called = graph shape changes with config. Resolution: deletion-in-scope already names this column for removal. `TargetIntegratedLufs` is data-driven (flows through fixed loudnorm filter slot, no graph change) and stays. `EnableSpeechLanguageDetection` is data-driven (toggles a measurement read, not which functions are called).
 
 ## Deletions in scope
 
@@ -87,7 +91,38 @@ Per `.claude/rules/call-graph-audit.md`. To be completed during NEEDS_STANDARDS_
 
 ### Files
 
-To be enumerated at NEEDS_PLAN before phase advance to NEEDS_DOC_PREREAD.
+```
+CREATE:
+Features/AudioNormalization/audio-normalization.flow.md             -- CREATE: new flow doc; per-encode pipeline stages incl. Demucs pre-pass
+Features/AudioNormalization/Services/DemucsVocalIsolationService.py -- CREATE: wraps Demucs subprocess; returns vocals.wav + instrumental.wav paths + vocals RMS dBFS
+Tests/Contract/TestTwoTrackContract.py                              -- CREATE: per-criterion G1..G6 contract test
+Scripts/SQLScripts/SimplifyAudioPolicyTables_2026_06_30.py          -- CREATE: drop EnableDialogBoostTrack column + orphan knob columns; collapse AudioPolicyResolved enum
+
+EDIT:
+Features/AudioNormalization/AudioFilterEmitter.py                   -- EDIT: rewrite to emit two-track Source of Truth shape unconditionally; delete legacy strategy branches
+Features/AudioNormalization/AudioStrategyClassifier.py              -- EDIT or DELETE: collapse to single classification (or remove entirely; consumers updated)
+Features/AudioNormalization/AudioVertical.py                        -- EDIT: remove EnableDialogBoostTrack reads; always emit two tracks
+Features/AudioNormalization/AudioNormalizationController.py         -- EDIT: remove orphan knob endpoints + EnableDialogBoostTrack from PUT body; add /api/AudioNormalization/PreviewChains endpoint for G6
+Features/AudioNormalization/AudioPolicyResolver.py                  -- EDIT: simplify resolver; only TargetIntegratedLufs remains as a knob
+Features/AudioNormalization/AudioDispositionResolver.py             -- EDIT: Track 1 disposition.default=1, Track 0 =0 per G4
+Features/AudioNormalization/AudioPipelineFailHandler.py             -- EDIT: collapse AudioPolicyResolved to single enum value
+Features/AudioNormalization/TranscodeAudioPolicyVerdictRepository.py -- EDIT: same
+Features/AudioNormalization/audio-normalization.feature.md          -- EDIT: replace conflicting C-criteria with G1..G6 contract; embed Source of Truth table (DELIVERING-time promotion)
+Templates/AudioNormalization.html                                   -- EDIT: rewrite as two-panel side-by-side per G6; show literal pipelines; remove orphan knobs
+Templates/AdminCompliance.html                                      -- EDIT: remove EnableDialogBoostTrack toggle + orphan audio knobs
+Templates/Compliance.html                                           -- EDIT: same as AdminCompliance.html
+Tests/Contract/TestAudioFilterEmitter.py                            -- EDIT: update for Source of Truth chain shape
+Tests/Contract/TestAudioStrategyClassifier.py                       -- EDIT or DELETE: matches classifier collapse decision
+Tests/Contract/TestMultiLanguageLiveEncode.py                       -- EDIT: per-language two-track still emitted
+Tests/Contract/TestLinearLoudnormEnforcement.py                     -- EDIT: Track 0 keeps linear contract; Track 1 chain is post-Demucs and has its own loudnorm shape; whitelist Track 1 path
+requirements.txt                                                    -- EDIT: add demucs Python dependency
+WorkerService/requirements.txt                                      -- EDIT: same (worker venv runs Demucs)
+
+DELETE (effected via SimplifyAudioPolicyTables_2026_06_30.py migration):
+AudioComplianceRules.EnableDialogBoostTrack column
+Any Profiles audio-override columns not feeding Track 0 ch/kbps (audit at IMPLEMENTING)
+AudioPolicyResolved enum values that do not map to two_track_original_and_boost
+```
 
 ### Promotions
 
