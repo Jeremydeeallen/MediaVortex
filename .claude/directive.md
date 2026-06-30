@@ -130,6 +130,16 @@ To be populated at DELIVERING. Anticipated targets:
 - `Features/AudioNormalization/audio-normalization.feature.md` -- replace conflicting C-criteria with G1..G6 contract; embed Source of Truth table.
 - `Features/AudioNormalization/audio-normalization.flow.md` (create if missing) -- pipeline stages including Demucs pre-pass.
 
+### Three-host smoke results (all output in T:\_Testing\)
+
+| Host | Hardware | Demucs device | Pre-pass | Encode | Output filename | Pass |
+|---|---|---|---|---|---|---|
+| I9 | RTX 4060 Ti | **cuda** | 19.4 s | 9.4 s | `Bluey_(2018)_-_S01E01_-_Magic_Xylophone_WEBDL-480p_S01E01_i9.mp4` | yes |
+| wakko-worker-1 | Ryzen 7 3700X | cpu | 186.6 s | 19.1 s | `Bluey_(2018)_-_S01E01_-_Magic_Xylophone_WEBDL-480p_S01E01_wakko-worker-1.mp4` | yes |
+| dot-worker-1 | i9-10850K | cpu | 144.2 s | 30.1 s | `Bluey_(2018)_-_S01E01_-_Magic_Xylophone_WEBDL-480p_S01E01_dot-worker-1.mp4` | yes |
+
+Each output: stream 1 aac stereo 130 kbps default=0 name=Original; stream 2 aac stereo 194 kbps default=1 name=Dialog Boost.
+
 ### Verification
 
 - **G1 (Original within +/-1 LU of TargetIntegratedLufs):** Smoke encode of Bluey S01E01 WEBDL-480p emitted Track 0 with `loudnorm=I=-23.00:LRA=9.10:TP=-2.00:measured_I=-22.30:measured_LRA=9.10:measured_TP=-1.60:measured_thresh=-33.00:linear=true` per AudioFilterEmitter unit test output. Linear-mode loudnorm with measured values guarantees +/-1 LU achieved at -23 LUFS target. Full library-wide SQL verification deferred until production-deploy backlog drains.
@@ -142,7 +152,7 @@ To be populated at DELIVERING. Anticipated targets:
 ### Decisions Made
 
 - **Worker venv on Python 3.11.8** (not 3.13). Reason: ML wheels (torch-directml, intel-extension-for-pytorch) lag behind Python releases; 3.11 has the broadest wheel availability while torch+CUDA + demucs work fine.
-- **CUDA on I9 only.** Linux containers (wakko, dot, larry) run CPU Demucs in container. Reason: GPU passthrough varies per host (wakko has Arc B580 needing oneAPI runtime ~5GB; dot has UHD 630 with weak ML perf). CPU Demucs on Ryzen 7 3700X / i9-10850K runs in ~3-5 min per 45-min episode; acceptable. GPU acceleration on Linux containers deferred to follow-up `audio-demucs-linux-gpu`.
+- **CUDA on I9 only.** Linux containers (wakko, dot, larry) run CPU Demucs. Reason for dot (has RTX 4060 + nvidia-container-toolkit + GPU passthrough): docker build with TORCH_VARIANT=cu124 builds the image but the final "exporting layers" step hangs indefinitely (3+ attempts, dockerd active at 80-110% CPU but never completes) when ~3 GB of CUDA wheels are added to the image. Containerd snapshotter on dot's overlayfs backend appears unable to flush this layer size. Reason for wakko (has Intel Arc B580 + /dev/dri passthrough): IPEX wheel availability on Intel's CDN is broken for cp312 -- IPEX 2.5.10+xpu returns 403, IPEX 2.6.10+xpu requires torch 2.6.0+xpu which also returns 403, only torch 2.5.1+cxx11.abi is downloadable but no IPEX pairs with it. Follow-up directive needed: `audio-demucs-linux-gpu` to switch dot to buildx (or chunked build) AND switch wakko to ONNX-runtime + OpenVINO model for vocal separation.
 - **Intel iGPU acceleration on Windows: blocked.** torch-directml hard-pins torch 2.4.1 (clashes with demucs+torchaudio 2.6 requirement); intel-extension-for-pytorch has no Windows wheels. Documented as wheel-ecosystem limitation, not code-level. RTX 4060 Ti on I9 is the faster device anyway.
 - **Parallelization mechanism = multi-instance, not in-process threading.** `StartParallelWorkers.py` spawns N WorkerService instances via subprocess, each auto-claims a `{prefix}-N` slot via the existing `_ClaimPrefixedWorkerName` advisory lock. Reason: simpler than in-worker pipeline parallelism; reuses already-correct multi-worker infrastructure; multiple Demucs runs naturally serialize on CUDA queue without OOM risk.
 - **I9 Windows production requirements (consolidated):**
