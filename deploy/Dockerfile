@@ -30,6 +30,7 @@ RUN apt-get update -qq \
         locales \
         ca-certificates \
         gnupg \
+        curl \
         python3.12 \
         python3-pip > /dev/null \
     && add-apt-repository -y ppa:kobuk-team/intel-graphics > /dev/null \
