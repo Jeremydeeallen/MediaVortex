@@ -13,8 +13,21 @@ SILENCE_FLOOR_DBFS = -120.0
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
 def _DetectDemucsDevice(PythonExe):
+    Code = (
+        "try:\n"
+        " import intel_extension_for_pytorch\n"
+        "except ImportError:\n"
+        " pass\n"
+        "import torch\n"
+        "if torch.cuda.is_available():\n"
+        " print('cuda')\n"
+        "elif hasattr(torch, 'xpu') and torch.xpu.is_available():\n"
+        " print('xpu')\n"
+        "else:\n"
+        " print('cpu')\n"
+    )
     Probe = subprocess.run(
-        [PythonExe, "-c", "import torch; print('cuda' if torch.cuda.is_available() else 'cpu')"],
+        [PythonExe, "-c", Code],
         capture_output=True, text=True, timeout=30,
     )
     if Probe.returncode != 0:
@@ -50,15 +63,27 @@ class DemucsVocalIsolationService:
             f"Demucs separating {StereoInputWavPath} -> {OutputDir} (device={self.Device})",
             "DemucsVocalIsolationService", "IsolateVocals"
         )
-        Cmd = [
-            self.PythonExe, "-m", "demucs.separate",
-            "-n", self.ModelName,
-            "-d", self.Device,
-            "--two-stems", "vocals",
-            "-o", OutputDir,
-            "--filename", "{stem}.{ext}",
-            StereoInputWavPath,
-        ]
+        if self.Device == "xpu":
+            Preamble = "import intel_extension_for_pytorch; from demucs.separate import main; import sys; main()"
+            Cmd = [
+                self.PythonExe, "-c", Preamble,
+                "-n", self.ModelName,
+                "-d", self.Device,
+                "--two-stems", "vocals",
+                "-o", OutputDir,
+                "--filename", "{stem}.{ext}",
+                StereoInputWavPath,
+            ]
+        else:
+            Cmd = [
+                self.PythonExe, "-m", "demucs.separate",
+                "-n", self.ModelName,
+                "-d", self.Device,
+                "--two-stems", "vocals",
+                "-o", OutputDir,
+                "--filename", "{stem}.{ext}",
+                StereoInputWavPath,
+            ]
         Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=3600)
         if Result.returncode != 0:
             raise RuntimeError(

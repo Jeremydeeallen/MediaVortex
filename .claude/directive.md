@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-29
-**Status:** Active -- phase: VERIFYING
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** audio-dialog-boost-real
 **Replaces:** in-flight pivot on top of `transcode-worker-unification` (at IMPLEMENTING; paused at `.claude/directives/paused/2026-06-29-transcode-worker-unification.md`)
 **Interrupts:** transcode-worker-unification

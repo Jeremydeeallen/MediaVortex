@@ -283,13 +283,27 @@ def _LoadFfmpegPin() -> tuple[str, str]:
     return Tag, Asset
 
 
-# directive: worker-runtime-state
+# directive: audio-dialog-boost-real | # see audio-normalization.C14
+def _DetectTorchVariant(Target: str) -> str:
+    R = _RunSsh(Target, "nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1", Timeout=10)
+    Out = (R.stdout or '').strip()
+    if Out:
+        return "cu124"
+    R = _RunSsh(Target, "lspci -nn 2>/dev/null | grep -iE 'vga|3d|display' | grep -i 'intel' | grep -iE 'arc|battlemage|alchemist|\\[8086:e' | head -1", Timeout=10)
+    Out = (R.stdout or '').strip()
+    if Out:
+        return "xpu"
+    return "cpu"
+
+
+# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def StepDockerBuild(Target: str, Sha: str) -> bool:
-    """Build the worker image on the target. Passes COMMIT_SHA + pinned ffmpeg tag + asset."""
     FfmpegTag, FfmpegAsset = _LoadFfmpegPin()
-    BuildArgs = [f"--build-arg FFMPEG_TAG={FfmpegTag}", f"--build-arg FFMPEG_ASSET={FfmpegAsset}"]
+    TorchVariant = _DetectTorchVariant(Target)
+    BuildArgs = [f"--build-arg FFMPEG_TAG={FfmpegTag}", f"--build-arg FFMPEG_ASSET={FfmpegAsset}", f"--build-arg TORCH_VARIANT={TorchVariant}"]
     if Sha:
         BuildArgs.append(f"--build-arg COMMIT_SHA={Sha}")
+    print(f"  [..]   build args: TORCH_VARIANT={TorchVariant}", flush=True)
     Cmd = (
         f"docker build {' '.join(BuildArgs)} "
         f"-t mediavortex-worker:latest "
