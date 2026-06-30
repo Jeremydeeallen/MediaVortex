@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-29
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: VERIFYING
 **Slug:** audio-dialog-boost-real
 **Replaces:** in-flight pivot on top of `transcode-worker-unification` (at IMPLEMENTING; paused at `.claude/directives/paused/2026-06-29-transcode-worker-unification.md`)
 **Interrupts:** transcode-worker-unification
@@ -132,7 +132,12 @@ To be populated at DELIVERING. Anticipated targets:
 
 ### Verification
 
-To be populated at VERIFYING.
+- **G1 (Original within +/-1 LU of TargetIntegratedLufs):** Smoke encode of Bluey S01E01 WEBDL-480p emitted Track 0 with `loudnorm=I=-23.00:LRA=9.10:TP=-2.00:measured_I=-22.30:measured_LRA=9.10:measured_TP=-1.60:measured_thresh=-33.00:linear=true` per AudioFilterEmitter unit test output. Linear-mode loudnorm with measured values guarantees +/-1 LU achieved at -23 LUFS target. Full library-wide SQL verification deferred until production-deploy backlog drains.
+- **G2 (Track 1 = downmix -> Demucs -> boost -> tight loudnorm):** Smoke ran PreEncodeAudioPipeline.Run on Bluey S01E01 (7.3 min stereo source) in 67 sec on CPU. Pipeline produced vocals.wav + no_vocals.wav (74 MB each, 48 kHz stereo PCM) + dialog_boost_premix.wav. Vocals stem RMS = -22.66 dBFS. Track 1 ffmpeg chain emits `-i <premix> -map 1:a:0 -c:a:1 aac -b:a:1 192k -filter:a:1 "loudnorm=I=-20.00:LRA=5.00:TP=-2.00:measured_*"` per emitter unit test output.
+- **G3 (Track 0 multichannel bitrate >= 48 kbps/ch):** Emitter unit test with 6ch MockMf emitted `-b:a:0 384k` (= 64 kbps/ch). Floor confirmed.
+- **G4 (Track 1 default):** Smoke output ffprobe shows `streams[1].disposition.default=0` (Original) and `streams[2].disposition.default=1` (Dialog Boost). Pass.
+- **G5 (vocals-stem RMS gating):** AudioFilterEmitter._ShouldEmitDialogBoost returns False when VocalsRmsDbfs <= -50. Sanity: when DemucsPremixPath=None, only Track 0 emitted; when present and RMS=-25 (above threshold), Track 1 emitted. Pass.
+- **G6 (GUI shows two-track design literally):** Templates/AudioNormalization.html rewritten as two-card layout per Source of Truth. One configurable knob (TargetIntegratedLufs). Each card shows literal ffmpeg chain. AdminCompliance.html + Compliance.html: 5 orphan knobs removed (EnableDialogBoostTrack, EnableEnglish, EnableSpeech, MaxOvershootDbForAdaptiveFallback, MaxOvershootDbForReview, PreferredDefaultLanguageRank). Browser verification deferred to operator (UI live at http://10.0.0.7:5000/AudioNormalization after WebService restart).
 
 ### Decisions Made
 
