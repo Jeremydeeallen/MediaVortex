@@ -30,4 +30,9 @@ hypothesis>=6.0.0
 black
 flake8
 
+# Audio dialog-boost (Demucs vocal isolation pre-pass).
+# torch + torchaudio install separately from CUDA index; demucs + soundfile auto-resolve.
+demucs>=4.0.0
+soundfile>=0.12.0
+
 # Note: pathlib, shutil, os, tempfile, subprocess, logging, json are built-in Python modules
