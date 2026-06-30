@@ -839,9 +839,7 @@ function ShowProfileKnobs(ProfileId) {
             {name: 'YadifMode', kind: 'int', group: 'Deinterlace'},
             {name: 'YadifParity', kind: 'int', group: 'Deinterlace'},
             {name: 'YadifDeint', kind: 'int', group: 'Deinterlace'},
-            {name: 'AudioBitrateKbps', kind: 'int', group: 'Encoder Audio'},
-            {name: 'AudioChannels', kind: 'int', group: 'Encoder Audio'},
-            {name: 'AudioFilter', kind: 'text', group: 'Encoder Audio'},
+            {name: 'AudioConfigLink', kind: 'audio_link', group: 'Audio (managed by the Audio Vertical)'},
             {name: 'FastStart', kind: 'bool', group: 'Output'},
             {name: 'QualityTestRequired', kind: 'bool', group: 'Quality Test'},
         ];
@@ -905,6 +903,9 @@ function ShowProfileKnobs(ProfileId) {
                     Opts += `<option value="${O}" ${Sel}>${O}</option>`;
                 });
                 return `<select id="${FieldId}" data-kind="select" class="form-select form-select-sm">${Opts}</select>`;
+            }
+            if (Col.kind === 'audio_link') {
+                return `<span class="text-muted"><i class="fas fa-info-circle me-1"></i>Audio codec, bitrate, channels, and filter are owned by the <a href="/AudioNormalization" target="_blank">Audio Vertical <i class="fas fa-external-link-alt"></i></a>. Per-profile audio overrides were removed in directive <code>audio-dialog-boost-real</code>.</span>`;
             }
             return `<input type="text" id="${FieldId}" data-kind="${Col.kind}" value="${V.replace(/"/g,'&quot;')}" class="form-control form-control-sm">`;
         }

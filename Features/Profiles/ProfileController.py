@@ -185,12 +185,11 @@ class ProfileController:
                     'YadifMode', 'YadifParity', 'YadifDeint',
                     'UseNvidiaHardware', 'UseIntelHardware',
                     'Tune', 'Multipass', 'PixelFormat',
-                    'AudioCodec', 'AudioBitrateKbps', 'AudioChannels', 'AudioFilter',
                     'Container', 'FastStart', 'RateControlMode', 'AqStrength',
                     'SpatialAq', 'TemporalAq', 'WeightedPred', 'LowPower',
                     'QualityTestRequired',
                     'StreamCodecName', 'TargetResolutionCategory', 'TargetVideoKbps',
-                    'AllowUpscale', 'TargetAudioKbps', 'Active',
+                    'AllowUpscale', 'AudioCodec', 'TargetAudioKbps', 'Active',
                 }
                 COMPLIANCE_FIELDS = {
                     'Codec', 'StreamCodecName', 'TargetResolutionCategory', 'TargetVideoKbps',

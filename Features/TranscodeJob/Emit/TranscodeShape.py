@@ -26,7 +26,8 @@ class TranscodeShape(EncodeShape):
         self.VideoFilterBuilder = VideoFilterBuilder
         self.MediaProbeAdapter = MediaProbeAdapter
         self.Resolver = Resolver or AudioPolicyResolver()
-        self.Emitter = Emitter or AudioFilterEmitter(ProfileResolver=EffectiveProfileResolver())
+        # directive: audio-dialog-boost-real | # see audio-normalization.C8 | # see encode-emit.C12
+        self.Emitter = Emitter or AudioFilterEmitter()
         self.StreamProbe = StreamProbe or AudioStreamProbe()
         self.CodecPolicy = CodecPolicy or EAC3OrPassthroughCodecPolicy()
 
@@ -68,6 +69,20 @@ class TranscodeShape(EncodeShape):
                 CommandParts.extend(['-ss', StartTime.strip()])
             CommandParts.extend(['-i', f'"{InputPath}"'])
 
+            # directive: audio-dialog-boost-real | # see audio-normalization.C8
+            Policy = self.Resolver.GetEffectivePolicy(MediaFile)
+            SourceStreams = self.StreamProbe.Probe(CommandData.get('InputPath')) or None
+            DemucsPremixPath = CommandData.get('DemucsPremixPath')
+            VocalsRmsDbfs = CommandData.get('VocalsRmsDbfs')
+            Blocks = self.Emitter.EmitTracks(MediaFile, Policy, AudioStreams=SourceStreams, DemucsPremixPath=DemucsPremixPath, VocalsRmsDbfs=VocalsRmsDbfs) if Policy else []
+            for Block in Blocks:
+                if Block.InputArgs:
+                    Quoted = []
+                    for I in range(0, len(Block.InputArgs), 2):
+                        Quoted.append(Block.InputArgs[I])
+                        Quoted.append(f'"{Block.InputArgs[I+1]}"')
+                    CommandParts.extend(Quoted)
+
             AudioStreamIndex = CommandData.get('AudioStreamIndex', 0)
             CommandParts.extend(['-map', '0:v:0'])
 
@@ -80,10 +95,6 @@ class TranscodeShape(EncodeShape):
                 CommandParts.extend(['-threads', str(MaxCpuThreads)])
 
             self.CodecParameterAssembler.AddCodecParameters(CommandParts, CodecParameters, ProfileSettings)
-
-            Policy = self.Resolver.GetEffectivePolicy(MediaFile)
-            SourceStreams = self.StreamProbe.Probe(CommandData.get('InputPath')) or None
-            Blocks = self.Emitter.EmitTracks(MediaFile, Policy, AudioStreams=SourceStreams) if Policy else []
             if not Blocks:
                 SourceCodec = getattr(MediaFile, 'AudioCodec', None)
                 AudioCorruptSuspect = bool(getattr(MediaFile, 'AudioCorruptSuspect', False))
