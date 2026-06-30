@@ -50,10 +50,20 @@ ENV LIBVA_DRIVER_NAME=iHD
 
 # Python dependencies (WorkerService). PEP 668 on Ubuntu noble needs --break-system-packages
 # for global pip install in a single-purpose container.
+# directive: audio-dialog-boost-real | # see audio-normalization.C14
+# torch CPU build + torchaudio + demucs + soundfile for Demucs vocal isolation pre-pass.
+# Linux containers run CPU Demucs since GPU passthrough varies by host (Arc B580 on wakko
+# would need oneAPI runtime, ~5GB; deferred). Ryzen 7/i9 multi-core handles ~3-5min per
+# 45-min episode at ~30%-50% CPU.
 RUN pip install --no-cache-dir --break-system-packages \
-    psycopg2-binary \
-    psutil \
-    setproctitle
+        psycopg2-binary \
+        psutil \
+        setproctitle \
+        soundfile \
+ && pip install --no-cache-dir --break-system-packages \
+        --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.6.0 torchaudio==2.6.0 \
+ && pip install --no-cache-dir --break-system-packages demucs==4.0.1
 
 # Copy application code
 WORKDIR /opt/mediavortex
