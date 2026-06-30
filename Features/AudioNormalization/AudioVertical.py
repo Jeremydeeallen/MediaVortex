@@ -23,12 +23,10 @@ class AudioVertical:
 
     # directive: worker-runtime-state
     def _LoadRules(self) -> dict:
+        # directive: audio-dialog-boost-real | # see audio-normalization.C8
         Rows = self._Db.ExecuteQuery(
             "SELECT TargetIntegratedLufs, TargetTruePeakDbtp, "
-            "MaxOvershootDbForAdaptiveFallback, MaxOvershootDbForReview, "
-            "AcceptableAudioCodecsCsv, EnableDialogBoostTrack, "
-            "EnableEnglishPreferredDefault, PreferredDefaultLanguageRank, "
-            "EnableSpeechLanguageDetection "
+            "MaxOvershootDbForReview, AcceptableAudioCodecsCsv "
             "FROM AudioComplianceRules ORDER BY Id LIMIT 1"
         )
         if not Rows:

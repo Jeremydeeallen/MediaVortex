@@ -6,171 +6,148 @@
 <div class="container my-4">
     {% include '_admin_subnav.html' %}
   <h2>Audio Normalization</h2>
+  <p class="text-muted">Every encoded output ships exactly two audio tracks per kept language. Operator goal: consistent loudness between episodes (Track 0) + dialog audible over music and effects (Track 1).</p>
 
   <ul class="nav nav-tabs" role="tablist">
-    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#settings-pane">Settings</a></li>
+    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tracks-pane">Tracks</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#dashboard-pane">Dashboard</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#review-pane">Review Queue</a></li>
   </ul>
 
   <div class="tab-content mt-3">
-    <div class="tab-pane fade show active" id="settings-pane">
-      <h4>Policies</h4>
-      <div id="settings-rows" class="table-responsive">
-        <table class="table table-sm table-striped">
-          <thead><tr>
-            <th>Scope</th><th>ScopeKey</th><th>Enabled</th>
-            <th>Target LUFS</th><th>Target TP</th><th>Tolerance</th>
-            <th>Ungainable</th><th>KeepCommentary</th><th>SpeechDetect</th>
-          </tr></thead>
-          <tbody id="settings-body"></tbody>
-        </table>
+
+    <div class="tab-pane fade show active" id="tracks-pane">
+      <div class="mb-3">
+        <label for="Ac_TargetLufs" class="form-label">Target integrated loudness (LUFS) -- the only knob that affects emit</label>
+        <div class="input-group" style="max-width: 320px;">
+          <input type="number" step="0.1" id="Ac_TargetLufs" class="form-control" value="-23.0">
+          <button class="btn btn-primary" id="Ac_Save">Save</button>
+        </div>
+        <small class="text-muted">Both tracks normalize to this LUFS so episodes match in volume between switches. Default -23 LUFS (broadcast standard).</small>
+        <div id="Ac_Msg" class="small mt-1"></div>
       </div>
-      <h5 class="mt-3">Edit / Insert</h5>
-      <form id="settings-form" class="row g-2">
-        <div class="col-md-2"><label>Scope</label>
-          <select name="Scope" class="form-select">
-            <option>global</option><option>library</option>
-            <option>folder</option><option>item</option>
-          </select>
+
+      <div class="row g-3">
+
+        <div class="col-md-6">
+          <div class="card h-100">
+            <div class="card-header">
+              <strong>Track 0 -- Original</strong>
+              <span class="badge bg-secondary float-end">disposition.default = 0</span>
+            </div>
+            <div class="card-body">
+              <p class="card-text"><em>Source dynamics preserved. Linear loudnorm only. Audience: AVRs / Atmos receivers / surround setups (they have their own dialog enhancement).</em></p>
+              <h6>Channels</h6>
+              <p>Source passthrough -- 5.1 stays 5.1, stereo stays stereo, mono stays mono.</p>
+              <h6>Bitrate</h6>
+              <p>AAC-LC at 64 kbps per channel (floor 48 kbps/ch above AAC-LC transparency).</p>
+              <h6>ffmpeg chain</h6>
+              <pre class="bg-light p-2 small mb-0" id="Ac_Chain0" style="white-space: pre-wrap;"></pre>
+            </div>
+          </div>
         </div>
-        <div class="col-md-2"><label>ScopeKey</label><input name="ScopeKey" class="form-control"></div>
-        <div class="col-md-1"><label>Enabled</label><input name="Enabled" type="checkbox" checked class="form-check-input"></div>
-        <div class="col-md-1"><label>Target LUFS</label><input name="TargetIntegratedLufs" type="number" step="0.1" value="-23" class="form-control"></div>
-        <div class="col-md-1"><label>Target TP</label><input name="TargetTruePeakDbtp" type="number" step="0.1" value="-2" class="form-control"></div>
-        <div class="col-md-1"><label>Tolerance</label><input name="LoudnessTolerance" type="number" step="0.1" value="4" class="form-control"></div>
-        <div class="col-md-1"><label>MaxAudioChannels</label><input name="MaxAudioChannels" type="number" min="1" max="8" value="2" class="form-control" title="Max acceptable source channel count; 2=stereo, 6=5.1; exceed -> defer with channels_exceed_max"></div>
-        <div class="col-md-2"><label>Ungainable</label>
-          <select name="UngainablePolicy" class="form-select">
-            <option>adaptive</option><option>skip</option>
-            <option>limiter</option><option>review</option>
-          </select>
+
+        <div class="col-md-6">
+          <div class="card h-100">
+            <div class="card-header">
+              <strong>Track 1 -- Dialog Boost</strong>
+              <span class="badge bg-primary float-end">disposition.default = 1</span>
+            </div>
+            <div class="card-body">
+              <p class="card-text"><em>Dialog surgically lifted via Demucs vocal isolation. Stereo, compressed for one-comfortable-volume listening. Audience: TV speakers / soundbars / phones.</em></p>
+              <h6>Channels</h6>
+              <p>Forced stereo downmix -- regardless of source channel count.</p>
+              <h6>Bitrate</h6>
+              <p>AAC-LC at 192 kbps stereo (96 kbps/ch -- transparent).</p>
+              <h6>Pipeline</h6>
+              <pre class="bg-light p-2 small mb-0" id="Ac_Chain1" style="white-space: pre-wrap;"></pre>
+              <p class="small text-muted mt-2">If vocals-stem RMS &lt;= -50 dBFS (no dialog detected), Track 1 falls back to a copy of the Track 0 chain.</p>
+            </div>
+          </div>
         </div>
-        <div class="col-md-1"><label>Commentary</label><input name="KeepCommentaryTracks" type="checkbox" checked class="form-check-input"></div>
-        <div class="col-md-1"><label>SpeechDetect</label><input name="EnableSpeechLanguageDetection" type="checkbox" class="form-check-input"></div>
-        <div class="col-md-2"><label title="How H1 treats files transcoded by MediaVortex before this vertical shipped">Pre-vertical re-normalize</label>
-          <select name="PreVerticalReNormalizePolicy" class="form-select">
-            <option value="lazy" selected>lazy (no action)</option>
-            <option value="aggressive">aggressive (re-transcode)</option>
-            <option value="none">none (exclude entirely)</option>
-          </select>
-        </div>
-        <div class="col-12"><label>EmitTracks (JSON array)</label>
-          <textarea name="EmitTracks" class="form-control" rows="4">[{"Label":"Original","TargetLufs":-23,"TargetLra":null,"Channels":"source","Codec":"eac3","Bitrate":384,"SampleRateHz":48000,"BitDepth":16,"LanguageFilter":"keep-all","IsDefaultTrack":false},{"Label":"Dialog Boost","TargetLufs":-23,"TargetLra":11,"Channels":"source","Codec":"eac3","Bitrate":384,"SampleRateHz":48000,"BitDepth":16,"LanguageFilter":"keep-all","IsDefaultTrack":true}]</textarea>
-        </div>
-        <div class="col-12"><button type="submit" class="btn btn-primary">Save</button></div>
-      </form>
-      <div id="settings-msg" class="mt-2"></div>
+
+      </div>
     </div>
 
     <div class="tab-pane fade" id="dashboard-pane">
-      <h4>Consistency Bands per Library</h4>
-      <table class="table table-sm table-striped">
-        <thead><tr><th>LibraryId</th><th>Uniform (+/-2 LU)</th><th>Acceptable (+/-4 LU)</th><th>Deviant (>4 LU)</th><th>Total</th></tr></thead>
-        <tbody id="dashboard-body"></tbody>
-      </table>
-      <button id="snapshot-btn" class="btn btn-secondary btn-sm">Run policy snapshot (last 60s queue inserts)</button>
-      <div id="snapshot-msg" class="mt-2"></div>
+      <h5>Loudness consistency band</h5>
+      <div id="Ac_Dashboard" class="table-responsive small text-muted">Loading...</div>
     </div>
 
     <div class="tab-pane fade" id="review-pane">
-      <h4>Operator Review Queue</h4>
-      <p id="review-count" class="text-muted"></p>
-      <div id="review-groups"></div>
-      <p class="text-muted small mt-3">
-        <strong>Bulk Resolve</strong> clears the audio defer reason. ComplianceGate then re-routes each file to its
-        smallest-applicable WorkBucket (Transcode &#8835; Remux &#8835; AudioFix). It does NOT mark files compliant
-        directly.
-      </p>
+      <h5>Operator review queue</h5>
+      <div id="Ac_Review" class="small text-muted">Loading...</div>
     </div>
+
   </div>
 </div>
 
 <script>
-function _esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'})[c])}
-async function loadSettings(){
-  const r=await fetch('/api/AudioNormalization/Settings'); const j=await r.json();
-  const rows=(j.Data&&j.Data.Rows)||[];
-  document.getElementById('settings-body').innerHTML=rows.map(r=>`<tr><td>${_esc(r.Scope)}</td><td>${_esc(r.ScopeKey)}</td><td>${r.Enabled}</td><td>${r.TargetIntegratedLufs}</td><td>${r.TargetTruePeakDbtp}</td><td>${r.LoudnessTolerance}</td><td>${_esc(r.UngainablePolicy)}</td><td>${r.KeepCommentaryTracks}</td><td>${r.EnableSpeechLanguageDetection}</td></tr>`).join('');
+async function LoadAudioRules() {
+  const R = await fetch('/api/AudioNormalization/Rules');
+  const J = await R.json();
+  if (!J.Success) { document.getElementById('Ac_Msg').textContent = 'Load failed: ' + J.Message; return; }
+  const D = J.Data;
+  const Lufs = D.TargetIntegratedLufs;
+  document.getElementById('Ac_TargetLufs').value = Lufs;
+  RenderChains(Lufs);
 }
-async function loadDashboard(){
-  const r=await fetch('/api/AudioNormalization/Dashboard'); const j=await r.json();
-  const rows=(j.Data&&j.Data.Libraries)||[];
-  document.getElementById('dashboard-body').innerHTML=rows.length?rows.map(r=>`<tr><td>${_esc(r.LibraryId)}</td><td>${r.UniformCount}</td><td>${r.AcceptableCount}</td><td>${r.DeviantCount}</td><td>${r.TotalCount}</td></tr>`).join(''):'<tr><td colspan="5" class="text-muted">No measured outputs yet</td></tr>';
+
+function RenderChains(Lufs) {
+  const Tp = -2.00;
+  const Lra = '<source_LRA>';
+  document.getElementById('Ac_Chain0').textContent =
+    `-map 0:a:0 -c:a:0 aac -b:a:0 <64*channels>k -ar:0 48000\n` +
+    `-filter:a:0 "loudnorm=I=${Lufs.toFixed(2)}:LRA=${Lra}:TP=${Tp.toFixed(2)}:\n` +
+    `             measured_*:linear=true"\n` +
+    `-metadata:s:a:0 "title=Original" "language=<lang>"\n` +
+    `-disposition:a:0 0`;
+  document.getElementById('Ac_Chain1').textContent =
+    `# Pre-pass: stereo downmix -> Demucs vocal isolation\n` +
+    `#   -> vocals.wav + no_vocals.wav\n` +
+    `#   -> dialog_boost_premix.wav (vocals +5dB, instrumental -3dB)\n` +
+    `\n` +
+    `-i dialog_boost_premix.wav\n` +
+    `-map 1:a:0 -c:a:1 aac -b:a:1 192k -ar:1 48000\n` +
+    `-filter:a:1 "loudnorm=I=-20.00:LRA=5.00:TP=${Tp.toFixed(2)}:\n` +
+    `             measured_*"\n` +
+    `-metadata:s:a:1 "title=Dialog Boost" "language=<lang>"\n` +
+    `-disposition:a:1 1`;
 }
-async function loadReview(){
-  const r=await fetch('/api/AudioNormalization/Review'); const j=await r.json();
-  const groups=(j.Data&&j.Data.Groups)||[];
-  const total=(j.Data&&j.Data.Count)||0;
-  document.getElementById('review-count').textContent=`${total.toLocaleString()} files held for review across ${groups.length} group${groups.length===1?'':'s'}`;
-  const container=document.getElementById('review-groups');
-  if(!groups.length){container.innerHTML='<div class="alert alert-info">Queue empty.</div>';return}
-  container.innerHTML=groups.map((g,i)=>{
-    const samples=(g.Samples||[]).map(s=>`<tr><td>${s.Id}</td><td><code class="small">${_esc(s.FileName)}</code></td><td class="text-end">${_esc(s.SourceIntegratedLufs)}</td><td class="text-end">${_esc(s.SourceTruePeakDbtp)}</td><td><span class="badge bg-secondary">${_esc(s.WorkBucket||'(none)')}</span></td></tr>`).join('');
-    return `<div class="card mb-3">
-      <div class="card-header d-flex justify-content-between align-items-center">
-        <div>
-          <strong>${_esc(g.AdmissionDeferReason)}</strong>
-          <span class="badge bg-primary ms-2">${g.Total.toLocaleString()} files</span>
-          ${g.AudioOnly?`<span class="badge bg-info text-dark ms-1" title="Audio is the only blocker">audio-only: ${g.AudioOnly.toLocaleString()}</span>`:''}
-          ${g.NeedsTranscode?`<span class="badge bg-warning text-dark ms-1" title="ComplianceGate also flags Transcode">+ Transcode: ${g.NeedsTranscode.toLocaleString()}</span>`:''}
-          ${g.NeedsRemux?`<span class="badge bg-warning text-dark ms-1" title="ComplianceGate also flags Remux">+ Remux: ${g.NeedsRemux.toLocaleString()}</span>`:''}
-          ${g.NoBucket?`<span class="badge bg-success ms-1" title="Already compliant on container + transcode">no further bucket: ${g.NoBucket.toLocaleString()}</span>`:''}
-        </div>
-        <div>
-          <button class="btn btn-sm btn-outline-secondary me-2" data-bs-toggle="collapse" data-bs-target="#review-samples-${i}">Preview</button>
-          <button class="btn btn-sm btn-outline-success" onclick="bulkResolveReason('${_esc(g.AdmissionDeferReason)}', ${g.Total}, '${_esc(g.ActionLabel||'Resolve all')}', '${_esc(g.ActionVerb||'clear_and_recompute')}')">${_esc(g.ActionLabel||'Resolve all')} ${g.Total.toLocaleString()}</button>
-        </div>
-      </div>
-      <div class="collapse" id="review-samples-${i}">
-        <div class="card-body p-0">
-          <table class="table table-sm mb-0">
-            <thead><tr><th>Id</th><th>FileName (first 5)</th><th class="text-end">LUFS</th><th class="text-end">TP</th><th>WorkBucket</th></tr></thead>
-            <tbody>${samples}</tbody>
-          </table>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
+
+async function SaveAudioRules() {
+  const Body = {
+    TargetIntegratedLufs: parseFloat(document.getElementById('Ac_TargetLufs').value),
+    TargetTruePeakDbtp: -2.0,
+    AcceptableAudioCodecsCsv: 'aac,ac3,eac3,mp3,flac,truehd,dts,opus,vorbis',
+  };
+  const R = await fetch('/api/AudioNormalization/Rules', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(Body) });
+  const J = await R.json();
+  const M = document.getElementById('Ac_Msg');
+  M.textContent = J.Success ? 'Saved.' : 'Save failed: ' + J.Message;
+  M.className = 'small mt-1 ' + (J.Success ? 'text-success' : 'text-danger');
+  if (J.Success) RenderChains(Body.TargetIntegratedLufs);
 }
-async function bulkResolveReason(reason, total, label, verb){
-  const verbCopy = {
-    'clear_and_recompute': 'clear the defer reason and re-route through ComplianceGate',
-    'mark_for_remeasurement': 'mark for re-measurement (ebur128 will re-run on next worker pass)',
-    'reenrich_speech_lang': 'clear the Whisper cache so language detection re-runs',
-  }[verb] || 'clear the defer reason';
-  if(!confirm(`${label} on ${total.toLocaleString()} MediaFiles for reason='${reason}'?\\n\\nAction: ${verbCopy}.`))return;
-  const r=await fetch('/api/AudioNormalization/Review/Resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({AdmissionDeferReason:reason})});
-  const j=await r.json();
-  const count=(j.Data && (j.Data.Cleared||j.Data.Marked||0))||0;
-  alert(j.Success?`${label}: ${count}.`:`Failed: ${j.Message}`);
-  loadReview();
+
+document.getElementById('Ac_Save').addEventListener('click', SaveAudioRules);
+
+async function LoadDashboard() {
+  try {
+    const R = await fetch('/api/AudioNormalization/Dashboard');
+    const J = await R.json();
+    document.getElementById('Ac_Dashboard').textContent = J.Success ? JSON.stringify(J.Data, null, 2) : J.Message;
+  } catch (e) { document.getElementById('Ac_Dashboard').textContent = 'Dashboard load failed: ' + e; }
 }
-async function resolveReview(id){
-  await fetch(`/api/AudioNormalization/Review/${id}/Resolve`,{method:'POST'});
-  loadReview();
+async function LoadReview() {
+  try {
+    const R = await fetch('/api/AudioNormalization/Review');
+    const J = await R.json();
+    document.getElementById('Ac_Review').textContent = J.Success ? JSON.stringify(J.Data, null, 2) : J.Message;
+  } catch (e) { document.getElementById('Ac_Review').textContent = 'Review load failed: ' + e; }
 }
-document.getElementById('settings-form').addEventListener('submit', async e=>{
-  e.preventDefault();
-  const fd=new FormData(e.target);
-  const body={};
-  for(const [k,v] of fd.entries()){
-    if(k==='Enabled'||k==='KeepCommentaryTracks'||k==='EnableSpeechLanguageDetection'){body[k]=true}
-    else if(k==='EmitTracks'){try{body[k]=JSON.parse(v)}catch{body[k]=[]}}
-    else if(v===''){body[k]=null} else if(!isNaN(parseFloat(v))&&['TargetIntegratedLufs','TargetTruePeakDbtp','LoudnessTolerance','TargetLra','AudioDelayMs','MaxAudioChannels'].includes(k)){body[k]=k==='MaxAudioChannels'?parseInt(v,10):parseFloat(v)}
-    else{body[k]=v}
-  }
-  ['Enabled','KeepCommentaryTracks','EnableSpeechLanguageDetection'].forEach(k=>{if(!fd.has(k))body[k]=false});
-  const r=await fetch('/api/AudioNormalization/Settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const j=await r.json();
-  document.getElementById('settings-msg').innerHTML=`<div class="alert alert-${j.Success?'success':'danger'}">${_esc(j.Message)}</div>`;
-  loadSettings();
-});
-document.getElementById('snapshot-btn').addEventListener('click', async ()=>{
-  const r=await fetch('/api/AudioNormalization/SnapshotPolicies',{method:'POST'}); const j=await r.json();
-  document.getElementById('snapshot-msg').innerHTML=`<div class="alert alert-${j.Success?'success':'danger'}">${_esc(j.Message)}</div>`;
-  loadDashboard();
-});
-loadSettings(); loadDashboard(); loadReview();
+
+LoadAudioRules();
+LoadDashboard();
+LoadReview();
 </script>
 {% endblock %}

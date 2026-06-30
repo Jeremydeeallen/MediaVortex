@@ -261,59 +261,41 @@ class AudioNormalizationController:
                                             "AudioNormalizationController", "snapshot_policies")
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
 
-        # directive: worker-runtime-state
         @self.Blueprint.route('/api/AudioNormalization/Rules', methods=['GET'])
+        # directive: audio-dialog-boost-real | # see audio-normalization.C8
         def get_audio_rules():
             Rows = DatabaseService().ExecuteQuery(
                 "SELECT Id, TargetIntegratedLufs, TargetTruePeakDbtp, "
-                "MaxOvershootDbForAdaptiveFallback, MaxOvershootDbForReview, "
-                "AcceptableAudioCodecsCsv, EnableDialogBoostTrack, "
-                "EnableEnglishPreferredDefault, PreferredDefaultLanguageRank, "
-                "EnableSpeechLanguageDetection, LastUpdated "
+                "AcceptableAudioCodecsCsv, LastUpdated "
                 "FROM AudioComplianceRules ORDER BY Id LIMIT 1"
             )
             if not Rows:
                 return jsonify({'Success': False, 'Message': 'AudioComplianceRules has no rows -- migration not applied'}), 500
             return jsonify({'Success': True, 'Data': Rows[0]}), 200
 
-        # directive: worker-runtime-state
         @self.Blueprint.route('/api/AudioNormalization/Rules', methods=['PUT'])
+        # directive: audio-dialog-boost-real | # see audio-normalization.C8
         def update_audio_rules():
             Body = request.get_json(silent=True) or {}
             try:
                 Lufs = float(Body.get('TargetIntegratedLufs'))
                 TpDbtp = float(Body.get('TargetTruePeakDbtp'))
-                AdaptiveCap = float(Body.get('MaxOvershootDbForAdaptiveFallback'))
-                ReviewCap = float(Body.get('MaxOvershootDbForReview'))
                 Codecs = (Body.get('AcceptableAudioCodecsCsv') or '').strip()
-                EnableDialog = bool(Body.get('EnableDialogBoostTrack'))
-                EnableEnglish = bool(Body.get('EnableEnglishPreferredDefault'))
-                LangRank = (Body.get('PreferredDefaultLanguageRank') or '').strip()
-                EnableSpeech = bool(Body.get('EnableSpeechLanguageDetection'))
             except (TypeError, ValueError):
                 return jsonify({'Success': False, 'Message': 'Body field had wrong type'}), 400
             if not Codecs:
                 return jsonify({'Success': False, 'Message': 'AcceptableAudioCodecsCsv is required'}), 400
-            if not LangRank:
-                return jsonify({'Success': False, 'Message': 'PreferredDefaultLanguageRank is required'}), 400
-            if AdaptiveCap <= 0 or ReviewCap <= 0:
-                return jsonify({'Success': False, 'Message': 'Overshoot caps must be positive numbers'}), 400
-            if ReviewCap <= AdaptiveCap:
-                return jsonify({'Success': False, 'Message': 'MaxOvershootDbForReview must be > MaxOvershootDbForAdaptiveFallback'}), 400
             if TpDbtp > 0:
                 return jsonify({'Success': False, 'Message': 'TargetTruePeakDbtp must be <= 0 dBTP'}), 400
             DatabaseService().ExecuteNonQuery(
                 "UPDATE AudioComplianceRules SET "
                 "TargetIntegratedLufs=%s, TargetTruePeakDbtp=%s, "
-                "MaxOvershootDbForAdaptiveFallback=%s, MaxOvershootDbForReview=%s, "
-                "AcceptableAudioCodecsCsv=%s, EnableDialogBoostTrack=%s, "
-                "EnableEnglishPreferredDefault=%s, PreferredDefaultLanguageRank=%s, "
-                "EnableSpeechLanguageDetection=%s, LastUpdated=NOW() "
+                "AcceptableAudioCodecsCsv=%s, LastUpdated=NOW() "
                 "WHERE Id = 1",
-                (Lufs, TpDbtp, AdaptiveCap, ReviewCap, Codecs, EnableDialog, EnableEnglish, LangRank, EnableSpeech),
+                (Lufs, TpDbtp, Codecs),
             )
             LoggingService.LogInfo(
-                f"AudioComplianceRules updated: Lufs={Lufs} TpDbtp={TpDbtp} adaptiveCap={AdaptiveCap} reviewCap={ReviewCap} codecs={Codecs!r} dialog={EnableDialog} english={EnableEnglish} rank={LangRank!r} speech={EnableSpeech}",
+                f"AudioComplianceRules updated: Lufs={Lufs} TpDbtp={TpDbtp} codecs={Codecs!r}",
                 'AudioNormalizationController', 'update_audio_rules',
             )
             _SpawnAudioBackfill()
