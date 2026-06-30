@@ -12,6 +12,17 @@ SILENCE_FLOOR_DBFS = -120.0
 
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
+def _DetectDemucsDevice(PythonExe):
+    Probe = subprocess.run(
+        [PythonExe, "-c", "import torch; print('cuda' if torch.cuda.is_available() else 'cpu')"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if Probe.returncode != 0:
+        return "cpu"
+    return (Probe.stdout or "cpu").strip() or "cpu"
+
+
+# directive: audio-dialog-boost-real | # see audio-normalization.C14
 class DemucsIsolationResult:
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
@@ -26,21 +37,23 @@ class DemucsIsolationResult:
 class DemucsVocalIsolationService:
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
-    def __init__(self, FfmpegPath, PythonExe=None, ModelName=DEMUCS_MODEL_NAME):
+    def __init__(self, FfmpegPath, PythonExe=None, ModelName=DEMUCS_MODEL_NAME, Device=None):
         self.FfmpegPath = FfmpegPath
         self.PythonExe = PythonExe or sys.executable
         self.ModelName = ModelName
+        self.Device = Device or _DetectDemucsDevice(self.PythonExe)
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
     def IsolateVocals(self, StereoInputWavPath, OutputDir):
         os.makedirs(OutputDir, exist_ok=True)
         LoggingService.LogInfo(
-            f"Demucs separating {StereoInputWavPath} -> {OutputDir}",
+            f"Demucs separating {StereoInputWavPath} -> {OutputDir} (device={self.Device})",
             "DemucsVocalIsolationService", "IsolateVocals"
         )
         Cmd = [
             self.PythonExe, "-m", "demucs.separate",
             "-n", self.ModelName,
+            "-d", self.Device,
             "--two-stems", "vocals",
             "-o", OutputDir,
             "--filename", "{stem}.{ext}",
