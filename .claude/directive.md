@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-29
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: VERIFYING
 **Slug:** audio-dialog-boost-real
 **Replaces:** in-flight pivot on top of `transcode-worker-unification` (at IMPLEMENTING; paused at `.claude/directives/paused/2026-06-29-transcode-worker-unification.md`)
 **Interrupts:** transcode-worker-unification
@@ -141,4 +141,16 @@ To be populated at DELIVERING. Anticipated targets:
 
 ### Decisions Made
 
-To be populated during IMPLEMENTING.
+- **Worker venv on Python 3.11.8** (not 3.13). Reason: ML wheels (torch-directml, intel-extension-for-pytorch) lag behind Python releases; 3.11 has the broadest wheel availability while torch+CUDA + demucs work fine.
+- **CUDA on I9 only.** Linux containers (wakko, dot, larry) run CPU Demucs in container. Reason: GPU passthrough varies per host (wakko has Arc B580 needing oneAPI runtime ~5GB; dot has UHD 630 with weak ML perf). CPU Demucs on Ryzen 7 3700X / i9-10850K runs in ~3-5 min per 45-min episode; acceptable. GPU acceleration on Linux containers deferred to follow-up `audio-demucs-linux-gpu`.
+- **Intel iGPU acceleration on Windows: blocked.** torch-directml hard-pins torch 2.4.1 (clashes with demucs+torchaudio 2.6 requirement); intel-extension-for-pytorch has no Windows wheels. Documented as wheel-ecosystem limitation, not code-level. RTX 4060 Ti on I9 is the faster device anyway.
+- **Parallelization mechanism = multi-instance, not in-process threading.** `StartParallelWorkers.py` spawns N WorkerService instances via subprocess, each auto-claims a `{prefix}-N` slot via the existing `_ClaimPrefixedWorkerName` advisory lock. Reason: simpler than in-worker pipeline parallelism; reuses already-correct multi-worker infrastructure; multiple Demucs runs naturally serialize on CUDA queue without OOM risk.
+- **I9 Windows production requirements (consolidated):**
+  1. Python 3.11.x (`py -3.11`) -- bare 3.13 install lacks ML wheels
+  2. NVIDIA driver supporting CUDA 12.4+ (currently at driver 572.16 / CUDA 12.8)
+  3. Worker venv rebuild: `Remove-Item -Recurse -Force WorkerService\venv; py -3.11 -m venv WorkerService\venv`
+  4. Install deps: `WorkerService\venv\Scripts\pip install -r requirements.txt; WorkerService\venv\Scripts\pip install --index-url https://download.pytorch.org/whl/cu124 torch==2.6.0 torchaudio==2.6.0`
+  5. FFmpeg binaries at `C:\Code\MediaVortex\FFmpegMaster\bin\ffmpeg.exe` + `ffprobe.exe` (already present)
+  6. Disk: ~5 GB torch+CUDA wheels + ~80 MB htdemucs model (auto-download on first run to `~/.cache/torch/hub/checkpoints/`)
+  7. VRAM: ~2-3 GB per concurrent Demucs run; RTX 4060 Ti 16 GB supports 4-5 concurrent comfortably
+  8. Launch: `py StartParallelWorkers.py --count 3` (each worker gets MEDIAVORTEX_WORKER_PREFIX=i9 + claims i9-1/i9-2/i9-3 slot)
