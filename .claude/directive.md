@@ -146,11 +146,31 @@ To be populated at DELIVERING. Anticipated targets:
 
 Fleet after `py deploy/deploy-baremetal-worker.py {dot,wakko}`:
 
-| Worker | Deploy | Systemd unit | DB status | Capabilities |
-|---|---|---|---|---|
-| dot-worker-1..4 | bare-metal + systemd | `mediavortex-worker@{1..4}.service` active/running | Online | TranscodeEnabled=True, RemuxEnabled=True |
-| wakko-worker-1..4 | bare-metal + systemd | `mediavortex-worker@{1..4}.service` active/running | Online | TranscodeEnabled=True, RemuxEnabled=True |
-| I9-2024 | Windows venv | Task Scheduler / manual | Online | TranscodeEnabled=True |
+| Worker | Deploy | Systemd unit | DB status | Demucs device | Pre-pass warm |
+|---|---|---|---|---|---|
+| dot-worker-1..4 | bare-metal + systemd (torch cu124) | active/running | Online | **cuda (RTX 4060)** | ~15 s |
+| wakko-worker-1..4 | bare-metal + systemd (torch xpu) | active/running | Online | **xpu (Arc B580)** | ~25 s |
+| I9-2024 | Windows venv (torch cu124) | Task Scheduler | Online | **cuda (RTX 4060 Ti)** | ~19 s |
+
+### Compile-tax discovery (Battlemage software maturity clarified)
+
+First-ever xpu inference on Arc B580 = 366 s (kernel autotune + XMX SYCL compile + htdemucs model download). Every subsequent inference: **25 s consistently**. Confirmed by back-to-back runs on same file: run 1 = 25.8 s, run 2 = 25.2 s. The 366 s is one-time cost; production throughput is 25 s per 7-min source.
+
+### PyTorch xpu wheel channel (the unlock)
+
+`pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/xpu` installs self-contained:
+- torch 2.6.0+xpu
+- intel-pti 0.10 (bundled -- no separate apt package)
+- intel-cmplr-lib-rt / intel-cmplr-lib-ur / intel-sycl-rt 2025.0.2 (bundled)
+- pytorch-triton-xpu 3.2.0
+- umf 0.9.1 + tcmlib 1.2.0
+
+Bypasses Intel's broken `pytorch-extension.intel.com` channel completely. No IPEX / oneAPI / MKL / PTI apt packages required. `torch.xpu.is_available() = True` immediately.
+
+deploy-baremetal-worker.py `_DetectTorchVariant`:
+- nvidia-smi hit -> cu124
+- lspci Intel Arc (`[8086:e*xx]` Battlemage/Alchemist vendor) -> **xpu**
+- else -> cpu
 
 Docker containers stopped on dot + wakko (compose down at deploy step 6). Old image tag `mediavortex-worker:latest` retained locally until follow-up cleanup directive verifies no regression across a release cycle.
 
