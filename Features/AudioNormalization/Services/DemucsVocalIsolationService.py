@@ -64,7 +64,7 @@ class DemucsVocalIsolationService:
             "DemucsVocalIsolationService", "IsolateVocals"
         )
         if self.Device == "xpu":
-            Preamble = "import intel_extension_for_pytorch; from demucs.separate import main; import sys; main()"
+            Preamble = "import sys\ntry:\n import intel_extension_for_pytorch\nexcept ImportError:\n pass\nfrom demucs.separate import main\nmain()"
             Cmd = [
                 self.PythonExe, "-c", Preamble,
                 "-n", self.ModelName,
