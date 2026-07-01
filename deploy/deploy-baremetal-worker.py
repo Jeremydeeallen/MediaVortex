@@ -16,6 +16,7 @@ TorchIndexByVariant = {
     "cpu": "https://download.pytorch.org/whl/cpu",
     "cu124": "https://download.pytorch.org/whl/cu124",
     "cu121": "https://download.pytorch.org/whl/cu121",
+    "xpu": "https://download.pytorch.org/whl/xpu",
 }
 
 
@@ -60,7 +61,12 @@ def _ResolveTarget(TargetArg: str, InventoryToml: Path, UserOverride: Optional[s
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
 def _DetectTorchVariant(Target: str) -> str:
     R = _Ssh(Target, "nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1", Timeout=10)
-    return "cu124" if (R.stdout or "").strip() else "cpu"
+    if (R.stdout or "").strip():
+        return "cu124"
+    R = _Ssh(Target, "lspci -nn 2>/dev/null | grep -iE 'vga|3d|display' | grep -iE '\\[8086:e' | head -1", Timeout=10)
+    if (R.stdout or "").strip():
+        return "xpu"
+    return "cpu"
 
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
