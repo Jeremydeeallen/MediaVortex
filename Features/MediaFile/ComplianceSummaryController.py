@@ -107,8 +107,7 @@ def _ResolveAudioPolicy(Db, Mf):
     MediaFileId = getattr(Mf, 'Id', None)
     StorageRootId = getattr(Mf, 'StorageRootId', None)
     Rows = Db.ExecuteQuery(
-        "SELECT Scope, ScopeKey, Enabled, TargetIntegratedLufs, TargetLra, TargetTruePeakDbtp, "
-        "MaxAudioChannels, LanguageKeepPolicy "
+        "SELECT Scope, ScopeKey, Enabled, TargetLra, MaxAudioChannels "
         "FROM AudioNormalizationConfig "
         "WHERE (Scope = 'item' AND ScopeKey = %s) "
         "   OR (Scope = 'library' AND ScopeKey = %s) "

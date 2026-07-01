@@ -49,9 +49,7 @@ def _Policy(**Kwargs):
              'LanguageFilter': 'keep-all', 'IsDefaultTrack': True},
         ],
         'UngainablePolicy': 'review',
-        'KeepCommentaryTracks': True,
         'EnableSpeechLanguageDetection': False,
-        'AudioDelayMs': 0,
     }
     Defaults.update(Kwargs)
     return Defaults

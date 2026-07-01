@@ -185,10 +185,8 @@ class AudioPolicyAdmissionGate:
         """Coerce a CaseInsensitiveDict / dict / object policy row into a serializable dict."""
         Result = {}
         for Key in (
-            'Scope', 'ScopeKey', 'Enabled',
-            'TargetIntegratedLufs', 'TargetTruePeakDbtp', 'TargetLra', 'LoudnessTolerance',
-            'EmitTracks', 'UngainablePolicy', 'LanguageKeepPolicy',
-            'KeepCommentaryTracks', 'EnableSpeechLanguageDetection', 'AudioDelayMs',
+            'Scope', 'ScopeKey', 'Enabled', 'TargetLra', 'LoudnessTolerance',
+            'EmitTracks', 'UngainablePolicy', 'EnableSpeechLanguageDetection',
             'MaxAudioChannels',
         ):
             Val = _GetField(Policy, Key)

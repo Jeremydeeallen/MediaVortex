@@ -37,6 +37,9 @@ DEAD_COLUMNS_AUDIO_COMPLIANCE = [
 DEAD_COLUMNS_AUDIO_NORMALIZATION_CONFIG = [
     "TargetIntegratedLufs",
     "TargetTruePeakDbtp",
+    "LanguageKeepPolicy",
+    "KeepCommentaryTracks",
+    "AudioDelayMs",
 ]
 
 
@@ -58,8 +61,8 @@ def Main():
             f"ALTER TABLE AudioNormalizationConfig DROP COLUMN IF EXISTS {Name}"
         )
 
-    print('AudioComplianceRules: 14 knob columns added; 6 legacy columns dropped.')
-    print('AudioNormalizationConfig: TargetIntegratedLufs + TargetTruePeakDbtp dropped (moved to AudioComplianceRules global).')
+    print(f'AudioComplianceRules: {len(NEW_COLUMNS)} knob columns added; {len(DEAD_COLUMNS_AUDIO_COMPLIANCE)} legacy columns dropped.')
+    print(f'AudioNormalizationConfig: {len(DEAD_COLUMNS_AUDIO_NORMALIZATION_CONFIG)} columns dropped ({", ".join(DEAD_COLUMNS_AUDIO_NORMALIZATION_CONFIG)}).')
     return 0
 
 

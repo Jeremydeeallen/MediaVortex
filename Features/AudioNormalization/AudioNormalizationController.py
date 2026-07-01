@@ -61,23 +61,18 @@ DASHBOARD_SUMMARY_SQL = (
 
 UPSERT_POLICY_SQL = (
     "INSERT INTO AudioNormalizationConfig ("
-    "Scope, ScopeKey, Enabled, TargetIntegratedLufs, TargetTruePeakDbtp, TargetLra, "
-    "LoudnessTolerance, EmitTracks, UngainablePolicy, LanguageKeepPolicy, "
-    "KeepCommentaryTracks, EnableSpeechLanguageDetection, AudioDelayMs, "
+    "Scope, ScopeKey, Enabled, TargetLra, LoudnessTolerance, EmitTracks, "
+    "UngainablePolicy, EnableSpeechLanguageDetection, LanguageDefault, "
     "PreVerticalReNormalizePolicy, MaxAudioChannels, LastUpdated"
-    ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s::jsonb, %s, %s, %s, %s, %s, NOW()) "
+    ") VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, NOW()) "
     "ON CONFLICT (Scope, COALESCE(ScopeKey, '')) DO UPDATE SET "
     "Enabled = EXCLUDED.Enabled, "
-    "TargetIntegratedLufs = EXCLUDED.TargetIntegratedLufs, "
-    "TargetTruePeakDbtp = EXCLUDED.TargetTruePeakDbtp, "
     "TargetLra = EXCLUDED.TargetLra, "
     "LoudnessTolerance = EXCLUDED.LoudnessTolerance, "
     "EmitTracks = EXCLUDED.EmitTracks, "
     "UngainablePolicy = EXCLUDED.UngainablePolicy, "
-    "LanguageKeepPolicy = EXCLUDED.LanguageKeepPolicy, "
-    "KeepCommentaryTracks = EXCLUDED.KeepCommentaryTracks, "
     "EnableSpeechLanguageDetection = EXCLUDED.EnableSpeechLanguageDetection, "
-    "AudioDelayMs = EXCLUDED.AudioDelayMs, "
+    "LanguageDefault = EXCLUDED.LanguageDefault, "
     "PreVerticalReNormalizePolicy = EXCLUDED.PreVerticalReNormalizePolicy, "
     "MaxAudioChannels = EXCLUDED.MaxAudioChannels, "
     "LastUpdated = NOW()"
@@ -152,16 +147,12 @@ class AudioNormalizationController:
                     Body.get('Scope', 'global'),
                     Body.get('ScopeKey'),
                     bool(Body.get('Enabled', True)),
-                    float(Body.get('TargetIntegratedLufs', -23.0)),
-                    float(Body.get('TargetTruePeakDbtp', -2.0)),
                     Body.get('TargetLra'),
                     float(Body.get('LoudnessTolerance', 4.0)),
                     json.dumps(Body.get('EmitTracks') or []),
                     Body.get('UngainablePolicy', 'adaptive'),
-                    json.dumps(Body['LanguageKeepPolicy']) if Body.get('LanguageKeepPolicy') is not None else None,
-                    bool(Body.get('KeepCommentaryTracks', True)),
                     bool(Body.get('EnableSpeechLanguageDetection', False)),
-                    int(Body.get('AudioDelayMs', 0)),
+                    Body.get('LanguageDefault', 'eng'),
                     ValidatePreVerticalPolicy(Body.get('PreVerticalReNormalizePolicy', 'lazy')),
                     int(Body.get('MaxAudioChannels', 2)),
                 )

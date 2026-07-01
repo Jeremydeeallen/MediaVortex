@@ -2,11 +2,9 @@ from Core.Database.DatabaseService import DatabaseService
 
 
 SELECT_ALL_COLUMNS = (
-    "Id, Scope, ScopeKey, Enabled, "
-    "TargetIntegratedLufs, TargetTruePeakDbtp, TargetLra, LoudnessTolerance, "
-    "EmitTracks, UngainablePolicy, LanguageKeepPolicy, "
-    "KeepCommentaryTracks, EnableSpeechLanguageDetection, AudioDelayMs, "
-    "LanguageDefault, PreVerticalReNormalizePolicy, LastUpdated"
+    "Id, Scope, ScopeKey, Enabled, TargetLra, LoudnessTolerance, "
+    "EmitTracks, UngainablePolicy, EnableSpeechLanguageDetection, "
+    "LanguageDefault, PreVerticalReNormalizePolicy, MaxAudioChannels, LastUpdated"
 )
 
 

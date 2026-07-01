@@ -74,7 +74,6 @@ class TestMp4TitleResolution(unittest.TestCase):
         Policy = {
             'Enabled': True, 'TargetIntegratedLufs': -23.0, 'TargetTruePeakDbtp': -2.0,
             'LoudnessTolerance': 4.0, 'UngainablePolicy': 'adaptive',
-            'KeepCommentaryTracks': True, 'EnableSpeechLanguageDetection': False,
             'EmitTracks': [
                 {'Label': 'Original', 'TargetLufs': -23.0, 'TargetLra': None,
                  'Channels': 'source', 'Codec': 'eac3', 'Bitrate': 384,

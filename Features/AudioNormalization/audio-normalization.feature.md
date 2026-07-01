@@ -32,7 +32,7 @@ C2. Dialog Boost stream carries `disposition.default=1`; Original carries `=0`.
 
 C3. Original measures LRA within +/-0.5 LU of `SourceLoudnessRangeLU`; Dialog Boost measures `LRA <= 11.0`.
 
-C4. Source language streams preserved unless excluded by a per-scope `LanguageKeepPolicy`.
+C4. Source language streams preserved; per-scope `LanguageDefault` picks the default disposition.
 
 C5. Every shipped output has `AchievedIntegratedLufs` within +/-4 LU of effective `TargetIntegratedLufs`; classifier routes the rest to operator review.
 
@@ -68,7 +68,7 @@ C21. `Features/LoudnessAnalysis/LoudnessAnalysisService.py` -> `Features/AudioNo
 
 C22. Stream-copy decision (MP4_COMPAT_AUDIO_CODECS + ShouldStreamCopy) absorbed into `AudioFilterEmitter`. AudioCompletion's audio-state-machine (AudioComplete / AudioCorruptSuspect column writes) preserved for compliance + FileReplacement pipelines; not in this vertical.
 
-C23. `EmitTracks` carries Label, TargetLufs, TargetLra, Channels, Codec, Bitrate, SampleRateHz, BitDepth, LanguageFilter, IsDefaultTrack. `AudioNormalizationConfig` additionally carries KeepCommentaryTracks, EnableSpeechLanguageDetection, AudioDelayMs, LanguageDefault, PreVerticalReNormalizePolicy.
+C23. `EmitTracks` carries Label, TargetLufs, TargetLra, Channels, Codec, Bitrate, SampleRateHz, BitDepth, LanguageFilter, IsDefaultTrack. `AudioNormalizationConfig` additionally carries EnableSpeechLanguageDetection, LanguageDefault, PreVerticalReNormalizePolicy, MaxAudioChannels.
 
 C24. [BUG-0065] When a media file carries multiple language audio streams and no per-scope `AudioNormalizationConfig.LanguageDefault` is set, the English track receives `disposition.default=1` on the output. The implicit fallback chain in `_PickDefaultLanguage` becomes: (1) per-scope `LanguageDefault` if set, (2) English if any present stream resolves to English via `LanguageDetector.Detect`, (3) source's per-stream `disposition.default==1`, (4) first present language. Verifiable: encode a source with `eng` + `jpn` audio streams, no per-scope override -- the `eng` Dialog Boost track is the only output stream with `disposition.default=1`; flip the source so `jpn` carries `disposition.default==1` -- the `eng` track still wins. Operator-set `LanguageDefault='jpn'` overrides the rule and the `jpn` track wins. Conforms to C25 -- the rule that won must be recorded; silent cascades are forbidden.
 
