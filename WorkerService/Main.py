@@ -153,7 +153,7 @@ class WorkerServiceApp:
         try:
             # Use a raw connection to hold the advisory lock across queries
             import psycopg2
-            Conn = self.DatabaseManager.DatabaseService._GetConnection()
+            Conn = self.DatabaseManager.DatabaseService.GetConnection()
             Conn.autocommit = False
             Cur = Conn.cursor()
             try:
