@@ -1,0 +1,22 @@
+[Unit]
+Description=MediaVortex WorkerService instance %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/mediavortex/src
+EnvironmentFile=/etc/mediavortex/worker.env
+Environment=MEDIAVORTEX_WORKER_NAME=%H-worker-%i
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/root
+ExecStart=/opt/mediavortex/host-venv/bin/python /opt/mediavortex/src/WorkerService/Main.py
+Restart=always
+RestartSec=10
+TimeoutStopSec=1800
+KillSignal=SIGTERM
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
