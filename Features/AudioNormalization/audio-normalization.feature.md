@@ -64,8 +64,6 @@ C18. With no operator changes, every TranscodeQueue admission produces output pr
 
 C19. `LanguageEnrichmentService` scaffolds the 6th `LanguageDetector` layer with pluggable backend; default stub returns `und`. Cache-skip semantics ensure backend runs at most once per stream per file.
 
-C20. `DialNormHandler` preserves source DialNorm on Original stream-copy; emits freshly computed `DialNorm = round(-1 * AchievedIntegratedLufs)` clamped to [1, 31] on re-encode.
-
 C21. `Features/LoudnessAnalysis/LoudnessAnalysisService.py` -> `Features/AudioNormalization/Measurement/EbuR128MeasurementService.py`; all importers updated in same commit; `grep -rn 'from Features.LoudnessAnalysis' --include='*.py' .` returns 0.
 
 C22. Stream-copy decision (MP4_COMPAT_AUDIO_CODECS + ShouldStreamCopy) absorbed into `AudioFilterEmitter`. AudioCompletion's audio-state-machine (AudioComplete / AudioCorruptSuspect column writes) preserved for compliance + FileReplacement pipelines; not in this vertical.
@@ -78,13 +76,11 @@ C25. [BUG-0066] No silent fallback chains in the audio pipeline. Every decision 
 
 C26. PROFILE_CEILING holds unconditionally. `AudioFilterEmitter` has no `STRATEGY_REVIEW: continue` branch; REVIEW classifier output routes through `AudioDispositionResolver.ResolveForTrack` (via `_BuildReviewFallbackBlock`), which clamps emitted bitrate to `Profile.TargetAudioKbps` or raises `AudioPolicyUnresolvedError` when neither ceiling nor config bitrate is available. `TranscodeShape` has no literal `['-c:a', 'copy']` extend; codec args for the empty-Blocks branch come from `EAC3OrPassthroughCodecPolicy.Decide`. Verifiable: `Tests/Contract/TestAudioBitratePolicyHonorsCeiling.py` (REVIEW + truehd source emits eac3 at ceiling; REVIEW + aac emits stream-copy via policy; REVIEW + no inputs raises).
 
-C27. POLICY_OBSERVABILITY persistence. `TranscodeAudioPolicyVerdicts` table (one row per Attempt+Track per policy fired) + `TranscodeAttempts.AudioPolicyResolved` column (`'resolved'`/`'unresolved'`/`'mixed'`). `TranscodeAudioPolicyVerdictRepository.PersistVerdicts` writes rows; `MarkAttemptResolved` writes the column. `AudioPipelineFailHandler.HandleUnresolved` catches `AudioPolicyUnresolvedError`, writes `Success=FALSE` + `AudioPolicyResolved='unresolved'` + `WorkerStateReporter.Transition('Faulted:<PolicyName>')`. Verifiable: `Tests/Contract/TestAudioPolicyPersistenceAndFailHandler.py` 3/3.
-
 C28. NO_SILENT_PATH structural enforcement. `Tests/Contract/TestAudioPipelineNoSilentFallback.py` AST-walks `AudioFilterEmitter` + `TranscodeShape` and asserts: no `STRATEGY_REVIEW: continue` survives; `_BuildReviewFallbackBlock` + `DispositionResolver.ResolveForTrack` present; `_PickDefaultLanguage` delegates to `DispositionResolver.PickDefaultLanguage`; no literal `['-c:a', 'copy']` extend in `TranscodeShape`; `self.CodecPolicy.Decide` consumed; `EmitTracks` returns only the typed `Blocks` list or `None`.
 
 C29. OPERATOR_VISIBLE_FAILURE. `FailedJobsRepository.GetFailedJobsPaged` surfaces `AudioPolicyResolved` + the latest verdict's `PolicyName` + `PolicyReason` for each capped row. `/Admin/Workers` snapshot already surfaces `Faulted:<PolicyName>` via the existing RuntimeState text. Verifiable: `Tests/Contract/TestAudioOperatorVisibleFailure.py` 2/2 (response shape + synthetic verdict surface).
 
-## SOLID Compliance (added 2026-06-17)
+## SOLID Compliance
 
 S1. `AudioFilterEmitter._BuildBlockForTrack` is a thin orchestrator. The
 codec / filter / metadata / dialnorm / disposition / stream-copy decisions
@@ -112,7 +108,7 @@ resolver, PostEncodeAudioHandler invocation) has its own contract test
 under `Tests/Contract/`. Boundaries protected against regression at the
 test layer, not by live-encode discovery.
 
-## Self-Healing (added 2026-06-17)
+## Self-Healing
 
 The vertical detects and heals its own DB-state discrepancies via an
 in-system recurring service. Operator does not run scripts to fix
@@ -174,7 +170,7 @@ all cycles in the last 24h (throughput). The template's
 `Self-healing (last 24h)` sub-section renders the table plus the
 `PreVerticalPolicy` badge.
 
-## Operational (added 2026-06-17)
+## Operational
 
 O1. Stale-code Linux containers are paused at the DB level. Status
 'Paused' + `PauseReason` set on every Worker row whose deployed `Version`
@@ -187,7 +183,7 @@ H1's `PreVerticalTranscodedFile` invariant skips them; operator manual
 queue still works; aggressive flips to auto re-normalize on the next
 H1 cycle.
 
-## Live Verification (added 2026-06-17)
+## Live Verification
 
 L1. Multi-language live encode -- a source MediaFile with 2 distinct
 language audio streams encodes through the emitter and produces 4 output
@@ -246,7 +242,7 @@ documented design; the regex-on-stderr approach the original backend
 attempted does not work because ffmpeg's whisper filter does not
 emit a detected-language stderr line.
 
-## Cross-Vertical Contract (added 2026-06-19)
+## Cross-Vertical Contract
 
 This section locks the audio vertical's public surface. Any other vertical
 (Compliance, Self-Healing, Scanning, TranscodeJob, FileReplacement, etc.)
@@ -314,7 +310,7 @@ requires a directive.
 | `PostEncodeMeasurementService.Probe(TranscodeAttemptId, OutputFilePath) -> bool` | `Features/AudioNormalization/Workers/PostEncodeAudioHandler` (which is itself called by TranscodeJob's worker dispatch) |
 
 Everything else under `Features/AudioNormalization/` is INTERNAL. That
-includes (non-exhaustive): `AudioStrategyClassifier`, `DialNormHandler`,
+includes (non-exhaustive): `AudioStrategyClassifier`,
 `LanguageDetector`, `_BuildBlockForTrack`, the `TrackBlock` dataclass
 internals, every helper prefixed with `_`, every Repository, every test
 fixture. Other verticals MUST NOT import these.
@@ -372,7 +368,6 @@ vertical changes these freely:
 | S2 | Classifier -> Emitter | `AudioStrategyClassifier.ClassifyTrack` | `TrackStrategy(Strategy, EffectiveTargetLufs, EffectiveTruePeakDbtp, EffectiveLra, Reason)` | `AudioFilterEmitter._BuildBlockForTrack` translates strategy into argv | `TestAudioFilterEmitter` 12 fixture tests |
 | S3 | Emitter -> Shape | `AudioFilterEmitter.EmitTracks` | `List[TrackBlock]` each with `MapArgs / CodecArgs / FilterArgs / MetadataArgs / DispositionArgs` | `RemuxShape.Build` / `TranscodeShape.Build` / `SubtitleFixShape.Build` concatenate the slots into the ffmpeg command | `TestRemuxShape` / `TestTranscodeShape` / `TestSubtitleFixShape` |
 | S4 | Admission Gate -> Queue | `AudioPolicyAdmissionGate.AdmitOrDefer` | `AdmissionDecision(Outcome, DeferReason, PolicyJson)` -- side effect: `MediaFiles.AdmissionDeferReason` set on deferred | `TranscodeQueue.AudioPolicyJson` snapshot populated via `BackfillRecentInserts` UPDATE | `TestAudioPolicyAdmissionGate` 6 tests + live SQL `SELECT COUNT(AudioPolicyJson) FROM TranscodeQueue` |
-| S5 | DialNorm Handler -> Emitter | `DialNormHandler.ResolveForTrack` | int 1..31 or None | Emitter emits `-metadata:s:a:N dialnorm=<int>` | `TestDialNormHandler` 8 tests + `TestAudioFilterEmitter.test_h_*` |
 | S6 | Measurement Service -> Validator | `EbuR128MeasurementService.MeasureAndPersist` -> `MediaFiles.SourceIntegratedLufs` / LRA / TP / Threshold | `LoudnessMeasurementValidator.IsValid` reads the four columns + silence floor predicate | `TestEbuR128MeasurementService` 6 tests + `TestLoudnessMeasurementValidator` 8 tests |
 | S7 | Enrichment Service -> Detector Cache | `LanguageEnrichmentService.Enrich` writes `MediaFiles.AudioStreamLanguageDetectionsJson` | `LanguageDetector.Detect` 6th layer reads cache when `EnableSpeechLayer=True` | `TestLanguageEnrichmentService` 5 tests + `TestLanguageDetector.test_layer_speech_cache_when_enabled` |
 | S8 | Post-Encode Probe -> Dashboard | `PostEncodeMeasurementService.Probe` writes `TranscodeAttempts.AudioTracksEmittedJson` | `v_audio_consistency_summary` view aggregates per-StorageRootId bands; dashboard renders | `TestPostEncodeMeasurementService` 4 tests + live `SELECT * FROM v_audio_consistency_summary` |
@@ -404,7 +399,6 @@ L1 substages.
 | Features/AudioNormalization/SelfHealing/Remediations/*.py | Per-action remediation impls (5 ship) |
 | Tests/Contract/TestAudioInvariants.py | Live-DB invariant probe (H3) |
 | Features/AudioNormalization/AudioNormalizationController.py | Flask blueprint |
-| Features/AudioNormalization/DialNormHandler.py | Dolby DialNorm preserve / compute |
 | Features/AudioNormalization/LanguageDetector.py | 5+1 layered detection |
 | Features/AudioNormalization/LoudnessMeasurementValidator.py | Validity + silence-floor predicate |
 | Features/AudioNormalization/Measurement/EbuR128MeasurementService.py | ebur128 measurement + persistence |

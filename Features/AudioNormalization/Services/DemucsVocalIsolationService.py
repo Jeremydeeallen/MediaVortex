@@ -105,13 +105,13 @@ class DemucsVocalIsolationService:
         )
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
-    def MixBoostedPremix(self, IsolationResult, OutputWavPath, VocalsBoostDb=5.0, InstrumentalAttenDb=3.0):
+    def MixBoostedPremix(self, IsolationResult, OutputWavPath, VocalsBoostDb, InstrumentalAttenDb, CompressorThreshold, CompressorRatio, CompressorMakeupDb, DynaudnormFrameLen, DynaudnormGaussSize):
         Filter = (
-            f"[0:a:0]volume={VocalsBoostDb:+.1f}dB[v];"
-            f"[1:a:0]volume={-abs(InstrumentalAttenDb):+.1f}dB[i];"
+            f"[0:a:0]volume={float(VocalsBoostDb):+.1f}dB[v];"
+            f"[1:a:0]volume={-abs(float(InstrumentalAttenDb)):+.1f}dB[i];"
             f"[v][i]amix=inputs=2:duration=longest:dropout_transition=0[mix];"
-            f"[mix]acompressor=threshold=0.03:ratio=9:attack=8:release=120:makeup=3:knee=4,"
-            f"dynaudnorm=f=150:g=13:p=0.7:m=8[out]"
+            f"[mix]acompressor=threshold={float(CompressorThreshold):.3f}:ratio={float(CompressorRatio):.1f}:attack=8:release=120:makeup={float(CompressorMakeupDb):.1f}:knee=4,"
+            f"dynaudnorm=f={int(DynaudnormFrameLen)}:g={int(DynaudnormGaussSize)}:p=0.7:m=8[out]"
         )
         Cmd = [
             self.FfmpegPath, "-y",

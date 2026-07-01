@@ -25,8 +25,7 @@ class AudioVertical:
     def _LoadRules(self) -> dict:
         # directive: audio-dialog-boost-real | # see audio-normalization.C8
         Rows = self._Db.ExecuteQuery(
-            "SELECT TargetIntegratedLufs, TargetTruePeakDbtp, "
-            "MaxOvershootDbForReview, AcceptableAudioCodecsCsv "
+            "SELECT TargetIntegratedLufs, TargetTruePeakDbtp, AcceptableAudioCodecsCsv "
             "FROM AudioComplianceRules ORDER BY Id LIMIT 1"
         )
         if not Rows:
@@ -37,7 +36,6 @@ class AudioVertical:
         return {
             'TargetIntegratedLufs': float(R.get('TargetIntegratedLufs') if 'TargetIntegratedLufs' in R else R.get('targetintegratedlufs')),
             'TargetTruePeakDbtp': float(R.get('TargetTruePeakDbtp') if 'TargetTruePeakDbtp' in R else R.get('targettruepeakdbtp')),
-            'MaxOvershootDbForReview': float(R.get('MaxOvershootDbForReview') if 'MaxOvershootDbForReview' in R else R.get('maxovershootdbforreview')),
             'AllowedCodecs': AllowedCodecs,
         }
 
@@ -57,15 +55,6 @@ class AudioVertical:
         SrcCodec = (getattr(Mf, 'AudioCodec', None) or '').lower()
         if SrcCodec and Rules['AllowedCodecs'] and SrcCodec not in Rules['AllowedCodecs']:
             return (False, f'codec:{SrcCodec}')
-
-        SrcLufs = getattr(Mf, 'SourceIntegratedLufs', None)
-        SrcTp = getattr(Mf, 'SourceTruePeakDbtp', None)
-        if SrcLufs is not None and SrcTp is not None:
-            RequiredGain = float(Rules['TargetIntegratedLufs']) - float(SrcLufs)
-            Headroom = float(Rules['TargetTruePeakDbtp']) - float(SrcTp)
-            Overshoot = RequiredGain - Headroom
-            if Overshoot > float(Rules['MaxOvershootDbForReview']):
-                return (None, f'audio_ungainable:overshoot={Overshoot:.1f}dB')
 
         Decision = self._Gate.AdmitOrDefer(Mf)
         if Decision.Outcome != 'admitted':

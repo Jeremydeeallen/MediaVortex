@@ -5,6 +5,7 @@ import tempfile
 
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalExists, LocalJoin
+from Features.AudioNormalization.Repositories.AudioComplianceRulesRepository import AudioComplianceRulesRepository
 from Features.AudioNormalization.Services.DemucsVocalIsolationService import DemucsVocalIsolationService
 
 
@@ -12,20 +13,31 @@ from Features.AudioNormalization.Services.DemucsVocalIsolationService import Dem
 class PreEncodeAudioPipeline:
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
-    def __init__(self, FfmpegPath, PythonExe, DemucsService=None, ScratchRoot=None):
+    def __init__(self, FfmpegPath, PythonExe, DemucsService=None, ScratchRoot=None, RulesRepo=None):
         self.FfmpegPath = FfmpegPath
         self.PythonExe = PythonExe
         self.DemucsService = DemucsService or DemucsVocalIsolationService(FfmpegPath=FfmpegPath, PythonExe=PythonExe)
         self.ScratchRoot = ScratchRoot or tempfile.gettempdir()
+        self._RulesRepo = RulesRepo or AudioComplianceRulesRepository()
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
     def Run(self, SourceFilePath, JobId):
         ScratchDir = LocalJoin(self.ScratchRoot, f"mv_audio_{JobId}")
         try:
+            R = self._RulesRepo.GetRules()
             DownmixWavPath = self._ExtractStereoDownmix(SourceFilePath, ScratchDir)
             Isolation = self.DemucsService.IsolateVocals(DownmixWavPath, ScratchDir)
             PremixWavPath = LocalJoin(ScratchDir, "dialog_boost_premix.wav")
-            self.DemucsService.MixBoostedPremix(Isolation, PremixWavPath)
+            self.DemucsService.MixBoostedPremix(
+                Isolation, PremixWavPath,
+                VocalsBoostDb=R['VocalsBoostDb'],
+                InstrumentalAttenDb=R['InstrumentalAttenDb'],
+                CompressorThreshold=R['PremixCompressorThreshold'],
+                CompressorRatio=R['PremixCompressorRatio'],
+                CompressorMakeupDb=R['PremixCompressorMakeupDb'],
+                DynaudnormFrameLen=R['PremixDynaudnormFrameLen'],
+                DynaudnormGaussSize=R['PremixDynaudnormGaussSize'],
+            )
             return {
                 'DemucsPremixPath': PremixWavPath,
                 'VocalsRmsDbfs': Isolation.VocalsRmsDbfs,

@@ -264,38 +264,50 @@ class AudioNormalizationController:
         @self.Blueprint.route('/api/AudioNormalization/Rules', methods=['GET'])
         # directive: audio-dialog-boost-real | # see audio-normalization.C8
         def get_audio_rules():
-            Rows = DatabaseService().ExecuteQuery(
-                "SELECT Id, TargetIntegratedLufs, TargetTruePeakDbtp, "
-                "AcceptableAudioCodecsCsv, LastUpdated "
-                "FROM AudioComplianceRules ORDER BY Id LIMIT 1"
-            )
-            if not Rows:
-                return jsonify({'Success': False, 'Message': 'AudioComplianceRules has no rows -- migration not applied'}), 500
-            return jsonify({'Success': True, 'Data': Rows[0]}), 200
+            from Features.AudioNormalization.Repositories.AudioComplianceRulesRepository import AudioComplianceRulesRepository
+            try:
+                Data = AudioComplianceRulesRepository().GetRules()
+                return jsonify({'Success': True, 'Data': Data}), 200
+            except RuntimeError as Ex:
+                return jsonify({'Success': False, 'Message': str(Ex)}), 500
 
         @self.Blueprint.route('/api/AudioNormalization/Rules', methods=['PUT'])
         # directive: audio-dialog-boost-real | # see audio-normalization.C8
         def update_audio_rules():
+            from Features.AudioNormalization.Repositories.AudioComplianceRulesRepository import AudioComplianceRulesRepository, RULE_FIELDS
             Body = request.get_json(silent=True) or {}
+            Missing = [F for F in RULE_FIELDS if F not in Body]
+            if Missing:
+                return jsonify({'Success': False, 'Message': f'Missing fields: {",".join(Missing)}'}), 400
             try:
-                Lufs = float(Body.get('TargetIntegratedLufs'))
-                TpDbtp = float(Body.get('TargetTruePeakDbtp'))
-                Codecs = (Body.get('AcceptableAudioCodecsCsv') or '').strip()
-            except (TypeError, ValueError):
-                return jsonify({'Success': False, 'Message': 'Body field had wrong type'}), 400
-            if not Codecs:
+                Payload = {
+                    'TargetIntegratedLufs': float(Body['TargetIntegratedLufs']),
+                    'TargetTruePeakDbtp': float(Body['TargetTruePeakDbtp']),
+                    'AcceptableAudioCodecsCsv': str(Body['AcceptableAudioCodecsCsv']).strip(),
+                    'DialogBoostTargetLufs': float(Body['DialogBoostTargetLufs']),
+                    'DialogBoostTargetLra': float(Body['DialogBoostTargetLra']),
+                    'SampleLimitHeadroomDb': float(Body['SampleLimitHeadroomDb']),
+                    'Track0BitratePerChannelKbps': int(Body['Track0BitratePerChannelKbps']),
+                    'Track0MinPerChannelKbps': int(Body['Track0MinPerChannelKbps']),
+                    'Track1StereoBitrateKbps': int(Body['Track1StereoBitrateKbps']),
+                    'Track1VocalsRmsFallbackDbfs': float(Body['Track1VocalsRmsFallbackDbfs']),
+                    'VocalsBoostDb': float(Body['VocalsBoostDb']),
+                    'InstrumentalAttenDb': float(Body['InstrumentalAttenDb']),
+                    'PremixCompressorThreshold': float(Body['PremixCompressorThreshold']),
+                    'PremixCompressorRatio': float(Body['PremixCompressorRatio']),
+                    'PremixCompressorMakeupDb': float(Body['PremixCompressorMakeupDb']),
+                    'PremixDynaudnormFrameLen': int(Body['PremixDynaudnormFrameLen']),
+                    'PremixDynaudnormGaussSize': int(Body['PremixDynaudnormGaussSize']),
+                }
+            except (TypeError, ValueError) as Ex:
+                return jsonify({'Success': False, 'Message': f'Field had wrong type: {Ex}'}), 400
+            if not Payload['AcceptableAudioCodecsCsv']:
                 return jsonify({'Success': False, 'Message': 'AcceptableAudioCodecsCsv is required'}), 400
-            if TpDbtp > 0:
+            if Payload['TargetTruePeakDbtp'] > 0:
                 return jsonify({'Success': False, 'Message': 'TargetTruePeakDbtp must be <= 0 dBTP'}), 400
-            DatabaseService().ExecuteNonQuery(
-                "UPDATE AudioComplianceRules SET "
-                "TargetIntegratedLufs=%s, TargetTruePeakDbtp=%s, "
-                "AcceptableAudioCodecsCsv=%s, LastUpdated=NOW() "
-                "WHERE Id = 1",
-                (Lufs, TpDbtp, Codecs),
-            )
+            AudioComplianceRulesRepository().UpdateRules(Payload)
             LoggingService.LogInfo(
-                f"AudioComplianceRules updated: Lufs={Lufs} TpDbtp={TpDbtp} codecs={Codecs!r}",
+                f"AudioComplianceRules updated: {Payload}",
                 'AudioNormalizationController', 'update_audio_rules',
             )
             _SpawnAudioBackfill()

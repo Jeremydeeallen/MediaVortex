@@ -6,10 +6,10 @@
 <div class="container my-4">
     {% include '_admin_subnav.html' %}
   <h2>Audio Normalization</h2>
-  <p class="text-muted">Every encoded output ships exactly two audio tracks per kept language. Operator goal: consistent loudness between episodes (Track 0) + dialog audible over music and effects (Track 1).</p>
+  <p class="text-muted">Every encoded output ships two audio tracks per kept language. Track 0 = source dynamics preserved for surround listeners. Track 1 = Demucs vocal isolation + boost for TV speakers.</p>
 
   <ul class="nav nav-tabs" role="tablist">
-    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tracks-pane">Tracks</a></li>
+    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tracks-pane">Knobs</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#dashboard-pane">Dashboard</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#review-pane">Review Queue</a></li>
   </ul>
@@ -17,55 +17,131 @@
   <div class="tab-content mt-3">
 
     <div class="tab-pane fade show active" id="tracks-pane">
-      <div class="mb-3">
-        <label for="Ac_TargetLufs" class="form-label">Target integrated loudness (LUFS) -- the only knob that affects emit</label>
-        <div class="input-group" style="max-width: 320px;">
-          <input type="number" step="0.1" id="Ac_TargetLufs" class="form-control" value="-23.0">
-          <button class="btn btn-primary" id="Ac_Save">Save</button>
-        </div>
-        <small class="text-muted">Both tracks normalize to this LUFS so episodes match in volume between switches. Default -23 LUFS (broadcast standard).</small>
-        <div id="Ac_Msg" class="small mt-1"></div>
-      </div>
-
       <div class="row g-3">
 
         <div class="col-md-6">
           <div class="card h-100">
-            <div class="card-header">
-              <strong>Track 0 -- Original</strong>
-              <span class="badge bg-secondary float-end">disposition.default = 0</span>
-            </div>
+            <div class="card-header"><strong>Global loudness targets</strong></div>
             <div class="card-body">
-              <p class="card-text"><em>Source dynamics preserved. Linear loudnorm only. Audience: AVRs / Atmos receivers / surround setups (they have their own dialog enhancement).</em></p>
-              <h6>Channels</h6>
-              <p>Source passthrough -- 5.1 stays 5.1, stereo stays stereo, mono stays mono.</p>
-              <h6>Bitrate</h6>
-              <p>AAC-LC at 64 kbps per channel (floor 48 kbps/ch above AAC-LC transparency).</p>
-              <h6>ffmpeg chain</h6>
-              <pre class="bg-light p-2 small mb-0" id="Ac_Chain0" style="white-space: pre-wrap;"></pre>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_TargetIntegratedLufs">Track 0 target integrated LUFS</label>
+                <input type="number" step="0.1" id="K_TargetIntegratedLufs" class="form-control form-control-sm">
+                <div class="form-text small">Track 0 target loudness. Both episodes match volume so operator does not grab remote between switches. -23 is broadcast standard.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_TargetTruePeakDbtp">True-peak ceiling (dBTP)</label>
+                <input type="number" step="0.1" id="K_TargetTruePeakDbtp" class="form-control form-control-sm">
+                <div class="form-text small">True-peak ceiling both tracks. Prevents clipping on hardware DACs and streaming re-encoders. -2 is Netflix / EBU R128 strict.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_SampleLimitHeadroomDb">Sample-limit headroom (dB)</label>
+                <input type="number" step="0.1" id="K_SampleLimitHeadroomDb" class="form-control form-control-sm">
+                <div class="form-text small">Buffer below true-peak ceiling. AAC re-encoding adds intersample peaks; higher headroom = safer, quieter final output.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_AcceptableAudioCodecsCsv">Acceptable source codecs (CSV)</label>
+                <input type="text" id="K_AcceptableAudioCodecsCsv" class="form-control form-control-sm">
+                <div class="form-text small">Source codecs allowed through compliance gate. Others force re-encode.</div>
+              </div>
             </div>
           </div>
         </div>
 
         <div class="col-md-6">
           <div class="card h-100">
-            <div class="card-header">
-              <strong>Track 1 -- Dialog Boost</strong>
-              <span class="badge bg-primary float-end">disposition.default = 1</span>
-            </div>
+            <div class="card-header"><strong>Track 0 -- Original (source-passthrough)</strong></div>
             <div class="card-body">
-              <p class="card-text"><em>Dialog surgically lifted via Demucs vocal isolation. Stereo, compressed for one-comfortable-volume listening. Audience: TV speakers / soundbars / phones.</em></p>
-              <h6>Channels</h6>
-              <p>Forced stereo downmix -- regardless of source channel count.</p>
-              <h6>Bitrate</h6>
-              <p>AAC-LC at 192 kbps stereo (96 kbps/ch -- transparent).</p>
-              <h6>Pipeline</h6>
-              <pre class="bg-light p-2 small mb-0" id="Ac_Chain1" style="white-space: pre-wrap;"></pre>
-              <p class="small text-muted mt-2">If vocals-stem RMS &lt;= -50 dBFS (no dialog detected), Track 1 falls back to a copy of the Track 0 chain.</p>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_Track0BitratePerChannelKbps">AAC-LC kbps per channel</label>
+                <input type="number" step="1" id="K_Track0BitratePerChannelKbps" class="form-control form-control-sm">
+                <div class="form-text small">AAC-LC bitrate per source channel. 64 kbps/ch = transparent on 5.1 content.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_Track0MinPerChannelKbps">Minimum kbps per channel</label>
+                <input type="number" step="1" id="K_Track0MinPerChannelKbps" class="form-control form-control-sm">
+                <div class="form-text small">Floor. Below this AAC-LC loses transparency regardless of source complexity.</div>
+              </div>
             </div>
           </div>
         </div>
 
+        <div class="col-md-6">
+          <div class="card h-100">
+            <div class="card-header"><strong>Track 1 -- Dialog Boost (Demucs)</strong></div>
+            <div class="card-body">
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_DialogBoostTargetLufs">Target integrated LUFS</label>
+                <input type="number" step="0.1" id="K_DialogBoostTargetLufs" class="form-control form-control-sm">
+                <div class="form-text small">Track 1 target loudness. Louder than Track 0 so dialog cuts through on TV speakers. -20 is a common streaming spec.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_DialogBoostTargetLra">Target LRA (loudness range in LU)</label>
+                <input type="number" step="0.1" id="K_DialogBoostTargetLra" class="form-control form-control-sm">
+                <div class="form-text small">Track 1 target dynamic range. Lower = flatter = no remote-grabs. 5 LU is TV-comfortable.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_Track1StereoBitrateKbps">AAC-LC stereo bitrate (kbps)</label>
+                <input type="number" step="1" id="K_Track1StereoBitrateKbps" class="form-control form-control-sm">
+                <div class="form-text small">AAC-LC bitrate for Track 1 stereo downmix.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_Track1VocalsRmsFallbackDbfs">Vocals RMS fallback threshold (dBFS)</label>
+                <input type="number" step="0.1" id="K_Track1VocalsRmsFallbackDbfs" class="form-control form-control-sm">
+                <div class="form-text small">If vocals stem RMS ≤ this after Demucs, no dialog detected: Track 1 is not emitted.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-6">
+          <div class="card h-100">
+            <div class="card-header"><strong>Track 1 premix (before final loudnorm)</strong></div>
+            <div class="card-body">
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_VocalsBoostDb">Vocals boost (dB)</label>
+                <input type="number" step="0.1" id="K_VocalsBoostDb" class="form-control form-control-sm">
+                <div class="form-text small">Gain applied to Demucs-isolated vocals stem before mixdown. Higher = more speech prominence.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_InstrumentalAttenDb">Instrumental attenuation (dB)</label>
+                <input type="number" step="0.1" id="K_InstrumentalAttenDb" class="form-control form-control-sm">
+                <div class="form-text small">Cut applied to Demucs no-vocals stem before mixdown. Higher = more music/effects duck.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_PremixCompressorThreshold">Compressor threshold (linear 0-1)</label>
+                <input type="number" step="0.001" id="K_PremixCompressorThreshold" class="form-control form-control-sm">
+                <div class="form-text small">Amplitude where compressor engages. Lower = catches more of signal. 0.030 ≈ -30 dBFS.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_PremixCompressorRatio">Compressor ratio</label>
+                <input type="number" step="0.1" id="K_PremixCompressorRatio" class="form-control form-control-sm">
+                <div class="form-text small">Compression ratio. Higher = harder squash of loud parts. 9:1 is aggressive dialog leveling.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_PremixCompressorMakeupDb">Compressor makeup (dB)</label>
+                <input type="number" step="0.1" id="K_PremixCompressorMakeupDb" class="form-control form-control-sm">
+                <div class="form-text small">Post-compression gain recovery to restore perceived loudness.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_PremixDynaudnormFrameLen">Dynaudnorm frame length (ms)</label>
+                <input type="number" step="1" id="K_PremixDynaudnormFrameLen" class="form-control form-control-sm">
+                <div class="form-text small">Dynaudnorm analysis window. Smaller = more per-syllable normalization = punchier dialog.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_PremixDynaudnormGaussSize">Dynaudnorm gaussian size (odd)</label>
+                <input type="number" step="2" id="K_PremixDynaudnormGaussSize" class="form-control form-control-sm">
+                <div class="form-text small">Dynaudnorm smoothing (must be odd). Higher = less pumping between adjacent frames.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="d-flex align-items-center gap-2 my-3">
+        <button class="btn btn-primary" id="Ac_Save">Save all knobs</button>
+        <button class="btn btn-outline-secondary" id="Ac_Reload">Reload from DB</button>
+        <div id="Ac_Msg" class="small ms-2"></div>
       </div>
     </div>
 
@@ -83,53 +159,48 @@
 </div>
 
 <script>
+const KNOB_FIELDS = [
+  'TargetIntegratedLufs', 'TargetTruePeakDbtp', 'SampleLimitHeadroomDb', 'AcceptableAudioCodecsCsv',
+  'Track0BitratePerChannelKbps', 'Track0MinPerChannelKbps',
+  'DialogBoostTargetLufs', 'DialogBoostTargetLra', 'Track1StereoBitrateKbps', 'Track1VocalsRmsFallbackDbfs',
+  'VocalsBoostDb', 'InstrumentalAttenDb',
+  'PremixCompressorThreshold', 'PremixCompressorRatio', 'PremixCompressorMakeupDb',
+  'PremixDynaudnormFrameLen', 'PremixDynaudnormGaussSize',
+];
+
 async function LoadAudioRules() {
   const R = await fetch('/api/AudioNormalization/Rules');
   const J = await R.json();
-  if (!J.Success) { document.getElementById('Ac_Msg').textContent = 'Load failed: ' + J.Message; return; }
+  const Msg = document.getElementById('Ac_Msg');
+  if (!J.Success) { Msg.textContent = 'Load failed: ' + J.Message; Msg.className = 'small ms-2 text-danger'; return; }
   const D = J.Data;
-  const Lufs = D.TargetIntegratedLufs;
-  document.getElementById('Ac_TargetLufs').value = Lufs;
-  RenderChains(Lufs);
-}
-
-function RenderChains(Lufs) {
-  const Tp = -2.00;
-  const Lra = '<source_LRA>';
-  document.getElementById('Ac_Chain0').textContent =
-    `-map 0:a:0 -c:a:0 aac -b:a:0 <64*channels>k -ar:0 48000\n` +
-    `-filter:a:0 "loudnorm=I=${Lufs.toFixed(2)}:LRA=${Lra}:TP=${Tp.toFixed(2)}:\n` +
-    `             measured_*:linear=true"\n` +
-    `-metadata:s:a:0 "title=Original" "language=<lang>"\n` +
-    `-disposition:a:0 0`;
-  document.getElementById('Ac_Chain1').textContent =
-    `# Pre-pass: stereo downmix -> Demucs vocal isolation\n` +
-    `#   -> vocals.wav + no_vocals.wav\n` +
-    `#   -> dialog_boost_premix.wav (vocals +5dB, instrumental -3dB)\n` +
-    `\n` +
-    `-i dialog_boost_premix.wav\n` +
-    `-map 1:a:0 -c:a:1 aac -b:a:1 192k -ar:1 48000\n` +
-    `-filter:a:1 "loudnorm=I=-20.00:LRA=5.00:TP=${Tp.toFixed(2)}:\n` +
-    `             measured_*"\n` +
-    `-metadata:s:a:1 "title=Dialog Boost" "language=<lang>"\n` +
-    `-disposition:a:1 1`;
+  KNOB_FIELDS.forEach(F => {
+    const El = document.getElementById('K_' + F);
+    if (El && D[F] !== undefined && D[F] !== null) El.value = D[F];
+  });
+  Msg.textContent = 'Loaded from DB.';
+  Msg.className = 'small ms-2 text-muted';
 }
 
 async function SaveAudioRules() {
-  const Body = {
-    TargetIntegratedLufs: parseFloat(document.getElementById('Ac_TargetLufs').value),
-    TargetTruePeakDbtp: -2.0,
-    AcceptableAudioCodecsCsv: 'aac,ac3,eac3,mp3,flac,truehd,dts,opus,vorbis',
-  };
-  const R = await fetch('/api/AudioNormalization/Rules', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(Body) });
+  const Body = {};
+  KNOB_FIELDS.forEach(F => {
+    const El = document.getElementById('K_' + F);
+    if (El) Body[F] = (El.type === 'number') ? parseFloat(El.value) : El.value;
+  });
+  const R = await fetch('/api/AudioNormalization/Rules', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(Body),
+  });
   const J = await R.json();
   const M = document.getElementById('Ac_Msg');
-  M.textContent = J.Success ? 'Saved.' : 'Save failed: ' + J.Message;
-  M.className = 'small mt-1 ' + (J.Success ? 'text-success' : 'text-danger');
-  if (J.Success) RenderChains(Body.TargetIntegratedLufs);
+  M.textContent = J.Success ? ('Saved. ' + (J.Message || '')) : ('Save failed: ' + J.Message);
+  M.className = 'small ms-2 ' + (J.Success ? 'text-success' : 'text-danger');
 }
 
 document.getElementById('Ac_Save').addEventListener('click', SaveAudioRules);
+document.getElementById('Ac_Reload').addEventListener('click', LoadAudioRules);
 
 async function LoadDashboard() {
   try {
