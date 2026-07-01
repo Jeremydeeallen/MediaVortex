@@ -144,14 +144,14 @@ def StepInstallSystemdUnit(Target: str, Friendly: str) -> bool:
 
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
-def StepStopContainers(Target: str, Friendly: str) -> bool:
+def StepStopContainersAndClearDbAndClearDb(Target: str, Friendly: str) -> bool:
     R = _Ssh(Target, "docker ps -a --filter 'name=mediavortex-worker-' --format '{{.Names}}' | head -20", Timeout=10)
     Names = [N for N in (R.stdout or "").splitlines() if N.strip()]
-    if not Names:
-        _Status(6, 8, "stop containers", "SKIPPED", "no mediavortex-worker containers found")
-        return True
-    _Ssh(Target, "cd /opt/mediavortex && docker compose down --timeout 30 2>&1 | tail -5", Timeout=120)
-    _Status(6, 8, "stop containers", "OK", f"stopped {len(Names)} container(s)")
+    if Names:
+        _Ssh(Target, "cd /opt/mediavortex && docker compose down --timeout 30 2>&1 | tail -3", Timeout=120)
+    Prune = _Ssh(Target, f"which psql && PGPASSWORD=mediavortex psql -h 10.0.0.15 -U mediavortex -d mediavortex -c \"DELETE FROM Workers WHERE LOWER(WorkerName) LIKE '{Friendly.lower()}-worker-%';\" 2>&1 | tail -1 || echo psql_missing_local_ok", Timeout=30)
+    Detail = f"stopped {len(Names)} container(s); {(Prune.stdout or '').strip()[:60]}"
+    _Status(6, 8, "stop containers + clear DB", "OK", Detail)
     return True
 
 
@@ -206,7 +206,7 @@ def main():
         return 2
     if not StepInstallSystemdUnit(Target, Friendly):
         return 2
-    if not StepStopContainers(Target, Friendly):
+    if not StepStopContainersAndClearDb(Target, Friendly):
         return 2
     if not StepStartInstances(Target, Friendly, Count):
         return 3
