@@ -137,8 +137,22 @@ To be populated at DELIVERING. Anticipated targets:
 | Host | Hardware | Demucs device | Pre-pass | Encode | Output filename | Pass |
 |---|---|---|---|---|---|---|
 | I9 | RTX 4060 Ti | **cuda** | 19.4 s | 9.4 s | `Bluey_(2018)_-_S01E01_-_Magic_Xylophone_WEBDL-480p_S01E01_i9.mp4` | yes |
-| wakko-worker-1 | Ryzen 7 3700X | cpu | 186.6 s | 19.1 s | `Bluey_(2018)_-_S01E01_-_Magic_Xylophone_WEBDL-480p_S01E01_wakko-worker-1.mp4` | yes |
-| dot-worker-1 | i9-10850K | cpu | 144.2 s | 30.1 s | `Bluey_(2018)_-_S01E01_-_Magic_Xylophone_WEBDL-480p_S01E01_dot-worker-1.mp4` | yes |
+| wakko-worker-1 (in-container) | Ryzen 7 3700X | cpu | 186.6 s | 19.1 s | `..._wakko-worker-1.mp4` | yes |
+| dot-worker-1 (in-container) | i9-10850K | cpu | 144.2 s | 30.1 s | `..._dot-worker-1.mp4` | yes |
+| **dot bare-metal** | RTX 4060 | **cuda** | **15.1 s** | 59.0 s | `..._dot-baremetal.mp4` | yes -- 10x pre-pass speedup |
+| **wakko bare-metal** | Ryzen 7 3700X | cpu | 141.5 s | 19.7 s | `..._wakko-baremetal.mp4` | yes |
+
+### Fleet post-migration
+
+Fleet after `py deploy/deploy-baremetal-worker.py {dot,wakko}`:
+
+| Worker | Deploy | Systemd unit | DB status | Capabilities |
+|---|---|---|---|---|
+| dot-worker-1..4 | bare-metal + systemd | `mediavortex-worker@{1..4}.service` active/running | Online | TranscodeEnabled=True, RemuxEnabled=True |
+| wakko-worker-1..4 | bare-metal + systemd | `mediavortex-worker@{1..4}.service` active/running | Online | TranscodeEnabled=True, RemuxEnabled=True |
+| I9-2024 | Windows venv | Task Scheduler / manual | Online | TranscodeEnabled=True |
+
+Docker containers stopped on dot + wakko (compose down at deploy step 6). Old image tag `mediavortex-worker:latest` retained locally until follow-up cleanup directive verifies no regression across a release cycle.
 
 Each output: stream 1 aac stereo 130 kbps default=0 name=Original; stream 2 aac stereo 194 kbps default=1 name=Dialog Boost.
 
