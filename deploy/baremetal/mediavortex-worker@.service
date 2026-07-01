@@ -8,7 +8,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/mediavortex/src
 EnvironmentFile=/etc/mediavortex/worker.env
-Environment=MEDIAVORTEX_WORKER_NAME=%H-worker-%i
+EnvironmentFile=/etc/mediavortex/worker-prefix.env
 Environment=PYTHONUNBUFFERED=1
 Environment=HOME=/root
 ExecStart=/opt/mediavortex/host-venv/bin/python /opt/mediavortex/src/WorkerService/Main.py

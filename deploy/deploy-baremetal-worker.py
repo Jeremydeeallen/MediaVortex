@@ -130,15 +130,16 @@ def StepSyncSource(Target: str) -> bool:
 
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
-def StepInstallSystemdUnit(Target: str) -> bool:
+def StepInstallSystemdUnit(Target: str, Friendly: str) -> bool:
     UnitLocal = BaremetalDir / "mediavortex-worker@.service"
     EnvLocal = BaremetalDir / "worker.env.template"
     _Scp(UnitLocal, Target, "/etc/systemd/system/mediavortex-worker@.service", Timeout=30)
     R = _Ssh(Target, "test -f /etc/mediavortex/worker.env && echo ENV_EXISTS", Timeout=10)
     if "ENV_EXISTS" not in (R.stdout or ""):
         _Scp(EnvLocal, Target, "/etc/mediavortex/worker.env", Timeout=30)
+    _Ssh(Target, f"echo 'MEDIAVORTEX_WORKER_PREFIX={Friendly}' > /etc/mediavortex/worker-prefix.env", Timeout=10)
     _Ssh(Target, "systemctl daemon-reload", Timeout=10)
-    _Status(5, 8, "install systemd unit", "OK", "mediavortex-worker@.service loaded")
+    _Status(5, 8, "install systemd unit", "OK", f"mediavortex-worker@.service loaded, prefix={Friendly}")
     return True
 
 
@@ -203,7 +204,7 @@ def main():
         return 2
     if not StepSyncSource(Target):
         return 2
-    if not StepInstallSystemdUnit(Target):
+    if not StepInstallSystemdUnit(Target, Friendly):
         return 2
     if not StepStopContainers(Target, Friendly):
         return 2
