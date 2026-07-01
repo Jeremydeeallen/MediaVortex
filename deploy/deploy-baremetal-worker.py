@@ -137,20 +137,25 @@ def StepInstallSystemdUnit(Target: str, Friendly: str) -> bool:
     R = _Ssh(Target, "test -f /etc/mediavortex/worker.env && echo ENV_EXISTS", Timeout=10)
     if "ENV_EXISTS" not in (R.stdout or ""):
         _Scp(EnvLocal, Target, "/etc/mediavortex/worker.env", Timeout=30)
-    _Ssh(Target, f"echo 'MEDIAVORTEX_WORKER_PREFIX={Friendly}' > /etc/mediavortex/worker-prefix.env", Timeout=10)
+    Prefix = f"{Friendly}-worker"
+    _Ssh(Target, f"echo 'MEDIAVORTEX_WORKER_PREFIX={Prefix}' > /etc/mediavortex/worker-prefix.env", Timeout=10)
     _Ssh(Target, "systemctl daemon-reload", Timeout=10)
-    _Status(5, 8, "install systemd unit", "OK", f"mediavortex-worker@.service loaded, prefix={Friendly}")
+    _Status(5, 8, "install systemd unit", "OK", f"mediavortex-worker@.service loaded, prefix={Prefix}")
     return True
 
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
-def StepStopContainersAndClearDbAndClearDb(Target: str, Friendly: str) -> bool:
+def StepStopContainersAndClearDb(Target: str, Friendly: str) -> bool:
     R = _Ssh(Target, "docker ps -a --filter 'name=mediavortex-worker-' --format '{{.Names}}' | head -20", Timeout=10)
     Names = [N for N in (R.stdout or "").splitlines() if N.strip()]
     if Names:
         _Ssh(Target, "cd /opt/mediavortex && docker compose down --timeout 30 2>&1 | tail -3", Timeout=120)
-    Prune = _Ssh(Target, f"which psql && PGPASSWORD=mediavortex psql -h 10.0.0.15 -U mediavortex -d mediavortex -c \"DELETE FROM Workers WHERE LOWER(WorkerName) LIKE '{Friendly.lower()}-worker-%';\" 2>&1 | tail -1 || echo psql_missing_local_ok", Timeout=30)
-    Detail = f"stopped {len(Names)} container(s); {(Prune.stdout or '').strip()[:60]}"
+    QueryScript = MediaVortexRoot / "Scripts" / "SQLScripts" / "QueryDatabase.py"
+    Del = subprocess.run(
+        [sys.executable, str(QueryScript), "sql", f"DELETE FROM Workers WHERE LOWER(WorkerName) LIKE '{Friendly.lower()}-worker-%'", "--commit"],
+        capture_output=True, text=True, timeout=30,
+    )
+    Detail = f"stopped {len(Names)} container(s); DB clear: {(Del.stdout or '').strip().splitlines()[-1][:60] if Del.stdout else 'err'}"
     _Status(6, 8, "stop containers + clear DB", "OK", Detail)
     return True
 
