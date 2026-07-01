@@ -109,7 +109,9 @@ class DemucsVocalIsolationService:
         Filter = (
             f"[0:a:0]volume={VocalsBoostDb:+.1f}dB[v];"
             f"[1:a:0]volume={-abs(InstrumentalAttenDb):+.1f}dB[i];"
-            f"[v][i]amix=inputs=2:duration=longest:dropout_transition=0[out]"
+            f"[v][i]amix=inputs=2:duration=longest:dropout_transition=0[mix];"
+            f"[mix]acompressor=threshold=0.03:ratio=9:attack=8:release=120:makeup=3:knee=4,"
+            f"dynaudnorm=f=150:g=13:p=0.7:m=8[out]"
         )
         Cmd = [
             self.FfmpegPath, "-y",

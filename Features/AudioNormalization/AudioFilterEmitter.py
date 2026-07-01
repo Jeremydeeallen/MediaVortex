@@ -13,6 +13,12 @@ DEFAULT_TARGET_LUFS = -23.0
 DEFAULT_TARGET_TRUE_PEAK_DBTP = -2.0
 DIALOG_BOOST_TARGET_LUFS = -20.0
 DIALOG_BOOST_TARGET_LRA = 5.0
+SAMPLE_LIMIT_HEADROOM_DB = 4.0
+
+
+# directive: audio-dialog-boost-real | # see audio-normalization.C3
+def _DbToLinear(Db):
+    return 10.0 ** (float(Db) / 20.0)
 
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C8
@@ -66,21 +72,10 @@ def _BuildLinearLoudnormFilter(MediaFile, TargetLufs, TargetTruePeakDbtp):
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C3
 def _BuildDialogBoostLoudnormFilter(MediaFile):
-    SrcI = float(_GetField(MediaFile, 'SourceIntegratedLufs'))
-    SrcLra = float(_GetField(MediaFile, 'SourceLoudnessRangeLU'))
-    SrcTp = float(_GetField(MediaFile, 'SourceTruePeakDbtp'))
-    SrcThresh = float(_GetField(MediaFile, 'SourceIntegratedThresholdLufs'))
-    Measured = (
-        f"measured_I={SrcI:.2f}"
-        f":measured_LRA={SrcLra:.2f}"
-        f":measured_TP={SrcTp:.2f}"
-        f":measured_thresh={SrcThresh:.2f}"
-    )
     return (
         f"loudnorm=I={DIALOG_BOOST_TARGET_LUFS:.2f}"
         f":LRA={DIALOG_BOOST_TARGET_LRA:.2f}"
         f":TP={DEFAULT_TARGET_TRUE_PEAK_DBTP:.2f}"
-        f":{Measured}"
     )
 
 
@@ -143,7 +138,7 @@ class AudioFilterEmitter:
             f'-b:a:{OutputIndex}', f'{Bitrate}k',
             f'-ar:{OutputIndex}', '48000',
         ]
-        Filter = _BuildLinearLoudnormFilter(MediaFile, TargetLufs, TargetTp)
+        Filter = _BuildLinearLoudnormFilter(MediaFile, TargetLufs, TargetTp) + f",alimiter=level_in=1:level_out=1:limit={_DbToLinear(TargetTp - SAMPLE_LIMIT_HEADROOM_DB):.4f}:attack=1:release=50:level=false"
         Block.FilterArgs = [f'-filter:a:{OutputIndex}', Filter]
         Block.MetadataArgs = self._BuildMetadataArgs(Language, 'Original', OutputIndex)
         Block.DispositionArgs = [f'-disposition:a:{OutputIndex}', '1' if IsDefault else '0']
@@ -159,7 +154,7 @@ class AudioFilterEmitter:
             f'-b:a:{OutputIndex}', f'{TRACK1_STEREO_BITRATE_KBPS}k',
             f'-ar:{OutputIndex}', '48000',
         ]
-        Filter = _BuildDialogBoostLoudnormFilter(MediaFile)
+        Filter = _BuildDialogBoostLoudnormFilter(MediaFile) + f",alimiter=level_in=1:level_out=1:limit={_DbToLinear(DEFAULT_TARGET_TRUE_PEAK_DBTP - SAMPLE_LIMIT_HEADROOM_DB):.4f}:attack=1:release=50:level=false"
         Block.FilterArgs = [f'-filter:a:{OutputIndex}', Filter]
         Block.MetadataArgs = self._BuildMetadataArgs(Language, 'Dialog Boost', OutputIndex)
         Block.DispositionArgs = [f'-disposition:a:{OutputIndex}', '1']
