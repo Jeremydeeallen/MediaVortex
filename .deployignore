@@ -40,3 +40,20 @@ archive_*
 vmaf_*.xml
 *.log
 *.dump
+
+# Media files -- MUST NEVER ship in a worker image
+.e2e_preservation
+Scripts/Smoke
+*.mkv
+*.mp4
+*.m4v
+*.ts
+*.webm
+*.avi
+*.mov
+*.wav
+*.flac
+*.mp3
+*.aac
+*.eac3
+*.ac3
