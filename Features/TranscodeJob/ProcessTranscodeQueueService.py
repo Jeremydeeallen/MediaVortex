@@ -137,7 +137,7 @@ class ProcessTranscodeQueueService:
         AudioCodec = AudioCodecArgsBuilder()
         VideoFilter = VideoFilterBuilder()
         Probe = MediaProbeAdapter(FFprobePath=self.FFprobePath)
-        TranscodeS = TranscodeShape(Resolution, Filename, CodecAssembler, AudioCodec, VideoFilter, Probe)
+        TranscodeS = TranscodeShape(Resolution, Filename, CodecAssembler, VideoFilter, Probe)
         RemuxS = RemuxShape(Filename, AudioCodec, Probe)
         SubtitleS = SubtitleFixShape(Filename, AudioCodec, Probe)
         return EncodeShapeRegistry({

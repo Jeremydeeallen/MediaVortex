@@ -15,14 +15,13 @@ from Features.TranscodeJob.Emit.EncodeShape import EncodeShape
 class TranscodeShape(EncodeShape):
     """Builds ffmpeg argv for full video re-encode jobs; audio goes through AudioFilterEmitter (no profile-pinned override)."""
 
-    # directive: audio-pipeline-fail-loud | # see audio-normalization.C8
+    # directive: audio-pipeline-fail-loud | # see audio-normalization.C8 | # see encode-emit.C12
     def __init__(self, ResolutionCalculator, OutputFilenameBuilder, CodecParameterAssembler,
-                 AudioCodecArgsBuilder, VideoFilterBuilder, MediaProbeAdapter,
+                 VideoFilterBuilder, MediaProbeAdapter,
                  Resolver=None, Emitter=None, StreamProbe=None, CodecPolicy=None):
         self.ResolutionCalculator = ResolutionCalculator
         self.OutputFilenameBuilder = OutputFilenameBuilder
         self.CodecParameterAssembler = CodecParameterAssembler
-        self.AudioCodecArgsBuilder = AudioCodecArgsBuilder
         self.VideoFilterBuilder = VideoFilterBuilder
         self.MediaProbeAdapter = MediaProbeAdapter
         self.Resolver = Resolver or AudioPolicyResolver()

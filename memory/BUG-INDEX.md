@@ -31,6 +31,8 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0069 | active | transcodequeue / subtitle-fix | PopulateQueueForSubtitleFix references undefined existingFilePaths (latent NameError); crashes on first admitted file via existingFilePaths.add -- dead-code residue from per-FilePath dedup design replaced by pair-based dedup | 2026-06-28
 - BUG-0070 | active | audio-quality | Detect transcoded files affected by deprecated 96 kbps audio bitrate -- robotic-sounding audio across library; need query/report from TranscodeAttempts.FfpmpegCommand or AudioBitrateKbps to flag re-transcode candidates | 2026-06-29
 - BUG-0072 | active | media-recovery | Delete + requeue Sonarr/Radarr for shows and movies destroyed by -ac 2 forced-downmix + b:a 96k under-bitrate + MaxAudioChannels=2 global; optional reality-TV exclusion; source .mkv already replaced so files must be re-acquired | 2026-07-01
+- BUG-0073 | active | audio-loudnorm | Track 0 emits identical loudnorm measured_I / measured_LRA / measured_TP / measured_thresh across every per-language Original stream; file-level EBU R128 measurement re-used per stream; non-default languages over/under-normalize; needs per-stream measurement in _BuildTrack0Chain | 2026-07-02
+- BUG-0074 | active | audio-channels | AudioFilterEmitter._ResolveSourceChannels silently defaults to 2 when MediaFile.AudioChannels is NULL; real 5.1 sources with missing metadata ship as stereo at the 96k floor; violates C33 spirit; fail-loud or backfill AudioChannels via ffprobe before emit | 2026-07-02
 
 - BUG-0002 | active | file-replacement | Silent-output Remux MediaFiles purge | 2026-05-16
 - BUG-0007 | active | activity-page | Worker capability toggle no UI refresh | 2026-05-22

@@ -40,7 +40,7 @@ C10. **RemuxShape emits `-f mp4` + `-movflags +faststart` unconditionally.** The
 
 C11. **SubtitleFixShape emits the same invariants + `-c:s mov_text`.** ASS/SSA -> mov_text conversion is the SubtitleFix shape's defining transform; container/faststart invariants match Remux. Verifiable: `Tests/Contract/TestSubtitleFixShape.py`.
 
-C12. **TranscodeShape composes 7 collaborators via constructor.** ResolutionCalculator + OutputFilenameBuilder + CodecParameterAssembler + AudioCodecArgsBuilder + AudioFilterBuilder + VideoFilterBuilder + MediaProbeAdapter. NVENC dispatch via `ProfileSettings.UseNvidiaHardware=1`; SVT-AV1 fallback otherwise. Verifiable: `Tests/Contract/TestTranscodeShape.py`.
+C12. **TranscodeShape composes 5 collaborators via constructor.** ResolutionCalculator + OutputFilenameBuilder + CodecParameterAssembler + VideoFilterBuilder + MediaProbeAdapter, plus injectable audio seams (Resolver, Emitter, StreamProbe, CodecPolicy) that default to production instances. Audio emission runs through `AudioFilterEmitter.EmitTracks` (which reads `AudioComplianceRules` per encode); the pre-two-track `AudioCodecArgsBuilder` + `AudioFilterBuilder` legacy args are no longer present. NVENC dispatch via `ProfileSettings.UseNvidiaHardware=1`; SVT-AV1 fallback otherwise. Verifiable: `Tests/Contract/TestTranscodeShape.py`.
 
 ## Seams
 

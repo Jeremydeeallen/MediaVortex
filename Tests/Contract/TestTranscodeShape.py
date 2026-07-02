@@ -33,7 +33,6 @@ def _MakeShape():
         ResolutionCalculator=Resolution,
         OutputFilenameBuilder=Filename,
         CodecParameterAssembler=CodecAssembler,
-        AudioCodecArgsBuilder=AudioCodec,
         VideoFilterBuilder=VideoFilter,
         MediaProbeAdapter=Probe,
         Resolver=Resolver,
