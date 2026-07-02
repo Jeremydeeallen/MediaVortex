@@ -2,6 +2,39 @@
 
 ## Active
 
+### transcode-queue
+
+### [BUG-0078] AddJobToQueue silently rejects ForceAdd when latest attempt VMAF>=80; API returns Success=True with no queue row
+**Date:** 2026-07-02 | **Area:** transcode-queue / admission
+
+**What breaks:** `QueueManagementBusinessService.AddJobToQueue` walks two admission gates in sequence:
+
+1. Marginal-savings gate (lines 2011-2019) -- `if not ForceAdd:` skips the gate on force.
+2. RetranscodeDecider VMAF gate (lines 2022-2031) -- runs UNCONDITIONALLY. When VMAF>=80 on the latest attempt, returns `{"Success": True, "Skipped": True}` **without inserting a queue row**.
+
+`ForceAdd` was designed to bypass gate 1 but never got wired through gate 2. The API caller (`QueueAdmissionAppService`) then sees `Success=True` and emits the misleading `Admit one: media_file=<id> bucket=Transcode status=queued` log line even though nothing was queued. The GUI shows a success toast, the queue tab shows nothing.
+
+**Repro:** MediaFileId 691618 (Love Island - S01E34 - Episode 34 Live Final WEBDL-1080p.mkv, VMAF=87.44 on latest attempt). Confirmed twice today at 17:33:50 and 17:34:51 UTC, then again at 18:43:16 and 18:43:38 UTC. Each attempt: `Force adding ...` WARN followed 3-5 ms later by `Quality already acceptable (VMAF >= 80), skipping retranscode for ...` INFO. Zero rows in `TranscodeQueue` for MediaFileId=691618 across the whole window.
+
+**Evidence:**
+- `Features/TranscodeQueue/QueueManagementBusinessService.py:2028` -- `if not shouldRetranscode:` returns without insert regardless of ForceAdd.
+- `Features/WorkBucket/Services/QueueAdmissionAppService.py:29` -- maps `Result.get('Success')` to `Status='queued'` without checking `Skipped`.
+- `SELECT COUNT(*) FROM transcodequeue WHERE mediafileid=691618;` returns 0.
+- `SELECT COUNT(*) FROM logs WHERE message ILIKE '%Force adding%691618%' AND timestamp > '2026-07-02 17:00'` returns 4.
+
+**First place to look:**
+- `Features/TranscodeQueue/QueueManagementBusinessService.py:2022-2031` -- the fix.
+- `Features/WorkBucket/Services/QueueAdmissionAppService.py:25-38` -- the misleading log.
+- `Features/QualityTesting/Disposition/RetranscodeDecider.py` -- the gate itself; consider whether it should accept a `ForceAdd` kwarg instead of the caller wrapping the call.
+
+**Proposed criterion:** "When `AddJobToQueue` is invoked with `ForceAdd=True` against a MediaFile whose latest TranscodeAttempt has `VMAF >= 80`, the function inserts a `TranscodeQueue` row and returns `{Success: True, Skipped: False}`. `QueueAdmissionAppService.AdmitOne` logs `status=queued` only when a row was actually inserted; when `Skipped=True` it logs `status=skipped` with the reason from `Result.get('Message')`."
+
+**Scope note:** `QueueManagementBusinessService.py` has 10 colocated feature/flow docs. The fix directive must read the doc-preread stack per R1, not skirt it.
+
+**Fix with:** `/t BUG-0078`.
+
+---
+
 ### stuck-detection
 
 ### [BUG-0075] StuckJobDetectionService marks Success=TRUE on frozen ffmpeg kills; downstream sees a "successful" attempt with a frozen-error message
