@@ -73,7 +73,16 @@ class TranscodeShape(EncodeShape):
             SourceStreams = self.StreamProbe.Probe(CommandData.get('InputPath')) or None
             DemucsPremixPath = CommandData.get('DemucsPremixPath')
             VocalsRmsDbfs = CommandData.get('VocalsRmsDbfs')
-            Blocks = self.Emitter.EmitTracks(MediaFile, Policy, AudioStreams=SourceStreams, DemucsPremixPath=DemucsPremixPath, VocalsRmsDbfs=VocalsRmsDbfs) if Policy else []
+            PremixMeasuredI = CommandData.get('PremixMeasuredI')
+            PremixMeasuredLra = CommandData.get('PremixMeasuredLra')
+            PremixMeasuredTp = CommandData.get('PremixMeasuredTp')
+            PremixMeasuredThresh = CommandData.get('PremixMeasuredThresh')
+            Blocks = self.Emitter.EmitTracks(
+                MediaFile, Policy, AudioStreams=SourceStreams,
+                DemucsPremixPath=DemucsPremixPath, VocalsRmsDbfs=VocalsRmsDbfs,
+                PremixMeasuredI=PremixMeasuredI, PremixMeasuredLra=PremixMeasuredLra,
+                PremixMeasuredTp=PremixMeasuredTp, PremixMeasuredThresh=PremixMeasuredThresh,
+            ) if Policy else []
             for Block in Blocks:
                 if Block.InputArgs:
                     Quoted = []

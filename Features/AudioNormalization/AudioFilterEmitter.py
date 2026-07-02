@@ -80,12 +80,21 @@ def _BuildTrack0Chain(MediaFile, TargetLufs, TargetTruePeakDbtp, SampleLimitHead
 
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C8
-def _BuildDialogBoostLoudnormFilter(TargetLufs, TargetLra, TargetTruePeakDbtp):
-    return (
+def _BuildDialogBoostLoudnormFilter(TargetLufs, TargetLra, TargetTruePeakDbtp, MeasuredI=None, MeasuredLra=None, MeasuredTp=None, MeasuredThresh=None):
+    Base = (
         f"loudnorm=I={float(TargetLufs):.2f}"
         f":LRA={float(TargetLra):.2f}"
         f":TP={float(TargetTruePeakDbtp):.2f}"
     )
+    if MeasuredI is not None and MeasuredLra is not None and MeasuredTp is not None and MeasuredThresh is not None:
+        Base += (
+            f":measured_I={float(MeasuredI):.2f}"
+            f":measured_LRA={float(MeasuredLra):.2f}"
+            f":measured_TP={float(MeasuredTp):.2f}"
+            f":measured_thresh={float(MeasuredThresh):.2f}"
+            f":linear=true"
+        )
+    return Base
 
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C8
@@ -98,7 +107,7 @@ class AudioFilterEmitter:
         self._RulesRepo = RulesRepo or AudioComplianceRulesRepository()
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C8
-    def EmitTracks(self, MediaFile, Policy, AudioStreams=None, LibraryDefault=None, DemucsPremixPath=None, VocalsRmsDbfs=None, Rules=None):
+    def EmitTracks(self, MediaFile, Policy, AudioStreams=None, LibraryDefault=None, DemucsPremixPath=None, VocalsRmsDbfs=None, Rules=None, PremixMeasuredI=None, PremixMeasuredLra=None, PremixMeasuredTp=None, PremixMeasuredThresh=None):
         R = Rules or self._RulesRepo.GetRules()
         if AudioStreams is None:
             AudioStreams = [{'index': 0, 'tags': {}, 'disposition': {}}]
@@ -124,7 +133,7 @@ class AudioFilterEmitter:
             Blocks.append(self._BuildOriginalBlock(MediaFile, Stream, Language, StreamIdx, OutputIndex, OriginalIsDefault, R))
             OutputIndex += 1
             if EmitDialogBoost and IsDefaultLanguage:
-                Blocks.append(self._BuildDialogBoostBlock(Language, OutputIndex, DemucsPremixPath, R))
+                Blocks.append(self._BuildDialogBoostBlock(Language, OutputIndex, DemucsPremixPath, R, PremixMeasuredI, PremixMeasuredLra, PremixMeasuredTp, PremixMeasuredThresh))
                 OutputIndex += 1
         return Blocks
 
@@ -161,7 +170,7 @@ class AudioFilterEmitter:
         return Block
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C8
-    def _BuildDialogBoostBlock(self, Language, OutputIndex, DemucsPremixPath, R):
+    def _BuildDialogBoostBlock(self, Language, OutputIndex, DemucsPremixPath, R, MeasuredI=None, MeasuredLra=None, MeasuredTp=None, MeasuredThresh=None):
         TargetTp = float(R['TargetTruePeakDbtp'])
         EffectiveTp = TargetTp - float(R['SampleLimitHeadroomDb'])
         SampleLimit = _DbToLinear(EffectiveTp)
@@ -174,7 +183,7 @@ class AudioFilterEmitter:
             f'-b:a:{OutputIndex}', f"{int(R['Track1StereoBitrateKbps'])}k",
             f'-ar:{OutputIndex}', '48000',
         ]
-        Filter = _BuildDialogBoostLoudnormFilter(R['DialogBoostTargetLufs'], R['DialogBoostTargetLra'], EffectiveTp) + f",alimiter=level_in=1:level_out=1:limit={SampleLimit:.4f}:attack=1:release=50:level=false"
+        Filter = _BuildDialogBoostLoudnormFilter(R['DialogBoostTargetLufs'], R['DialogBoostTargetLra'], EffectiveTp, MeasuredI, MeasuredLra, MeasuredTp, MeasuredThresh) + f",alimiter=level_in=1:level_out=1:limit={SampleLimit:.4f}:attack=1:release=50:level=false"
         Block.FilterArgs = [f'-filter:a:{OutputIndex}', Filter]
         Block.MetadataArgs = self._BuildMetadataArgs(Language, 'Dialog Boost', OutputIndex)
         Block.DispositionArgs = [f'-disposition:a:{OutputIndex}', '1']

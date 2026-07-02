@@ -1,5 +1,7 @@
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
+import json
 import os
+import re
 import subprocess
 import sys
 
@@ -130,6 +132,36 @@ class DemucsVocalIsolationService:
             )
         IsolationResult.PremixWavPath = OutputWavPath
         return IsolationResult
+
+    # directive: audio-dialog-boost-real | # see audio-normalization.C14
+    def MeasurePremixLoudnorm(self, WavPath, TargetLufs, TargetLra, TargetTruePeakDbtp):
+        """Measure premix loudness with ffmpeg's loudnorm analysis pass; return (I, LRA, TP, thresh) or all-None on parse failure."""
+        Filter = f"loudnorm=I={float(TargetLufs):.2f}:LRA={float(TargetLra):.2f}:TP={float(TargetTruePeakDbtp):.2f}:print_format=json"
+        Result = subprocess.run(
+            [self.FfmpegPath, "-hide_banner", "-nostats", "-i", WavPath, "-af", Filter, "-f", "null", "-"],
+            capture_output=True, text=True, timeout=900,
+        )
+        Match = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", Result.stderr, re.DOTALL)
+        if not Match:
+            LoggingService.LogWarning(
+                f"Premix loudnorm measurement returned no JSON block; falling back to dynamic loudnorm. stderr tail={Result.stderr[-400:]}",
+                "DemucsVocalIsolationService", "MeasurePremixLoudnorm",
+            )
+            return None, None, None, None
+        try:
+            Payload = json.loads(Match.group(0))
+            return (
+                float(Payload["input_i"]),
+                float(Payload["input_lra"]),
+                float(Payload["input_tp"]),
+                float(Payload["input_thresh"]),
+            )
+        except (ValueError, KeyError) as Ex:
+            LoggingService.LogWarning(
+                f"Premix loudnorm JSON parse failed ({Ex}); falling back to dynamic loudnorm. block={Match.group(0)[:400]}",
+                "DemucsVocalIsolationService", "MeasurePremixLoudnorm",
+            )
+            return None, None, None, None
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
     def _MeasureWavRmsDbfs(self, WavPath):

@@ -42,9 +42,21 @@ class PreEncodeAudioPipeline:
                 DynaudnormFrameLen=R['PremixDynaudnormFrameLen'],
                 DynaudnormGaussSize=R['PremixDynaudnormGaussSize'],
             )
+            self._Report('demucs.measure', 0.0, 'Measuring premix loudness for two-pass linear loudnorm')
+            EffectiveTp = float(R['TargetTruePeakDbtp']) - float(R['SampleLimitHeadroomDb'])
+            PremixI, PremixLra, PremixTp, PremixThresh = self.DemucsService.MeasurePremixLoudnorm(
+                PremixWavPath,
+                TargetLufs=R['DialogBoostTargetLufs'],
+                TargetLra=R['DialogBoostTargetLra'],
+                TargetTruePeakDbtp=EffectiveTp,
+            )
             return {
                 'DemucsPremixPath': PremixWavPath,
                 'VocalsRmsDbfs': Isolation.VocalsRmsDbfs,
+                'PremixMeasuredI': PremixI,
+                'PremixMeasuredLra': PremixLra,
+                'PremixMeasuredTp': PremixTp,
+                'PremixMeasuredThresh': PremixThresh,
                 'ScratchDir': ScratchDir,
             }
         except Exception as Ex:

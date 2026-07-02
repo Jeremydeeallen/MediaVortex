@@ -27,6 +27,10 @@ class TranscodeJobStrategy(ITranscodeJobStrategy):
         if PreResult:
             TranscodingSettings['DemucsPremixPath'] = PreResult.get('DemucsPremixPath')
             TranscodingSettings['VocalsRmsDbfs'] = PreResult.get('VocalsRmsDbfs')
+            TranscodingSettings['PremixMeasuredI'] = PreResult.get('PremixMeasuredI')
+            TranscodingSettings['PremixMeasuredLra'] = PreResult.get('PremixMeasuredLra')
+            TranscodingSettings['PremixMeasuredTp'] = PreResult.get('PremixMeasuredTp')
+            TranscodingSettings['PremixMeasuredThresh'] = PreResult.get('PremixMeasuredThresh')
             self._LastScratchDir = PreResult.get('ScratchDir')
         CommandDict = QueueService.BuildTranscodeCommand(Job, MediaFile, TranscodingSettings)
         if not CommandDict:
