@@ -2,6 +2,63 @@
 
 ## Active
 
+### disposition
+
+### [BUG-0079] Requeue disposition never enqueues a new TranscodeQueue row; .inprogress orphans on disk
+**Date:** 2026-07-02 | **Area:** disposition / transcode-lifecycle
+
+**What breaks:** When VMAF is below the auto-replace threshold, `DispositionDispatcher` computes `Requeue (Reason=VmafBelowMin)` and logs it, but no new `TranscodeQueue` row is inserted anywhere in the pipeline. The rejected `-mv.mp4.inprogress` output stays on disk, no adjusted-CRF re-encode is scheduled, and /Operations doesn't render the state (it's neither RecentSuccess nor RecentFailure per Success=TRUE + PassesThreshold=FALSE).
+
+**Repro:** MediaFileId 691647 (Love Island USA S08E17), attempt 40985 on I9-2024, 2026-07-02:
+- Transcode: 3.75 GB source -> 482 MB output, Success=TRUE at 18:38:07 UTC.
+- QT: VMAF=84.72, PassesThreshold=FALSE at 19:16:16 UTC.
+- `DispositionDispatcher` log: `Disposition for TranscodeAttempt 40985: Requeue (Reason=VmafBelowMin)`.
+- `SELECT COUNT(*) FROM transcodequeue WHERE mediafileid=691647;` returns 0.
+- `.inprogress` file: `T:\Love Island USA\Season 8\Love Island USA - S08E17 - Episode 17 WEBDL-720p-mv.mp4.inprogress` (482 MB, mtime 12:37 MDT), still present, orphaned.
+
+**First place to look:**
+- `Features/QualityTesting/Disposition/DispositionDispatcher.py` -- decision is computed but the write-side may return silently.
+- `Features/TranscodeJob/Adjustments/AdjustmentRegistry.py` (CQ adjuster) + `RetranscodeDecider` -- these compute the adjusted CRF for the re-queue; the dispatcher may not be calling them.
+- `Features/TranscodeQueue/QueueManagementBusinessService.py::CreateQueueItem*` -- the intended insert path.
+- `Features/Activity/ActivityController.py` + `/Operations` templates -- add a third bucket for "Requeue-pending" / "quality-rejected" attempts.
+
+**Proposed criterion:** "Every TranscodeAttempts row with `Success=TRUE, QualityTestCompleted=TRUE, PassesThreshold=FALSE` and a Requeue disposition results in either (a) a new `TranscodeQueue` row created with `AdjustmentRegistry`-computed CRF within 5 seconds of the disposition write, or (b) a `MediaFiles.AdmissionDeferReason='requeue_refused_<reason>'` set with the refusal reason logged. `.inprogress` outputs from Requeue'd attempts are deleted (or explicitly retained under an audit table). /Operations renders a `Quality Rejected` card counting these attempts."
+
+**Fix with:** `/t BUG-0079`.
+
+---
+
+### quality-testing
+
+### [BUG-0080] GenerateComparisonStills raises `NameError: name 'Ctx' is not defined` on every call
+**Date:** 2026-07-02 | **Area:** quality-testing / stills
+
+**What breaks:** `QualityTestingBusinessService.GenerateComparisonStills` throws `NameError: name 'Ctx' is not defined` on every timestamp it tries to capture. All 4 default timestamps (ts=60/300/600/900) fail, `Auto-captured 0/4 stills for attempt ... (policy=All)` is logged. Operator loses the visual comparison surface the disposition review UI depends on.
+
+**Repro:** attempt 40985 (Love Island USA S08E17, MediaFileId 691647), 2026-07-02 19:16:16 UTC:
+```
+ERROR   GenerateComparisonStills failed for attempt 40985 at ts=60.0: name 'Ctx' is not defined
+WARNING Still capture at ts=60.0 for attempt 40985 failed: Exception: name 'Ctx' is not defined
+ERROR   GenerateComparisonStills failed for attempt 40985 at ts=300.0: name 'Ctx' is not defined
+WARNING Still capture at ts=300.0 for attempt 40985 failed: Exception: name 'Ctx' is not defined
+ERROR   GenerateComparisonStills failed for attempt 40985 at ts=600.0: name 'Ctx' is not defined
+WARNING Still capture at ts=600.0 for attempt 40985 failed: Exception: name 'Ctx' is not defined
+ERROR   GenerateComparisonStills failed for attempt 40985 at ts=900.0: name 'Ctx' is not defined
+WARNING Still capture at ts=900.0 for attempt 40985 failed: Exception: name 'Ctx' is not defined
+INFO    Auto-captured 0/4 stills for attempt 40985 (policy=All)
+```
+
+**First place to look:**
+- `Features/QualityTesting/QualityTestingBusinessService.py::GenerateComparisonStills` -- grep for `Ctx` in the body and identify the intended binding (likely a `with subprocess.Popen(...) as Ctx:` block that was refactored, or a `Ctx = {...}` context-dict that got removed).
+- Recent git blame on the function -- the bug looks like a partial rename or a dropped import.
+- Verify by re-running QT against attempt 40985 after the fix -- expect `Auto-captured 4/4 stills`.
+
+**Proposed criterion:** "GenerateComparisonStills produces N/N stills for every attempt where source + encoded output both exist and are readable. Contract test at `Tests/Contract/TestGenerateComparisonStills.py` exercises the ts=60/300/600/900 default set against a synthetic fixture; observed via `SELECT COUNT(*) FROM logs WHERE message LIKE 'Auto-captured %/4 stills%' AND timestamp > '<deploy_time>' AND message NOT LIKE 'Auto-captured 4/4%'` returning 0 in 24h post-deploy."
+
+**Fix with:** `/t BUG-0080`.
+
+---
+
 ### transcode-queue
 
 ### [BUG-0078] AddJobToQueue silently rejects ForceAdd when latest attempt VMAF>=80; API returns Success=True with no queue row
