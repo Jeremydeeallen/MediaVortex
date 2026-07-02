@@ -69,6 +69,16 @@ class QualityTestingBusinessService:
 
 
     # directive: nvenc-rate-anchored-remediation
+    @staticmethod
+    def _BuildVmafFilterChain(SourceFps, TargetWidth, TargetHeight, XmlLogPath, NThreads=4):
+        """Single source of truth for the libvmaf ffmpeg filter chain. Both post-transcode VMAF (BuildVMAFCommand) and Mode A pre-flight VMAF (RunLocalVmafForAttempt) build the exact same chain. Layout: fps lock, PTS reset, lanczos scale to target with TV color range pinning, 10-bit precision, libvmaf n_threads."""
+        CompareScale = f"scale={TargetWidth}:{TargetHeight}:flags=lanczos:in_range=auto:out_range=tv,"
+        return (
+            f"[0:v]fps={SourceFps},setpts=PTS-STARTPTS,{CompareScale}format=yuv420p10le[dist];"
+            f"[1:v]fps={SourceFps},setpts=PTS-STARTPTS,{CompareScale}format=yuv420p10le[ref];"
+            f"[dist][ref]libvmaf=log_fmt=xml:log_path={XmlLogPath}:n_threads={NThreads}"
+        )
+
     def _CleanupTemporaryFilePathsForVmafFailure(self, TranscodeAttemptId: int) -> None:
         try:
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(
@@ -280,12 +290,7 @@ class QualityTestingBusinessService:
                     SourceFps = float(FpsRaw) if FpsRaw else 24
             except Exception:
                 SourceFps = 24
-            reference_scale = f"scale=w={target_width}:h={target_height},"
-            vmaf_filter = (
-                f"[0:v]format=yuv420p10le,fps=fps={SourceFps},setpts=PTS-STARTPTS[dist];"
-                f"[1:v]{reference_scale}format=yuv420p10le,fps=fps={SourceFps},setpts=PTS-STARTPTS[ref];"
-                f"[dist][ref]libvmaf=log_fmt=xml:log_path=vmaf_output.xml:n_threads=4"
-            )
+            vmaf_filter = self._BuildVmafFilterChain(SourceFps, target_width, target_height, "vmaf_output.xml")
             if original_resolution == transcoded_resolution:
                 LoggingService.LogInfo(f"VMAF compare at native {target_width}x{target_height} (resolutions match)", "QualityTestingBusinessService", "BuildVMAFCommand")
             else:
@@ -424,13 +429,8 @@ class QualityTestingBusinessService:
                     SourceFps = float(FpsRaw) if FpsRaw else 24
             except Exception:
                 SourceFps = 24
-            ReferenceScale = f"scale=w={TargetWidth}:h={TargetHeight},"
             XmlPath = f"vmaf_modea_{TranscodeAttemptId}.xml"
-            VmafFilter = (
-                f"[0:v]format=yuv420p10le,fps=fps={SourceFps},setpts=PTS-STARTPTS[dist];"
-                f"[1:v]{ReferenceScale}format=yuv420p10le,fps=fps={SourceFps},setpts=PTS-STARTPTS[ref];"
-                f"[dist][ref]libvmaf=log_fmt=xml:log_path={XmlPath}:n_threads=4"
-            )
+            VmafFilter = self._BuildVmafFilterChain(SourceFps, TargetWidth, TargetHeight, XmlPath)
             Command = f'"{FFmpegBinary}" -i "{LocalOutputPath}" -i "{LocalSourcePath}" -lavfi "{VmafFilter}" -f null -'
             LoggingService.LogInfo(f"Mode A VMAF for attempt {TranscodeAttemptId}: {Command}", "QualityTestingBusinessService", "RunLocalVmafForAttempt")
             Result = subprocess.run(Command, shell=True, capture_output=True, text=True)
