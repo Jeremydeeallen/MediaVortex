@@ -22,7 +22,7 @@ class RemuxShape(EncodeShape):
         self.AudioCodecArgsBuilder = AudioCodecArgsBuilder
         self.MediaProbeAdapter = MediaProbeAdapter
         self.Resolver = Resolver or AudioPolicyResolver()
-        self.Emitter = Emitter or AudioFilterEmitter(ProfileResolver=EffectiveProfileResolver())
+        self.Emitter = Emitter or AudioFilterEmitter()
         self.StreamProbe = StreamProbe or AudioStreamProbe()
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C13
