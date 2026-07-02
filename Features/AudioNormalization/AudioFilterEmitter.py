@@ -2,6 +2,7 @@
 from typing import List, Optional
 
 from Features.AudioNormalization.AudioDispositionResolver import AudioDispositionResolver
+from Features.AudioNormalization.AudioStrategyResult import AudioPolicyUnresolvedError
 from Features.AudioNormalization.LanguageDetector import LanguageDetector
 from Features.AudioNormalization.Repositories.AudioComplianceRulesRepository import AudioComplianceRulesRepository
 
@@ -190,10 +191,27 @@ class AudioFilterEmitter:
     # directive: audio-dialog-boost-real | # see audio-normalization.C8
     def _ResolveSourceChannels(self, MediaFile):
         Channels = _GetField(MediaFile, 'AudioChannels')
+        MediaFileId = _GetField(MediaFile, 'Id')
+        if Channels is None or (isinstance(Channels, str) and not Channels.strip()):
+            raise AudioPolicyUnresolvedError(
+                'AudioChannelsMissing',
+                f'MediaFile.Id={MediaFileId} has AudioChannels=NULL; cannot emit audio without known source channel layout. Route to operator review; trigger re-probe. See BUG-0074.',
+                None,
+            )
         try:
-            ChannelsInt = int(Channels) if Channels else 2
+            ChannelsInt = int(Channels)
         except (TypeError, ValueError):
-            ChannelsInt = 2
+            raise AudioPolicyUnresolvedError(
+                'AudioChannelsInvalid',
+                f'MediaFile.Id={MediaFileId} has AudioChannels={Channels!r} (unparseable). See BUG-0074.',
+                None,
+            )
+        if ChannelsInt <= 0:
+            raise AudioPolicyUnresolvedError(
+                'AudioChannelsInvalid',
+                f'MediaFile.Id={MediaFileId} has AudioChannels={ChannelsInt} (non-positive). See BUG-0074.',
+                None,
+            )
         return max(1, min(8, ChannelsInt))
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C8
