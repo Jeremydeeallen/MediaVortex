@@ -7,6 +7,7 @@ from Core.Database.DatabaseService import DatabaseService
 RULES_SELECT = (
     "SELECT Id, TargetIntegratedLufs, TargetTruePeakDbtp, AcceptableAudioCodecsCsv, "
     "DialogBoostTargetLufs, DialogBoostTargetLra, SampleLimitHeadroomDb, "
+    "Track0Codec, Track1Codec, "
     "Track0BitratePerChannelKbps, Track0MinPerChannelKbps, "
     "Track1StereoBitrateKbps, Track1VocalsRmsFallbackDbfs, "
     "VocalsBoostDb, InstrumentalAttenDb, "
@@ -20,6 +21,7 @@ RULES_UPDATE = (
     "UPDATE AudioComplianceRules SET "
     "TargetIntegratedLufs=%s, TargetTruePeakDbtp=%s, AcceptableAudioCodecsCsv=%s, "
     "DialogBoostTargetLufs=%s, DialogBoostTargetLra=%s, SampleLimitHeadroomDb=%s, "
+    "Track0Codec=%s, Track1Codec=%s, "
     "Track0BitratePerChannelKbps=%s, Track0MinPerChannelKbps=%s, "
     "Track1StereoBitrateKbps=%s, Track1VocalsRmsFallbackDbfs=%s, "
     "VocalsBoostDb=%s, InstrumentalAttenDb=%s, "
@@ -32,6 +34,7 @@ RULES_UPDATE = (
 RULE_FIELDS = [
     'TargetIntegratedLufs', 'TargetTruePeakDbtp', 'AcceptableAudioCodecsCsv',
     'DialogBoostTargetLufs', 'DialogBoostTargetLra', 'SampleLimitHeadroomDb',
+    'Track0Codec', 'Track1Codec',
     'Track0BitratePerChannelKbps', 'Track0MinPerChannelKbps',
     'Track1StereoBitrateKbps', 'Track1VocalsRmsFallbackDbfs',
     'VocalsBoostDb', 'InstrumentalAttenDb',
@@ -61,6 +64,8 @@ class AudioComplianceRulesRepository:
             'DialogBoostTargetLufs': float(R.get('DialogBoostTargetLufs') if 'DialogBoostTargetLufs' in R else R.get('dialogboosttargetlufs')),
             'DialogBoostTargetLra': float(R.get('DialogBoostTargetLra') if 'DialogBoostTargetLra' in R else R.get('dialogboosttargetlra')),
             'SampleLimitHeadroomDb': float(R.get('SampleLimitHeadroomDb') if 'SampleLimitHeadroomDb' in R else R.get('samplelimitheadroomdb')),
+            'Track0Codec': str(R.get('Track0Codec') or R.get('track0codec') or 'aac').strip().lower(),
+            'Track1Codec': str(R.get('Track1Codec') or R.get('track1codec') or 'aac').strip().lower(),
             'Track0BitratePerChannelKbps': int(R.get('Track0BitratePerChannelKbps') if 'Track0BitratePerChannelKbps' in R else R.get('track0bitrateperchannelkbps')),
             'Track0MinPerChannelKbps': int(R.get('Track0MinPerChannelKbps') if 'Track0MinPerChannelKbps' in R else R.get('track0minperchannelkbps')),
             'Track1StereoBitrateKbps': int(R.get('Track1StereoBitrateKbps') if 'Track1StereoBitrateKbps' in R else R.get('track1stereobitratekbps')),
@@ -85,6 +90,8 @@ class AudioComplianceRulesRepository:
                 float(R['DialogBoostTargetLufs']),
                 float(R['DialogBoostTargetLra']),
                 float(R['SampleLimitHeadroomDb']),
+                str(R['Track0Codec']).strip().lower(),
+                str(R['Track1Codec']).strip().lower(),
                 int(R['Track0BitratePerChannelKbps']),
                 int(R['Track0MinPerChannelKbps']),
                 int(R['Track1StereoBitrateKbps']),

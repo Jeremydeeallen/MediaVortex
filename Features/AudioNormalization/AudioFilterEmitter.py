@@ -12,6 +12,12 @@ def _DbToLinear(Db):
 
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C8
+def _ResolveFfmpegCodec(CodecName):
+    Normalized = str(CodecName or 'aac').strip().lower()
+    return {'opus': 'libopus', 'aac': 'aac', 'libopus': 'libopus'}.get(Normalized, 'aac')
+
+
+# directive: audio-dialog-boost-real | # see audio-normalization.C8
 class TrackBlock:
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C8
@@ -135,14 +141,19 @@ class AudioFilterEmitter:
         Bitrate = max(int(R['Track0BitratePerChannelKbps']), int(R['Track0MinPerChannelKbps'])) * Channels
         TargetLufs = float(R['TargetIntegratedLufs'])
         TargetTp = float(R['TargetTruePeakDbtp'])
+        CodecName = _ResolveFfmpegCodec(R.get('Track0Codec', 'aac'))
         Block = TrackBlock(Label='Original', Language=Language, Strategy='linear_loudnorm')
         Block.MapArgs = ['-map', f'0:a:{StreamIdx}']
         Block.CodecArgs = [
-            f'-c:a:{OutputIndex}', 'aac',
+            f'-c:a:{OutputIndex}', CodecName,
             f'-b:a:{OutputIndex}', f'{Bitrate}k',
             f'-ar:{OutputIndex}', '48000',
         ]
+        if CodecName == 'libopus' and Channels > 2:
+            Block.CodecArgs.extend([f'-mapping_family:a:{OutputIndex}', '1'])
         Filter = _BuildTrack0Chain(MediaFile, TargetLufs, TargetTp, float(R['SampleLimitHeadroomDb']))
+        if CodecName == 'libopus' and Channels > 2:
+            Filter = f"aformat=channel_layouts=5.1|7.1,{Filter}"
         Block.FilterArgs = [f'-filter:a:{OutputIndex}', Filter]
         Block.MetadataArgs = self._BuildMetadataArgs(Language, 'Original', OutputIndex)
         Block.DispositionArgs = [f'-disposition:a:{OutputIndex}', '1' if IsDefault else '0']
@@ -153,11 +164,12 @@ class AudioFilterEmitter:
         TargetTp = float(R['TargetTruePeakDbtp'])
         EffectiveTp = TargetTp - float(R['SampleLimitHeadroomDb'])
         SampleLimit = _DbToLinear(EffectiveTp)
+        CodecName = _ResolveFfmpegCodec(R.get('Track1Codec', 'aac'))
         Block = TrackBlock(Label='Dialog Boost', Language=Language, Strategy='demucs_boost')
         Block.InputArgs = ['-i', DemucsPremixPath]
         Block.MapArgs = ['-map', '1:a:0']
         Block.CodecArgs = [
-            f'-c:a:{OutputIndex}', 'aac',
+            f'-c:a:{OutputIndex}', CodecName,
             f'-b:a:{OutputIndex}', f"{int(R['Track1StereoBitrateKbps'])}k",
             f'-ar:{OutputIndex}', '48000',
         ]
@@ -170,9 +182,9 @@ class AudioFilterEmitter:
     # directive: audio-dialog-boost-real | # see audio-normalization.C8
     def _BuildMetadataArgs(self, Language, Label, OutputIndex):
         return [
-            f'-metadata:s:a:{OutputIndex}', f'language={Language}',
-            f'-metadata:s:a:{OutputIndex}', f'title={Label}',
-            f'-metadata:s:a:{OutputIndex}', f'handler_name={Label} ({Language})',
+            f'-metadata:s:a:{OutputIndex}', f'"language={Language}"',
+            f'-metadata:s:a:{OutputIndex}', f'"title={Label}"',
+            f'-metadata:s:a:{OutputIndex}', f'"handler_name={Label} ({Language})"',
         ]
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C8

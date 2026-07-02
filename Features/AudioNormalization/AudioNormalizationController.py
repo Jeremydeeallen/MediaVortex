@@ -278,6 +278,8 @@ class AudioNormalizationController:
                     'DialogBoostTargetLufs': float(Body['DialogBoostTargetLufs']),
                     'DialogBoostTargetLra': float(Body['DialogBoostTargetLra']),
                     'SampleLimitHeadroomDb': float(Body['SampleLimitHeadroomDb']),
+                    'Track0Codec': str(Body['Track0Codec']).strip().lower(),
+                    'Track1Codec': str(Body['Track1Codec']).strip().lower(),
                     'Track0BitratePerChannelKbps': int(Body['Track0BitratePerChannelKbps']),
                     'Track0MinPerChannelKbps': int(Body['Track0MinPerChannelKbps']),
                     'Track1StereoBitrateKbps': int(Body['Track1StereoBitrateKbps']),

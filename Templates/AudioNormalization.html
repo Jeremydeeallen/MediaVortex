@@ -52,14 +52,22 @@
             <div class="card-header"><strong>Track 0 -- Original (source-passthrough)</strong></div>
             <div class="card-body">
               <div class="mb-3">
-                <label class="form-label small mb-0" for="K_Track0BitratePerChannelKbps">AAC-LC kbps per channel</label>
+                <label class="form-label small mb-0" for="K_Track0Codec">Codec</label>
+                <select id="K_Track0Codec" class="form-select form-select-sm">
+                  <option value="opus">Opus (recommended -- ~40% smaller at same perceptual quality)</option>
+                  <option value="aac">AAC-LC (universal compatibility)</option>
+                </select>
+                <div class="form-text small">Opus outperforms AAC per-bit. Jellyfin server-transcodes for the ~8% of clients that can't native-decode Opus.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_Track0BitratePerChannelKbps">kbps per channel</label>
                 <input type="number" step="1" id="K_Track0BitratePerChannelKbps" class="form-control form-control-sm">
-                <div class="form-text small">AAC-LC bitrate per source channel. 64 kbps/ch = transparent on 5.1 content.</div>
+                <div class="form-text small">Bitrate per source channel. Opus: 48 k/ch transparent on 5.1. AAC-LC: 64 k/ch.</div>
               </div>
               <div class="mb-3">
                 <label class="form-label small mb-0" for="K_Track0MinPerChannelKbps">Minimum kbps per channel</label>
                 <input type="number" step="1" id="K_Track0MinPerChannelKbps" class="form-control form-control-sm">
-                <div class="form-text small">Floor. Below this AAC-LC loses transparency regardless of source complexity.</div>
+                <div class="form-text small">Floor below the per-channel target.</div>
               </div>
             </div>
           </div>
@@ -69,6 +77,14 @@
           <div class="card h-100">
             <div class="card-header"><strong>Track 1 -- Dialog Boost (Demucs)</strong></div>
             <div class="card-body">
+              <div class="mb-3">
+                <label class="form-label small mb-0" for="K_Track1Codec">Codec</label>
+                <select id="K_Track1Codec" class="form-select form-select-sm">
+                  <option value="opus">Opus (recommended -- 64k transparent for speech)</option>
+                  <option value="aac">AAC-LC (128k safer for compatibility)</option>
+                </select>
+                <div class="form-text small">Dialog Boost is speech-focused; Opus at 64 kbps stereo matches AAC 128 kbps quality.</div>
+              </div>
               <div class="mb-3">
                 <label class="form-label small mb-0" for="K_DialogBoostTargetLufs">Target integrated LUFS</label>
                 <input type="number" step="0.1" id="K_DialogBoostTargetLufs" class="form-control form-control-sm">
@@ -161,8 +177,8 @@
 <script>
 const KNOB_FIELDS = [
   'TargetIntegratedLufs', 'TargetTruePeakDbtp', 'SampleLimitHeadroomDb', 'AcceptableAudioCodecsCsv',
-  'Track0BitratePerChannelKbps', 'Track0MinPerChannelKbps',
-  'DialogBoostTargetLufs', 'DialogBoostTargetLra', 'Track1StereoBitrateKbps', 'Track1VocalsRmsFallbackDbfs',
+  'Track0Codec', 'Track0BitratePerChannelKbps', 'Track0MinPerChannelKbps',
+  'Track1Codec', 'DialogBoostTargetLufs', 'DialogBoostTargetLra', 'Track1StereoBitrateKbps', 'Track1VocalsRmsFallbackDbfs',
   'VocalsBoostDb', 'InstrumentalAttenDb',
   'PremixCompressorThreshold', 'PremixCompressorRatio', 'PremixCompressorMakeupDb',
   'PremixDynaudnormFrameLen', 'PremixDynaudnormGaussSize',
