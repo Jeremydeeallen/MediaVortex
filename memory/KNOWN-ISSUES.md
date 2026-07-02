@@ -2,6 +2,35 @@
 
 ## Active
 
+### stuck-detection
+
+### [BUG-0075] StuckJobDetectionService marks Success=TRUE on frozen ffmpeg kills; downstream sees a "successful" attempt with a frozen-error message
+**Date:** 2026-07-02 | **Area:** stuck-detection / transcode-lifecycle
+
+**What breaks:** When `StuckJobDetectionService` decides an ffmpeg process is frozen (no frame advance for N minutes) and kills it, the corresponding `TranscodeAttempts` row is updated with `Success=TRUE` even though `ErrorMessage` says the process was killed while frozen. Every downstream consumer that gates on `Success=TRUE` then behaves as if the encode succeeded:
+
+1. `QualityTestingQueue` gets a row enqueued for the killed attempt -> some worker claims it -> runs VMAF against a truncated `-mv.mp4.inprogress` output -> VMAF ffmpeg hangs against the incomplete file -> `qualitytestresults` row sits in `status='Running'` indefinitely (today's hung QT sweep found 30 such orphans across weeks).
+2. `TranscodeFiles` rollup marks the file as successfully transcoded when the output is incomplete or missing.
+3. `/Activity` failure surface hides the failure -- operator has no visible signal.
+4. Retry policy skips the file because "it already succeeded."
+
+**Repro:** `TranscodeAttempts.id=40967` (Breaking Bad S03E08 on wakko-worker-1, 2026-07-01): `Success=TRUE`, `ErrorMessage='FFmpeg process died unexpectedly - cleaned by StuckJobDetectionService: FFmpeg process is alive but frozen - no frame advance for 5.3 minutes (threshold...'`. QT queue row 1986 enqueued from this, claimed by larry-worker-4, hung for 18.6 h before manual sweep.
+
+**Evidence:**
+- `SELECT id, success, errormessage FROM transcodeattempts WHERE id=40967;` -> `success=TRUE, errormessage LIKE '%frozen%'`
+- `SELECT COUNT(*) FROM qualitytestresults WHERE status='Running';` returned 30 before today's sweep -- all orphans of the same shape.
+
+**First place to look:**
+- `Features/ServiceControl/StuckJobDetectionService.py` -- the freeze-cleanup path that updates `TranscodeAttempts`; find every place it writes `Success=` and default to `False` in the freeze / kill path.
+- `Features/QualityTesting/ProcessQualityTestQueueService.py` -- QT admission should refuse to enqueue when the driving `TranscodeAttempts` row's `ErrorMessage` contains the freeze marker, even if `Success=TRUE`.
+- `Features/QualityTesting/QualityTestingBusinessService.py` -- add a stale-Running sweep (age > N hours + no matching ActiveJob row) that flips to `Failed` with a diagnostic reason. Prevents future 18-hour orphans.
+
+**Proposed criterion:** "Every `TranscodeAttempts` row updated by `StuckJobDetectionService`'s freeze-cleanup path carries `Success=FALSE`. QT admission refuses to enqueue when the source `TranscodeAttempts` row's `ErrorMessage` matches the freeze marker regex. A background sweep marks any `qualitytestresults` row in `status='Running'` for > 60 minutes with no matching `activejobs` row as `status='Failed'` with `errormessage='orphan_prior_session'`."
+
+**Fix with:** `/t BUG-0075`.
+
+---
+
 ### audio-quality
 
 ### [BUG-0071] av1_qsv crashes mid-encode on Arc B580 + libmfx-gen 2.16 when `-extbrc` or `-look_ahead` are set
