@@ -30,6 +30,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0066 | active | audio-pipeline | Audio pipeline has silent fallback chains (LanguageDetector.Detect C11 + _PickDefaultLanguage L1) -- principle violation; silent fallbacks hide whether the primary rule fired; pipeline must fail loud or record which rule won so operator can verify the system is working; reshapes BUG-0065 fix path away from "add another fallback layer" | 2026-06-23
 - BUG-0069 | active | transcodequeue / subtitle-fix | PopulateQueueForSubtitleFix references undefined existingFilePaths (latent NameError); crashes on first admitted file via existingFilePaths.add -- dead-code residue from per-FilePath dedup design replaced by pair-based dedup | 2026-06-28
 - BUG-0070 | active | audio-quality | Detect transcoded files affected by deprecated 96 kbps audio bitrate -- robotic-sounding audio across library; need query/report from TranscodeAttempts.FfpmpegCommand or AudioBitrateKbps to flag re-transcode candidates | 2026-06-29
+- BUG-0072 | active | media-recovery | Delete + requeue Sonarr/Radarr for shows and movies destroyed by -ac 2 forced-downmix + b:a 96k under-bitrate + MaxAudioChannels=2 global; optional reality-TV exclusion; source .mkv already replaced so files must be re-acquired | 2026-07-01
 
 - BUG-0002 | active | file-replacement | Silent-output Remux MediaFiles purge | 2026-05-16
 - BUG-0007 | active | activity-page | Worker capability toggle no UI refresh | 2026-05-22

@@ -21,6 +21,33 @@
 
 **See also:** `Docs/superpowers/specs/2026-06-29-wakko-arc-b580-onboarding-design.md` Phase H findings.
 
+### [BUG-0072] Delete + requeue in Sonarr/Radarr for shows and movies destroyed by under-bitrated + downmixed transcode settings
+**Date:** 2026-07-01 | **Area:** media-recovery
+
+**What breaks:** Files transcoded under the deprecated policy stack (`-ac 2` forced-downmix + `-b:a 96k` bitrate cap + AudioNormalizationConfig.MaxAudioChannels=2 global) shipped audibly compromised: source 5.1 permanently collapsed to stereo (surround + LFE lost) AND the resulting stereo encoded at 96 kbps AAC-LC which is below transparency for orchestral / music / dynamic content. Damage is baked into the -mv.mp4 output; the source .mkv was replaced. Companion of BUG-0070 (which handles the detection query). This bug is about the recovery pipeline: (1) identify affected MediaFiles, (2) delete the destroyed -mv output on disk, (3) mark the file for re-acquisition, (4) trigger Sonarr/Radarr to re-fetch the source at the same or better quality, (5) let the freshly-scanned source flow through the current corrected pipeline (5.1 preserved on Track 0 + Dialog Boost on Track 1). Reality-TV shows may be excluded from the recovery set (operator judgement -- typically simple stereo mixes with low information density where the loss is smaller and re-download is bandwidth-expensive).
+
+**Repro:** Doctor Strange in the Multiverse of Madness (MediaFileId=620518) ffmpeg command captures the exact damage: `-c:a aac -ac 2 -b:a 96k`. Source was 5.1; output is stereo at 96 kbps AAC-LC = smeared cymbals, muddled orchestra, missing bass rumble.
+
+**Evidence:**
+- `TranscodeAttempts.FfpmpegCommand` for Doctor Strange (attempt 36887): `-c:a aac -ac 2 -b:a 96k` confirms both downmix + low bitrate applied.
+- `AudioNormalizationConfig.MaxAudioChannels = 2` at global scope means EVERY transcode through the affected window forced stereo downmix.
+- `MediaFiles.TranscodedByMediaVortex=TRUE` with the compromised profile identifies the affected population.
+
+**First place to look:**
+- Sonarr API: `/api/v3/episodefile/{id}` for DELETE, `/api/v3/episodefile/bulk` for bulk operations, `/api/v3/wanted/missing` after delete triggers re-search
+- Radarr API: same shape at `/api/v3/moviefile/{id}` + `/api/v3/movie/{id}/refresh`
+- `TranscodeAttempts.FfpmpegCommand` regex for `-ac 2` AND (`-b:a 96k` OR `-b:a 128k`) as the damage marker
+- `AudioNormalizationConfig` history if audit table exists, or grep git history for MaxAudioChannels changes
+- MediaFile Genre / library tag to identify reality-TV subset for optional exclusion
+
+**Proposed criterion:** "Provide a script/report + operator-triggered recovery flow that (1) enumerates every MediaFileId whose latest FileReplaced attempt was emitted through the `-ac 2 + b:a <=128k` damage window, (2) supports optional reality-TV exclusion by genre or library tag, (3) issues Sonarr/Radarr delete + re-search for each affected file, (4) verifies the re-download completes and the new file re-enters the current corrected pipeline."
+
+**Out of scope for /b:** feature-doc criterion add + implementation of Sonarr/Radarr client + reality-TV classifier -- lands with `/t BUG-0072`.
+
+**Fix with:** `/t BUG-0072`.
+
+---
+
 ### [BUG-0070] Detect transcoded files affected by deprecated 96 kbps audio bitrate -- "robotic" audio across the library
 **Date:** 2026-06-29 | **Area:** audio-quality
 
