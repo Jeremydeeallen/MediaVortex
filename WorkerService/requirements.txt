@@ -1,0 +1,2 @@
+# see audio-normalization.C35 -- worker venv MUST have demucs; root requirements is inherited.
+-r ../requirements.txt

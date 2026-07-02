@@ -57,10 +57,19 @@ class TranscodeJobStrategy(ITranscodeJobStrategy):
             )
             return None
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C14
+    # directive: audio-dialog-boost-real | # see audio-normalization.C34
     def _BuildDefaultPipeline(self, Context):
         FfmpegPath = Context.get('FFmpegPath')
         if not FfmpegPath:
             return None
-        self.PreEncodeAudio = PreEncodeAudioPipeline(FfmpegPath=FfmpegPath, PythonExe=sys.executable)
+        QueueService = Context.get('QueueService')
+        AttemptId = Context.get('TranscodeAttemptId')
+        Reporter = None
+        if QueueService and AttemptId:
+            def Reporter(Phase, Percent, Info):
+                try:
+                    QueueService.UpdateTranscodeProgress(AttemptId, Phase, Percent, Info)
+                except Exception:
+                    pass
+        self.PreEncodeAudio = PreEncodeAudioPipeline(FfmpegPath=FfmpegPath, PythonExe=sys.executable, ProgressReporter=Reporter)
         return self.PreEncodeAudio

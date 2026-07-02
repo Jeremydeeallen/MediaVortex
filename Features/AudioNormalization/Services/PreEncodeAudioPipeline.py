@@ -13,20 +13,24 @@ from Features.AudioNormalization.Services.DemucsVocalIsolationService import Dem
 class PreEncodeAudioPipeline:
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
-    def __init__(self, FfmpegPath, PythonExe, DemucsService=None, ScratchRoot=None, RulesRepo=None):
+    def __init__(self, FfmpegPath, PythonExe, DemucsService=None, ScratchRoot=None, RulesRepo=None, ProgressReporter=None):
         self.FfmpegPath = FfmpegPath
         self.PythonExe = PythonExe
         self.DemucsService = DemucsService or DemucsVocalIsolationService(FfmpegPath=FfmpegPath, PythonExe=PythonExe)
         self.ScratchRoot = ScratchRoot or tempfile.gettempdir()
         self._RulesRepo = RulesRepo or AudioComplianceRulesRepository()
+        self._Report = ProgressReporter or (lambda Phase, Percent, Info: None)
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C14
+    # directive: audio-dialog-boost-real | # see audio-normalization.C34
     def Run(self, SourceFilePath, JobId):
         ScratchDir = LocalJoin(self.ScratchRoot, f"mv_audio_{JobId}")
         try:
             R = self._RulesRepo.GetRules()
+            self._Report('demucs.downmix', 0.0, 'Extracting stereo downmix for Demucs')
             DownmixWavPath = self._ExtractStereoDownmix(SourceFilePath, ScratchDir)
+            self._Report('demucs.isolate', 0.0, f'Isolating vocals ({self.DemucsService.ModelName} on {self.DemucsService.Device})')
             Isolation = self.DemucsService.IsolateVocals(DownmixWavPath, ScratchDir)
+            self._Report('demucs.premix', 0.0, 'Mixing boosted vocals + attenuated instrumental')
             PremixWavPath = LocalJoin(ScratchDir, "dialog_boost_premix.wav")
             self.DemucsService.MixBoostedPremix(
                 Isolation, PremixWavPath,

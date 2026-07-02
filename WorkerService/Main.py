@@ -35,6 +35,26 @@ from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepos
 from WorkerService.WorkerStateReporter import WorkerStateReporter
 
 
+# directive: audio-dialog-boost-real | # see audio-normalization.C35
+def _AssertDemucsImportable():
+    try:
+        import demucs  # noqa: F401
+    except ImportError as Ex:
+        sys.stderr.write(
+            f"FATAL: 'demucs' not importable by {sys.executable}.\n"
+            "Dialog Boost pipeline cannot run without it. Install into the "
+            "worker venv and relaunch:\n"
+            "  WorkerService\\venv\\Scripts\\python.exe -m pip install -r requirements.txt\n"
+            "Then launch the worker via the venv python, NOT bare `py`:\n"
+            "  WorkerService\\venv\\Scripts\\python.exe WorkerService\\Main.py\n"
+            f"Root cause: {Ex}\n"
+        )
+        sys.exit(2)
+
+
+_AssertDemucsImportable()
+
+
 # directive: path-schema-migration | # see path.S8
 def LocalExists(Value):
     """Existence on a worker-local string."""

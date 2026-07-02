@@ -85,6 +85,7 @@ class JobProcessor:
                     'FFmpegPath': self.QueueService.FFmpegPath,
                     'FFprobePath': self.QueueService.FFprobePath,
                     'OutputDirectory': LocalDirname(EffectiveInputPath),
+                    'TranscodeAttemptId': TranscodeAttemptId,
                 },
             )
             if not CommandResult:
