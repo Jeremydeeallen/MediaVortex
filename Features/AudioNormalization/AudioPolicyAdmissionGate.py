@@ -124,15 +124,7 @@ class AudioPolicyAdmissionGate:
                 PolicyJson=None,
             )
 
-        MaxChannels = _GetField(Policy, 'MaxAudioChannels')
-        SrcChannels = _GetField(MediaFile, 'AudioChannels')
-        if MaxChannels is not None and SrcChannels is not None and int(SrcChannels) > int(MaxChannels):
-            return AdmissionDecision(
-                Outcome=DEFERRED_CHANNELS_EXCEED_MAX,
-                DeferReason=f'channels_exceed_max:{SrcChannels}>{MaxChannels}',
-                PolicyJson=None,
-            )
-
+        # directive: transcode-flow-canonical | # see transcode-flow-canonical.C11 -- MaxAudioChannels cap dead under 2-track contract; kept as column for future per-track use.
         Tracks = _GetField(Policy, 'EmitTracks') or []
         if not Tracks:
             return AdmissionDecision(
