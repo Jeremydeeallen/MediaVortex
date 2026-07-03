@@ -124,13 +124,22 @@ Contract test `Tests/Contract/TestFailLoud.py` greps for anti-patterns in produc
 
 **C8. Docs describing violated behavior are deleted, not annotated.** Every `*.feature.md` / `*.flow.md` / `ARCHITECTURE.md` section describing a removed route is deleted in the same commit as the code. Verification: grep `deprecated|superseded|legacy|removed 20|no longer used|previously|formerly` in `**/*.feature.md`, `**/*.flow.md`, `ARCHITECTURE.md` returns 0 outside `GLOSSARY.md`. R14 hook already enforces at edit-time.
 
-**C9. Four live smokes end-to-end.** Each smoke: TranscodeAttempts row with `completeddate > <cutover>` and `disposition=Replace`, recorded in `### Verification` with mediafileid + strategy + timestamp.
+**C9. Four live smokes end-to-end.** Each smoke: TranscodeAttempts row with `completeddate > <cutover>` and `disposition=Replace`, recorded in `### Verification` with mediafileid + strategy + timestamp + audio-emit check.
 - (a) web GUI enqueue -> Reencode -> VMAF pass -> Replace
 - (b) web GUI enqueue on container-fix candidate -> StreamCopy -> checksum pass -> Replace
 - (c) scanner auto-enqueue -> full pipeline -> Replace
 - (d) Requeue disposition (BUG-0079 verification) -> new queue row inserted -> claimed -> completed -> Replace
 
-Inherits transcode-worker-unification C5 (MediaFileId=621412 replay -- becomes any Reencode-strategy smoke) + C8 (no regression baseline vs post).
+**Per-smoke audio-emit check** (verifies audio pipeline ST6/ST7 for every strategy since audio path is universal): `ffprobe -show_streams -select_streams a` on the emitted output asserts:
+- Two audio tracks (Track 0 Original + Track 1 Dialog Boost)
+- `Track 0.channels` = source channels (5.1 stays 5.1; stereo stays stereo)
+- `Track 1.channels` = 2 (forced stereo downmix)
+- `Track 0.disposition.default` = 0; `Track 1.disposition.default` = 1
+- Track 0 integrated LUFS within +/-1 LU of `TargetIntegratedLufs`
+
+Any smoke where audio-emit check fails = C9 fails. Covers AudioFix workflow verification structurally (AudioFix bucket = plan variant `VideoOp=Copy + AudioOp=Reencode`, exercised via smoke (b) or (c) if candidate file has AudioFix bucket).
+
+Inherits transcode-worker-unification C5 (MediaFileId=621412 replay -- becomes any Reencode-strategy smoke) + C8 (no regression baseline vs post) + audio-dialog-boost-real G1/G2/G3/G4 verification pattern.
 
 **C10. Directive doc size guard at DELIVERING.** Directive doc size <= 110% of snapshot taken at IMPLEMENTING -> DELIVERING transition. `### Promotions` populated incrementally per step per memory rule `feedback_promotions_grow_incrementally`, not batched.
 
