@@ -30,7 +30,7 @@ C5. **DB-fresh per call (db-is-authority).** `RetryBudgetService.HasBudgetRemain
 
 C6. **Dispatcher composes via constructor only.** `DispositionDispatcher.__init__` parameters: Decider, GateConfigRepository, AttemptCleanupService, DatabaseService (required); RetranscodeDecider, AdjustmentRegistry, RetryBudgetService (optional). No `from X import Y` inside any method body. Verifiable: ctor signature inspection.
 
-C7. **Terminal-disposition cleanup is centralized.** `DispositionDispatcher._MaybeCleanupTfp(TranscodeAttemptId, Action)` calls `AttemptCleanupService.Cleanup` iff `Action in ('Discard', 'NoReplace', 'Requeue')`. `Replace`, `BypassReplace`, `Pending` do NOT trigger cleanup. Verifiable: `Tests/Contract/TestDispositionDispatcher.py` covers each branch.
+C7. **Terminal-disposition cleanup is centralized.** `DispositionDispatcher._MaybeCleanupTfp(TranscodeAttemptId, Action)` calls `AttemptCleanupService.Cleanup` iff `Action in ('Reject', 'NoReplace', 'Requeue', 'Discard')`. `Replace` and `Pending` do NOT trigger cleanup. Verifiable: `Tests/Contract/TestDispositionDispatcher.py` covers each branch.
 
 C8. **Compliance refusal flows through ComplianceFailureRecorder.** `FileReplacementBusinessService.ProcessFileReplacement` ComplianceGateRefused branch calls `ComplianceFailureRecorder.Record(TranscodeAttemptId, CascadeReason)`. Verifiable: code review.
 

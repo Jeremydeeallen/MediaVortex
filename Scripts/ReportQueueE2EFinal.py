@@ -58,8 +58,8 @@ def _Outcome(B, A, Att):
         return 'awaiting_VMAF'
     if Disp == 'NoReplace':
         return f'NoReplace:{Reason}'
-    if Disp == 'BypassReplace':
-        return f'BypassReplace:{Reason}'
+    if Disp == 'Reject':
+        return f'Reject:{Reason}'
     if Disp == 'Replace' and Replaced and not CompliantAfter:
         return 'replaced_but_still_noncompliant'
     return Disp or 'pending'

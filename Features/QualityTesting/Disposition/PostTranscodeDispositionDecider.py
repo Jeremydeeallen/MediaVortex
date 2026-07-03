@@ -6,23 +6,20 @@ from Features.QualityTesting.Disposition.Disposition import Disposition
 class PostTranscodeDispositionDecider:
     """Pure-function decider: given a transcode attempt + gate config, returns a Disposition."""
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C5
+    # directive: transcode-flow-canonical | # see transcode.ST7
     def Decide(self, Attempt: Dict[str, Any], GateConfig: Dict[str, Any]) -> Disposition:
         """Return the Disposition for a completed transcode attempt under the given gate config."""
         Success = bool(Attempt.get('Success'))
         if not Success:
-            return Disposition(Action='Discard', Reason='TranscodeFailed')
-
-        if not bool(Attempt.get('QualityTestRequired')):
-            return Disposition(Action='BypassReplace', Reason='QualityTestNotRequired')
+            return Disposition(Action='Reject', Reason='TranscodeFailed')
 
         OldSize = Attempt.get('OldSize') or 0
         NewSize = Attempt.get('NewSize') or 0
         if NewSize and OldSize and NewSize >= OldSize:
-            return Disposition(Action='Discard', Reason='NoSavings')
+            return Disposition(Action='Reject', Reason='NoSavings')
 
-        if not GateConfig.get('QualityTestEnabled', True):
-            return Disposition(Action='BypassReplace', Reason='QualityTestingGloballyDisabled')
+        if not bool(Attempt.get('QualityTestRequired')):
+            return Disposition(Action='Replace', Reason='QualityTestNotRequired')
 
         VmafScore = Attempt.get('VmafScore')
         if VmafScore is not None:
@@ -37,6 +34,6 @@ class PostTranscodeDispositionDecider:
                     return Disposition(Action='Requeue', Reason='VmafBelowMin')
                 if Score <= MaxThreshold:
                     return Disposition(Action='Replace', Reason='VmafPassed')
-                return Disposition(Action='NoReplace', Reason='VmafAboveMax')
+                return Disposition(Action='Reject', Reason='VmafAboveMax')
 
         return Disposition(Action='Pending', Reason='AwaitingVmaf')

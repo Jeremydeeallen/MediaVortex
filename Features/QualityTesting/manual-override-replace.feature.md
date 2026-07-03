@@ -4,7 +4,7 @@
 
 ## What It Does
 
-Adds an operator-driven path to replace a transcoded file whose `Disposition='Requeue'` (or `'NoReplace'`) decision the user wants to override. The action transitions the attempt to `Disposition='BypassReplace'`, records who/when/why on the attempt, and runs the same `FileReplacementBusinessService.ProcessFileReplacement` path that an auto-approved attempt would.
+Adds an operator-driven path to replace a transcoded file whose `Disposition='Requeue'` (or `'NoReplace'`) decision the user wants to override. The action transitions the attempt to `Disposition='Replace'` with `DispositionReason='manual-override: <reason>'`, records who/when/why on the attempt, and runs the same `FileReplacementBusinessService.ProcessFileReplacement` path that an auto-approved attempt would.
 
 Every override is recorded in a new `ManualOverrideEvents` audit table so trending statistics ("we're force-overriding 30% of Sister Wives attempts -- the VMAF gate is mis-calibrated for that show") are queryable without log grep.
 
@@ -26,9 +26,9 @@ Stats surface: `/Activity` page gains an "Override trends" panel showing count-p
 
 1. `ManualOverrideEvents` table exists with columns `(Id, TranscodeAttemptId, MediaFileId, OldDisposition, NewDisposition, Reason, ReasonCategory, OverriddenBy, OverriddenAt)`. `\d ManualOverrideEvents` shows the columns; FK on `TranscodeAttemptId` references `TranscodeAttempts(Id)`.
 
-2. `POST /api/QualityTest/OverrideReplace` with a valid attempt id whose current `Disposition IN ('Requeue','NoReplace')` returns `Success=true`, sets `TranscodeAttempts.Disposition='BypassReplace'`, sets `DispositionReason` to `'manual-override: <truncated reason>'`, and creates one `ManualOverrideEvents` row. Verifiable: integration test invokes the endpoint, queries both tables, asserts the columns updated and a row appeared.
+2. `POST /api/QualityTest/OverrideReplace` with a valid attempt id whose current `Disposition IN ('Requeue','NoReplace','Reject')` returns `Success=true`, sets `TranscodeAttempts.Disposition='Replace'`, sets `DispositionReason` to `'manual-override: <truncated reason>'`, and creates one `ManualOverrideEvents` row. Verifiable: integration test invokes the endpoint, queries both tables, asserts the columns updated and a row appeared.
 
-3. Same endpoint refuses (HTTP 400, `Success=false`, descriptive Message) when the attempt's current `Disposition` is `Replace`, `BypassReplace`, `Discard`, or NULL. No DB state changes. Verifiable: integration test invokes against each forbidden state and asserts no `ManualOverrideEvents` row was created.
+3. Same endpoint refuses (HTTP 400, `Success=false`, descriptive Message) when the attempt's current `Disposition` is `Replace`, `Discard`, or NULL. No DB state changes. Verifiable: integration test invokes against each forbidden state and asserts no `ManualOverrideEvents` row was created.
 
 4. Same endpoint refuses (HTTP 400) when `Reason` is missing or has fewer than 10 characters. No DB state changes. Verifiable: integration test posts an empty and a 5-char reason and asserts rejection.
 

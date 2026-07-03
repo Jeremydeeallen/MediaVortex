@@ -32,7 +32,7 @@ C4. **Worker poll query honors the override.** `QualityTestingBusinessService.Pr
 
 C5. **WebService override endpoint.** `POST /api/QualityTest/Override` accepts `{queueId, forceDisposition, reason?}`. The handler runs atomically:
    - UPDATE `QualityTestingQueue` SET `ForceDisposition=$forceDisposition`, `OverrideSetAt=NOW()`, `Status='Cancelled'` WHERE `Id=$queueId AND Status='Pending'`
-   - UPDATE `TranscodeAttempts` SET `Disposition=$d`, `DispositionReason=$r`, `DispositionDecidedAt=NOW()` where `$d`='BypassReplace' for Replace, 'Discard' for Discard; `$r`='OperatorForcedReplace' or 'OperatorDiscarded'
+   - UPDATE `TranscodeAttempts` SET `Disposition=$d`, `DispositionReason=$r`, `DispositionDecidedAt=NOW()` where `$d`='Replace' for Replace, 'Discard' for Discard; `$r`='OperatorForcedReplace' or 'OperatorDiscarded'
    - For Replace: call `FileReplacementBusinessService.ProcessFileReplacement(attemptId)` synchronously, return the result
    - For Discard: delete the `.inprogress` output file via `TemporaryFilePaths.LocalOutputPath`, delete the TFP row, return success
    - Response: `{Success, AttemptId, Disposition, Reason, FileReplaced?}`

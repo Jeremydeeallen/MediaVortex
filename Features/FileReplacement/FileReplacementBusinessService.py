@@ -100,12 +100,12 @@ class FileReplacementBusinessService:
             DispositionRow = DispositionRows[0]
 
             Disposition = DispositionRow.get('Disposition')
-            if Disposition not in ('Replace', 'BypassReplace'):
+            if Disposition != 'Replace':
                 return {
                     'Success': False,
                     'ErrorMessage': (
                         f"Refusing to replace TranscodeAttempt {TranscodeAttemptId}: "
-                        f"Disposition={Disposition!r} (must be Replace or BypassReplace). "
+                        f"Disposition={Disposition!r} (must be Replace). "
                         f"Reason={DispositionRow.get('DispositionReason')!r}."
                     ),
                 }
@@ -252,9 +252,7 @@ class FileReplacementBusinessService:
             if replacement_result.get('Success', False):
                 transcode_attempt.FileReplaced = True
                 transcode_attempt.FileReplacedDate = datetime.now(timezone.utc)
-                transcode_attempt.ReplacementType = (
-                    'Bypass' if Disposition == 'BypassReplace' else 'Auto'
-                )
+                transcode_attempt.ReplacementType = 'Auto'
                 self.DatabaseManager.SaveTranscodeAttempt(transcode_attempt)
 
                 # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C11

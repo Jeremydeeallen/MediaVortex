@@ -1088,7 +1088,7 @@ def OverrideQualityTest():
         AttemptId = AttemptRows[0]['TranscodeAttemptId']
 
         # Commit disposition on the attempt.
-        Disposition = 'BypassReplace' if ForceDisposition == 'Replace' else 'Discard'
+        Disposition = 'Replace' if ForceDisposition == 'Replace' else 'Discard'
         Reason = 'OperatorForcedReplace' if ForceDisposition == 'Replace' else 'OperatorDiscarded'
         Db.ExecuteNonQuery(
             """

@@ -16,7 +16,7 @@ STUCK_QUERY = (
     "FROM TranscodeAttempts ta "
     "LEFT JOIN TemporaryFilePaths tfp ON tfp.TranscodeAttemptId = ta.Id "
     "LEFT JOIN MediaFiles m ON m.Id = ta.MediaFileId "
-    "WHERE ta.Disposition IN ('Replace','BypassReplace') AND ta.FileReplaced = FALSE "
+    "WHERE ta.Disposition = 'Replace' AND ta.FileReplaced = FALSE "
     "AND ta.AttemptDate < NOW() - INTERVAL '15 minutes' "
     "AND (ta.ErrorMessage IS NULL OR ta.ErrorMessage NOT ILIKE '%%Recovery refused%%') "
     "ORDER BY ta.Id"

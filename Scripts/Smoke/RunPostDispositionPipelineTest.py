@@ -102,8 +102,8 @@ def Main(TranscodeAttemptId: int):
         Step(5, "Call DispositionDispatcher.Dispatch")
         Result = _BuildDispatcher(Mgr, Repo).Dispatch(TranscodeAttemptId)
         print(f"    -> Disposition={Result.Disposition}, Reason={Result.Reason}")
-        if Result.Disposition not in ('Replace', 'BypassReplace'):
-            Fail(f"Expected Replace/BypassReplace; got {Result.Disposition} ({Result.Reason}). "
+        if Result.Disposition != 'Replace':
+            Fail(f"Expected Replace; got {Result.Disposition} ({Result.Reason}). "
                  f"Audit payload: {Result.AuditPayload}")
 
         Step(6, "Call ProcessFileReplacement")

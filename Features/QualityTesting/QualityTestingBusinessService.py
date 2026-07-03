@@ -383,7 +383,7 @@ class QualityTestingBusinessService:
                             AutoCapEx, "QualityTestingBusinessService", "_AutoCaptureStillsIfPolicyFires",
                         )
                     DispositionResult = self._BuildDispositionDispatcher().Dispatch(ta_id)
-                    if DispositionResult.Disposition in ('Replace', 'BypassReplace'):
+                    if DispositionResult.Disposition == 'Replace':
                         from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
                         FileReplacementBusinessService(self.DatabaseManager).ProcessFileReplacement(ta_id)
                         AutoReplaceTriggered = True

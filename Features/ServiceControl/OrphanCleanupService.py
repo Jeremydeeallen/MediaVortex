@@ -58,20 +58,8 @@ class OrphanCleanupService:
             "QualityTestProgress": QtProgressSwept,
         }
 
-    # directive: bug-0020-worker-ownership
+    # directive: bug-0020-worker-ownership -- TFP sweep disabled pending liveness-based redesign
     def _SweepTemporaryFilePaths(self) -> int:
-        # 2026-05-25: TFP sweep disabled pending redesign of the liveness-based predicate. Legacy
-        # `Success IS NOT NULL` predicate and the first-attempt tighter predicate
-        # (Success=FALSE / FileReplaced=TRUE / Disposition IN terminal-no-replace)
-        # both raced FileReplacement during the VMAF window and silently deleted
-        # in-flight TFP rows -- Doctor Who S06E04 canary v2 + v3 lost their TFP
-        # mid-VMAF and ended with `.inprogress` files stranded on disk. Correct
-        # design uses liveness signals (QualityTestingQueue + ActiveJobs rows for
-        # the parent TranscodeAttemptId) instead of column inference. Until that
-        # ships, no sweep -- real TFP cleanup is owned by FileReplacement on
-        # Replace/BypassReplace and by _CommitDisposition on terminal-no-replace.
-        # Small operator-cleanable accumulation is the accepted trade for not
-        # racing the live pipeline.
         LoggingService.LogInfo(
             "TFP sweep disabled pending redesign (liveness-based predicate).",
             "OrphanCleanupService", "_SweepTemporaryFilePaths",

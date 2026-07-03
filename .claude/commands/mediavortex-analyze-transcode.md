@@ -31,13 +31,13 @@ Analyze the transcode history of a media file. The goal is a clear before/after 
 
    **Video / audio operations from the FFmpeg command** -- parse the command and show: input map (`-map`), video codec arg (`-c:v ...` -- highlight `copy` vs an encoder), video tag, audio codec/bitrate, audio filter chain (one row per filter, e.g. `acompressor`, `loudnorm`), container flags (`-movflags`). This is the most useful table for explaining "what actually happened."
 
-   **VMAF** -- if any rows exist in `qualitytestresults`: status, vmafscore, min/max/harmonic mean/stddev, percentiles (p1/p5/p10/p25), passesthreshold, testduration. If none: state explicitly that no VMAF was performed, and cite the reason from `transcodeattempts.disposition` + `dispositionreason` (e.g. `BypassReplace / QualityTestNotRequired` means the profile is a Remux and VMAF is meaningless because video was copied).
+   **VMAF** -- if any rows exist in `qualitytestresults`: status, vmafscore, min/max/harmonic mean/stddev, percentiles (p1/p5/p10/p25), passesthreshold, testduration. If none: state explicitly that no VMAF was performed, and cite the reason from `transcodeattempts.disposition` + `dispositionreason` (e.g. `Replace / QualityTestNotRequired` = StreamCopy strategy verified inline via checksum; VMAF not applicable).
 
 5. Close with a one-line summary: "Source was X, FFmpeg did Y to video and Z to audio, VMAF result was W."
 
 ## Interpretation notes
 
-- `disposition = BypassReplace`, `dispositionreason = QualityTestNotRequired` -- typical for Remux profiles where `-c:v copy` is used. Size savings come from audio re-encode and/or container change, not from video re-compression.
+- `disposition = Replace`, `dispositionreason = QualityTestNotRequired` -- typical for StreamCopy profiles (Remux / AudioFix / SubtitleFix / Quick) where `-c:v copy` is used. Verify was checksum, not VMAF. Size savings come from audio re-encode and/or container change.
 - `qualitytestrequired = false` AND `qualitytestcompleted = false` AND no `qualitytestresults` row -- VMAF was deliberately skipped, not failed.
 - `loudnorm` in the audio filter chain often upsamples the audio internally (e.g. source 48 kHz can come out 96 kHz). That is expected, not a bug.
 - If the current `videobitratekbps` differs from source but `-c:v copy` is set, the difference is the container remeasuring -- the video stream itself is byte-identical.

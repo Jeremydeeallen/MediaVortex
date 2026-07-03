@@ -17,7 +17,7 @@ ST<N> stage IDs are stable; never renumbered (`.claude/rules/flow-docs.md`). The
 
 Stages ST1-ST5 require user action. Stages ST6-ST9 are automatic once WorkerService is running:
 - QUEUE -> TRANSCODE (ST5 -> ST6): automatic (service polls for Pending items)
-- TRANSCODE -> DISPOSITION -> VERIFY or ACTION (ST6 -> ST7 -> ST8 or ST9): `Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.Decide` is the single decision function -- reads `TranscodeAttempts.QualityTestRequired` + `VMAF` + `PostTranscodeGateConfig` and returns one of `Replace`/`BypassReplace`/`Pending`/`Requeue`/`Discard`/`NoReplace`. `DispositionDispatcher.Dispatch` routes accordingly: `Pending` enqueues to QualityTestingQueue (ST8); any other disposition goes straight to ST9.
+- TRANSCODE -> DISPOSITION -> VERIFY or ACTION (ST6 -> ST7 -> ST8 or ST9): `Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.Decide` is the single decision function -- reads `TranscodeAttempts.QualityTestRequired` + `VMAF` + `PostTranscodeGateConfig` and returns one of `Replace`/`Pending`/`Requeue`/`Reject`/`NoReplace`/`Discard`. `DispositionDispatcher.Dispatch` routes accordingly: `Pending` enqueues to QualityTestingQueue (ST8); any other disposition goes straight to ST9.
 - VERIFY -> ACTION (ST8 -> ST9): automatic if verify-score is within threshold range (default 80-100 for VMAF-verifying Reencode strategy; 100 for checksum-verifying StreamCopy strategy). Verify method is Strategy-per; result written to `TranscodeAttempts.VMAF` in both cases.
 
 **Service dependency model:** Both services communicate exclusively via PostgreSQL. No HTTP calls between them. Each polls the database for its own work. FileReplacement is a library (not a service) that runs in whatever process calls it -- WorkerService when QualityTest=OFF, WorkerService's quality test loop when QualityTest=ON, WebService for manual replacement.
@@ -282,20 +282,19 @@ The disposition decision is **the only post-transcode branch point**. It reads f
 | `PostTranscodeGateConfig.VmafAutoReplaceMinThreshold` | typed column, default 88 |
 | `PostTranscodeGateConfig.VmafAutoReplaceMaxThreshold` | typed column, default 98 |
 | `PostTranscodeGateConfig.WhenVmafUnavailable` | `'block'` (default, safe) or `'bypass'` (operator opt-in) |
-| `PostTranscodeGateConfig.QualityTestEnabled` | typed BOOLEAN, default TRUE. Operator master switch -- when FALSE, every successful transcode short-circuits to `BypassReplace` / `QualityTestingGloballyDisabled`. Editable on `/settings` Post-Transcode card. |
+| `PostTranscodeGateConfig.QualityTestEnabled` | typed BOOLEAN, default TRUE. Advisory: gates which workers CLAIM VMAF jobs. When FALSE with `QualityTestRequired=TRUE`, attempt still lands `Pending/AwaitingVmaf` in `QualityTestingQueue` (operator brings a capable worker online or force-overrides). Editable on `/settings` Post-Transcode card. |
 
-**Decision table** (canonical -- code MUST mirror this 1:1):
+**Decision table** (canonical -- code MUST mirror this 1:1). Post `transcode-flow-canonical` C6: no `BypassReplace`; every attempt is verified (VMAF for Reencode, checksum for StreamCopy). Values in `{Replace, Reject, Requeue, Pending}` post-verify; `NoReplace/Discard` reserved for test-mode/edge paths only.
 
 | Success | NewSize >= OldSize | QualityTestRequired | VMAF score | Disposition | Reason |
 |---|---|---|---|---|---|
-| false | n/a | n/a | n/a | `Discard` | `TranscodeFailed` |
-| true (and `QualityTestEnabled=FALSE` globally) | n/a | n/a | n/a | `BypassReplace` | `QualityTestingGloballyDisabled` |
-| true | true (no savings) | any | any | `Discard` | `NoSavings` |
-| true | false | false | n/a | `BypassReplace` | `QualityTestNotRequired` |
+| false | n/a | n/a | n/a | `Reject` | `TranscodeFailed` |
+| true | true (no savings) | any | any | `Reject` | `NoSavings` |
+| true | false | false | n/a | `Replace` | `QualityTestNotRequired` |
 | true | false | true | NULL | `Pending` | `AwaitingVmaf` |
 | true | false | true | < min | `Requeue` | `VmafBelowMin` |
 | true | false | true | >= min, <= max | `Replace` | `VmafPassed` |
-| true | false | true | > max | `NoReplace` | `VmafAboveMax` |
+| true | false | true | > max | `Reject` | `VmafAboveMax` |
 
 **Note (2026-05-29):** the legacy `VmafCapableWorkerOnline` / `WhenVmafUnavailable` branching is retired. `Pending/AwaitingVmaf` is now the only outcome when VMAF is required and no score is available -- the row is enqueued to `QualityTestingQueue` regardless of whether a capable worker is currently online. Operators see the pending work in the queue surface (Stage 7) and either bring a capable worker online OR override the row to force an immediate disposition. `VmafServicePaused` / `VmafServicePausedBypassed` reasons remain in the closed enum for audit history (legacy attempts) but are no longer emitted by new decisions. See `Features/QualityTesting/qt-queue-visibility-and-override.feature.md`.
 
@@ -304,11 +303,11 @@ The disposition decision is **the only post-transcode branch point**. It reads f
 | Disposition | What happens |
 |---|---|
 | `Replace` | FileReplacement proceeds: archive original, rename `.inprogress` -> `-mv.<ext>`, re-probe, update MediaFiles, delete source. On post-rename update failure the rename is rolled back (no orphan, source intact) and `Success=False` is returned with the real error. See `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4. |
-| `BypassReplace` | Same as `Replace` mechanically -- the only difference is the audit reason. The file IS replaced; operator can query why VMAF was skipped. |
-| `NoReplace` | Both files left in place. The `.inprogress` output sits next to the source for operator inspection / manual replay. The TranscodeAttempt is final (no requeue). |
-| `Requeue` | Staged file deleted. ProblemFiles row created with `ErrorType='VmafBelowMin'` and the VMAF score / min-threshold in the message. Operator action required: choose a profile with a lower CRF or accept the result. **Not auto-creating a new TranscodeQueue row** -- TranscodeQueue has no CRF column, so a new row would re-run at the same CRF and reproduce the low VMAF. Real auto-requeue requires a schema change (a `QualityOverride` column or a stricter sibling profile) -- tracked separately. |
-| `Discard` | Staged file deleted. `MediaFiles.LastTranscodeOutcome='NoSavings'` set when reason is NoSavings; queue's no-savings filter prevents re-queueing. |
-| `Pending` | No action yet. The TranscodeAttempt's disposition is re-evaluated when the VMAF result lands. The worker's VMAF processing loop calls `DecidePostTranscodeDisposition` again after writing the score. |
+| `Reject` | Staged file deleted. Verify failed (`VmafAboveMax` / `NoSavings` / `TranscodeFailed`). TranscodeAttempt is terminal; no requeue. |
+| `Requeue` | Staged file deleted; TFP row cleared; new `TranscodeQueue` row inserted for the same `MediaFileId` via canonical `AddJobToQueue(ForceAdd=True)`. Next claim picks up the requeued row with adjustment knobs applied. BUG-0079 fix. |
+| `NoReplace` | Test-mode / operator hold. Both files left in place; `.inprogress` output sits next to source for manual replay. |
+| `Discard` | Test-variant short-circuit or operator discard via override. Staged file deleted. |
+| `Pending` | Awaiting VMAF. The row lands in `QualityTestingQueue`; disposition re-evaluated when the score lands. |
 
 **Audit trail (queryable):**
 
@@ -328,7 +327,7 @@ WHERE Success=true AND FileReplaced=false AND Disposition <> 'Pending'
 ORDER BY DispositionDecidedAt DESC;
 ```
 
-**Tables written:** TranscodeAttempts (Disposition, DispositionReason, DispositionDecidedAt), QualityTestQueue (when disposition='Pending' and not yet queued), MediaFiles (LastTranscodeOutcome on Discard/NoSavings), ProblemFiles (when Requeue with adjusted CRF below floor), TemporaryFilePaths (DELETE at the chokepoint for `Discard`/`NoReplace`/`Requeue` -- BUG-0001 criterion 15; `Replace`/`BypassReplace` defer TFP cleanup to FileReplacement's success branch since the canonical paths are still needed).
+**Tables written:** TranscodeAttempts (Disposition, DispositionReason, DispositionDecidedAt), QualityTestQueue (when disposition='Pending' and not yet queued), TranscodeQueue (new row on Requeue via canonical AddJobToQueue -- BUG-0079), MediaFiles (LastTranscodeOutcome on Reject/NoSavings), ProblemFiles (when Requeue with adjusted CRF below floor), TemporaryFilePaths (DELETE at the chokepoint for terminal dispositions; `Replace` defers TFP cleanup to FileReplacement's success branch since the canonical paths are still needed).
 
 ---
 
@@ -354,7 +353,7 @@ ORDER BY DispositionDecidedAt DESC;
 - Operator POSTs `{queueId, forceDisposition: 'Replace'|'Discard', reason: 'optional note'}` to `/api/QualityTest/Override`
 - WebService (no worker capability required -- has DB + share access):
   1. UPDATE QualityTestingQueue SET ForceDisposition=$1, OverrideSetAt=NOW(), Status='Cancelled' WHERE Id=$2
-  2. Write `TranscodeAttempts.Disposition='BypassReplace'` (for Replace) or `'Discard'` (for Discard); `DispositionReason='OperatorForcedReplace'` or `'OperatorDiscarded'`
+  2. Write `TranscodeAttempts.Disposition='Replace'` (for Replace) or `'Discard'` (for Discard); `DispositionReason='OperatorForcedReplace'` or `'OperatorDiscarded'`
   3. If Replace: call `FileReplacementBusinessService.ProcessFileReplacement(attemptId)` synchronously
   4. If Discard: delete the `.inprogress` output and the TFP row
 - Worker poll query excludes `ForceDisposition IS NOT NULL` rows so a worker can't race the override.
@@ -380,7 +379,7 @@ Adding a new Strategy verify path is one `Strategy.Verify()` implementation + on
 
 **Trigger:** Disposition committed (anything other than `Pending`).
 
-**Replace / BypassReplace path:**
+**Replace path:**
 - `Features/FileReplacement/FileReplacementBusinessService.ProcessFileReplacement(TranscodeAttemptId)` orchestrates; dispatches to `TranscodedOutputPlacement.Execute` for the rename + MediaFiles refresh + source delete (extracted 2026-06-02 via `filereplacement-decompose`). No `BypassVMAFCheck` parameter -- the disposition already decided.
   1. Validate TranscodeAttempt exists and FileReplaced=false.
   2. Validate both source and staged files exist; resolve canonical paths to worker-local via `Path.Resolve(Worker)`.
@@ -399,16 +398,18 @@ Adding a new Strategy verify path is one `Strategy.Verify()` implementation + on
 - Delete the `.inprogress` output next to the source
 - When reason is `NoSavings`: `MediaFiles.LastTranscodeOutcome='NoSavings'`
 
-**Requeue path:**
-- Delete the `.inprogress` output
-- `Features/TranscodeJob/Adjustments/AdjustmentRegistry.Get('cq').Calculate(PreviousAttempt, ProfileSettings, GateThreshold)` -> `KnobOverrides(CRF=new_crf)`
-- If adjusted CRF >= 15 floor: insert new TranscodeQueue row with the lower CRF
-- Else: log to ProblemFiles (file cannot be improved further)
+**Requeue path (BUG-0079 fix):**
+- `DispositionDispatcher._MaybeScheduleRequeue` inserts a new `TranscodeQueue` row for the same `MediaFileId` via canonical `QueueManagementBusinessService.AddJobToQueue(ForceAdd=True)`.
+- `AttemptCleanupService.Cleanup` drops the TFP row + `.inprogress` output.
+- Next claim picks up the requeued row; adjustment-registry knob overrides apply at admission for CRF/bitrate refinement.
+
+**Reject path:**
+- Terminal outcome. Staged `.inprogress` deleted. No requeue, no replace. `TranscodeAttempts.Disposition='Reject'` + reason (`TranscodeFailed` / `NoSavings` / `VmafAboveMax`).
 
 **NoReplace path:**
-- No filesystem changes. The `.inprogress` output sits next to the source until an operator clears it manually.
+- Test-mode / operator hold. Files left in place. Operator clears `.inprogress` manually.
 
-**Tables written:** MediaFiles (new metadata on Replace/BypassReplace), MediaFilesArchive (snapshot before replace), TranscodeAttempts (FileReplaced, FileReplacedDate), TranscodeQueue (new row on Requeue), ProblemFiles (CRF floor breach), QualityTestQueue (cleared on disposition commit).
+**Tables written:** MediaFiles (new metadata on Replace), MediaFilesArchive (snapshot before replace), TranscodeAttempts (FileReplaced, FileReplacedDate), TranscodeQueue (new row on Requeue), ProblemFiles (CRF floor breach), QualityTestQueue (cleared on disposition commit).
 
 **Safety guards:**
 - Archive-before-delete: original metadata always saved before the rename.
@@ -629,7 +630,7 @@ End-to-end trace from worker installation through finished product. Every functi
 | 5.1 | Calculate size reduction | `HandleTranscodingResult()` | -- | -- |
 | 5.2 | Mark attempt successful | `DatabaseManager.UpdateTranscodeAttempt()` | `UPDATE TranscodeAttempts SET Success=True, CompletedDate=NOW(), NewSizeBytes=%s, SizeReductionBytes=%s, SizeReductionPercent=%s, QualityTestRequired=True` | Attempt marked successful |
 | 5.3 | Update TranscodeFiles | `UpdateTranscodeFileRecord()` | `INSERT/UPDATE TranscodeFiles (FilePath, SuccessfulAttemptId, ...)` | File-level status updated |
-| 5.4 | Bridge: decide disposition | `Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.Decide(AttemptId)` -- single decision function, no per-caller branching. Reads `TranscodeAttempts` row + `PostTranscodeGateConfig` + (when present) the VMAF score; returns one of `Replace` / `BypassReplace` / `Pending` / `Requeue` / `Discard` / `NoReplace` with a reason. `DispositionDispatcher.Dispatch` then routes to the matching action. | Writes `TranscodeAttempts.Disposition` + `DispositionReason`. If `Pending`: `INSERT INTO QualityTestingQueue (TranscodeAttemptId, Status='Pending')`. If `Replace`/`BypassReplace`: synchronous call into `FileReplacementBusinessService.ProcessFileReplacement(AttemptId)` -- which dispatches into `TranscodedOutputPlacement.Execute`. | `TranscodeAttempts.Disposition` populated; `QualityTestingQueue` row created only when `Pending`. |
+| 5.4 | Bridge: decide disposition | `Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.Decide(AttemptId)` -- single decision function; returns one of `Replace` / `Pending` / `Requeue` / `Reject` / `NoReplace` / `Discard`. `DispositionDispatcher.Dispatch` routes to the matching action; Requeue inserts a new `TranscodeQueue` row via canonical `AddJobToQueue` (BUG-0079). | Writes `TranscodeAttempts.Disposition` + `DispositionReason`. If `Pending`: `INSERT INTO QualityTestingQueue`. If `Replace`: sync call into `FileReplacementBusinessService.ProcessFileReplacement`. If `Requeue`: sync call into `AddJobToQueue(ForceAdd=True)`. | `TranscodeAttempts.Disposition` populated; QT / Queue rows created per branch. |
 | 5.5 | Delete from TranscodeQueue | `DatabaseManager.DeleteTranscodeQueueItem(Job.Id)` | `DELETE FROM TranscodeQueue WHERE Id = %s` | Job removed from queue |
 | 5.6 | Clean progress | `DatabaseManager.DeleteTranscodeProgress(AttemptId)` | `DELETE FROM TranscodeProgress WHERE TranscodeAttemptId = %s` | -- |
 | 5.7 | Complete ActiveJob | `DatabaseManager.CompleteActiveJob(ActiveJobId, Success=True)` | `UPDATE ActiveJobs SET Status='Completed', CompletedAt=NOW()` | ActiveJobs.Status = `Completed` |
@@ -646,7 +647,7 @@ End-to-end trace from worker installation through finished product. Every functi
 
 ### Phase 7: File Replacement (if VMAF passes, or directly after transcode when QualityTestRequired=False)
 
-Per-step detail of Stage 8 ACTION above (Replace / BypassReplace path). Step IDs match the Stage 8 numbering; the table adds the function + DB-call granularity.
+Per-step detail of Stage 8 ACTION above (Replace path). Step IDs match the Stage 8 numbering; the table adds the function + DB-call granularity.
 
 | Step | Action | Function | DB Call | Status Change |
 |------|--------|----------|---------|---------------|

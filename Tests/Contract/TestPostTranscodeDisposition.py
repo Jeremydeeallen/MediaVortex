@@ -51,21 +51,21 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
         self.assertEqual(self._Decide(**Kwargs), Expected)
         self.assertEqual(self._Decide(**Kwargs), Expected)
 
-    # Row 1: transcode failed -> Discard / TranscodeFailed.
+    # Row 1: transcode failed -> Reject / TranscodeFailed.
     def test_Row1_TranscodeFailed(self):
-        self._AssertDeterministic(('Discard', 'TranscodeFailed'), Success=False)
+        self._AssertDeterministic(('Reject', 'TranscodeFailed'), Success=False)
 
-    # Row 2: transcode succeeded but produced no savings.
+    # Row 2: transcode succeeded but produced no savings -> Reject / NoSavings.
     def test_Row2_NoSavings(self):
         self._AssertDeterministic(
-            ('Discard', 'NoSavings'),
+            ('Reject', 'NoSavings'),
             Success=True, OldSize=500_000_000, NewSize=600_000_000,
         )
 
-    # Row 3: QualityTestRequired=False -> BypassReplace / QualityTestNotRequired.
+    # Row 3: QualityTestRequired=False -> Replace / QualityTestNotRequired (StreamCopy verified inline).
     def test_Row3_QualityTestNotRequired(self):
         self._AssertDeterministic(
-            ('BypassReplace', 'QualityTestNotRequired'),
+            ('Replace', 'QualityTestNotRequired'),
             QualityTestRequired=False,
         )
 
@@ -93,9 +93,9 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
     def test_Row6c_VmafPassed_AtMax(self):
         self._AssertDeterministic(('Replace', 'VmafPassed'), VmafScore=98.0)
 
-    # Row 7: VMAF score above max -> NoReplace / VmafAboveMax.
+    # Row 7: VMAF score above max -> Reject / VmafAboveMax.
     def test_Row7_VmafAboveMax(self):
-        self._AssertDeterministic(('NoReplace', 'VmafAboveMax'), VmafScore=99.5)
+        self._AssertDeterministic(('Reject', 'VmafAboveMax'), VmafScore=99.5)
 
     # Rows 8-9 (legacy `VmafServicePaused` / `VmafServicePausedBypassed`)
     # were retired by qt-queue-visibility-and-override.feature.md (2026-05-29).
@@ -118,22 +118,10 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
             GateConfig=FakeGateConfig(WhenVmafUnavailable='bypass'),
         )
 
-    # Edge: priority of Discard/NoSavings over QualityTestRequired flag.
-    @unittest.expectedFailure
+    # Edge: NoSavings beats QualityTestNotRequired -- Reset 9 reordered decider so savings gate runs first.
     def test_NoSavings_BeatsQualityTestNotRequired(self):
-        # FLOW-DOC vs CODE DISCREPANCY (filed in
-        # `.claude/programs/db-authority-program.md` deferred items):
-        # The transcode.flow.md Stage 6 decision table lists "no savings" Discard
-        # BEFORE the `QualityTestRequired=False -> BypassReplace` row. The
-        # current `_DecideFromInputs` orders them the opposite way, with an
-        # inline comment justifying the order for remux jobs (which set
-        # QualityTestRequired=False and are not aimed at disk savings).
-        # Resolution requires operator decision: either the flow doc reorders
-        # to match code (and the no-savings gate becomes remux-aware) OR the
-        # code reorders to match the flow doc (and remux jobs growing slightly
-        # get Discarded). xfail until that decision lands.
         self._AssertDeterministic(
-            ('Discard', 'NoSavings'),
+            ('Reject', 'NoSavings'),
             Success=True, OldSize=500_000_000, NewSize=600_000_000,
             QualityTestRequired=False,
         )
@@ -141,7 +129,7 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
     # Edge: TranscodeFailed beats every other branch.
     def test_TranscodeFailed_BeatsEverything(self):
         self._AssertDeterministic(
-            ('Discard', 'TranscodeFailed'),
+            ('Reject', 'TranscodeFailed'),
             Success=False, QualityTestRequired=True, VmafScore=95.0, VmafCapableWorkerOnline=False,
         )
 

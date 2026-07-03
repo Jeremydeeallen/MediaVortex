@@ -16,13 +16,13 @@ class TestFileReplacementDrain(unittest.TestCase):
         Db = DatabaseService()
         Rows = Db.ExecuteQuery(
             "SELECT COUNT(*) AS stuck FROM TranscodeAttempts "
-            "WHERE Disposition IN ('Replace','BypassReplace') "
+            "WHERE Disposition = 'Replace' "
             "AND FileReplaced = FALSE "
             "AND AttemptDate < NOW() - INTERVAL '15 minutes' "
             "AND (ErrorMessage IS NULL OR ErrorMessage NOT ILIKE '%%Recovery refused%%')"
         )
         Stuck = int(Rows[0]['stuck'])
-        self.assertEqual(Stuck, 0, f"FileReplacement drain invariant violated: {Stuck} attempts have Disposition Replace/BypassReplace AND FileReplaced=False for >15min with no ErrorMessage")
+        self.assertEqual(Stuck, 0, f"FileReplacement drain invariant violated: {Stuck} attempts have Disposition=Replace AND FileReplaced=False for >15min with no ErrorMessage")
 
     # directive: filereplacement-drain-bug
     def test_dispatchdisposition_no_longer_silently_swallows(self):

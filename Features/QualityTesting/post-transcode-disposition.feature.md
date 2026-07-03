@@ -20,7 +20,7 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
 
 2. The function is **idempotent** for non-`Pending` dispositions: calling it twice on a TranscodeAttempt that already has a final disposition returns the same `(Disposition, Reason)` and does NOT trigger any side effect (no second replace, no log spam beyond a single DEBUG line). Verifiable: integration test invokes the function twice, asserts the second call returns the cached decision and produces no new `MediaFilesArchive` row.
 
-3. The function is the **only** code path that decides whether a transcoded file gets replaced, requeued, or discarded. `FileReplacementBusinessService.ProcessFileReplacement` never makes a VMAF-related decision itself; it executes the disposition the function already committed. Verifiable: `ProcessFileReplacement` has no `BypassVMAFCheck` parameter, no read of any VMAF threshold, and refuses to run unless `TranscodeAttempts.Disposition` is one of `Replace` or `BypassReplace`.
+3. The function is the **only** code path that decides whether a transcoded file gets replaced, requeued, or discarded. `FileReplacementBusinessService.ProcessFileReplacement` never makes a VMAF-related decision itself; it executes the disposition the function already committed. Verifiable: `ProcessFileReplacement` has no `BypassVMAFCheck` parameter, no read of any VMAF threshold, and refuses to run unless `TranscodeAttempts.Disposition = 'Replace'`.
 
 ### B. Decision-table conformance
 
@@ -46,7 +46,7 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
    ```
    Disposition TEXT NULL
        CHECK (Disposition IS NULL OR Disposition IN
-              ('Pending','Replace','BypassReplace','NoReplace','Requeue','Discard'))
+              ('Pending','Replace','Reject','NoReplace','Requeue','Discard'))
    DispositionReason TEXT NULL
    DispositionDecidedAt TIMESTAMP NULL
    ```
@@ -132,9 +132,9 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
              THEN 'HeldFrame' ELSE 'LiveAction' END AS Path,
         ta.DispositionReason,
         COUNT(*) AS Decisions,
-        COUNT(*) FILTER (WHERE ta.Disposition IN ('Replace','BypassReplace')) AS Passes,
-        COUNT(*) FILTER (WHERE ta.Disposition IN ('Requeue','NoReplace','Discard')) AS Fails,
-        ROUND(100.0 * COUNT(*) FILTER (WHERE ta.Disposition IN ('Replace','BypassReplace'))
+        COUNT(*) FILTER (WHERE ta.Disposition = 'Replace') AS Passes,
+        COUNT(*) FILTER (WHERE ta.Disposition IN ('Requeue','Reject','NoReplace','Discard')) AS Fails,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE ta.Disposition = 'Replace')
               / NULLIF(COUNT(*), 0), 1) AS PassRatePct
       FROM TranscodeAttempts ta
       LEFT JOIN QualityTestResults qtr ON qtr.TranscodeAttemptId = ta.Id
@@ -171,17 +171,17 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
 
 ### J. Per-profile VMAF skip (amendment 2026-06-03)
 
-30. **`TranscodeAttempts.QualityTestRequired` is sourced from `Profiles.qualitytestrequired` at attempt creation, not hardcoded.** New column `Profiles.qualitytestrequired BOOLEAN NOT NULL DEFAULT TRUE` carries the per-profile decision: trusted profiles (today: all 11 `usenvidiahardware=1` NVENC profiles) set FALSE and skip VMAF via the dispositioner's existing Row 2 (`QualityTestNotRequired -> BypassReplace`); the default TRUE preserves prior behavior for every other profile. `ProcessTranscodeQueueService.CreateTranscodeAttempt` queries the profile by `AssignedProfile` and copies the flag into the attempt; if the profile cannot be located, the fallback is TRUE (preserves safety: when in doubt, VMAF runs). Per-file granularity is reachable today by pointing `MediaFiles.AssignedProfile` at a profile with the desired flag; an explicit per-file override column (`MediaFiles.QualityTestOverride NULLABLE`) is deferred until recurring need. Verifiable: (a) `SELECT qualitytestrequired FROM profiles WHERE Id=<N>` matches `SELECT QualityTestRequired FROM TranscodeAttempts WHERE Id=<M>` for any attempt M whose source MediaFile has that profile assigned; (b) `SELECT COUNT(*) FROM profiles WHERE usenvidiahardware=1 AND qualitytestrequired=TRUE` returns 0; (c) a transcode against any NVENC profile completes with `Disposition='BypassReplace', DispositionReason='QualityTestNotRequired'` and no `QualityTestingQueue` row is created.
+30. **`TranscodeAttempts.QualityTestRequired` is sourced from `Profiles.qualitytestrequired` at attempt creation, not hardcoded.** New column `Profiles.qualitytestrequired BOOLEAN NOT NULL DEFAULT TRUE` carries the per-profile decision: trusted profiles (today: all 11 `usenvidiahardware=1` NVENC profiles) set FALSE and skip VMAF via the dispositioner (`QualityTestNotRequired -> Replace` post `transcode-flow-canonical` C6); the default TRUE preserves prior behavior for every other profile. Per-file granularity is reachable today by pointing `MediaFiles.AssignedProfile` at a profile with the desired flag. Verifiable: (a) `SELECT qualitytestrequired FROM profiles WHERE Id=<N>` matches `SELECT QualityTestRequired FROM TranscodeAttempts WHERE Id=<M>` for any attempt M whose source MediaFile has that profile assigned; (b) `SELECT COUNT(*) FROM profiles WHERE usenvidiahardware=1 AND qualitytestrequired=TRUE` returns 0; (c) a transcode against any NVENC profile completes with `Disposition='Replace', DispositionReason='QualityTestNotRequired'` and no `QualityTestingQueue` row is created.
 
 ### I. Operator master switch (amendment 2026-05-16)
 
-26. **[BUG 2026-05-16]** Operators have no UI lever to globally bypass VMAF. The legacy `SystemSettings.QualityTestEnabled` row was deleted by criterion 8 of this feature; per-worker `Workers.QualityTestEnabled` has no UI control (`memory/KNOWN-ISSUES.md` "Worker capability flags not editable from the UI"); the `WhenVmafUnavailable='bypass'` switch only kicks in when *no* capable worker is online. Net effect: to make every transcode skip VMAF and go straight to FileReplacement, the operator must currently `UPDATE Workers` directly via SQL on every worker row -- not acceptable. Fixed = `PostTranscodeGateConfig` gains a `QualityTestEnabled BOOLEAN NOT NULL DEFAULT TRUE` column; when `FALSE`, `PostTranscodeDispositionService._DecideFromInputs` short-circuits before the per-attempt `QualityTestRequired` check and returns `(BypassReplace, QualityTestingGloballyDisabled)`. A checkbox in the existing `/settings` "Post-Transcode" card writes the column. Mid-flight flip is safe because the disposition reads `GateConfig` fresh per call (the standing no-caching rule). Verifiable: (a) toggle the checkbox OFF, queue a transcode against a worker with `Workers.QualityTestEnabled=TRUE`, observe `TranscodeAttempts.Disposition='BypassReplace', DispositionReason='QualityTestingGloballyDisabled'` and the file replaced without a `QualityTestQueue` row ever being created; (b) toggle ON during an in-flight transcode (worker started with global=OFF), observe the very next post-transcode disposition uses the new value (no worker restart); (c) `SELECT DISTINCT DispositionReason FROM TranscodeAttempts` includes `QualityTestingGloballyDisabled` only when the toggle was OFF.
+26. **Global operator master switch: `PostTranscodeGateConfig.QualityTestEnabled BOOLEAN NOT NULL DEFAULT TRUE`.** Advisory gate: workers with `QualityTestEnabled=FALSE` don't CLAIM VMAF jobs. Post `transcode-flow-canonical` C6 (Reset 9) `QualityTestingGloballyDisabled` no longer short-circuits to a replace disposition -- attempts still land `Pending/AwaitingVmaf` in `QualityTestingQueue`, visible to the operator, who can bring a capable worker online or force-override via `/api/QualityTest/Override`. Editable on `/settings` Post-Transcode card. Mid-flight flip is safe because the disposition reads `GateConfig` fresh per call.
 
 ## Seams
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
 |---|---|---|---|---|---|
-| S1 | `Profiles.qualitytestrequired -> TranscodeAttempts.QualityTestRequired` | `ProcessTranscodeQueueService.CreateTranscodeAttempt` reads `qualitytestrequired` from `profiles` WHERE `profilename = MediaFile.AssignedProfile` and copies into the attempt row | `BOOLEAN NOT NULL` on `profiles`; `BOOLEAN` on `TranscodeAttempts` | `PostTranscodeDispositionService._DecideFromInputs` Row 2 (`if not QualityTestRequired: return ('BypassReplace', 'QualityTestNotRequired')`) | C30 verification (a)+(b)+(c); `Tests/Contract/TestPostTranscodeDisposition.py` Row 2 case |
+| S1 | `Profiles.qualitytestrequired -> TranscodeAttempts.QualityTestRequired` | `ProcessTranscodeQueueService.CreateTranscodeAttempt` reads `qualitytestrequired` from `profiles` WHERE `profilename = MediaFile.AssignedProfile` and copies into the attempt row | `BOOLEAN NOT NULL` on `profiles`; `BOOLEAN` on `TranscodeAttempts` | `PostTranscodeDispositionDecider.Decide` Row 3 (`if not QualityTestRequired: return Disposition(Action='Replace', Reason='QualityTestNotRequired')`) | C30 verification (a)+(b)+(c); `Tests/Contract/TestPostTranscodeDisposition.py` Row 3 case |
 
 ## Status
 
@@ -222,7 +222,7 @@ NEXT: operator approval of the 8 new criteria. Then start with the migration (cr
 - [x] 7. New repository: `PostTranscodeGateConfigRepository.Get() / Update()`. Read-fresh per call. (Criterion 6.)
 - [x] 8. Implement `DecidePostTranscodeDisposition(TranscodeAttemptId)` in a new module `Features/QualityTesting/PostTranscodeDispositionService.py`. Returns `(Disposition, Reason, AuditPayload)`. Idempotent. (Criteria 1, 2, 5.)
 - [x] 9. Wire the function as the **only** post-transcode call from `ProcessTranscodeQueueService.ProcessJob` and `QualityTestingBusinessService.ProcessQualityTestQueue` (re-decide after VMAF lands). (Criterion 3.)
-- [x] 10. Update `FileReplacementBusinessService.ProcessFileReplacement` to require `Disposition IN ('Replace','BypassReplace')` on the attempt, refuse otherwise. Drop `BypassVMAFCheck` parameter. Delete `ProcessFileReplacementWithVMAF` (collapse). (Criterion 14.)
+- [x] 10. Update `FileReplacementBusinessService.ProcessFileReplacement` to require `Disposition = 'Replace'` on the attempt, refuse otherwise. Drop `BypassVMAFCheck` parameter. Delete `ProcessFileReplacementWithVMAF` (collapse). (Criterion 14.)
 - [x] 11. Implement the audit-trail UPDATE in the disposition function (Disposition, DispositionReason, DispositionDecidedAt). (Criteria 9, 11.)
 - [x] 12. Add the rolled-up INFO log line. Remove the opaque "Quality test processing failed" pattern. (Criteria 12, 13.)
 - [x] 13. Delete the legacy symbols listed in criterion 14. Update `post-transcode-pipeline.feature.md` per criterion 15.
@@ -262,7 +262,7 @@ memory/KNOWN-ISSUES.md                                                    -- rec
 | `Features/QualityTesting/PostTranscodeGateConfigRepository.py` | `Get() -> PostTranscodeGateConfigModel`, `Update(Min, Max, WhenVmafUnavailable)`. No caching. |
 | `Features/QualityTesting/Models/DispositionResult.py` | Dataclass: `Disposition`, `Reason`, `AuditPayload` (dict). |
 | `Features/QualityTesting/Models/PostTranscodeGateConfigModel.py` | Dataclass: `Id`, `VmafAutoReplaceMinThreshold`, `VmafAutoReplaceMaxThreshold`, `WhenVmafUnavailable`, `LastUpdated`. |
-| `Features/FileReplacement/FileReplacementBusinessService.py` | `ProcessFileReplacement(TranscodeAttemptId)` -- single entry point. Reads `Disposition` from `TranscodeAttempts`, refuses unless `IN ('Replace','BypassReplace')`. No threshold reads. |
+| `Features/FileReplacement/FileReplacementBusinessService.py` | `ProcessFileReplacement(TranscodeAttemptId)` -- single entry point. Reads `Disposition` from `TranscodeAttempts`, refuses unless `Disposition = 'Replace'`. No threshold reads. |
 | `Features/QualityTesting/QualityTestingBusinessService.py` | After writing a VMAF score, calls `DecidePostTranscodeDisposition` to re-decide and act on the result. `UpdateQualityTestResults` no longer computes `PassesThreshold` -- it just stores the score. |
 | `Features/TranscodeJob/ProcessTranscodeQueueService.py` | After successful transcode, calls `DecidePostTranscodeDisposition`. No more `ShouldQualityTestService`, no more `IsQualityTestEnabled`. |
 | `Templates/Settings.html` | "Post-Transcode" card with three editable controls (Min, Max, WhenVmafUnavailable). |

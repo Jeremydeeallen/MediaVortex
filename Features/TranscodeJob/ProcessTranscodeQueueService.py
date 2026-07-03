@@ -590,9 +590,9 @@ class ProcessTranscodeQueueService:
             except Exception:
                 pass
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: transcode-flow-canonical | # see transcode.ST8 -- StreamCopy checksum verify
     def HandleRemuxResult(self, Job: TranscodeQueueModel, TranscodeResult: Dict[str, Any], TranscodeAttemptId: int, ActiveJobId: int, OutputPath: str):
-        """Handle remux results - skip quality testing, go directly to file replacement."""
+        """StreamCopy path: checksum-verify then dispatch disposition. Vmaf=100.0 sentinel on match; Success=False on mismatch."""
         try:
             NewSizeBytes = TranscodeResult.get("NewSizeBytes", 0)
             RawOutputFilePath = TranscodeResult.get("OutputFilePath", OutputPath)
@@ -602,16 +602,20 @@ class ProcessTranscodeQueueService:
             SizeReductionBytes = OldSizeBytes - NewSizeBytes if NewSizeBytes > 0 and OldSizeBytes > 0 else 0
             SizeReductionPercent = (SizeReductionBytes / OldSizeBytes) * 100 if OldSizeBytes > 0 else 0.0
 
-            # Update attempt as successful, no quality test needed
-            self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
-                'Success': True,
+            ChecksumOutcome = self._VerifyStreamCopyChecksum(Job, RawOutputFilePath, TranscodeAttemptId)
+            AttemptUpdate = {
                 'CompletedDate': datetime.now(timezone.utc),
                 'TranscodeDurationSeconds': TranscodeResult.get('Duration', 0.0),
                 'NewSizeBytes': NewSizeBytes,
                 'SizeReductionBytes': SizeReductionBytes,
                 'SizeReductionPercent': SizeReductionPercent,
-                'QualityTestRequired': False
-            })
+                'QualityTestRequired': False,
+                'Success': ChecksumOutcome['Success'],
+                'VMAF': ChecksumOutcome['Vmaf'],
+            }
+            if not ChecksumOutcome['Success']:
+                AttemptUpdate['ErrorMessage'] = ChecksumOutcome['ErrorMessage']
+            self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, AttemptUpdate)
 
             # Update TranscodeFiles record
             self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes, MediaFileId=Job.MediaFileId)
@@ -631,6 +635,63 @@ class ProcessTranscodeQueueService:
         except Exception as e:
             LoggingService.LogException("Exception handling job result", e, "ProcessTranscodeQueueService", "HandleRemuxResult")
 
+    # directive: transcode-flow-canonical | # see transcode.ST8 -- StreamCopy verify emits checksum
+    def _VerifyStreamCopyChecksum(self, Job: TranscodeQueueModel, StagedOutputPath: str, TranscodeAttemptId: int) -> Dict[str, Any]:
+        """Return {Success, Vmaf, ErrorMessage}. Vmaf=100.0 on video-stream MD5 match; Success=False on mismatch or probe error."""
+        import subprocess
+        try:
+            SourceLocalPath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker.Current(Db=self.DatabaseManager.DatabaseService))
+            if not SourceLocalPath or not LocalExists(SourceLocalPath):
+                return {'Success': False, 'Vmaf': None, 'ErrorMessage': f'StreamCopy verify: source unresolved or missing at {SourceLocalPath!r}'}
+            if not LocalExists(StagedOutputPath):
+                return {'Success': False, 'Vmaf': None, 'ErrorMessage': f'StreamCopy verify: staged output missing at {StagedOutputPath!r}'}
+            SourceMd5 = self._ComputeVideoStreamMd5(SourceLocalPath)
+            OutputMd5 = self._ComputeVideoStreamMd5(StagedOutputPath)
+            if SourceMd5 is None or OutputMd5 is None:
+                return {'Success': False, 'Vmaf': None, 'ErrorMessage': f'StreamCopy verify: MD5 probe failed (source={SourceMd5!r} output={OutputMd5!r})'}
+            if SourceMd5 != OutputMd5:
+                LoggingService.LogError(
+                    f"StreamCopy checksum mismatch on TranscodeAttempt {TranscodeAttemptId}: source MD5={SourceMd5} output MD5={OutputMd5}",
+                    "ProcessTranscodeQueueService", "_VerifyStreamCopyChecksum",
+                )
+                return {'Success': False, 'Vmaf': None, 'ErrorMessage': f'StreamCopy checksum mismatch: source={SourceMd5} output={OutputMd5}'}
+            LoggingService.LogInfo(
+                f"StreamCopy checksum verified on TranscodeAttempt {TranscodeAttemptId}: MD5={SourceMd5}",
+                "ProcessTranscodeQueueService", "_VerifyStreamCopyChecksum",
+            )
+            return {'Success': True, 'Vmaf': 100.0, 'ErrorMessage': None}
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"StreamCopy checksum verify failed on TranscodeAttempt {TranscodeAttemptId}",
+                Ex, "ProcessTranscodeQueueService", "_VerifyStreamCopyChecksum",
+            )
+            return {'Success': False, 'Vmaf': None, 'ErrorMessage': f'StreamCopy verify raised: {str(Ex)[:200]}'}
+
+    # directive: transcode-flow-canonical | # see transcode.ST8
+    def _ComputeVideoStreamMd5(self, LocalPath: str) -> Optional[str]:
+        """Return hex MD5 of the video stream via `ffmpeg -i <path> -map 0:v -c copy -f md5 -`."""
+        import subprocess
+        try:
+            Command = [self.FFmpegPath, '-nostdin', '-hide_banner', '-loglevel', 'error', '-i', LocalPath, '-map', '0:v', '-c', 'copy', '-f', 'md5', '-']
+            Result = subprocess.run(Command, capture_output=True, text=True, timeout=600)
+            if Result.returncode != 0:
+                LoggingService.LogError(
+                    f"ffmpeg MD5 probe returned {Result.returncode} for {LocalPath!r}: {Result.stderr.strip()[:200]}",
+                    "ProcessTranscodeQueueService", "_ComputeVideoStreamMd5",
+                )
+                return None
+            for Line in Result.stdout.splitlines():
+                Line = Line.strip()
+                if Line.startswith('MD5='):
+                    return Line[len('MD5='):].lower()
+            return None
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"MD5 probe raised for {LocalPath!r}",
+                Ex, "ProcessTranscodeQueueService", "_ComputeVideoStreamMd5",
+            )
+            return None
+
     # directive: nvenc-rate-anchored-remediation
     def GetMediaFileData(self, Job: TranscodeQueueModel) -> Optional[MediaFileModel]:
         """Get MediaFile data by FilePath to retrieve source resolution."""
@@ -643,26 +704,12 @@ class ProcessTranscodeQueueService:
     # directive: nvenc-rate-anchored-remediation
     def DispatchDisposition(self, TranscodeAttemptId: int, Job: TranscodeQueueModel,
                             OutputFilePath: str) -> None:
-        """Decide the disposition for a finished transcode and act on it.
-        Delegates the decision to PostTranscodeDispositionService (single source
-        of truth). Acts on the result:
-
-          Replace / BypassReplace -> hand off to FileReplacementBusinessService
-          Pending (AwaitingVmaf)   -> enqueue to QualityTestQueue
-          Discard / NoReplace / Requeue -> audit row already committed by the
-            disposition function; the .inprogress file remains next to the
-            source for operator inspection. (Action paths for these are
-            deferred -- the disposition + audit trail give the operator
-            visibility today.)
-
-        Replaces the legacy `ShouldQualityTestService.ProcessTranscodedFile`
-        call. See Features/QualityTesting/post-transcode-disposition.feature.md.
-        """
+        """Replace -> FileReplacementBusinessService; Pending -> QualityTestQueue; other terminals audited by dispatcher (Requeue reschedules via BUG-0079 wiring)."""
         try:
             Result = self.DispositionDispatcher.Dispatch(TranscodeAttemptId)
             Disposition = Result.Disposition
 
-            if Disposition in ('Replace', 'BypassReplace'):
+            if Disposition == 'Replace':
                 from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
                 ReplacementService = FileReplacementBusinessService(
                     self.DatabaseManager,

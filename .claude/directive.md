@@ -310,6 +310,16 @@ Populated incrementally per step.
 | Parked `quality-test.flow.md` full content (C1) | `Features/QualityTesting/quality-test.flow.md` -- CREATE at DELIVERING (R13 refuses outside DELIVERING; content parked in directive `### Parked -- quality-test.flow.md`) | (DELIVERING commit) |
 | Violated-section sweep results (C8) | `WorkerService/WorkerService.feature.md` L43-46 delete; `Features/TranscodeQueue/media-tabs.flow.md` L126 parenthetical delete; `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md` L48 wording | (Reset 5 commit) |
 | Enqueue non-null contract description (C2 / S3) | `Features/TranscodeQueue/TranscodeQueue.feature.md` new criterion 12 | (Reset 6 commit) |
+| BypassReplace retired -- decision table + outcome table + operator override wording (C6/C8) | `transcode.flow.md` ST7 decision table, ST9 outcome table, WebService override sub-path, Phase 7 heading | (Reset 9 commit) |
+| Reject added as terminal-verify-fail; Requeue = new-queue-row via BUG-0079 wiring (C6) | `transcode.flow.md` ST9 outcome table + Requeue/Reject/NoReplace subsections | (Reset 9 commit) |
+| StreamCopy checksum verify contract (C6) | `transcode.flow.md` ST8 Strategy variants -- checksum row + Vmaf overload note (already promoted Reset 5) | (Reset 9 commit reaffirms) |
+| Decider decision table + operator master switch rewrite (C6) | `Features/QualityTesting/post-transcode-disposition.feature.md` criteria 3, 7, 26, 30 + S1 seam wording | (Reset 9 commit) |
+| Terminal-cleanup dispositions include Reject (C6) | `Features/QualityTesting/Disposition/disposition.feature.md` C7 | (Reset 9 commit) |
+| Operator override endpoint writes Replace/Discard, not BypassReplace (C6) | `Features/QualityTesting/qt-queue-visibility-and-override.feature.md` C5 + `Features/QualityTesting/manual-override-replace.feature.md` What-It-Does / criterion 2 / criterion 3 | (Reset 9 commit) |
+| Post-transcode-pipeline TFP cleanup covers Reject too (C6) | `Features/FileReplacement/post-transcode-pipeline.feature.md` criterion 15 + Notes | (Reset 9 commit) |
+| Compliance-gate-failure flip references only Replace (C6) | `compliance-gated-rename.feature.md` Notes | (Reset 9 commit) |
+| Gap-to-Target -- Compliance-bypass row deleted (gap closed by C6) | `ARCHITECTURE.md` `## Gap to Target` | (Reset 9 commit) |
+| Analyze-transcode command interpretation updated for retired BypassReplace (C6/C8) | `.claude/commands/mediavortex-analyze-transcode.md` | (Reset 9 commit) |
 
 ### Verification
 
@@ -317,11 +327,16 @@ Populated at VERIFYING.
 
 ### Resume Marker
 
-- **Current step:** Reset 8 code complete -- (C5) `PostEncodeMeasurementService.Probe` extended: new `QueueId` param, new `_PersistAttestation` writes all three columns in one UPDATE via `WRITE_ATTEMPT_ATTESTATION_SQL` (`AudioTracksEmittedJson` + `AudioPolicyResolved` verdict + `AudioPolicyJson` snapshot from `TranscodeQueue` via correlated subquery). Verdict logic: `resolved` if all streams measured, `mixed` if any measurement failed, `unresolved` if no streams. `JobProcessor.Process` line 149-153 now passes `QueueId=Job.Id` to Probe. `transcode.flow.md` L256/L260 renamed `PostEncodeMeasurementService.Measure` -> `.Probe` (doc-code alignment). New `Tests/Contract/TestSharedColumnsPopulated.py` -- round-trip test proves `_PersistAttestation` writes all three columns against a real attempt+queue seed; audit test skips until post-cutover data lands. Regression sweep 31/31 pass across TestClaimAuthority + TestEnqueueContract + TestAddJobToQueueForceAdd + TestNoModeBranchingAtOrchestration + TestAudioOperatorVisibleFailure + TestSharedColumnsPopulated.
-- **Reset 8 live smoke DONE:** attempt 41049 (My Little Pony S01E01, av1_nvenc, MediaFileId=4275) enqueued via WorkBucket ForceAdd path (~scanner-simulating), claimed by I9-2024, encoded in ~80s. Result: `Success=True`, `AudioPolicyResolved='resolved'`, `AudioPolicyJson` non-null (592 bytes), `AudioTracksEmittedJson` non-null (631 bytes, 2 tracks -- Track 0 measured -23.0 LUFS matching TargetIntegratedLufs, Track 1 = Dialog Boost). Disposition=Requeue (VMAF=41.76 below auto-replace threshold -- profile-tuning orthogonal to C5 shared-columns contract; same pattern as Reset 7 QSV smoke). C5 attestation contract fully wired end-to-end.
-- **Next:** Reset 9 -- C6 code (retire `BypassReplace` disposition; StreamCopy emits checksum; BUG-0079 Requeue inserts new queue row). Live smoke (d) Requeue -> new row -> Replace.
+- **Current step:** Reset 9 code + smoke DONE. C6 BypassReplace retirement complete; StreamCopy checksum verify wired at `HandleRemuxResult` via `_VerifyStreamCopyChecksum` + `_ComputeVideoStreamMd5` (ffmpeg -f md5 on both source and staged output, VMAF=100.0 sentinel on match); BUG-0079 Requeue-new-row wiring landed at `DispositionDispatcher._MaybeScheduleRequeue` via injectable `RequeueScheduler` (default = `QueueManagementBusinessService.AddJobToQueue(ForceAdd=True)`).
+- **Reset 9 migration DONE:** `Scripts/SQLScripts/DropBypassReplaceDisposition_2026_07_03.py` executed. Rename-then-drop pattern -- backup existing `transcodeattempts_disposition_enum` CHECK, rewrote **27608** historical `Disposition='BypassReplace'` rows to `Replace` (DispositionReason preserved for audit), installed new CHECK `('Pending','Replace','Reject','NoReplace','Requeue','Discard')`, dropped backup. Post-migration DISTINCT Disposition = `{Discard, NoReplace, Pending, Replace, Requeue}`.
+- **Reset 9 live smoke (d) DONE:** MFID 4275 enqueued via `POST /api/Work/Transcode/Queue/4275` -> QueueId 144675. I9-2024 claimed 22:08:10, encoded ~80s. Attempt 41060 completed 22:10:40 -> Disposition=Pending/AwaitingVmaf. VMAF ran on I9-2024, score=8.26 (below 88.0 min). Dispatcher.Dispatch fired -> Disposition=Requeue/VmafBelowMin committed on 41060, `_MaybeScheduleRequeue` invoked `AddJobToQueue(MediaFileId=4275, ForceAdd=True)` -> **new TranscodeQueue row 144676 inserted at 22:18:48, ProcessingMode=Transcode, immediately claimed by I9-2024**. BUG-0079 wiring verified end-to-end.
+- **Regression:** 63/63 tests pass, 1 skipped -- TestNoBypassReplace (4), TestDispositionDecider (15), TestPostTranscodeDisposition (13), TestFileReplacementDrain (5), TestClaimAuthority (18), TestEnqueueContract (3+1 skip), TestNoModeBranchingAtOrchestration (1), TestSharedColumnsPopulated (2), TestAudioOperatorVisibleFailure (2).
+- **Deferred (not scope-blocking):**
+  - `SaveTranscodeAttempt` sentinel `__UNRESOLVED__` on ProfileName still surfaces in smoke (attempt 41061 phantom row from bug); Resume Marker Reset 8 already noted this; pre-existing.
+  - No AdjustmentRegistry knob-override applied on requeued row -- second attempt will use same profile settings and likely VMAF-fail again. Phase 2 concern; not in Reset 9 scope. Filed as future work (adjustment-registry-wiring).
+- **Next:** Reset 10 -- C7 sweep (fail-loud grep audit; remove silent fallbacks; BUG-0077 QT admission refuses freeze-marker rows). `Tests/Contract/TestFailLoud.py` green.
 - **Phase:** IMPLEMENTING
-- **Last commit:** (Reset 8 pending commit)
+- **Last commit:** (Reset 9 pending commit)
 - **Follow-ups noted:**
   - Directive C9 `+/-1 LU` LUFS tolerance vs DB `LoudnessTolerance=4.0` mismatch; reconcile at VERIFYING or via doc-only edit before Reset 12.
   - `AudioPolicyAdmissionGate.AdmitOrDefer` can return `PolicyJson=None` (DEFERRED_UNGAINABLE), leaving `TranscodeQueue.AudioPolicyJson` NULL despite S3 contract. Live-DB audit currently skips; will fail if a policy-deferred file lands post-cutover. File as bug at Reset 11.

@@ -11,13 +11,14 @@ from Features.QualityTesting.Models.DispositionResult import DispositionResult
 class DispositionDispatcher:
     """Orchestrates ST7 disposition: read attempt + gate config, delegate to Decider, write outcome, cleanup TFP (replaces PostTranscodeDispositionService.DecidePostTranscodeDisposition)."""
 
-    TERMINAL_DISPOSITIONS = ('Discard', 'NoReplace', 'Requeue')
-    VALID_DISPOSITIONS = ('Pending', 'Replace', 'BypassReplace', 'NoReplace', 'Requeue', 'Discard')
+    TERMINAL_DISPOSITIONS = ('Reject', 'NoReplace', 'Requeue', 'Discard')
+    VALID_DISPOSITIONS = ('Pending', 'Replace', 'Reject', 'NoReplace', 'Requeue', 'Discard')
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
+    # directive: transcode-flow-canonical | # see transcode.ST7
     def __init__(self, Decider, GateConfigRepository, AttemptCleanupService, DatabaseService,
-                 RetranscodeDecider=None, AdjustmentRegistry=None, RetryBudgetService=None):
-        """Inject the core decision dependencies plus optional Phase-2 strategies (composed for forward use)."""
+                 RetranscodeDecider=None, AdjustmentRegistry=None, RetryBudgetService=None,
+                 RequeueScheduler=None):
+        """Inject core dependencies plus optional Phase-2 strategies + Requeue scheduler (BUG-0079)."""
         self.Decider = Decider
         self.GateConfigRepository = GateConfigRepository
         self.AttemptCleanupService = AttemptCleanupService
@@ -25,6 +26,7 @@ class DispositionDispatcher:
         self.RetranscodeDecider = RetranscodeDecider
         self.AdjustmentRegistry = AdjustmentRegistry
         self.RetryBudgetService = RetryBudgetService
+        self.RequeueScheduler = RequeueScheduler
 
     # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
     def Dispatch(self, TranscodeAttemptId: int) -> DispositionResult:
@@ -57,6 +59,7 @@ class DispositionDispatcher:
 
             self._CommitDisposition(TranscodeAttemptId, Outcome.Action, Outcome.Reason)
             self._MaybeCleanupTfp(TranscodeAttemptId, Outcome.Action)
+            self._MaybeScheduleRequeue(TranscodeAttemptId, Outcome.Action, Row)
 
             AuditPayload = self._BuildAuditPayload(TranscodeAttemptId, Attempt, VmafCapableWorkerOnline, GateConfig)
             LoggingService.LogInfo(
@@ -224,3 +227,36 @@ class DispositionDispatcher:
         """For terminal dispositions, drop the TFP row via AttemptCleanupService."""
         if Action in self.TERMINAL_DISPOSITIONS:
             self.AttemptCleanupService.Cleanup(TranscodeAttemptId)
+
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- BUG-0079
+    def _MaybeScheduleRequeue(self, TranscodeAttemptId: int, Action: str, Row: dict) -> None:
+        """On Requeue, insert a new TranscodeQueue row for the MediaFile via canonical AddJobToQueue."""
+        if Action != 'Requeue':
+            return
+        MediaFileId = Row.get('MediaFileId')
+        if MediaFileId is None:
+            LoggingService.LogError(
+                f"Requeue for TranscodeAttempt {TranscodeAttemptId}: MediaFileId missing; cannot enqueue new attempt",
+                "DispositionDispatcher", "_MaybeScheduleRequeue",
+            )
+            return
+        Scheduler = self.RequeueScheduler or self._DefaultRequeueScheduler
+        try:
+            Result = Scheduler(MediaFileId, TranscodeAttemptId)
+            LoggingService.LogInfo(
+                f"Requeue for TranscodeAttempt {TranscodeAttemptId} (MediaFileId={MediaFileId}): scheduler result={Result}",
+                "DispositionDispatcher", "_MaybeScheduleRequeue",
+            )
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"Requeue scheduling failed for TranscodeAttempt {TranscodeAttemptId} (MediaFileId={MediaFileId})",
+                Ex, "DispositionDispatcher", "_MaybeScheduleRequeue",
+            )
+
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- BUG-0079
+    def _DefaultRequeueScheduler(self, MediaFileId: int, TranscodeAttemptId: int) -> dict:
+        """Default scheduler: reuse QueueManagementBusinessService.AddJobToQueue with ForceAdd=True."""
+        from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+        from Repositories.DatabaseManager import DatabaseManager
+        Service = QueueManagementBusinessService(DatabaseManager())
+        return Service.AddJobToQueue(MediaFileId=MediaFileId, ForceAdd=True)

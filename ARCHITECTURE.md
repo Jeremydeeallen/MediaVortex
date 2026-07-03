@@ -117,7 +117,6 @@ Re-audited 2026-07-03 during `transcode-flow-canonical` NEEDS_STANDARDS_REVIEW.
 
 | Gap | Evidence | Directive |
 |---|---|---|
-| Compliance gate bypassed 88% of attempts | BypassReplace=981/1121 over 7d | `transcode-flow-canonical` C6 |
 | `AudioPolicyResolved` 0% populated | 0/1121 rows | C5 |
 | `AudioPolicyJson` 0% populated | 0/1121 rows | C5 |
 | VMAF measured on 3.6% of attempts | 40/1121 rows | C6 |
