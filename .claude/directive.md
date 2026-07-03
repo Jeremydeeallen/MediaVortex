@@ -297,6 +297,8 @@ Populated incrementally per step.
 
 | Source (directive) | Target | Commit |
 |---|---|---|
+| Job Types section spec (C0a) | `ARCHITECTURE.md` `## Job Types` | (Reset 2 commit) |
+| Gap to Target re-audit (Signal 3 findings + missing artifacts) | `ARCHITECTURE.md` `## Gap to Target` | (Reset 2 commit) |
 
 ### Verification
 
@@ -304,9 +306,10 @@ Populated at VERIFYING.
 
 ### Resume Marker
 
-- **Current step:** 1 -- NEEDS_PLAN (this reset)
-- **Next:** operator reviews criteria + Files + Reset Plan; on approval, advance to NEEDS_DOC_PREREAD (Reset 2) and pre-read colocated docs
-- **Last commit:** 9386eea (audit-populated open)
+- **Current step:** Reset 2 complete -- ARCHITECTURE.md shrunk 243 -> 129 lines with Job Types section + re-audited Gap to Target
+- **Next:** Reset 3 -- create GLOSSARY.md at repo root; four buckets; reference from CLAUDE.md; add tier entry to doc-layering.md
+- **Phase:** IMPLEMENTING
+- **Last commit:** (Reset 2 pending commit)
 
 ### Promotions
 
