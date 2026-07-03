@@ -45,7 +45,7 @@ Three operator concerns this feature resolves:
 
 3. **Library hygiene drift.** Some MediaVortex outputs were transcoded before audio normalization was wired in, so the library has an inconsistent loudness. Some natively-imported files are MKV, breaking Jellyfin compatibility. Today there is no single signal that says "this file is done." The `IsCompliant` column becomes that signal.
 
-The audio-on-remux fix shipped 2026-05-09 made the Remux pipeline a fully-acceptable alternative to Transcode for files that don't need video re-encoding -- this feature is what routes traffic to it.
+The audio-on-remux fix shipped 2026-05-09 made the Remux strategy (stream-copy path through the unified pipeline) a fully-acceptable alternative to the Transcode strategy for files that don't need video re-encoding -- this feature is what routes traffic to it.
 
 ## Surface
 

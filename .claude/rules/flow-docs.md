@@ -4,6 +4,8 @@ One pipeline per flow doc. Features reference flows, not the reverse. One tier o
 
 **Flow doc is the navigation hub for pipeline-shaped code.** Stable `ST<N>` stage IDs + a complete `## Seams` table make a flow doc indexable: a code anchor `# see <flow-slug>.ST<N>` lets a reader navigate via a partial Read of the named stage section instead of full Reads of every colocated `*.feature.md`. R1 (`.claude/standards/index.md`) accepts this anchored partial Read as a substitute for colocated feature-md preread. R18 enforces partial-read discipline on `*.feature.md` (limit<=50).
 
+**Invariant -- one flow per pipeline shape.** Two `*.flow.md` files describing one conceptual operation is refused. Sub-flows are legitimate ONLY when both hold: (a) the nested pipeline has enough stage variance to warrant its own stage graph (e.g. audio normalization's Demucs pre-pass + Track 0 emit + Track 1 emit); (b) every parent-flow entry converges on it. Absent both, fold into the parent. Reason: divergent flow docs mask orchestration-level mode-branching (`.claude/rules/call-graph-audit.md` Signal 1). Enforcement: NEEDS_STANDARDS_REVIEW call-graph audit reviews every `*.flow.md` pair -- unify or explicitly name the carve-out.
+
 ## Required structure
 
 Every `*.flow.md` has:

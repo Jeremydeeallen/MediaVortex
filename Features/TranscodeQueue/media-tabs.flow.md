@@ -123,7 +123,7 @@ AudioFixPriorityHints    -- (NEW) folder-level priority overrides for Audio Fix 
 ## Related Docs
 
 - `Features/TranscodeQueue/transcode.flow.md` -- the broader pipeline; this flow restructures Stage 4's queue listing presentation, not the pipeline itself.
-- `transcode.flow.md ST6 Strategy variants` -- the worker-side Remux/AudioFix execution (remux.flow.md absorbed here). AudioFix tab rows use the same unified orchestration.
+- `transcode.flow.md ST6 Strategy variants` -- the worker-side Remux/AudioFix execution via unified `JobProcessor` + per-mode Strategy. AudioFix tab rows use the same orchestration.
 - `Features/AudioCompletion/audio-completion.flow.md` -- the audio-completion state machine that drives the AudioFix routing decision.
 - `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md` -- the cascade that produces RecommendedMode (extended here to include 'AudioFix').
 - `Features/MediaProbe/` -- the reprobe lifecycle feature (sibling to this one) that ensures loudness data is fresh.
