@@ -9,6 +9,7 @@ Three documentation tiers. Non-overlapping roles. Each tier owns a distinct kind
 | Directive | `.claude/directive.md` -> `.claude/directives/closed/YYYY-MM-DD-<slug>.md` | Transient | The current CEO ask: outcome, criteria, plan, in-flight state, verification, decisions | Enumerated before IMPLEMENTING; promoted to feature/flow docs at DELIVERING |
 | Feature | `*.feature.md` colocated with code | Durable | What a vertical DOES + Workflows + intra-feature seams | Intra-feature: function-call, helper, vertical-to-external-service |
 | Flow | `*.flow.md` colocated with pipeline entry | Durable | What the pipeline DOES + stages + cross-stage seams | Cross-stage: data crossing each stage transition |
+| Glossary | `GLOSSARY.md` at repo root | Durable | Terminology + deprecated-term pointers. Four buckets (project vocabulary / media-encoding / job model / infrastructure). Every entry names an authoritative source. | None -- terminology only, no seams |
 
 Content has exactly one tier-appropriate home at any time. The directive is the ASK, not the contract. Features and flows are the CONTRACTS.
 

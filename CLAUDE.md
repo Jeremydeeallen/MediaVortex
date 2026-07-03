@@ -5,6 +5,7 @@ MediaVortex: Python/Flask media transcoding system. Scans files, runs FFmpeg, in
 ## Where everything lives
 
 - **Target architecture:** `ARCHITECTURE.md` (target-state vertical roster, cross-cutting concerns, data flow, deprecated/dying — every directive is a delta against this)
+- **Terminology:** `GLOSSARY.md` (four buckets: project vocabulary, media/encoding, job model, infrastructure; each entry names an authoritative source; deprecated terms carry replacement pointer)
 - **Framework rules:** `.claude/rules/*.md` (auto-loaded; invariants only — details in `.claude/rules-details/`)
 - **Mechanically enforced standards:** `.claude/standards/index.md` (phase gates + R-rules)
 - **Current directive:** `.claude/directive.md` (auto-loaded; empty + no marker = hook refuses code edits)

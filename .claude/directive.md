@@ -299,6 +299,8 @@ Populated incrementally per step.
 |---|---|---|
 | Job Types section spec (C0a) | `ARCHITECTURE.md` `## Job Types` | (Reset 2 commit) |
 | Gap to Target re-audit (Signal 3 findings + missing artifacts) | `ARCHITECTURE.md` `## Gap to Target` | (Reset 2 commit) |
+| Glossary tier definition (C0b) | `GLOSSARY.md` created; `.claude/rules/doc-layering.md` tier row added | (Reset 3 commit) |
+| Deprecated-term inventory (Remux / BypassReplace / ProcessingMode / Transcode ambiguity / AudioFix / SubtitleFix / Quick) | `GLOSSARY.md` Media-encoding + Job-model buckets | (Reset 3 commit) |
 
 ### Verification
 
@@ -306,10 +308,10 @@ Populated at VERIFYING.
 
 ### Resume Marker
 
-- **Current step:** Reset 2 complete -- ARCHITECTURE.md shrunk 243 -> 129 lines with Job Types section + re-audited Gap to Target
-- **Next:** Reset 3 -- create GLOSSARY.md at repo root; four buckets; reference from CLAUDE.md; add tier entry to doc-layering.md
+- **Current step:** Reset 3 complete -- GLOSSARY.md created (4 buckets alphabetical, every entry cites authoritative source); CLAUDE.md links it; doc-layering.md adds Glossary tier row
+- **Next:** Reset 4 -- create `.claude/rules/fail-loud.md` + `.claude/rules-details/fail-loud.md` (C7 pre-step, BEFORE code sweep)
 - **Phase:** IMPLEMENTING
-- **Last commit:** (Reset 2 pending commit)
+- **Last commit:** (Reset 3 pending commit)
 
 ### Promotions
 
