@@ -25,9 +25,9 @@ class EnqueueRetranscode(IAudioVerticalRemediation):
 
     Name = "EnqueueRetranscode"
 
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.H1
+    # directive: transcode-flow-canonical | # see transcodequeue.S3
     def Apply(self, RowIds):
-        """Bulk-insert queue rows for the offending MediaFiles; rowcount reflects actual inserts."""
+        """Bulk-insert queue rows for the offending MediaFiles; rowcount reflects actual inserts. Snapshots AudioPolicyJson per S3 enqueue contract."""
         if not RowIds:
             return 0
         try:
@@ -38,9 +38,11 @@ class EnqueueRetranscode(IAudioVerticalRemediation):
                 Cur.execute(INSERT_QUEUE_SQL, (list(RowIds),))
                 Inserted = Cur.rowcount or 0
                 Conn.commit()
-                return Inserted
             finally:
                 Db.CloseConnection(Conn)
+            from Features.AudioNormalization.AudioPolicyAdmissionGate import AudioPolicyAdmissionGate
+            AudioPolicyAdmissionGate().BackfillAllPending()
+            return Inserted
         except Exception as Ex:
             LoggingService.LogException(
                 "EnqueueRetranscode.Apply failed",

@@ -307,6 +307,7 @@ Populated incrementally per step.
 | Stale `remux.flow.md` parenthetical deletion (C8) | `transcode.flow.md` ST6 audio-policy attestation + same-slot rename safety paragraphs | (Reset 5 commit) |
 | Parked `quality-test.flow.md` full content (C1) | `Features/QualityTesting/quality-test.flow.md` -- CREATE at DELIVERING (R13 refuses outside DELIVERING; content parked in directive `### Parked -- quality-test.flow.md`) | (DELIVERING commit) |
 | Violated-section sweep results (C8) | `WorkerService/WorkerService.feature.md` L43-46 delete; `Features/TranscodeQueue/media-tabs.flow.md` L126 parenthetical delete; `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md` L48 wording | (Reset 5 commit) |
+| Enqueue non-null contract description (C2 / S3) | `Features/TranscodeQueue/TranscodeQueue.feature.md` new criterion 12 | (Reset 6 commit) |
 
 ### Verification
 
@@ -314,10 +315,17 @@ Populated at VERIFYING.
 
 ### Resume Marker
 
-- **Current step:** Reset 5 complete -- `transcode.flow.md` Strategy@ST8 + VMAF->VERIFY rename + Seams S3/S4 update + remux.flow.md parenthetical deletion; `.claude/rules/flow-docs.md` "one flow per pipeline shape" invariant added; `quality-test.flow.md` content drafted and parked in directive for DELIVERING promotion (R13 blocks creation at IMPLEMENTING); violated-section sweep deletions applied.
-- **Next:** Reset 6 -- C2 code: collapse enqueue routes; fix BUG-0078 (ForceAdd insert on VMAF>=80). Contract test `Tests/Contract/TestEnqueueContract.py` green. Live smoke (a) web GUI enqueue -> Reencode -> VMAF pass -> Replace with audio-emit check.
+- **Current step:** Reset 6 complete -- BUG-0078 pre-fixed in tree (verified `TestAddJobToQueueForceAdd` 6/6 green); enqueue producer collapse: `EnqueueRetranscode.Apply` now calls `AudioPolicyAdmissionGate.BackfillAllPending()` after INSERT; `QualityTestController` test-variant INSERT now stamps `ProcessingMode='Transcode'` + calls `BackfillAllPending()`; new contract test `Tests/Contract/TestEnqueueContract.py` asserts every top-level producer calls a snapshot hook + every INSERT stanza names StorageRootId/RelativePath/ProcessingMode + no unlisted production producer bypasses (3/1 skipped, live-DB audit skips absent recent rows); `TranscodeQueue.feature.md` C12 documents S3 non-null contract. Live smoke (a): GUI POST /api/Work/Transcode/Queue/378 (Adventure Time) + /Queue/621222 (Chalet Girl) via canonical `AddJobToQueue`. Chalet Girl attempt 41019 landed VMAF=92.66, Disposition=Replace, FileReplaced=True 2026-07-03 16:43:18Z. Audio-emit check: 2 tracks (opus/stereo), disposition.default=0/1, Track 0 I=-21.8 LUFS (target -23.0, DB tolerance 4.0 LU PASS; directive C9 +/-1 LU tighter spec exceeded by 0.2 -- doc drift to reconcile).
+- **Next:** Reset 7 -- C3 + C4 code: collapse claim (route all claim queries through `WorkerCapabilityPredicate.BuildClaimPredicate`); collapse orchestration (delete the 9+ mode-branches Signal 2 named). `TestClaimAuthority` full-green; grep for mode-branches = 0. Live smoke (b) web GUI enqueue on container-fix candidate -> StreamCopy -> checksum pass -> Replace.
 - **Phase:** IMPLEMENTING
-- **Last commit:** (Reset 5 pending commit)
+- **Last commit:** (Reset 6 pending commit)
+- **Follow-ups noted:**
+  - Directive C9 `+/-1 LU` LUFS tolerance vs DB `LoudnessTolerance=4.0` mismatch; reconcile at VERIFYING or via doc-only edit before Reset 12.
+  - `AudioPolicyAdmissionGate.AdmitOrDefer` can return `PolicyJson=None` (DEFERRED_UNGAINABLE), leaving `TranscodeQueue.AudioPolicyJson` NULL despite S3 contract. Live-DB audit currently skips; will fail if a policy-deferred file lands post-cutover. File as bug at Reset 11.
+  - VMAF filter chain gaps (color primaries, HDR/4K model select, VFR handling, deinterlace, fail-loud fps fallback) -- open `vmaf-color-and-model-matching` follow-up directive after this closes.
+  - `SaveTranscodeAttempt` sentinel `__UNRESOLVED__` on ProfileName -- surfaced in both smoke (a) attempts. Pre-existing; not this directive's scope.
+  - `DetectAndCleanStuckTranscodeJobs` false-positive killed Chalet Girl attempt 41018 pre-VMAF-write (still emitted output OK). Pre-existing.
+  - `DetectAndCleanStuck/StaleQualityTestJobs` claims "No running quality test jobs found" while VMAF process actively running (per MonitorVMAFProgress logs). Pre-existing bug in stale detector.
 
 ---
 
