@@ -308,10 +308,10 @@ Populated at VERIFYING.
 
 ### Resume Marker
 
-- **Current step:** Reset 3 complete -- GLOSSARY.md created (4 buckets alphabetical, every entry cites authoritative source); CLAUDE.md links it; doc-layering.md adds Glossary tier row
-- **Next:** Reset 4 -- create `.claude/rules/fail-loud.md` + `.claude/rules-details/fail-loud.md` (C7 pre-step, BEFORE code sweep)
+- **Current step:** Reset 4 complete -- `.claude/rules/fail-loud.md` + `.claude/rules-details/fail-loud.md` created (C7 pre-step; four anti-patterns + boundary-sanitization carve-out + grep patterns for TestFailLoud.py)
+- **Next:** Reset 5 -- C1 + C8 doc surgery: rewrite `transcode.flow.md` to 10-stage + Strategy shape; keep `audio-normalization.flow.md` as sub-flow (already decided); create `Features/QualityTesting/quality-test.flow.md`; add "one flow per pipeline shape" invariant to `.claude/rules/flow-docs.md`
 - **Phase:** IMPLEMENTING
-- **Last commit:** (Reset 3 pending commit)
+- **Last commit:** (Reset 4 pending commit)
 
 ### Promotions
 
