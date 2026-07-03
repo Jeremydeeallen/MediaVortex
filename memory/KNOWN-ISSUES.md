@@ -94,6 +94,41 @@ INFO    Auto-captured 0/4 stills for attempt 40985 (policy=All)
 
 ### stuck-detection
 
+### [BUG-0081] StuckJobDetectionService is phase-blind; kills legitimate Demucs pre-encode + leaves child unreaped + re-claim stacks
+**Date:** 2026-07-03 | **Area:** stuck-detection / transcode-lifecycle
+
+**What breaks:** `StuckJobDetectionService._IsJobFrozen` (`Features/ServiceControl/StuckJobDetectionService.py:255-296`) reads `TranscodeProgress.LastProgressUpdate` and fires "frozen -- no frame advance for N minutes" once staleness exceeds threshold (default 5 min). But `JobProcessor.Process` calls `_RunPreEncodeAudio` (Demucs source separation) BEFORE ffmpeg starts. On a wakko-worker-N container (Ryzen 7 3700X, 4-thread cpuset), Demucs `htdemucs -d cpu` for a 20-25 min episode takes 15+ min. During Demucs the Reporter callback does not tick TranscodeProgress -- Demucs stdout progress is not parsed -- so `LastProgressUpdate` stays at the pre-Demucs "Preparing Files" tick and goes stale.
+
+Detector fires -> HandleJobFailure marks attempt failed -> re-set queue row to Pending. But the Demucs subprocess is a child of the Python worker, NOT tracked in the kill path. Re-claim spawns a new JobProcessor.Process for the same MediaFileId -> new Demucs -> stacks on top of the old one that's still running.
+
+**Repro (2026-07-03, MediaFileId=617157, wakko-worker-1, av1_qsv profile):**
+- 17:30 wakko-worker-1 claims TranscodeQueue.Id=144640, spawns Demucs (PID 29).
+- 17:35 StuckJobDetector fires "no frame advance for 5.1 min", marks TranscodeAttempts.Id=41037 Success=False. Old Demucs (PID 29) keeps running.
+- Same worker re-claims 144640, spawns Demucs (PID 59) alongside PID 29.
+- 17:40 detector fires again, marks 41038 failed, Demucs PID 89 spawns alongside 29 and 59.
+- Confirmed via `ssh root@10.0.0.230 "docker exec mediavortex-worker-1-1 sh -c 'ps -ef'"` -- three concurrent `demucs.separate` procs.
+- External `kill -9 29 59 89` reaped the demucs procs; JobProcessor advanced to ffmpeg stage; two av1_qsv ffmpeg parent+child pairs spawned racing for the same output path.
+
+**Evidence:**
+- Three back-to-back attempts (41037, 41038, 41039) for MediaFileId=617157, spaced 5 minutes apart, all Success=False after external cleanup.
+- Two stale ActiveJobs rows (70311, 70312) both pointing at QueueId=144640, both WorkerName=wakko-worker-1 -- old ActiveJobs not deleted by the kill path.
+- No `TranscodeProgress` row for attempt 41038 at time of second kill -- confirms Demucs never emitted heartbeat.
+
+**Related bugs:** BUG-0075 same detector, different symptom (Success=TRUE on kill vs phase-misclassification). Fixes may share the Reporter tick path.
+
+**First place to look:**
+- `Features/ServiceControl/StuckJobDetectionService.py:255-296` `_IsJobFrozen` -- add phase-awareness (join `TranscodeProgress.CurrentPhase`, look up threshold per-phase; encode phase 5 min, Demucs phase 30+ min).
+- `Features/TranscodeJob/Worker/JobProcessor.py` `_RunPreEncodeAudio` Reporter -- Demucs subprocess should emit stdout progress; Reporter must tick `TranscodeProgress.LastProgressUpdate` every N seconds even if no numeric progress available.
+- `Features/AudioNormalization/Services/AudioPreEncodeFacade.py` -- Demucs subprocess management + stdout parsing.
+- `Features/TranscodeJob/ProcessTranscodeQueueService.HandleJobFailure` -- must terminate + wait() any live Demucs subprocess for the failing job before returning.
+- `Features/TranscodeJob/Worker/WorkerLoopService.py` claim loop -- consider a cooldown per MediaFileId after a stuck-kill to prevent immediate re-claim before cleanup.
+
+**Proposed criterion:** "For any TranscodeAttempts row that transitions through pre-encode phases (Demucs / ffprobe / staging), `TranscodeProgress.LastProgressUpdate` receives a heartbeat tick at least every 60s while the phase is running. `StuckJobDetectionService._IsJobFrozen` reads `TranscodeProgress.CurrentPhase` and applies phase-specific thresholds. `HandleJobFailure` must reap every child subprocess owned by the failing JobProcessor.Process invocation before writing Success=False and releasing the queue row."
+
+**Fix with:** `/t BUG-0081`.
+
+---
+
 ### [BUG-0075] StuckJobDetectionService marks Success=TRUE on frozen ffmpeg kills; downstream sees a "successful" attempt with a frozen-error message
 **Date:** 2026-07-02 | **Area:** stuck-detection / transcode-lifecycle
 
