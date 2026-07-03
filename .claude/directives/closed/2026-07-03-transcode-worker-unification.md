@@ -1,7 +1,25 @@
-# Current Directive
+# Closed Directive
+
+## Close Note (2026-07-03)
+
+Closed via inheritance. All 22 STRUCTURAL criteria (C1-C3, C6, C7, C10-C25, C27) verified with commit SHAs in the Verification section. Five LIVE PENDING criteria (C4, C5, C8, C9-live-partial, C26) could not be verified because end-to-end transcode pipeline was broken at close time.
+
+Rather than lower the bar, these five criteria inherit into `transcode-flow-canonical` (opened 2026-07-03) whose C9 live-smoke suite verifies them by construction:
+
+| Was | Inherits as | Because |
+|---|---|---|
+| C4 (per-mode attestation populated) | transcode-flow-canonical C5 (shared columns populated by every strategy) | flow-canonical C5 explicitly requires `AudioPolicyResolved` + `AudioTracksEmittedJson` non-null per strategy |
+| C5 (MediaFileId=621412 replay) | transcode-flow-canonical C9 live smoke (a) or (d) | flow-canonical's four live smokes cover the same end-to-end path |
+| C8 (no regression in Transcode-mode Success) | transcode-flow-canonical C9 live smoke (a) | same |
+| C9 (TestClaimAuthority full-green) | transcode-flow-canonical C3 verification gate | same test suite; flow-canonical explicitly gates on it |
+| C26 (call-graph shape invariant under flags) | transcode-flow-canonical C4 (orchestration mode-blind) | same invariant, restated at code-shape level; flow-canonical strengthens the check |
+
+Embedded sections (Web-Performance Design L1, Queue Page Redesign) archived in this doc; their promotion targets are already named in the sections (`WebService/web-performance.feature.md`, `Features/TranscodeQueue/TranscodeQueue.feature.md`, `Features/QualityTesting/qt-queue-visibility-and-override.feature.md`). Queue Page delivered per ui-verify at commit `cdb244b`. Web-Performance L1 delivered per Files section; promotion to feature doc deferred to future cleanup directive.
+
+---
 
 **Set:** 2026-06-28
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Closed -- 2026-07-03 -- structural work landed; 5 LIVE PENDING criteria inherited by transcode-flow-canonical
 **Slug:** transcode-worker-unification
 **Replaces:** in-flight pivot on top of `work-transcode-unified` (at DELIVERING; awaiting operator close)
 **Interrupts:** work-transcode-unified
