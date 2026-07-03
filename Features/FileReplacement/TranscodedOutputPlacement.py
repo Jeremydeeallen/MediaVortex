@@ -41,10 +41,10 @@ class TranscodedOutputPlacement:
         from Core.Path.PathStorageRoots import GetStorageRoots
         return GetStorageRoots()
 
-    # directive: filereplacement-decompose | see transcoded-output-placement.C4 | see transcoded-output-placement.S1 | # see transcode.ST9
+    # directive: transcode-flow-canonical | # see transcode.ST9 | see transcoded-output-placement.C4 | see transcoded-output-placement.C13
     def Execute(self, OriginalFilePath: str, TranscodedFilePath: str, NetworkOriginalPath: str = None,
                 FFmpegCommand: Optional[str] = None, SourceMediaFileId: Optional[int] = None,
-                Mode: str = 'Transcode') -> Dict[str, Any]:
+                Mode: str = 'Transcode', RunComplianceGate: bool = True) -> Dict[str, Any]:
         """Rename .inprogress -> final, refresh MediaFiles, delete original; see transcoded-output-placement.C4."""
         try:
             LocalOriginalPath = Path.FromLegacyString(OriginalFilePath, self._GetStorageRoots()).Resolve(self._GetWorker())
@@ -80,7 +80,7 @@ class TranscodedOutputPlacement:
                 LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
                 return {'Success': False, 'ErrorMessage': ErrorMsg}
 
-            if SourceMediaFileId is not None and Mode == 'Transcode':
+            if SourceMediaFileId is not None and RunComplianceGate:
                 from Features.FileReplacement.ComplianceGate import ComplianceGate
                 GateResult = ComplianceGate(self.DatabaseManager, self.FileManager).Evaluate(LocalStagedPath, SourceMediaFileId, FFmpegCommand)
                 if not GateResult.get('Compliant', False):

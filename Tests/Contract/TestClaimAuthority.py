@@ -69,11 +69,24 @@ class TestQualityTestClaimAuthority(unittest.TestCase):
         self.Db.ExecuteNonQuery(
             "DELETE FROM QualityTestingQueue WHERE LocalSourcePath = %s", ("_test-local",),
         )
-        # sentinel queue row: TranscodeAttemptId NULL (gate-independent); ExecuteNonQuery auto-commits
+        self.Db.ExecuteNonQuery(
+            "DELETE FROM TranscodeAttempts WHERE ProfileName = %s", ("_test-qt-claim-authority",),
+        )
+        # Sentinel TranscodeAttempt satisfies the QT-claim INNER JOIN + FailureBudget predicate.
+        self.Db.ExecuteNonQuery(
+            "INSERT INTO TranscodeAttempts (ProfileName, AttemptDate, Success) VALUES (%s, NOW(), TRUE)",
+            ("_test-qt-claim-authority",),
+        )
+        Rows = self.Db.ExecuteQuery(
+            "SELECT Id FROM TranscodeAttempts WHERE ProfileName = %s ORDER BY Id DESC LIMIT 1",
+            ("_test-qt-claim-authority",),
+        )
+        self.SentinelAttemptId = Rows[0]["Id"]
         self.Db.ExecuteNonQuery(
             "INSERT INTO QualityTestingQueue "
             "(TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, LocalSourcePath, Status, DateAdded) "
-            "VALUES (NULL, '_test-source', '_test-transcoded', '_test-local', 'Pending', NOW())",
+            "VALUES (%s, '_test-source', '_test-transcoded', '_test-local', 'Pending', NOW())",
+            (self.SentinelAttemptId,),
         )
         Rows = self.Db.ExecuteQuery(
             "SELECT Id FROM QualityTestingQueue WHERE LocalSourcePath = %s",
@@ -83,6 +96,7 @@ class TestQualityTestClaimAuthority(unittest.TestCase):
 
     def tearDown(self):
         self.Db.ExecuteNonQuery("DELETE FROM QualityTestingQueue WHERE Id = %s", (self.QueueId,))
+        self.Db.ExecuteNonQuery("DELETE FROM TranscodeAttempts WHERE Id = %s", (self.SentinelAttemptId,))
 
     def test_eligible_worker_claims(self):
         Job = self.Dm.ClaimQualityTestJob(SENTINEL_WORKER)
@@ -137,10 +151,11 @@ class TestQualityTestClaimAuthority(unittest.TestCase):
 # Transcode claim authority
 
 SENTINEL_FILE_TRANSCODE = "_test-claim-authority-transcode.mkv"
+SENTINEL_TRANSCODE_PROFILE = "_test-claim-authority-cpu-profile"
 
 
 class TestTranscodeClaimAuthority(unittest.TestCase):
-    """ClaimNextPendingJob must honor Workers.Status + Workers.TranscodeEnabled; sentinel queue row at Priority=-1000 with MediaFileId=NULL for safety."""
+    """ClaimNextPendingJob must honor Workers.Status + Workers.TranscodeEnabled; sentinel queue row at Priority=-1000 pointing at a sentinel MediaFile/Profile so profile-gates pass."""
 
     @classmethod
     def setUpClass(cls):
@@ -154,6 +169,24 @@ class TestTranscodeClaimAuthority(unittest.TestCase):
             "VALUES (%s, 'linux', 'Online', TRUE, TRUE, FALSE, TRUE, TRUE, TRUE, NOW())",
             (SENTINEL_WORKER,),
         )
+        cls.Db.ExecuteNonQuery(
+            "DELETE FROM Profiles WHERE ProfileName = %s", (SENTINEL_TRANSCODE_PROFILE,),
+        )
+        cls.Db.ExecuteNonQuery(
+            "INSERT INTO Profiles (ProfileName, usenvidiahardware) VALUES (%s, 0)",
+            (SENTINEL_TRANSCODE_PROFILE,),
+        )
+        cls.Db.ExecuteNonQuery(
+            "DELETE FROM MediaFiles WHERE FileName = %s", (SENTINEL_FILE_TRANSCODE,),
+        )
+        cls.Db.ExecuteNonQuery(
+            "INSERT INTO MediaFiles (FileName, AssignedProfile) VALUES (%s, %s)",
+            (SENTINEL_FILE_TRANSCODE, SENTINEL_TRANSCODE_PROFILE),
+        )
+        Rows = cls.Db.ExecuteQuery(
+            "SELECT Id FROM MediaFiles WHERE FileName = %s", (SENTINEL_FILE_TRANSCODE,),
+        )
+        cls.SentinelMediaFileId = Rows[0]["Id"]
 
     @classmethod
     def tearDownClass(cls):
@@ -162,6 +195,8 @@ class TestTranscodeClaimAuthority(unittest.TestCase):
             "DELETE FROM TranscodeQueue WHERE RelativePath LIKE %s ESCAPE '!'",
             (EscapeLikePattern("_test-claim-authority-") + "%",),
         )
+        cls.Db.ExecuteNonQuery("DELETE FROM MediaFiles WHERE FileName = %s", (SENTINEL_FILE_TRANSCODE,))
+        cls.Db.ExecuteNonQuery("DELETE FROM Profiles WHERE ProfileName = %s", (SENTINEL_TRANSCODE_PROFILE,))
 
     def setUp(self):
         self.Db.ExecuteNonQuery(
@@ -177,8 +212,8 @@ class TestTranscodeClaimAuthority(unittest.TestCase):
             "INSERT INTO TranscodeQueue "
             "(StorageRootId, RelativePath, FileName, Directory, SizeBytes, SizeMB, "
             "Priority, Status, ProcessingMode, MediaFileId, DateAdded) "
-            "VALUES (%s, %s, '_test.mkv', '_test', 1, 1.0, -1000, 'Pending', 'Transcode', NULL, NOW())",
-            (SENTINEL_STORAGE_ROOT_ID, SENTINEL_FILE_TRANSCODE),
+            "VALUES (%s, %s, '_test.mkv', '_test', 1, 1.0, -1000, 'Pending', 'Transcode', %s, NOW())",
+            (SENTINEL_STORAGE_ROOT_ID, SENTINEL_FILE_TRANSCODE, self.SentinelMediaFileId),
         )
         Rows = self.Db.ExecuteQuery(
             "SELECT Id FROM TranscodeQueue WHERE StorageRootId = %s AND RelativePath = %s",
@@ -333,11 +368,11 @@ class TestNvencRouting(unittest.TestCase):
         cls.Dm = DatabaseManager()
         cls._WipeFixtures()
         cls.Db.ExecuteNonQuery(
-            "INSERT INTO Profiles (ProfileName, usenvidiahardware) VALUES (%s, 1)",
+            "INSERT INTO Profiles (ProfileName, Codec, usenvidiahardware, useintelhardware) VALUES (%s, 'av1_nvenc', 1, 0)",
             (NVENC_TEST_PROFILE_NVENC,),
         )
         cls.Db.ExecuteNonQuery(
-            "INSERT INTO Profiles (ProfileName, usenvidiahardware) VALUES (%s, 0)",
+            "INSERT INTO Profiles (ProfileName, Codec, usenvidiahardware, useintelhardware) VALUES (%s, 'libx264', 0, 0)",
             (NVENC_TEST_PROFILE_CPU,),
         )
         cls.Db.ExecuteNonQuery(

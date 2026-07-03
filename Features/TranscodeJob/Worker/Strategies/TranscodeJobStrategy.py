@@ -28,3 +28,7 @@ class TranscodeJobStrategy(ITranscodeJobStrategy):
     def HandleResult(self, Job, Result: Dict[str, Any], TranscodeAttemptId: int, ActiveJobId: int, OutputPath: str, QueueService=None) -> None:
         Qs = QueueService or self.QueueService
         Qs.HandleTranscodingResult(Job, Result, TranscodeAttemptId, ActiveJobId)
+
+    # directive: transcode-flow-canonical | # see transcode.ST5
+    def DefaultProfileName(self, Job) -> str:
+        return getattr(Job, 'AssignedProfile', None) or 'Transcode'

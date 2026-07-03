@@ -199,9 +199,11 @@ class FileReplacementBusinessService:
                     'ErrorMessage': f'Transcoded file not found at: {LocalTranscodedPath}',
                 }
 
-            # directive: filereplacement-drain-bug | # see filereplacement.C11
+            # directive: transcode-flow-canonical | # see transcode.ST9
+            from Features.TranscodeJob import ProcessingModeMetadata
             AttemptMode = (transcode_attempt.ProfileName or 'Transcode')
-            isRemux = (AttemptMode != 'Transcode')  # registry: non-Transcode modes skip size guard; see transcode.ST9
+            ModeMeta = ProcessingModeMetadata.GetOrDefault(AttemptMode)
+            isRemux = not ModeMeta['RequiresProfileGates']
             EffectiveOldBytes = transcode_attempt.OldSizeBytes
             if (not isRemux) and (EffectiveOldBytes is None or EffectiveOldBytes <= 0):
                 try:
@@ -244,6 +246,7 @@ class FileReplacementBusinessService:
                 FFmpegCommand=getattr(transcode_attempt, 'FfpmpegCommand', None),
                 SourceMediaFileId=SourceMediaFileId,
                 Mode=AttemptMode,
+                RunComplianceGate=ModeMeta['RequiresProfileGates'],
             )
 
             if replacement_result.get('Success', False):

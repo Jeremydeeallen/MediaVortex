@@ -8,10 +8,10 @@ from Features.Activity.Models.DashboardSnapshot import DashboardSnapshot
 from Features.Activity.Services.ProgressSmoothingService import ProgressSmoothingService
 
 
-# directive: worker-runtime-state | # see activity.S4
-def _EstimateSavings(ProcessingMode, SourceSizeBytes, SourceVideoKbps, TargetVideoKbps):
-    """Negative => size shrink. Only meaningful for Transcode jobs with known source + target bitrates."""
-    if ProcessingMode != 'Transcode' or not SourceSizeBytes or not SourceVideoKbps or not TargetVideoKbps:
+# directive: transcode-flow-canonical | # see transcode.ST7
+def _EstimateSavings(SourceSizeBytes, SourceVideoKbps, TargetVideoKbps):
+    """Negative => size shrink. Non-encode modes have no matching Profiles row so TargetVideoKbps is NULL and the guard returns None -- no per-Mode branch needed."""
+    if not SourceSizeBytes or not SourceVideoKbps or not TargetVideoKbps:
         return None
     try:
         SrcBytes = int(SourceSizeBytes)
@@ -179,7 +179,7 @@ class DashboardSnapshotService:
             IsStale = (Fps is None)
             SizeBytes = R.get('SizeBytes')
             TargetKbps = R.get('TargetVideoKbps')
-            EstSavings = _EstimateSavings(R.get('ProcessingMode'), SizeBytes, R.get('SourceVideoKbps'), TargetKbps)
+            EstSavings = _EstimateSavings(SizeBytes, R.get('SourceVideoKbps'), TargetKbps)
             Out.append(ActiveJobRow(
                 AttemptId=AttemptId,
                 MediaFileId=int(R['MediaFileId']) if R.get('MediaFileId') is not None else None,

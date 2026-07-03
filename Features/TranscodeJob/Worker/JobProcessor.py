@@ -107,7 +107,8 @@ class JobProcessor:
             TemporaryFilePathId = self.QueueService.PrivateCreateTemporaryFilePathRecord(
                 TranscodeAttemptId, SrcId, SrcRel, OutId, OutRel)
 
-            ProfileName = Job.AssignedProfile if Mode == 'Transcode' and hasattr(Job, 'AssignedProfile') else Mode
+            # directive: transcode-flow-canonical | # see transcode.ST5
+            ProfileName = Strategy.DefaultProfileName(Job)
             self.QueueService.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                 'FilePath': Job.FilePath,
                 'AttemptDate': datetime.now(timezone.utc),

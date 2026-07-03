@@ -317,22 +317,18 @@ class QueueManagementBusinessService:
                 "AND " + CapPredicateFragment
             )
 
-            # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
-            if Mode == 'Quick':
-                WhereSql += " AND m.WorkBucket IN ('Remux', 'AudioFix')"
-            elif Mode == 'Transcode':
-                WhereSql += " AND m.WorkBucket = 'Transcode'"
-            elif Mode == 'Remux':
-                WhereSql += " AND m.WorkBucket = 'Remux'"
-            elif Mode == 'AudioFix':
-                WhereSql += " AND m.WorkBucket = 'AudioFix'"
+            # directive: transcode-flow-canonical | # see transcode.ST2
+            from Features.TranscodeJob import ProcessingModeMetadata
+            _AdmissionMeta = ProcessingModeMetadata.Get(Mode)
+            if _AdmissionMeta and _AdmissionMeta.get('WorkBucketFilterSql'):
+                WhereSql += " AND " + _AdmissionMeta['WorkBucketFilterSql']
 
             if Drive:
                 DrivePrefix = Drive.rstrip(':\\/') + ':'
                 DriveStorageRootId = _ResolveStorageRootIdForDrivePrefixFn(DrivePrefix)
                 if DriveStorageRootId is None:
                     LoggingService.LogInfo(f"SmartPopulateQueue: Drive {Drive!r} did not match any StorageRoot; returning empty", "QueueManagementBusinessService", "SmartPopulateQueue")
-                    return {"Success": True, "Suggestions": [], "TotalCandidates": 0, "Offset": Offset, "Limit": Limit, "Search": Search or '', "Mode": Mode if Mode in ('Transcode', 'Remux', 'AudioFix', 'Quick') else None, "HasMore": False}
+                    return {"Success": True, "Suggestions": [], "TotalCandidates": 0, "Offset": Offset, "Limit": Limit, "Search": Search or '', "Mode": Mode if ProcessingModeMetadata.IsKnown(Mode) else None, "HasMore": False}
                 WhereSql += " AND m.StorageRootId = %s"
                 Params.append(DriveStorageRootId)
 
@@ -362,7 +358,7 @@ class QueueManagementBusinessService:
             #   0 = container is not MP4-family                       -- CONFIRMED container fix
             #   1 = container is MP4 (here only because audio not done)
             FocusSql = ""
-            if Mode == 'Quick':
+            if _AdmissionMeta and _AdmissionMeta.get('SupportsFocus'):
                 if Focus == 'Audio':
                     FocusSql = (
                         "(CASE "
@@ -420,7 +416,7 @@ class QueueManagementBusinessService:
                     'BitrateKbps': int(Row.get('VideoBitrateKbps', 0) or 0),
                     'ContainerFormat': Row.get('ContainerFormat', '') or '',
                     'PriorityScore': Row.get('PriorityScore'),
-                    'Mode': Mode if Mode in ('Transcode', 'Remux', 'AudioFix', 'Quick') else 'Transcode',
+                    'Mode': Mode if ProcessingModeMetadata.IsKnown(Mode) else 'Transcode',
                     # Audio metadata for the Quick Fix tab columns
                     'AudioCodec': Row.get('AudioCodec'),
                     'AudioComplete': Row.get('AudioComplete'),
@@ -435,7 +431,7 @@ class QueueManagementBusinessService:
                 "Offset": Offset,
                 "Limit": Limit,
                 "Search": Search or '',
-                "Mode": Mode if Mode in ('Transcode', 'Remux', 'AudioFix', 'Quick') else None,
+                "Mode": Mode if ProcessingModeMetadata.IsKnown(Mode) else None,
                 "HasMore": (Offset + len(Suggestions)) < TotalCandidates,
             }
             LoggingService.LogInfo(f"SmartPopulate: fetched {len(Rows)} of {TotalCandidates} candidates (offset={Offset}, search='{Search or ''}')", "QueueManagementBusinessService", "SmartPopulateQueue")
@@ -586,13 +582,14 @@ class QueueManagementBusinessService:
             if not NormalizedIds:
                 return {"Success": False, "ErrorMessage": "No MediaFileIds provided", "ItemsAdded": 0}
 
-            if Mode not in ('Transcode', 'Remux', 'AudioFix', 'Quick'):
+            # directive: transcode-flow-canonical | # see transcode.ST2
+            from Features.TranscodeJob import ProcessingModeMetadata
+            if not ProcessingModeMetadata.IsKnown(Mode):
                 Mode = 'Transcode'
+            _AddMeta = ProcessingModeMetadata.Get(Mode)
 
-            # Resolve profile name. Transcode allows a profile choice; Remux
-            # has no profile by design (cascade pre-decided no-re-encode).
             ProfileName = None
-            if Mode == 'Transcode' and ProfileId is not None:
+            if _AddMeta['RequiresProfileGates'] and ProfileId is not None:
                 Profile = self.ProfileRepository.GetProfileById(ProfileId)
                 if not Profile:
                     return {"Success": False, "ErrorMessage": f"Profile with ID {ProfileId} not found", "ItemsAdded": 0}
@@ -661,21 +658,18 @@ class QueueManagementBusinessService:
             return {"Success": False, "ErrorMessage": ErrorMsg, "ItemsAdded": 0}
 
     def QueueAllMatching(self, Mode: str, Search: str = '', Drive: str = '') -> Dict[str, Any]:
-        """Queue every WorkBucket-classified candidate matching the optional filters via one INSERT...SELECT; Mode in {Transcode, Remux, AudioFix, Quick}; returns ItemsAdded."""
+        """Queue every WorkBucket-classified candidate matching the optional filters via one INSERT...SELECT; Mode must be a known ProcessingModes row; returns ItemsAdded."""
         try:
-            if Mode not in ('Transcode', 'Remux', 'AudioFix', 'Quick'):
-                return {"Success": False, "ErrorMessage": "Mode must be 'Transcode', 'Quick', 'Remux' (legacy), or 'AudioFix' (legacy)", "ItemsAdded": 0}
+            # directive: transcode-flow-canonical | # see transcode.ST2
+            from Features.TranscodeJob import ProcessingModeMetadata
+            _QamMeta = ProcessingModeMetadata.Get(Mode)
+            if not _QamMeta or not _QamMeta.get('WorkBucketFilterSql'):
+                return {"Success": False, "ErrorMessage": f"Mode {Mode!r} is not a known admission mode", "ItemsAdded": 0}
 
             from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
-            # directive: compliance-solid-refactor | # see compliance-solid-refactor.C20
-            ModeToBucket = {'Transcode': 'Transcode', 'Remux': 'Remux', 'AudioFix': 'AudioFix'}
             Params: list = [Mode]
-            if Mode == 'Quick':
-                BucketSql = "AND m.WorkBucket IN ('Remux', 'AudioFix') "
-            else:
-                BucketSql = "AND m.WorkBucket = %s "
-                Params.append(ModeToBucket[Mode])
+            BucketSql = "AND " + _QamMeta['WorkBucketFilterSql'] + " "
             # directive: failure-accounting | # see failure-accounting.C6
             from Core.Database.FailureBudgetPredicate import BuildCapPredicate
             CapPredicateFragment, _CapParams = BuildCapPredicate("m.Id")
@@ -1085,15 +1079,17 @@ class QueueManagementBusinessService:
                 existingQueueItems = self.Repository.GetAllTranscodeQueueItems()
                 existingQueueByPair = {(item.StorageRootId, item.RelativePath or ''): item for item in existingQueueItems}
 
+            # directive: transcode-flow-canonical | # see transcode.ST2
+            TargetMode = 'Remux'
             for mediaFile in mkvFiles:
                 _Pair = (mediaFile.StorageRootId, mediaFile.RelativePath or '')
                 if _Pair in existingPairs:
                     existingItem = existingQueueByPair.get(_Pair)
-                    if existingItem and existingItem.ProcessingMode != "Remux" and existingItem.Status == "Pending":
-                        existingItem.ProcessingMode = "Remux"
+                    if existingItem and existingItem.ProcessingMode != TargetMode and existingItem.Status == "Pending":
+                        existingItem.ProcessingMode = TargetMode
                         self.Repository.SaveTranscodeQueueItem(existingItem)
                         itemsUpdated += 1
-                        LoggingService.LogInfo(f"Switched queue item {existingItem.Id} ({mediaFile.FileName}) from Transcode to Remux", "QueueManagementBusinessService", "PopulateQueueForRemux")
+                        LoggingService.LogInfo(f"Switched queue item {existingItem.Id} ({mediaFile.FileName}) to {TargetMode}", "QueueManagementBusinessService", "PopulateQueueForRemux")
                     continue
 
                 queueItem = self.CreateRemuxQueueItem(mediaFile)
@@ -1964,9 +1960,10 @@ class QueueManagementBusinessService:
     # directive: path-schema-migration | # see path.S8
     def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None, ForceAdd: bool = False, ProcessingMode: str = None) -> Dict[str, Any]:
         """Add a specific media file to the transcoding queue; dedupe via typed-pair identity. ProcessingMode overrides default 'Transcode'; non-Transcode modes skip profile/savings/VMAF gates."""
-        # directive: transcode-worker-unification | # see work-bucket.C4, work-bucket.C5
+        # directive: transcode-flow-canonical | # see transcode.ST2
+        from Features.TranscodeJob import ProcessingModeMetadata
         EffectiveMode = ProcessingMode or 'Transcode'
-        IsTranscodeMode = (EffectiveMode == 'Transcode')
+        IsTranscodeMode = ProcessingModeMetadata.GetOrDefault(EffectiveMode)['RequiresProfileGates']
         try:
             LoggingService.LogFunctionEntry("AddJobToQueue", "QueueManagementBusinessService", MediaFileId, Priority)
 
