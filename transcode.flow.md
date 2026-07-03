@@ -253,15 +253,15 @@ ST6 has one orchestration body (`Features/TranscodeJob/Worker/JobProcessor.Proce
 | SubtitleFix | `SubtitleFixJobStrategy` | Subtitle extraction + stream selection per `Services.FFmpegAnalysisService.SelectPreferredSubtitleStream` | `QualityTestRequired=False` |
 | Quick | `RemuxJobStrategy` (alias) | Same as Remux | `QualityTestRequired=False` |
 
-The orchestration shape (ActiveJob create -> Mark Running -> Load MediaFile -> Setup file prep -> BuildCommand -> ExecuteFFmpeg -> Verify output -> `PostEncodeMeasurementService.Measure` -> HandleResult -> Cleanup) is identical for every mode. PostEncode measurement runs universally; per-mode strategies cannot opt out.
+The orchestration shape (ActiveJob create -> Mark Running -> Load MediaFile -> Setup file prep -> BuildCommand -> ExecuteFFmpeg -> Verify output -> `PostEncodeMeasurementService.Probe` -> HandleResult -> Cleanup) is identical for every mode. PostEncode measurement runs universally; per-mode strategies cannot opt out.
 
 Adding a new ProcessingMode is one `INSERT INTO ProcessingModes` row + one `<NewMode>JobStrategy` class + one `Registry.Register('NewMode', NewModeJobStrategy)` line in `ProcessTranscodeQueueService.ProcessJob` registry initialization. No other file changes.
 
-Audio-policy attestation contract: `Strategy.HandleResult` is called AFTER `PostEncodeMeasurementService.Measure` has populated `TranscodeAttempts.AudioPolicyResolved` and `AudioTracksEmittedJson`. Mode-specific HandleResult bodies MUST NOT consume these columns directly -- they belong to the downstream ComplianceGate evaluation.
+Audio-policy attestation contract: `Strategy.HandleResult` is called AFTER `PostEncodeMeasurementService.Probe` has populated `TranscodeAttempts.AudioPolicyResolved` and `AudioTracksEmittedJson`. Mode-specific HandleResult bodies MUST NOT consume these columns directly -- they belong to the downstream ComplianceGate evaluation.
 
 Same-slot rename safety: all post-flight modes use `Features/FileReplacement/FilesystemRenameWithBackup` with `Apply` -> `Commit` (on success) or `Rollback` (on update failure). Source file is never at the path FFmpeg writes to (PrepareReplacement moves it). Both layers must independently fail before any data loss; the 2026-05-09 bug pattern cannot recur.
 
-**Historical-attempt attestation (post-2026-06-28 only).** The `JobProcessor.Process` Template Method calls `PostEncodeMeasurementService.Measure` AFTER every successful FFmpeg run, populating `TranscodeAttempts.AudioPolicyResolved` + `AudioTracksEmittedJson`. Pre-2026-06-28 TranscodeAttempts (created by the deleted three-processor pipeline) have these columns NULL by construction -- they predate the universal attestation hook. Operator-facing analytics that group by attestation should filter `AttemptDate >= '2026-06-28'` or treat NULL as "not measured." No backfill is provided; per the `transcode-worker-unification` directive Out of Scope, historical attempts remain NULL.
+**Historical-attempt attestation (post-2026-06-28 only).** The `JobProcessor.Process` Template Method calls `PostEncodeMeasurementService.Probe` AFTER every successful FFmpeg run, populating `TranscodeAttempts.AudioPolicyResolved` + `AudioTracksEmittedJson`. Pre-2026-06-28 TranscodeAttempts (created by the deleted three-processor pipeline) have these columns NULL by construction -- they predate the universal attestation hook. Operator-facing analytics that group by attestation should filter `AttemptDate >= '2026-06-28'` or treat NULL as "not measured." No backfill is provided; per the `transcode-worker-unification` directive Out of Scope, historical attempts remain NULL.
 
 ---
 

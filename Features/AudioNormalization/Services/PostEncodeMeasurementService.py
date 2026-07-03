@@ -17,6 +17,18 @@ READ_TRACKS_EMITTED_SQL = (
     "SELECT AudioTracksEmittedJson FROM TranscodeAttempts WHERE Id = %s"
 )
 
+# directive: transcode-flow-canonical | # see transcode.ST5
+WRITE_ATTEMPT_ATTESTATION_SQL = (
+    "UPDATE TranscodeAttempts "
+    "SET AudioTracksEmittedJson = %s::jsonb, "
+    "    AudioPolicyResolved = %s, "
+    "    AudioPolicyJson = COALESCE("
+    "        (SELECT AudioPolicyJson FROM TranscodeQueue WHERE Id = %s), "
+    "        AudioPolicyJson"
+    "    ) "
+    "WHERE Id = %s"
+)
+
 
 # directive: perfect-audio-vertical | # see perfect-audio-vertical.C15
 class PostEncodeMeasurementService:
@@ -97,25 +109,18 @@ class PostEncodeMeasurementService:
             )
             return None
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C15
-    def Probe(self, TranscodeAttemptId, OutputFilePath):
-        """Measure every output audio stream, build AudioTracksEmittedJson, write to TranscodeAttempts."""
+    # directive: transcode-flow-canonical | # see transcode.ST5 | # see audio-normalization.C5
+    def Probe(self, TranscodeAttemptId, OutputFilePath, QueueId=None):
+        """Measure every output audio stream; write AudioTracksEmittedJson + AudioPolicyResolved verdict + AudioPolicyJson snapshot in one UPDATE."""
         Ffmpeg, Ffprobe = self._ResolveBinaries()
         if not Ffmpeg or not Ffprobe:
             return False
         Streams = self.ListAudioStreams(Ffprobe, OutputFilePath)
         if not Streams:
-            try:
-                DatabaseService().ExecuteNonQuery(WRITE_TRACKS_EMITTED_SQL, ('[]', TranscodeAttemptId))
-                return True
-            except Exception as Ex:
-                LoggingService.LogException(
-                    f"PostEncodeMeasurement.Probe no-streams sentinel persist failed for AttemptId={TranscodeAttemptId}",
-                    Ex, "PostEncodeMeasurementService", "Probe",
-                )
-                return False
+            return self._PersistAttestation(TranscodeAttemptId, QueueId, [], 'unresolved')
 
         Results = []
+        AnyMeasureFailed = False
         for Stream in Streams:
             Idx = Stream.get('index')
             Tags = Stream.get('tags') or {}
@@ -134,6 +139,7 @@ class PostEncodeMeasurementService:
                     'AchievedLra': Measure.LoudnessRangeLU,
                 })
             else:
+                AnyMeasureFailed = True
                 Results.append({
                     'TrackIndex': Idx,
                     'Label': Label,
@@ -144,16 +150,22 @@ class PostEncodeMeasurementService:
                     'AchievedLra': None,
                 })
 
+        Verdict = 'mixed' if AnyMeasureFailed else 'resolved'
+        return self._PersistAttestation(TranscodeAttemptId, QueueId, Results, Verdict)
+
+    # directive: transcode-flow-canonical | # see transcode.ST5 | # see audio-normalization.C5
+    def _PersistAttestation(self, TranscodeAttemptId, QueueId, Results, Verdict):
+        """Single UPDATE that lands AudioTracksEmittedJson + AudioPolicyResolved + AudioPolicyJson (snapshot from queue)."""
         try:
             DatabaseService().ExecuteNonQuery(
-                WRITE_TRACKS_EMITTED_SQL,
-                (json.dumps(Results), TranscodeAttemptId),
+                WRITE_ATTEMPT_ATTESTATION_SQL,
+                (json.dumps(Results), Verdict, QueueId, TranscodeAttemptId),
             )
             return True
         except Exception as Ex:
             LoggingService.LogException(
-                f"PostEncodeMeasurement.Probe persist failed for AttemptId={TranscodeAttemptId}",
-                Ex, "PostEncodeMeasurementService", "Probe",
+                f"PostEncodeMeasurement._PersistAttestation failed for AttemptId={TranscodeAttemptId} Verdict={Verdict}",
+                Ex, "PostEncodeMeasurementService", "_PersistAttestation",
             )
             return False
 

@@ -146,11 +146,12 @@ class JobProcessor:
                 FinalOutputPath = CanonicalOut
 
             try:
+                # directive: transcode-flow-canonical | # see transcode.ST5
                 from Features.AudioNormalization.Services.PostEncodeMeasurementService import PostEncodeMeasurementService
                 PostEncodeMeasurementService(
                     FFmpegPath=self.QueueService.FFmpegPath,
                     FFprobePath=self.QueueService.FFprobePath,
-                ).Probe(TranscodeAttemptId, FinalOutputPath)
+                ).Probe(TranscodeAttemptId, FinalOutputPath, QueueId=Job.Id)
             except Exception as MeasureEx:
                 LoggingService.LogException(f"PostEncodeMeasurement failed for attempt {TranscodeAttemptId}", MeasureEx, "JobProcessor", "Process")
 
