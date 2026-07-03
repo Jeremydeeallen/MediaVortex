@@ -65,7 +65,8 @@ class PreEncodeAudioPipeline:
                 Ex, "PreEncodeAudioPipeline", "Run",
             )
             self.Cleanup(ScratchDir)
-            return {'DemucsPremixPath': None, 'VocalsRmsDbfs': None, 'ScratchDir': None}
+            # see audio-normalization.C39
+            return {'DemucsPremixPath': None, 'VocalsRmsDbfs': None, 'ScratchDir': None, 'DemucsFailed': True, 'DemucsFailureReason': f"{type(Ex).__name__}: {str(Ex)[:200]}"}
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
     def Cleanup(self, ScratchDir):

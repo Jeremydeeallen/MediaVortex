@@ -13,20 +13,11 @@ class SubtitleFixJobStrategy(ITranscodeJobStrategy):
         # see worker-loop.C3
         self.QueueService = QueueService
 
-    # directive: transcode-worker-unification | # see worker-loop.C3
+    # directive: audio-dialog-boost-real | # see audio-normalization.C8
     def BuildCommand(self, Job, MediaFile, Context: Dict[str, Any]) -> Optional[CommandSpec]:
         # see worker-loop.C3
         QueueService = Context.get('QueueService') or self.QueueService
-        InputPath = Context.get('InputPath', '')
-        _Spec = QueueService.EncodeShapeRegistry.Get('SubtitleFix').Build(
-            MediaFile, Job,
-            Context={
-                'InputPath': InputPath,
-                'FFmpegPath': Context.get('FFmpegPath', ''),
-                'FFprobePath': Context.get('FFprobePath', ''),
-                'OutputDirectory': LocalDirname(InputPath) if InputPath else '',
-            },
-        )
+        _Spec = QueueService.EncodeShapeRegistry.Get('SubtitleFix').Build(MediaFile, Job, Context=Context)
         if not _Spec:
             return None
         return CommandSpec(Command=_Spec.Command, OutputPath=_Spec.OutputPath)

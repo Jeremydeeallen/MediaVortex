@@ -142,11 +142,7 @@ class MediaProbeBusinessService:
                             "MediaProbeBusinessService", "_ExecuteProbe"
                         )
                     elif Ok and FailureReason is None:
-                        # Measurement succeeded. If the file is already at the
-                        # broadcast loudness target, mark it AudioComplete=true
-                        # immediately so it never enters the encode path -- a
-                        # zero-gain loudnorm pass is wasted work.
-                        # See linear-loudnorm.feature.md criterion 28.
+                        # see audio-normalization.C36
                         self._MaybeAutoMarkAudioCompleteAtTarget(MediaFile.Id)
                 except Exception as LoudnessEx:
                     LoggingService.LogException(

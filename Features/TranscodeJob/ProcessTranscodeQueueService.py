@@ -431,6 +431,19 @@ class ProcessTranscodeQueueService:
             })
             return None
 
+        # directive: audio-dialog-boost-real | # see audio-normalization.C8
+        from Features.AudioNormalization.Services import AudioPreEncodeFacade
+        def _VariantProgress(Phase, Percent, Info):
+            try:
+                self.UpdateTranscodeProgress(TranscodeAttemptId, Phase, Percent, Info)
+            except Exception:
+                pass
+        VariantPreAudio = AudioPreEncodeFacade.Prepare(
+            FfmpegPath=self.FFmpegPath, InputPath=EffectiveInputPath,
+            JobId=getattr(Job, 'Id', 'unknown'), ProgressReporter=_VariantProgress,
+        )
+        AudioPreEncodeFacade.EnrichContext(TranscodingSettings, VariantPreAudio)
+
         self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, f"Variant {VariantName}: building command")
         TranscodingSettings['InputPath'] = EffectiveInputPath
         CommandResult = self.BuildTranscodeCommand(Job, MediaFile, TranscodingSettings)
@@ -482,8 +495,16 @@ class ProcessTranscodeQueueService:
             })
             return None
 
+        # directive: audio-dialog-boost-real | # see audio-normalization.C8
+        try:
+            from Features.AudioNormalization.Services.PostEncodeMeasurementService import PostEncodeMeasurementService
+            PostEncodeMeasurementService(FFmpegPath=self.FFmpegPath, FFprobePath=self.FFprobePath).Probe(TranscodeAttemptId, OutputPath)
+        except Exception as ProbeEx:
+            LoggingService.LogException(f"Variant post-encode probe failed for AttemptId={TranscodeAttemptId} ({OutputPath})", ProbeEx, "ProcessTranscodeQueueService", "_ProcessSingleVariant")
         self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, f"Variant {VariantName}: queuing VMAF")
         self.HandleTranscodingResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId)
+        AudioPreEncodeFacade.PersistMeta(TranscodeAttemptId, VariantPreAudio)
+        AudioPreEncodeFacade.Cleanup(self.FFmpegPath, VariantPreAudio)
         return TranscodeAttemptId
 
     # directive: nvenc-rate-anchored-remediation
@@ -596,8 +617,6 @@ class ProcessTranscodeQueueService:
             self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes, MediaFileId=Job.MediaFileId)
 
             self.DispatchDisposition(TranscodeAttemptId, Job, OutputFilePath)
-
-            self.PostEncodeAudioHandler.HandlePostEncode(TranscodeAttemptId, Job.MediaFileId)
 
             # Delete job from queue
             self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
@@ -1076,8 +1095,6 @@ class ProcessTranscodeQueueService:
                 # LocalOutputPath was already set during command building (single source of truth)
 
                 self.DispatchDisposition(TranscodeAttemptId, Job, OutputFilePath)
-
-                self.PostEncodeAudioHandler.HandlePostEncode(TranscodeAttemptId, Job.MediaFileId)
 
                 # Delete job from queue (successful completion)
                 self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)

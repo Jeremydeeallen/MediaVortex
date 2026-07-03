@@ -4,6 +4,7 @@ from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalDirname
 from Features.AudioNormalization.AudioFilterEmitter import AudioFilterEmitter
 from Features.AudioNormalization.AudioPolicyResolver import AudioPolicyResolver
+from Features.AudioNormalization.AudioStrategyResult import AudioPolicyUnresolvedError
 from Features.AudioNormalization.Policies.IAudioCodecPolicy import EAC3OrPassthroughCodecPolicy
 from Features.AudioNormalization.Services.AudioStreamProbe import AudioStreamProbe
 from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
@@ -70,6 +71,12 @@ class TranscodeShape(EncodeShape):
 
             # directive: audio-dialog-boost-real | # see audio-normalization.C8
             Policy = self.Resolver.GetEffectivePolicy(MediaFile)
+            if not Policy:
+                raise AudioPolicyUnresolvedError(
+                    'PolicyMissing',
+                    f'MediaFile.Id={getattr(MediaFile, "Id", None)} has no effective AudioPolicy; refusing legacy stream-copy/ceiling fallback (starvation risk).',
+                    None,
+                )
             SourceStreams = self.StreamProbe.Probe(CommandData.get('InputPath')) or None
             DemucsPremixPath = CommandData.get('DemucsPremixPath')
             VocalsRmsDbfs = CommandData.get('VocalsRmsDbfs')
@@ -82,7 +89,7 @@ class TranscodeShape(EncodeShape):
                 DemucsPremixPath=DemucsPremixPath, VocalsRmsDbfs=VocalsRmsDbfs,
                 PremixMeasuredI=PremixMeasuredI, PremixMeasuredLra=PremixMeasuredLra,
                 PremixMeasuredTp=PremixMeasuredTp, PremixMeasuredThresh=PremixMeasuredThresh,
-            ) if Policy else []
+            )
             for Block in Blocks:
                 if Block.InputArgs:
                     Quoted = []
@@ -104,28 +111,20 @@ class TranscodeShape(EncodeShape):
 
             self.CodecParameterAssembler.AddCodecParameters(CommandParts, CodecParameters, ProfileSettings)
             if not Blocks:
-                SourceCodec = getattr(MediaFile, 'AudioCodec', None)
-                AudioCorruptSuspect = bool(getattr(MediaFile, 'AudioCorruptSuspect', False))
-                SourceAudioKbps = getattr(MediaFile, 'AudioBitrateKbps', None)
-                ProfileAudioCeiling = ProfileSettings.get('TargetAudioKbps')
-                # directive: worker-runtime-state
-                CodecResult = self.CodecPolicy.Decide(
-                    SourceCodec, ForceReencode=False, AudioCorruptSuspect=AudioCorruptSuspect,
-                    ProfileCeilingKbps=ProfileAudioCeiling, SourceBitrateKbps=SourceAudioKbps,
+                # directive: audio-dialog-boost-real | # see audio-normalization.C8
+                raise AudioPolicyUnresolvedError(
+                    'EmitTracksReturnedEmpty',
+                    f'MediaFile.Id={getattr(MediaFile, "Id", None)} produced empty audio Blocks; refusing legacy ProfileAudioCeiling reencode fallback (starvation risk).',
+                    None,
                 )
-                Plan = CodecResult.Plan
-                CommandParts.extend(['-map', f'0:a:{AudioStreamIndex}', '-c:a', Plan['Codec']])
-                if Plan['Mode'] == 'reencode' and ProfileAudioCeiling:
-                    CommandParts.extend([f'-b:a', f'{int(ProfileAudioCeiling)}k'])
-            else:
-                for Block in Blocks:
-                    CommandParts.extend(Block.MapArgs)
-                    CommandParts.extend(Block.CodecArgs)
-                    if Block.FilterArgs:
-                        CommandParts.extend(Block.FilterArgs[:1])
-                        CommandParts.append(f'"{Block.FilterArgs[1]}"')
-                    CommandParts.extend(Block.MetadataArgs)
-                    CommandParts.extend(Block.DispositionArgs)
+            for Block in Blocks:
+                CommandParts.extend(Block.MapArgs)
+                CommandParts.extend(Block.CodecArgs)
+                if Block.FilterArgs:
+                    CommandParts.extend(Block.FilterArgs[:1])
+                    CommandParts.append(f'"{Block.FilterArgs[1]}"')
+                CommandParts.extend(Block.MetadataArgs)
+                CommandParts.extend(Block.DispositionArgs)
 
             RawInterlaced = getattr(MediaFile, 'IsInterlaced', None) if MediaFile else None
             IsInterlaced = str(RawInterlaced).strip().lower() in ('1', 'true', 'yes', 't') if RawInterlaced is not None else False

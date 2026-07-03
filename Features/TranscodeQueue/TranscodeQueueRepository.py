@@ -288,7 +288,7 @@ class TranscodeQueueRepository(BaseRepository):
             ReturningCols = (
                 "Id, StorageRootId, RelativePath, FileName, Directory, "
                 "SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, "
-                "ProcessingMode, ClaimedBy, MediaFileId"
+                "ProcessingMode, ClaimedBy, MediaFileId, TestVariantSetId"
             )
             connection = self.DatabaseService.GetConnection()
             try:
@@ -359,7 +359,7 @@ class TranscodeQueueRepository(BaseRepository):
                         'ProcessingMode': row.get('processingmode') or 'Transcode',
                         'ClaimedBy': row.get('claimedby'),
                         'MediaFileId': row.get('mediafileid'),
-                        'TestVariantSetId': None,
+                        'TestVariantSetId': row.get('testvariantsetid'),
                     }
                     return self._MapRowToQueueItem(NormalizedRow)
                 return None

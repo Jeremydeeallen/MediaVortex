@@ -61,7 +61,7 @@ INFO    Auto-captured 0/4 stills for attempt 40985 (policy=All)
 
 ### transcode-queue
 
-### [BUG-0078] AddJobToQueue silently rejects ForceAdd when latest attempt VMAF>=80; API returns Success=True with no queue row
+### [BUG-0078 -- RESOLVED 2026-07-02] AddJobToQueue silently rejects ForceAdd when latest attempt VMAF>=80; API returns Success=True with no queue row
 **Date:** 2026-07-02 | **Area:** transcode-queue / admission
 
 **What breaks:** `QueueManagementBusinessService.AddJobToQueue` walks two admission gates in sequence:
@@ -645,7 +645,7 @@ Plus 1455 orphan failures with `MediaFileId=NULL` going back to 2025-10-15 -- qu
 ### [BUG-0046] Legacy acompressor+dynamic-loudnorm chain damaged 8,249 library files; population is closed but damage is permanent
 **Date:** 2026-06-08 | **Area:** audio-pipeline
 
-**What happened:** Between 2025-10-03 and 2026-05-30 the production audio-filter chain was `acompressor=threshold=-15dB:ratio=3:attack=0.01:release=0.1:makeup=3dB,loudnorm=I=-23:LRA=7:TP=-2`. The `linear-loudnorm.feature.md` design replaced this with linear-mode loudnorm starting 2026-05-25; the transition completed 2026-05-30.
+**What happened:** Between 2025-10-03 and 2026-05-30 the production audio-filter chain was `acompressor=threshold=-15dB:ratio=3:attack=0.01:release=0.1:makeup=3dB,loudnorm=I=-23:LRA=7:TP=-2`. Linear-mode loudnorm (now enforced by `Features/AudioNormalization/audio-normalization.feature.md` C36; historically first documented in the deleted `linear-loudnorm.feature.md`) replaced this starting 2026-05-25; the transition completed 2026-05-30.
 
 **Scope:** 8,249 audio-bearing files were processed under the legacy chain. Split: 22 movies + 8,227 TV episodes. Population is closed -- no new files entering since 2026-05-25.
 
@@ -662,7 +662,7 @@ Plus 1455 orphan failures with `MediaFileId=NULL` going back to 2025-10-15 -- qu
 
 **Forward-guarantee:** `Tests/Contract/TestLinearLoudnormEnforcement.py` greps the python tree for the legacy chain literal + `acompressor=` and asserts production code is clean. `Models/CommandBuilder.BuildAudioFilters` now raises `RuntimeError(ungainable_peak)` on the case that previously triggered the dynamic-mode fallback -- "linear or refused" is now mechanically enforced, not just documented.
 
-**Look first:** `Reports/LegacyAudioDamagedMovies.csv` (the operator-actionable subset), `Features/LoudnessAnalysis/linear-loudnorm.feature.md` (forward policy), `Tests/Contract/TestLinearLoudnormEnforcement.py` (regression guard), `.claude/directives/closed/2026-06-08-legacy-audio-damage-accounting.md` (full directive context).
+**Look first:** `Reports/LegacyAudioDamagedMovies.csv` (the operator-actionable subset), `Features/AudioNormalization/audio-normalization.feature.md` C36 (forward policy; supersedes deleted `linear-loudnorm.feature.md`), `Tests/Contract/TestLinearLoudnormEnforcement.py` (regression guard), `.claude/directives/closed/2026-06-08-legacy-audio-damage-accounting.md` (full directive context).
 
 ---
 

@@ -74,9 +74,9 @@ C24. [BUG-0065] When a media file carries multiple language audio streams and no
 
 C25. [BUG-0066] No silent fallback chains in the audio pipeline. Every decision that today reads "rule A, falling back to rule B, falling back to rule C" must either (a) collapse to a single explicit rule that fails loud when it doesn't apply, OR (b) return a tagged result naming WHICH rule fired and persist that name to a queryable column (e.g. `TranscodeAttempts.AudioTracksEmittedJson`). Applies at minimum to `LanguageDetector.Detect` (C11) and `_PickDefaultLanguage` (L1). Verifiable: for any encoded output, an operator can SELECT from `TranscodeAttempts` and see, per audio track, which language-pick rule and which default-pick rule produced the result; a contract test asserts that across 50 sample encodes the rule-name field is never null and never `"fallback"`. The operator must be able to answer "is rule 1 still working?" by querying the rule-firing distribution, not by reasoning about which fallback didn't trigger.
 
-C26. PROFILE_CEILING holds unconditionally. `AudioFilterEmitter` has no `STRATEGY_REVIEW: continue` branch; REVIEW classifier output routes through `AudioDispositionResolver.ResolveForTrack` (via `_BuildReviewFallbackBlock`), which clamps emitted bitrate to `Profile.TargetAudioKbps` or raises `AudioPolicyUnresolvedError` when neither ceiling nor config bitrate is available. `TranscodeShape` has no literal `['-c:a', 'copy']` extend; codec args for the empty-Blocks branch come from `EAC3OrPassthroughCodecPolicy.Decide`. Verifiable: `Tests/Contract/TestAudioBitratePolicyHonorsCeiling.py` (REVIEW + truehd source emits eac3 at ceiling; REVIEW + aac emits stream-copy via policy; REVIEW + no inputs raises).
+C26. NO_STREAM_COPY_FALLBACK. `TranscodeShape` / `RemuxShape` / `SubtitleFixShape` MUST NOT carry a `-c:a copy` fallback for empty-`Blocks` situations, and TranscodeShape MUST NOT carry a `ProfileAudioCeiling` reencode fallback. Missing `Policy` OR empty `Blocks` list raises `AudioPolicyUnresolvedError` -- the file is routed to operator review, not shipped with starved audio. Verifiable: grep across all three shapes returns 0 hits for `['-c:a', 'copy']` and 0 hits for `TargetAudioKbps`. Historic damage this closes: BUG-0072 (21 kbps/ch source-bitrate-inherit).
 
-C28. NO_SILENT_PATH structural enforcement. `Tests/Contract/TestAudioPipelineNoSilentFallback.py` AST-walks `AudioFilterEmitter` + `TranscodeShape` and asserts: no `STRATEGY_REVIEW: continue` survives; `_BuildReviewFallbackBlock` + `DispositionResolver.ResolveForTrack` present; `_PickDefaultLanguage` delegates to `DispositionResolver.PickDefaultLanguage`; no literal `['-c:a', 'copy']` extend in `TranscodeShape`; `self.CodecPolicy.Decide` consumed; `EmitTracks` returns only the typed `Blocks` list or `None`.
+C28. NO_SILENT_PATH structural enforcement. `_PickDefaultLanguage` delegates to `DispositionResolver.PickDefaultLanguage`; every language-pick decision is recorded in `AudioTracksEmittedJson` per C25.
 
 C29. OPERATOR_VISIBLE_FAILURE. `FailedJobsRepository.GetFailedJobsPaged` surfaces `AudioPolicyResolved` + the latest verdict's `PolicyName` + `PolicyReason` for each capped row. `/Admin/Workers` snapshot already surfaces `Faulted:<PolicyName>` via the existing RuntimeState text. Verifiable: `Tests/Contract/TestAudioOperatorVisibleFailure.py` 2/2 (response shape + synthetic verdict surface).
 
@@ -94,14 +94,19 @@ C35. DEMUCS_USES_WORKER_VENV_PYTHON. `DemucsVocalIsolationService.IsolateVocals`
 
 C36. TRACK1_TWO_PASS_LINEAR_LOUDNORM. Track 1's loudnorm MUST be two-pass linear-mode when the premix WAV is measurable: `PreEncodeAudioPipeline.Run` runs a `loudnorm=print_format=json` analysis pass on the freshly-mixed `dialog_boost_premix.wav` and returns `(PremixMeasuredI, PremixMeasuredLra, PremixMeasuredTp, PremixMeasuredThresh)`. These flow through `TranscodeJobStrategy` -> `TranscodeShape.Build` -> `AudioFilterEmitter.EmitTracks` -> `_BuildDialogBoostBlock`, and the emitted Track 1 loudnorm carries `measured_I / measured_LRA / measured_TP / measured_thresh / linear=true`. Verifiable: SQL on `TranscodeAttempts.FfpmpegCommand` post-directive returns `-filter:a:1 "...loudnorm=...:measured_I=<x>:measured_LRA=<y>:measured_TP=<z>:measured_thresh=<t>:linear=true..."` for every Dialog-Boost-emitted attempt. Fail-safe: when measurement returns None (JSON parse failure), the emitted filter falls back to the single-pass dynamic form; the fallback is logged as a WARNING at `DemucsVocalIsolationService.MeasurePremixLoudnorm`. Motivation: today's Love Island USA S08E17 encode landed Track 1 at -19.6 LUFS (target -20, G2 violation of 0.4 LU) because single-pass dynamic loudnorm cannot correct for content-dependent premix loudness variation; linear-mode with pre-measured input targets ±0.1 LU regardless of content.
 
+C37. SINGLE_AUDIO_EMIT_PATH_ACROSS_MODES. Every ProcessingMode that ships audio (Transcode, Remux, AudioFix, Quick, SubtitleFix, TestVariant) MUST run the pre-encode Demucs pipeline and emit Track 0 + Track 1 through the same code path. The single source of truth is `AudioFilterEmitter.EmitTracks`; the single Demucs facade is `Features/AudioNormalization/Services/AudioPreEncodeFacade.py` (Prepare / EnrichContext / PersistMeta / Cleanup). `JobProcessor.Process` invokes the facade for all `_AUDIO_EMIT_MODES` before `Strategy.BuildCommand`; `ProcessTranscodeQueueService._ProcessSingleVariant` invokes the facade for each variant. Strategy classes forward `Context` wholesale to shapes; shapes read premix keys from Context and forward to `EmitTracks`. Verifiable: for any successful attempt across the six modes, `TranscodeAttempts.AudioTracksEmittedJson` carries two entries with `vocals_rms_dbfs` + `dialog_boost_emitted` stamped on both; `TranscodeAttempts.FfpmpegCommand` names both `-c:a:0` (Original) and `-c:a:1` (Dialog Boost). Negation: any single-track output in any of the six modes fails.
+
+C38. TRANSPARENT_KBPS_PER_CHANNEL_FLOOR. Track 0 per-channel bitrate MUST NOT fall below 48 kbps/ch (AAC-LC / Opus transparency floor) regardless of operator DB knob values. Enforced in three layers: (a) `AudioFilterEmitter.MIN_TRANSPARENT_KBPS_PER_CH = 48` is the absolute floor applied via `max(MIN_TRANSPARENT_KBPS_PER_CH, Track0BitratePerChannelKbps, Track0MinPerChannelKbps) * Channels`; (b) `AudioNormalizationController.update_audio_rules` refuses PUT bodies where `Track0BitratePerChannelKbps < 48` or `Track0MinPerChannelKbps < 48`; (c) no shape carries an `-c:a copy` no-Blocks fallback and no shape carries a legacy `ProfileAudioCeiling` reencode fallback (both starvation vectors deleted). Failure to resolve a `Policy` OR an empty `Blocks` list raises `AudioPolicyUnresolvedError` and routes the file to operator review. Verifiable: SQL on `TranscodeAttempts.FfpmpegCommand` post-directive returns 0 rows where `-b:a:0 <n>k` divided by source channel count is under 48. Historic damage this closes: BUG-0072 (21 kbps/ch 5.1 starvation), the operator-knob GUI-drop-to-zero vector, and the `-c:a copy` inherit-source-bitrate silo.
+
+C39. DEMUCS_FAILURE_PERSISTED. When `PreEncodeAudioPipeline.Run` catches an exception (Demucs crash, GPU driver fault, cuda OOM, venv-missing-module, etc.), the failure MUST be persisted to `TranscodeAttempts.AudioTracksEmittedJson` as `demucs_failed=true` with `demucs_failure_reason=<ExceptionType>: <first 200 chars of message>` on every existing track entry (or as a single meta-only entry when no tracks were probed). Operator MUST be able to SQL-distinguish silent Demucs crash from deliberate G5 skip (`dialog_boost_emitted=false, demucs_failed=false`) from never-attempted (`demucs_failed` field absent). Verifiable: `SELECT ta.id FROM TranscodeAttempts ta WHERE json_typeof(ta.AudioTracksEmittedJson) = 'array' AND ta.AudioTracksEmittedJson::jsonb @> '[{"demucs_failed": true}]'::jsonb` returns the exact set of Demucs-failed attempts; negation: an attempt where Demucs threw but `demucs_failed IS NULL OR = false` violates the criterion. Motivation: pre-C39 a Demucs crash silently shipped Track-0-only output that looked identical (in the JSON) to a deliberate G5 fallback -- operator had no diagnostic signal.
+
 ## SOLID Compliance
 
-S1. `AudioFilterEmitter._BuildBlockForTrack` is a thin orchestrator. The
-codec / filter / metadata / dialnorm / disposition / stream-copy decisions
-each live in their own per-concern helper method (`_DecideStreamCopyOrReencode`,
-`_BuildCodecArgs`, `_BuildFilterArgs`, `_BuildMetadataArgs`,
-`_BuildDialNormArgs`, `_BuildDispositionArgs`). Each helper has a per-helper
-contract test. SRP at the method level.
+S1. `AudioFilterEmitter.EmitTracks` orchestrates two per-block builders --
+`_BuildOriginalBlock` (Track 0) + `_BuildDialogBoostBlock` (Track 1). Each
+block owns its map / codec / filter / metadata / disposition slots via
+the `TrackBlock` dataclass. Shapes concatenate slots without knowing per-
+block internals. SRP at the block level.
 
 S2. The audio-state machine (`MarkAudioComplete`, `ResetAudioComplete`,
 `MarkAudioCorruptSuspect`, `EvaluateInitialAudioState`,
@@ -324,10 +329,9 @@ requires a directive.
 | `PostEncodeMeasurementService.Probe(TranscodeAttemptId, OutputFilePath) -> bool` | `Features/AudioNormalization/Workers/PostEncodeAudioHandler` (which is itself called by TranscodeJob's worker dispatch) |
 
 Everything else under `Features/AudioNormalization/` is INTERNAL. That
-includes (non-exhaustive): `AudioStrategyClassifier`,
-`LanguageDetector`, `_BuildBlockForTrack`, the `TrackBlock` dataclass
-internals, every helper prefixed with `_`, every Repository, every test
-fixture. Other verticals MUST NOT import these.
+includes (non-exhaustive): `LanguageDetector`, the `TrackBlock`
+dataclass internals, every helper prefixed with `_`, every Repository,
+every test fixture. Other verticals MUST NOT import these.
 
 ### HTTP API surface
 
@@ -352,15 +356,10 @@ operator-facing contract; UI templates + external scripts may call them.
 Other verticals MUST NOT depend on any of the following. The audio
 vertical changes these freely:
 
-- Internal class names of helpers, dataclasses (`TrackBlock`), and the
-  shape of `_BuildBlockForTrack`'s six per-concern slots
+- Internal class names of helpers, dataclasses (`TrackBlock`)
 - SQL clauses inside repositories
 - Regex patterns inside the language detector / Whisper parser
 - Internal directory structure under `Features/AudioNormalization/`
-- The `Strategy` enum strings (`'linear'` / `'adaptive'` / `'limiter'` /
-  `'skip'` / `'review'`) emitted by `AudioStrategyClassifier` -- they
-  are recorded inside `AudioPolicyJson` but consumers MUST NOT switch
-  on these strings; treat `AudioPolicyJson` as opaque
 - Anything prefixed with `_` (private by Python convention)
 
 ### Cross-vertical relationships (where audio fits in the larger system)
@@ -378,9 +377,8 @@ vertical changes these freely:
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
 |---|---|---|---|---|---|
-| S1 | Resolver -> Classifier | `AudioPolicyResolver.GetEffectivePolicy` | Policy dict (Scope, EmitTracks JSONB, Target* / UngainablePolicy / LoudnessTolerance) | `AudioStrategyClassifier.ClassifyTrack` reads TargetIntegratedLufs / TargetTruePeakDbtp / LoudnessTolerance / UngainablePolicy | `TestAudioPolicyResolver` 6 tests + `TestAudioStrategyClassifier` 11 tests |
-| S2 | Classifier -> Emitter | `AudioStrategyClassifier.ClassifyTrack` | `TrackStrategy(Strategy, EffectiveTargetLufs, EffectiveTruePeakDbtp, EffectiveLra, Reason)` | `AudioFilterEmitter._BuildBlockForTrack` translates strategy into argv | `TestAudioFilterEmitter` 12 fixture tests |
-| S3 | Emitter -> Shape | `AudioFilterEmitter.EmitTracks` | `List[TrackBlock]` each with `MapArgs / CodecArgs / FilterArgs / MetadataArgs / DispositionArgs` | `RemuxShape.Build` / `TranscodeShape.Build` / `SubtitleFixShape.Build` concatenate the slots into the ffmpeg command | `TestRemuxShape` / `TestTranscodeShape` / `TestSubtitleFixShape` |
+| S3 | Emitter -> Shape | `AudioFilterEmitter.EmitTracks` | `List[TrackBlock]` each with `InputArgs / MapArgs / CodecArgs / FilterArgs / MetadataArgs / DispositionArgs` | `TranscodeShape.Build` / `RemuxShape.Build` / `SubtitleFixShape.Build` concatenate the slots into the ffmpeg command; all shapes emit `-i` inputs before any `-map` | `TestRemuxShape` / `TestTranscodeShape` / `TestSubtitleFixShape` |
+| S10 | JobProcessor -> AudioPreEncodeFacade | `Features/TranscodeJob/Worker/JobProcessor._RunPreEncodeAudio` | `(FfmpegPath, InputPath, JobId, ProgressReporter)` | `AudioPreEncodeFacade.Prepare` returns `{DemucsPremixPath, VocalsRmsDbfs, PremixMeasured*, ScratchDir}` for every mode in `_AUDIO_EMIT_MODES` | live smoke attempts 41000-41011 |
 | S4 | Admission Gate -> Queue | `AudioPolicyAdmissionGate.AdmitOrDefer` | `AdmissionDecision(Outcome, DeferReason, PolicyJson)` -- side effect: `MediaFiles.AdmissionDeferReason` set on deferred | `TranscodeQueue.AudioPolicyJson` snapshot populated via `BackfillRecentInserts` UPDATE | `TestAudioPolicyAdmissionGate` 6 tests + live SQL `SELECT COUNT(AudioPolicyJson) FROM TranscodeQueue` |
 | S6 | Measurement Service -> Validator | `EbuR128MeasurementService.MeasureAndPersist` -> `MediaFiles.SourceIntegratedLufs` / LRA / TP / Threshold | `LoudnessMeasurementValidator.IsValid` reads the four columns + silence floor predicate | `TestEbuR128MeasurementService` 6 tests + `TestLoudnessMeasurementValidator` 8 tests |
 | S7 | Enrichment Service -> Detector Cache | `LanguageEnrichmentService.Enrich` writes `MediaFiles.AudioStreamLanguageDetectionsJson` | `LanguageDetector.Detect` 6th layer reads cache when `EnableSpeechLayer=True` | `TestLanguageEnrichmentService` 5 tests + `TestLanguageDetector.test_layer_speech_cache_when_enabled` |
@@ -389,20 +387,17 @@ vertical changes these freely:
 
 ## Status
 
-C1-C23 shipped 2026-06-16 + live-verified on MediaFile 690392 2026-06-17.
-S1-S4 SOLID compliance + H1-H4 self-healing + L1-L3 live verification +
-O1-O2 operational are tracked under directive
-`audio-vertical-perfection-and-self-healing` (open 2026-06-17). 116+
-contract tests green at prior close; new test suites land per S4 / H3 /
-L1 substages.
+C1-C38 shipped. Live-verified end-to-end across all six ProcessingModes
+(Transcode, Remux, AudioFix, Quick, SubtitleFix, TestVariant) via
+`audio-dialog-boost-real` directive.
 
 ## Files
 
 | File | Role |
 |------|------|
 | Features/AudioNormalization/AudioPolicyResolver.py | 4-scope walk |
-| Features/AudioNormalization/AudioStrategyClassifier.py | 5-route classifier |
-| Features/AudioNormalization/AudioFilterEmitter.py | The seam: EmitTracks -> List[TrackBlock]; orchestrator over 6 per-concern helpers (S1) |
+| Features/AudioNormalization/AudioFilterEmitter.py | The seam: EmitTracks -> List[TrackBlock]; two-track (Original + Dialog Boost) per Source of Truth |
+| Features/AudioNormalization/Services/AudioPreEncodeFacade.py | Single facade for Demucs pre-encode + G5 persistence + scratch cleanup; called by JobProcessor + `_ProcessSingleVariant` |
 | Features/AudioNormalization/AudioPolicyAdmissionGate.py | Pre-queue gate + PolicyJson snapshot + BackfillAllPending (no time window) |
 | Features/AudioNormalization/Services/AudioStateService.py | Audio-state machine on MediaFile (S2; renamed from AudioCompletionService) |
 | Features/AudioNormalization/Workers/PostEncodeAudioHandler.py | Post-encode probe + canonical-path resolve (S3; extracted from ProcessTranscodeQueueService) |

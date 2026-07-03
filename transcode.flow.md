@@ -145,7 +145,7 @@ See `Features/TranscodeQueue/priority-materialization.feature.md` and `Features/
 
 **Safety guards summary:**
 - **Audio language** (CRITICAL): files with `HasExplicitEnglishAudio = false` blocked at all queue paths
-- **VMAF quality gate**: files with VMAF >= 80 not re-transcoded
+- **VMAF quality gate**: files with VMAF >= 80 not re-transcoded. Bypassed by `AddJobToQueue(ForceAdd=True)` (used by `QueueAdmissionAppService.AdmitOne` from /Work/<bucket> per-row Queue button); WARN log records the override -- see `TranscodeQueue.feature.md` C11 [BUG-0078]
 - **CRF floor**: adjusted CRF cannot go below 15; files logged to ProblemFiles
 - **Marginal-savings gate** (`marginal-savings-gate.feature.md`): see below.
 - **Dedup**: files already in queue are skipped

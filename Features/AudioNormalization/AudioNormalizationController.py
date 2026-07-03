@@ -298,6 +298,18 @@ class AudioNormalizationController:
                 return jsonify({'Success': False, 'Message': 'AcceptableAudioCodecsCsv is required'}), 400
             if Payload['TargetTruePeakDbtp'] > 0:
                 return jsonify({'Success': False, 'Message': 'TargetTruePeakDbtp must be <= 0 dBTP'}), 400
+            # directive: audio-dialog-boost-real | # see audio-normalization.C8
+            from Features.AudioNormalization.AudioFilterEmitter import MIN_TRANSPARENT_KBPS_PER_CH
+            if Payload['Track0BitratePerChannelKbps'] < MIN_TRANSPARENT_KBPS_PER_CH:
+                return jsonify({'Success': False, 'Message': f'Track0BitratePerChannelKbps must be >= {MIN_TRANSPARENT_KBPS_PER_CH} (transparent floor for AAC-LC/Opus)'}), 400
+            if Payload['Track0MinPerChannelKbps'] < MIN_TRANSPARENT_KBPS_PER_CH:
+                return jsonify({'Success': False, 'Message': f'Track0MinPerChannelKbps must be >= {MIN_TRANSPARENT_KBPS_PER_CH} (transparent floor for AAC-LC/Opus)'}), 400
+            # directive: audio-dialog-boost-real | # see audio-normalization.C8
+            AcceptableSet = {C.strip().lower() for C in Payload['AcceptableAudioCodecsCsv'].split(',') if C.strip()}
+            for TrackCodecField in ('Track0Codec', 'Track1Codec'):
+                CodecValue = Payload[TrackCodecField]
+                if CodecValue and CodecValue not in AcceptableSet:
+                    return jsonify({'Success': False, 'Message': f"{TrackCodecField}='{CodecValue}' must appear in AcceptableAudioCodecsCsv ('{Payload['AcceptableAudioCodecsCsv']}'). Mismatch causes ComplianceGate to refuse every output with '{CodecValue}' -- silent starvation vector."}), 400
             AudioComplianceRulesRepository().UpdateRules(Payload)
             LoggingService.LogInfo(
                 f"AudioComplianceRules updated: {Payload}",
@@ -308,8 +320,51 @@ class AudioNormalizationController:
 
         # directive: worker-runtime-state
         @self.Blueprint.route('/api/AudioNormalization/Rules/BackfillStatus', methods=['GET'])
+        # directive: audio-dialog-boost-real | # see audio-normalization.C8
         def audio_rules_backfill_status():
             return jsonify({'Success': True, 'Data': dict(_AudioBackfillStatus)}), 200
+
+        @self.Blueprint.route('/api/AudioNormalization/PreviewChains', methods=['GET'])
+        # directive: audio-dialog-boost-real | # see audio-normalization.C8
+        def preview_chains():
+            from Features.AudioNormalization.Repositories.AudioComplianceRulesRepository import AudioComplianceRulesRepository
+            from Features.AudioNormalization.AudioFilterEmitter import _BuildTrack0Chain, _BuildDialogBoostLoudnormFilter, _DbToLinear
+            try:
+                R = AudioComplianceRulesRepository().GetRules()
+            except Exception as Ex:
+                return jsonify({'Success': False, 'Message': str(Ex)}), 500
+            PlaceholderSrc = type('PreviewMediaFile', (), {
+                'SourceIntegratedLufs': -24.0,
+                'SourceLoudnessRangeLU': 8.0,
+                'SourceTruePeakDbtp': -3.0,
+                'SourceIntegratedThresholdLufs': -34.0,
+            })()
+            Track0Chain = _BuildTrack0Chain(PlaceholderSrc, R['TargetIntegratedLufs'], R['TargetTruePeakDbtp'], R['SampleLimitHeadroomDb'])
+            EffectiveTp = float(R['TargetTruePeakDbtp']) - float(R['SampleLimitHeadroomDb'])
+            SampleLimit = _DbToLinear(EffectiveTp)
+            Track1Loudnorm = _BuildDialogBoostLoudnormFilter(R['DialogBoostTargetLufs'], R['DialogBoostTargetLra'], EffectiveTp)
+            Track1Filter = Track1Loudnorm + f",alimiter=level_in=1:level_out=1:limit={SampleLimit:.4f}:attack=1:release=50:level=false"
+            PremixFilter = (
+                f"[vocals]volume=+{float(R['VocalsBoostDb']):.1f}dB[v];"
+                f"[instrumental]volume=-{float(R['InstrumentalAttenDb']):.1f}dB[i];"
+                f"[v][i]amix=inputs=2:duration=longest:dropout_transition=0[mix];"
+                f"[mix]acompressor=threshold={float(R['PremixCompressorThreshold']):.3f}:ratio={float(R['PremixCompressorRatio']):.1f}:attack=8:release=120:makeup={float(R['PremixCompressorMakeupDb']):.1f}:knee=4,"
+                f"dynaudnorm=f={int(R['PremixDynaudnormFrameLen'])}:g={int(R['PremixDynaudnormGaussSize'])}:p=0.7:m=8"
+            )
+            return jsonify({'Success': True, 'Data': {
+                'Track0': {
+                    'Codec': f"{R.get('Track0Codec', 'aac')} @ {R['Track0BitratePerChannelKbps']} kbps/ch (min {R['Track0MinPerChannelKbps']} kbps/ch)",
+                    'Filter': Track0Chain,
+                    'PlaceholderSource': 'measured_I=-24, LRA=8, TP=-3 (typical; per-file values substituted at encode)',
+                },
+                'Track1': {
+                    'PreEncode': 'Demucs htdemucs on cuda|xpu|cpu (auto-detected) -> vocals.wav + instrumental.wav (+ RMS measurement)',
+                    'Premix': PremixFilter,
+                    'Codec': f"{R.get('Track1Codec', 'aac')} stereo @ {R['Track1StereoBitrateKbps']} kbps",
+                    'Filter': Track1Filter,
+                    'FallbackGate': f"skip Track 1 when vocals-stem RMS <= {R['Track1VocalsRmsFallbackDbfs']} dBFS",
+                },
+            }}), 200
 
 
 # directive: perfect-audio-vertical | # see perfect-audio-vertical.C10

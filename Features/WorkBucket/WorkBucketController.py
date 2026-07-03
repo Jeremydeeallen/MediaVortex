@@ -152,9 +152,15 @@ class WorkBucketController:
                 if Bucket is None:
                     return jsonify({'Success': False, 'Message': f"Unknown bucket: {url_key}", 'Data': {}}), 404
                 R = self.QueueService.AdmitOne(media_file_id, Bucket)
+                MessageByStatus = {
+                    'queued': 'Queued',
+                    'already_queued': 'Already queued',
+                    'skipped': 'Skipped (quality already acceptable)',
+                    'error': 'Admission failed',
+                }
                 return jsonify({
-                    'Success': True,
-                    'Message': 'Queued' if R.Status == 'queued' else 'Already queued',
+                    'Success': R.Status != 'error',
+                    'Message': MessageByStatus.get(R.Status, R.Status),
                     'Data': {'Status': R.Status, 'QueueId': R.QueueId, 'ProcessingMode': Bucket.ProcessingMode},
                 })
             except Exception as Ex:

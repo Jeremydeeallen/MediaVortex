@@ -109,6 +109,6 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 ### What is EXPLICITLY NOT a contract
 
 - The internal claim SQL -- routes through WorkerCapabilityPredicate.BuildClaimPredicate
-- Per-mode dispatch internals -- single decision tree per command-builder.feature.md
+- Per-mode dispatch internals -- single decision tree per `Features/TranscodeJob/Emit/encode-emit.feature.md` (CommandBuilder god class decomposed 2026-06-10)
 - The .inprogress filename suffix -- file-replacement seam owns the rename
 - The TranscodeAttempts.ffpmpegcommand typo (double p) -- known invariant

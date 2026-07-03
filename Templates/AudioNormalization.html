@@ -157,7 +157,37 @@
       <div class="d-flex align-items-center gap-2 my-3">
         <button class="btn btn-primary" id="Ac_Save">Save all knobs</button>
         <button class="btn btn-outline-secondary" id="Ac_Reload">Reload from DB</button>
+        <button class="btn btn-outline-secondary" id="Ac_PreviewChains">Preview literal pipelines</button>
         <div id="Ac_Msg" class="small ms-2"></div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="card h-100">
+            <div class="card-header"><strong>Track 0 -- Original: literal ffmpeg pipeline</strong></div>
+            <div class="card-body">
+              <div class="small text-muted mb-2">Codec: <span id="Pv_Track0_Codec">--</span></div>
+              <div class="small text-muted mb-1">Filter chain (per-file measurements substituted at encode time):</div>
+              <pre id="Pv_Track0_Filter" class="small bg-light border rounded p-2 mb-2" style="white-space:pre-wrap;word-break:break-all;">click "Preview literal pipelines"</pre>
+              <div class="small text-muted" id="Pv_Track0_Placeholder"></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card h-100">
+            <div class="card-header"><strong>Track 1 -- Dialog Boost: literal Demucs + ffmpeg pipeline</strong></div>
+            <div class="card-body">
+              <div class="small text-muted mb-1">Pre-encode:</div>
+              <pre id="Pv_Track1_PreEncode" class="small bg-light border rounded p-2 mb-2" style="white-space:pre-wrap;word-break:break-all;">click "Preview literal pipelines"</pre>
+              <div class="small text-muted mb-1">Premix (before final loudnorm):</div>
+              <pre id="Pv_Track1_Premix" class="small bg-light border rounded p-2 mb-2" style="white-space:pre-wrap;word-break:break-all;"></pre>
+              <div class="small text-muted mb-2">Codec: <span id="Pv_Track1_Codec">--</span></div>
+              <div class="small text-muted mb-1">Filter chain:</div>
+              <pre id="Pv_Track1_Filter" class="small bg-light border rounded p-2 mb-2" style="white-space:pre-wrap;word-break:break-all;"></pre>
+              <div class="small text-muted" id="Pv_Track1_Fallback"></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -217,6 +247,32 @@ async function SaveAudioRules() {
 
 document.getElementById('Ac_Save').addEventListener('click', SaveAudioRules);
 document.getElementById('Ac_Reload').addEventListener('click', LoadAudioRules);
+
+async function LoadPreviewChains() {
+  const Msg = document.getElementById('Ac_Msg');
+  try {
+    const R = await fetch('/api/AudioNormalization/PreviewChains');
+    const J = await R.json();
+    if (!J.Success) { Msg.textContent = 'Preview failed: ' + J.Message; Msg.className = 'small ms-2 text-danger'; return; }
+    const T0 = J.Data.Track0 || {};
+    const T1 = J.Data.Track1 || {};
+    document.getElementById('Pv_Track0_Codec').textContent = T0.Codec || '';
+    document.getElementById('Pv_Track0_Filter').textContent = T0.Filter || '';
+    document.getElementById('Pv_Track0_Placeholder').textContent = T0.PlaceholderSource || '';
+    document.getElementById('Pv_Track1_PreEncode').textContent = T1.PreEncode || '';
+    document.getElementById('Pv_Track1_Premix').textContent = T1.Premix || '';
+    document.getElementById('Pv_Track1_Codec').textContent = T1.Codec || '';
+    document.getElementById('Pv_Track1_Filter').textContent = T1.Filter || '';
+    document.getElementById('Pv_Track1_Fallback').textContent = T1.FallbackGate || '';
+    Msg.textContent = 'Pipelines previewed against current DB rules.';
+    Msg.className = 'small ms-2 text-muted';
+  } catch (e) {
+    Msg.textContent = 'Preview load failed: ' + e;
+    Msg.className = 'small ms-2 text-danger';
+  }
+}
+document.getElementById('Ac_PreviewChains').addEventListener('click', LoadPreviewChains);
+LoadPreviewChains();
 
 async function LoadDashboard() {
   try {

@@ -19,6 +19,10 @@ def _ResolveFfmpegCodec(CodecName):
 
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C8
+MIN_TRANSPARENT_KBPS_PER_CH = 48
+
+
+# directive: audio-dialog-boost-real | # see audio-normalization.C8
 class TrackBlock:
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C8
@@ -148,7 +152,7 @@ class AudioFilterEmitter:
     # directive: audio-dialog-boost-real | # see audio-normalization.C8
     def _BuildOriginalBlock(self, MediaFile, Stream, Language, StreamIdx, OutputIndex, IsDefault, R):
         Channels = self._ResolveSourceChannels(MediaFile)
-        Bitrate = max(int(R['Track0BitratePerChannelKbps']), int(R['Track0MinPerChannelKbps'])) * Channels
+        Bitrate = max(MIN_TRANSPARENT_KBPS_PER_CH, int(R['Track0BitratePerChannelKbps']), int(R['Track0MinPerChannelKbps'])) * Channels
         TargetLufs = float(R['TargetIntegratedLufs'])
         TargetTp = float(R['TargetTruePeakDbtp'])
         CodecName = _ResolveFfmpegCodec(R.get('Track0Codec', 'aac'))

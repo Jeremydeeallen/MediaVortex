@@ -13,6 +13,10 @@ WRITE_TRACKS_EMITTED_SQL = (
     "WHERE Id = %s"
 )
 
+READ_TRACKS_EMITTED_SQL = (
+    "SELECT AudioTracksEmittedJson FROM TranscodeAttempts WHERE Id = %s"
+)
+
 
 # directive: perfect-audio-vertical | # see perfect-audio-vertical.C15
 class PostEncodeMeasurementService:
@@ -150,5 +154,40 @@ class PostEncodeMeasurementService:
             LoggingService.LogException(
                 f"PostEncodeMeasurement.Probe persist failed for AttemptId={TranscodeAttemptId}",
                 Ex, "PostEncodeMeasurementService", "Probe",
+            )
+            return False
+
+    # directive: audio-dialog-boost-real | # see audio-normalization.C39
+    def PersistPreEncodeMeta(self, TranscodeAttemptId, VocalsRmsDbfs, DialogBoostEmitted, VocalsFallbackDbfs, DemucsFailed=False, DemucsFailureReason=None):
+        """Merge Demucs vocals-stem RMS + Dialog Boost decision + Demucs failure signal onto AudioTracksEmittedJson so G5 verifier SQL can run and operators can distinguish deliberate skip from silent Demucs crash."""
+        try:
+            Rows = DatabaseService().ExecuteQuery(READ_TRACKS_EMITTED_SQL, (TranscodeAttemptId,))
+            Current = Rows[0].get('audiotracksemittedjson') if Rows else None
+            if isinstance(Current, str):
+                Current = json.loads(Current) if Current else []
+            if not isinstance(Current, list):
+                Current = []
+            Meta = {
+                'vocals_rms_dbfs': None if VocalsRmsDbfs is None else float(VocalsRmsDbfs),
+                'vocals_fallback_dbfs': None if VocalsFallbackDbfs is None else float(VocalsFallbackDbfs),
+                'dialog_boost_emitted': bool(DialogBoostEmitted),
+                'demucs_failed': bool(DemucsFailed),
+                'demucs_failure_reason': DemucsFailureReason if DemucsFailed else None,
+            }
+            if not Current:
+                Current = [dict(Meta, TrackIndex=None, Label='pre_encode_meta', Language='und', Strategy='pre_encode_meta_only')]
+            else:
+                for Entry in Current:
+                    if isinstance(Entry, dict):
+                        Entry.update(Meta)
+            DatabaseService().ExecuteNonQuery(
+                WRITE_TRACKS_EMITTED_SQL,
+                (json.dumps(Current), TranscodeAttemptId),
+            )
+            return True
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"PostEncodeMeasurement.PersistPreEncodeMeta failed for AttemptId={TranscodeAttemptId}",
+                Ex, "PostEncodeMeasurementService", "PersistPreEncodeMeta",
             )
             return False

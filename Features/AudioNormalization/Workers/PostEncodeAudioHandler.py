@@ -10,6 +10,10 @@ CANONICAL_PATH_SQL = (
     "WHERE mf.Id = %s"
 )
 
+EXISTING_TRACKS_SQL = (
+    "SELECT AudioTracksEmittedJson FROM TranscodeAttempts WHERE Id = %s"
+)
+
 
 # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S3
 class PostEncodeAudioHandler:
@@ -25,8 +29,10 @@ class PostEncodeAudioHandler:
 
     # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S3
     def HandlePostEncode(self, TranscodeAttemptId, MediaFileId):
-        """Resolve post-replacement canonical path + invoke probe; never raises into the encode flow."""
+        """Resolve post-replacement canonical path + invoke probe; never raises into the encode flow. Idempotent: skips when AudioTracksEmittedJson already carries per-track measurements (JobProcessor probes FinalOutputPath first)."""
         try:
+            if self._AlreadyProbed(TranscodeAttemptId):
+                return True
             Path = self.ResolvePostReplacementCanonicalPath(MediaFileId)
             if not Path:
                 LoggingService.LogWarning(
@@ -47,6 +53,26 @@ class PostEncodeAudioHandler:
                 f"Post-encode audio handler failed for AttemptId={TranscodeAttemptId}",
                 Ex, "PostEncodeAudioHandler", "HandlePostEncode",
             )
+            return False
+
+    # directive: audio-dialog-boost-real | # see audio-normalization.C8
+    def _AlreadyProbed(self, TranscodeAttemptId):
+        """True when AudioTracksEmittedJson already contains at least one track with a real Achieved measurement (JobProcessor probed the actual encoded output before HandleResult ran)."""
+        try:
+            import json as _json
+            Rows = DatabaseService().ExecuteQuery(EXISTING_TRACKS_SQL, (TranscodeAttemptId,))
+            if not Rows:
+                return False
+            Existing = Rows[0].get('audiotracksemittedjson')
+            if isinstance(Existing, str):
+                Existing = _json.loads(Existing) if Existing else None
+            if not isinstance(Existing, list) or not Existing:
+                return False
+            for Entry in Existing:
+                if isinstance(Entry, dict) and Entry.get('AchievedIntegratedLufs') is not None:
+                    return True
+            return False
+        except Exception:
             return False
 
     # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S3

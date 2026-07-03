@@ -2,15 +2,16 @@
 
 **Slug:** pipeline-test-harness
 
-## Interrupts: linear-loudnorm
+## Interrupts: audio-dialog-boost-real (successor to linear-loudnorm)
 
 ## What It Does
 
 Provides a `pytest`-runnable harness that drives real MediaFile rows
 through the actual Quick Fix (Remux) and Transcode pipelines on the I9
 worker, asserting state at every stage. The two initial test cases
-cover the contracts of `audio-completion`, `linear-loudnorm`, and
-`transcode-vs-remux-routing` all at once:
+cover the contracts of `audio-completion`, `audio-normalization` (see
+C36 linear-mode + C37 single-emit-path), and `transcode-vs-remux-routing`
+all at once:
 
 1. **Quick Fix then Transcode preserves audio.** A file flagged for
    Quick Fix runs through Remux first -- audio is one-shot normalized,
@@ -44,9 +45,10 @@ Five concerns this feature resolves:
    `Scripts/Smoke` exists for one-off checks. Nothing drives a real
    MediaFile through the actual pipeline and asserts the full
    contract from `audio-completion.feature.md` criterion 25,
-   `linear-loudnorm.feature.md` criteria 25-27, and the routing
-   feature criteria 26-28. We have been shipping these features
-   without a regression-grade test.
+   `Features/AudioNormalization/audio-normalization.feature.md`
+   C36 + C37 (linear-mode two-pass + single audio emit path), and
+   the routing feature criteria 26-28. We have been shipping these
+   features without a regression-grade test.
 2. **Manual verification doesn't scale.** Each release re-derives the
    same probe sequence (run a file, check the DB, check ffprobe output,
    check Jellyfin) by hand. That's a runbook tax we pay every release.
@@ -308,7 +310,7 @@ IMPLEMENTED 2026-05-25 -- both test cases green, idempotency verified.
 
 ### Progress
 
-- [x] Stack pivot from `linear-loudnorm`; tree was clean, no pause commit
+- [x] Stack pivot from historic `linear-loudnorm` directive (content absorbed into `audio-normalization.feature.md` C36); tree was clean, no pause commit
 - [x] Feature doc (this file) drafted with PIVOT marker
 - [x] Operator approved (2026-05-24)
 - [x] Step 1: Tests/Pipeline/ directory + __init__.py + .gitignore exclusions for _backup/_jellyfin_capture

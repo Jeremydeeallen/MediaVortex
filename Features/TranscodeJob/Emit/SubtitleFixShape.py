@@ -66,8 +66,42 @@ class SubtitleFixShape(EncodeShape):
             FFmpegPath = CommandData.get('FFmpegPath')
             if not FFmpegPath:
                 raise ValueError("FFmpegPath missing from CommandData. The caller (worker) must resolve this from Workers.FFmpegPath via WorkerContext before invoking the shape.")
+
+            Policy = self.Resolver.GetEffectivePolicy(MediaFile)
+            if not Policy:
+                # directive: audio-dialog-boost-real | # see audio-normalization.C8
+                from Features.AudioNormalization.AudioStrategyResult import AudioPolicyUnresolvedError
+                raise AudioPolicyUnresolvedError(
+                    'PolicyMissing',
+                    f'MediaFile.Id={getattr(MediaFile, "Id", None)} has no effective AudioPolicy; refusing stream-copy fallback that would ship source-bitrate audio (starvation risk).',
+                    None,
+                )
+            SourceStreams = self.StreamProbe.Probe(CommandData.get('InputPath')) or None
+            Blocks = self.Emitter.EmitTracks(
+                MediaFile, Policy, AudioStreams=SourceStreams,
+                DemucsPremixPath=CommandData.get('DemucsPremixPath'),
+                VocalsRmsDbfs=CommandData.get('VocalsRmsDbfs'),
+                PremixMeasuredI=CommandData.get('PremixMeasuredI'),
+                PremixMeasuredLra=CommandData.get('PremixMeasuredLra'),
+                PremixMeasuredTp=CommandData.get('PremixMeasuredTp'),
+                PremixMeasuredThresh=CommandData.get('PremixMeasuredThresh'),
+            )
+            if not Blocks:
+                from Features.AudioNormalization.AudioStrategyResult import AudioPolicyUnresolvedError
+                raise AudioPolicyUnresolvedError(
+                    'EmitTracksReturnedEmpty',
+                    f'MediaFile.Id={getattr(MediaFile, "Id", None)} produced empty audio Blocks; refusing stream-copy fallback (starvation risk).',
+                    None,
+                )
+
             CommandParts = [FFmpegPath]
             CommandParts.extend(['-i', f'"{InputPath}"'])
+            for Block in Blocks:
+                if Block.InputArgs:
+                    for I in range(0, len(Block.InputArgs), 2):
+                        CommandParts.append(Block.InputArgs[I])
+                        CommandParts.append(f'"{Block.InputArgs[I+1]}"')
+
             CommandParts.extend(['-map', '0:v:0', '-map', f'0:s:{SubtitleStreamIndex}'])
             CommandParts.extend(['-c:v', 'copy'])
 
@@ -75,20 +109,14 @@ class SubtitleFixShape(EncodeShape):
             if VideoCodec in ('hevc', 'h265', 'x265'):
                 CommandParts.extend(['-tag:v', 'hvc1'])
 
-            Policy = self.Resolver.GetEffectivePolicy(MediaFile)
-            SourceStreams = self.StreamProbe.Probe(CommandData.get('InputPath')) or None
-            Blocks = self.Emitter.EmitTracks(MediaFile, Policy, AudioStreams=SourceStreams) if Policy else []
-            if not Blocks:
-                CommandParts.extend(['-map', f'0:a:{AudioStreamIndex}', '-c:a', 'copy'])
-            else:
-                for Block in Blocks:
-                    CommandParts.extend(Block.MapArgs)
-                    CommandParts.extend(Block.CodecArgs)
-                    if Block.FilterArgs:
-                        CommandParts.extend(Block.FilterArgs[:1])
-                        CommandParts.append(f'"{Block.FilterArgs[1]}"')
-                    CommandParts.extend(Block.MetadataArgs)
-                    CommandParts.extend(Block.DispositionArgs)
+            for Block in Blocks:
+                CommandParts.extend(Block.MapArgs)
+                CommandParts.extend(Block.CodecArgs)
+                if Block.FilterArgs:
+                    CommandParts.extend(Block.FilterArgs[:1])
+                    CommandParts.append(f'"{Block.FilterArgs[1]}"')
+                CommandParts.extend(Block.MetadataArgs)
+                CommandParts.extend(Block.DispositionArgs)
 
             CommandParts.extend(['-c:s', 'mov_text'])
             CommandParts.extend(['-f', 'mp4'])

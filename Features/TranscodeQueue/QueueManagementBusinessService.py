@@ -2026,9 +2026,11 @@ class QueueManagementBusinessService:
                 shouldRetranscode, previousAttempt = retranscodeDecider.Decide(mediaFile.Id)
 
                 if not shouldRetranscode:
-                    skipMsg = f"Quality already acceptable (VMAF >= 80), skipping retranscode for {mediaFile.FileName}"
-                    LoggingService.LogInfo(skipMsg, "QueueManagementBusinessService", "AddJobToQueue")
-                    return {"Success": True, "Skipped": True, "Message": "Quality already acceptable, skipping retranscode", "FileName": mediaFile.FileName}
+                    if not ForceAdd:
+                        skipMsg = f"Quality already acceptable (VMAF >= 80), skipping retranscode for {mediaFile.FileName}"
+                        LoggingService.LogInfo(skipMsg, "QueueManagementBusinessService", "AddJobToQueue")
+                        return {"Success": True, "Skipped": True, "Message": "Quality already acceptable, skipping retranscode", "FileName": mediaFile.FileName}
+                    LoggingService.LogWarning(f"Force adding {mediaFile.FileName} despite VMAF>=80 on latest attempt (VMAF gate overridden)", "QueueManagementBusinessService", "AddJobToQueue")
 
                 if previousAttempt:
                     previousCRF = previousAttempt.get('Quality')

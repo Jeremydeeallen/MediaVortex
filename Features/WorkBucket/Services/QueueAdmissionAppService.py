@@ -25,17 +25,20 @@ class QueueAdmissionAppService:
         if Result.get('AlreadyQueued'):
             Status = 'already_queued'
             QueueId = int(Result.get('ItemId', 0))
+        elif Result.get('Skipped'):
+            Status = 'skipped'
+            QueueId = 0
         elif Result.get('Success'):
             Status = 'queued'
             QueueId = int(Result.get('ItemId', 0))
         else:
             Status = 'error'
             QueueId = 0
-        LoggingService.LogInfo(
-            f"Admit one: media_file={MediaFileId} bucket={Bucket.BucketName} status={Status}",
-            "QueueAdmissionAppService",
-            "AdmitOne",
-        )
+        Reason = Result.get('Message') or Result.get('ErrorMessage') or ''
+        LogLine = f"Admit one: media_file={MediaFileId} bucket={Bucket.BucketName} status={Status}"
+        if Reason:
+            LogLine += f" reason={Reason}"
+        LoggingService.LogInfo(LogLine, "QueueAdmissionAppService", "AdmitOne")
         return AdmitOneResult(Status=Status, QueueId=QueueId)
 
     # directive: transcode-worker-unification | # see work-bucket.C4

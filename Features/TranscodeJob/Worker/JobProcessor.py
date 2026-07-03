@@ -4,8 +4,12 @@ from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker
 from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalExists, LocalJoin, LocalSplitExt
+from Features.AudioNormalization.Services import AudioPreEncodeFacade
 from Features.TranscodeJob.Emit.OutputFilenameBuilder import OutputFilenameBuilder
 from Features.TranscodeJob.Worker.JobResult import JobResult
+
+# directive: audio-dialog-boost-real | # see audio-normalization.C8
+_AUDIO_EMIT_MODES = frozenset(('Transcode', 'Remux', 'AudioFix', 'Quick', 'SubtitleFix'))
 
 
 # directive: transcode-worker-unification | # see worker-loop.C2
@@ -75,6 +79,7 @@ class JobProcessor:
             BaseName = OutputFilenameBuilder().CollapseMvSuffix(BaseName)
             TargetLocalPath = LocalJoin(LocalDirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
 
+            PreAudio = self._RunPreEncodeAudio(Mode, EffectiveInputPath, Job, TranscodeAttemptId)
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, f"Building {Mode} command...")
             CommandResult = Strategy.BuildCommand(
                 Job, MediaFile,
@@ -86,6 +91,12 @@ class JobProcessor:
                     'FFprobePath': self.QueueService.FFprobePath,
                     'OutputDirectory': LocalDirname(EffectiveInputPath),
                     'TranscodeAttemptId': TranscodeAttemptId,
+                    'DemucsPremixPath': (PreAudio or {}).get('DemucsPremixPath'),
+                    'VocalsRmsDbfs': (PreAudio or {}).get('VocalsRmsDbfs'),
+                    'PremixMeasuredI': (PreAudio or {}).get('PremixMeasuredI'),
+                    'PremixMeasuredLra': (PreAudio or {}).get('PremixMeasuredLra'),
+                    'PremixMeasuredTp': (PreAudio or {}).get('PremixMeasuredTp'),
+                    'PremixMeasuredThresh': (PreAudio or {}).get('PremixMeasuredThresh'),
                 },
             )
             if not CommandResult:
@@ -142,6 +153,8 @@ class JobProcessor:
             except Exception as MeasureEx:
                 LoggingService.LogException(f"PostEncodeMeasurement failed for attempt {TranscodeAttemptId}", MeasureEx, "JobProcessor", "Process")
 
+            self._PersistPreEncodeMeta(TranscodeAttemptId, PreAudio)
+
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Finalizing...")
             OwnershipTransferred = True
             Strategy.HandleResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId, FinalOutputPath, QueueService=self.QueueService)
@@ -155,6 +168,7 @@ class JobProcessor:
             self.QueueService.HandleJobFailure(Job, f"Exception during {Mode}: {str(Ex)}", TranscodeAttemptId, ActiveJobId)
             return JobResult(Success=False, ErrorMessage=str(Ex))
         finally:
+            self._CleanupPreEncodeScratch(locals().get('PreAudio'))
             if not OwnershipTransferred:
                 if TargetLocalPath:
                     try:
@@ -166,3 +180,28 @@ class JobProcessor:
                         self.QueueService.DatabaseManager.DeleteTemporaryFilePath(TranscodeAttemptId)
                     except Exception:
                         pass
+
+    # directive: audio-dialog-boost-real | # see audio-normalization.C8
+    def _RunPreEncodeAudio(self, Mode, InputPath, Job, TranscodeAttemptId):
+        """One-source-of-truth Demucs pre-encode via AudioPreEncodeFacade. Fires for every ProcessingMode that ships audio."""
+        if Mode not in _AUDIO_EMIT_MODES:
+            return None
+        def Reporter(Phase, Percent, Info):
+            try:
+                self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, Phase, Percent, Info)
+            except Exception:
+                pass
+        return AudioPreEncodeFacade.Prepare(
+            FfmpegPath=self.QueueService.FFmpegPath,
+            InputPath=InputPath,
+            JobId=getattr(Job, 'Id', 'unknown'),
+            ProgressReporter=Reporter,
+        )
+
+    # directive: audio-dialog-boost-real | # see audio-normalization.C8
+    def _PersistPreEncodeMeta(self, TranscodeAttemptId, PreAudio):
+        AudioPreEncodeFacade.PersistMeta(TranscodeAttemptId, PreAudio)
+
+    # directive: audio-dialog-boost-real | # see audio-normalization.C8
+    def _CleanupPreEncodeScratch(self, PreAudio):
+        AudioPreEncodeFacade.Cleanup(self.QueueService.FFmpegPath, PreAudio)

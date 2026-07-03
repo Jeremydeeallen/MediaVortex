@@ -86,6 +86,34 @@ function Increment-RefusalCount {
     return $Counts[$Key]
 }
 
+function Reset-RefusalCountsForFile {
+    param([string]$FilePath)
+    # Clear all rule counters for a file when the edit sails through cleanly.
+    # Prevents sticky lock: refusals accumulated during exploration should not
+    # penalize a subsequent successful edit -- monotonic counters were the wrong
+    # abstraction for a session where the agent iterates toward correctness.
+    if (-not $FilePath) { return }
+    if (-not (Test-Path $RefusalStateFile)) { return }
+    try {
+        $CurrentStamp = Get-CurrentSessionStamp
+        $Loaded = Get-Content $RefusalStateFile -Raw | ConvertFrom-Json
+        if (-not $Loaded.counts) { return }
+        if ($Loaded.session_stamp -ne $CurrentStamp) { return }
+        $Suffix = "|" + $FilePath.ToLower()
+        $Counts = @{}
+        $Changed = $false
+        foreach ($Prop in $Loaded.counts.PSObject.Properties) {
+            if ($Prop.Name -like "*$Suffix") { $Changed = $true; continue }
+            $Counts[$Prop.Name] = [int]$Prop.Value
+        }
+        if (-not $Changed) { return }
+        $Out = @{ session_stamp = $CurrentStamp; counts = $Counts }
+        $Json = $Out | ConvertTo-Json -Compress
+        Set-Content -Path $RefusalStateFile -Value $Json -Encoding UTF8
+    }
+    catch { }
+}
+
 function Emit-DenyWithRepeatDetection {
     param([string]$Reason, [string]$FilePath)
     # directive: hook-honesty-fence -- agent-stop header on every refusal.
@@ -232,8 +260,10 @@ function Test-R1FlowStubSatisfied {
 
 function Get-ReadFilesFromTranscript {
     param([string]$TranscriptPath)
-    # Returns hashtable: { path_lowercase => array of @{ offset = int; limit = int } }.
+    # Returns hashtable: { absolute-path-lowercase => array of @{ offset = int; limit = int } }.
     # offset defaults to 1 (start), limit 0 means whole-file. Multiple Reads accumulate.
+    # Path normalization: relative paths get resolved against $RepoRoot so the hook keys match
+    # regardless of whether the Read tool was called with an absolute or relative path.
     if (-not $TranscriptPath -or -not (Test-Path $TranscriptPath)) { return @{} }
     $Files = @{}
     foreach ($Line in (Get-Content $TranscriptPath)) {
@@ -241,7 +271,11 @@ function Get-ReadFilesFromTranscript {
             $Inner = $M.Groups[1].Value
             $PathM = [regex]::Match($Inner, '"file_path"\s*:\s*"([^"]+)"')
             if (-not $PathM.Success) { continue }
-            $P = ($PathM.Groups[1].Value -replace '\\\\', '\').ToLower()
+            $Raw = ($PathM.Groups[1].Value -replace '\\\\', '\')
+            if ($Raw -notmatch '^[a-zA-Z]:[\\/]' -and $Raw -notmatch '^[\\/]{2}') {
+                $Raw = Join-Path $RepoRoot $Raw
+            }
+            $P = $Raw.ToLower()
             $OffsetM = [regex]::Match($Inner, '"offset"\s*:\s*(\d+)')
             $LimitM = [regex]::Match($Inner, '"limit"\s*:\s*(\d+)')
             $Offset = if ($OffsetM.Success) { [int]$OffsetM.Groups[1].Value } else { 1 }
@@ -555,6 +589,9 @@ function Test-R1-DocPreread {
     param($PostContent, $FilePath, $ReadFiles, $AllContent)
     # $ReadFiles is a hashtable from Get-ReadFilesFromTranscript: { path_lower => array of @{offset, limit} }.
     if ($FilePath -notmatch '\.(py|js|html|sql)$') { return $null }
+    # Inline override: `# allow: R1 <reason>` anywhere in the file bypasses R1 entirely.
+    # Use when a colocated doc mentions this file but doesn't actually govern the edit region.
+    if (Test-AllowOverride $PostContent 0 'R1' $FilePath) { return $null }
     # Flow-stub satisfaction (R1 extension per flow-docs-as-hub criterion 6):
     # if the code carries `# see <flow-slug>.ST<N>` and the named *.flow.md has been Read
     # covering the ST<N> section, colocated *.feature.md preread is waived.
@@ -570,6 +607,7 @@ function Test-R1-DocPreread {
     foreach ($M in [regex]::Matches($PostContent, '#\s*see\s+([a-z0-9-]+)\.((?:W|S|C|ST)\d+)')) {
         $AnchorRefs += @{ slug = $M.Groups[1].Value.ToLower(); id = $M.Groups[2].Value }
     }
+    $AnchorSlugs = @($AnchorRefs | ForEach-Object { $_.slug } | Sort-Object -Unique)
     $FileBaseName = Split-Path $FilePath -Leaf
     foreach ($D in $Docs) {
         $DocLower = $D.FullName.ToLower()
@@ -605,11 +643,18 @@ function Test-R1-DocPreread {
         catch {}
         if (-not $DocGovernsFile) { continue }
         if (-not $DocIsActive) { continue }
+        # Anchor-driven relevance narrowing: if code carries any `# see <slug>.<ID>` anchors,
+        # only gate docs whose slug is referenced. Docs the code doesn't anchor to are treated
+        # as sibling-noise and skipped -- reduces preread tax on files that legitimately touch
+        # multiple concerns but whose current edit only relates to one concern.
+        if ($AnchorSlugs.Count -gt 0 -and $DocSlug -and ($AnchorSlugs -notcontains $DocSlug)) {
+            continue
+        }
         $MatchingAnchors = @($AnchorRefs | Where-Object { $_.slug -eq $DocSlug })
         if ($MatchingAnchors.Count -eq 0) {
             # No anchor refs to this doc.
             if (-not $Reads -or $Reads.Count -eq 0) {
-                return "R1 Doc preread: $FilePath has colocated doc $($D.FullName) which has not been Read this session. Read it before Edit/Write. See .claude/rules/feature-docs.md / .claude/rules/doc-layering.md. Path forward: Read the named colocated *.feature.md / *.flow.md file -- full read, OR partial read covering the relevant section if you add a '# see $DocSlug.<S|W|C|ST><N>' anchor in the code (the hook will then validate the anchored section is in your Read window)."
+                return "R1 Doc preread: $FilePath has colocated doc $($D.FullName) which has not been Read this session. Read it before Edit/Write. See .claude/rules/feature-docs.md / .claude/rules/doc-layering.md. Path forward: Read the named colocated *.feature.md / *.flow.md file -- full read, OR partial read covering the relevant section if you add a '# see $DocSlug.<S|W|C|ST><N>' anchor in the code (the hook will then validate the anchored section is in your Read window). Alternative: if this doc is not actually relevant to your edit, add `# allow: R1 <reason>` anywhere in the file to bypass R1 entirely for this edit."
             }
             # Partial read present, no anchor: today's lenient behavior. Continue.
             continue
@@ -1119,6 +1164,9 @@ try {
         $Refusal = & $R
         if ($Refusal) { Emit-DenyWithRepeatDetection $Refusal $FilePath }
     }
+    # Every rule passed: reset accumulated refusal counters for this file so
+    # prior exploration-refusals don't sticky-lock future edits.
+    Reset-RefusalCountsForFile $FilePath
 }
 catch {
     Emit-Ask "Standards hook errored: $($_.Exception.Message). Asking for human review."

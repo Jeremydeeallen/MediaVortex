@@ -4,7 +4,7 @@
 
 ## What It Does
 
-Owns the ffmpeg argv construction for every job type the worker can run. Decomposed from the legacy `Models/CommandBuilder.py` god class (857 LOC, 7 responsibilities) into single-responsibility domain primitives, codec/filter builders, external-tool adapters, and three `EncodeShape` Strategy implementations dispatched by a registry. Every shape produces a typed `CommandSpec` value object instead of an ad-hoc dict. The vertical encodes two structural invariants the legacy code violated: (1) Remux output ALWAYS emits `-f mp4 -movflags +faststart` regardless of any optional ProfileSettings; (2) audio normalization raises a typed `UngainablePeakError` instead of a bare `RuntimeError` when fixed-gain loudnorm would clip.
+Owns the ffmpeg argv construction for every job type the worker can run. Decomposed from the legacy `Models/CommandBuilder.py` god class (857 LOC, 7 responsibilities) into single-responsibility domain primitives, codec/filter builders, external-tool adapters, and three `EncodeShape` Strategy implementations dispatched by a registry. Every shape produces a typed `CommandSpec` value object instead of an ad-hoc dict. Audio emission for every shape routes through `AudioFilterEmitter.EmitTracks` (two-track: Original + Dialog Boost); shapes MUST emit `-i` inputs before any `-map` (ffmpeg parser is order-sensitive). Structural invariants: (1) Remux output ALWAYS emits `-f mp4 -movflags +faststart` regardless of any optional ProfileSettings; (2) no shape carries an `-c:a copy` empty-Blocks fallback -- missing `Policy` or empty `Blocks` raises `AudioPolicyUnresolvedError`.
 
 ## Workflows
 
@@ -26,7 +26,7 @@ C3. **OutputFilenameBuilder owns filename + path normalization.** Replaces 5 met
 
 C4. **CodecParameterAssembler + AudioCodecArgsBuilder own codec arg synthesis.** Three legacy `Add*Parameter` methods + `BuildAudioCodecArgs` + `_DefaultAudioBitrateForChannels` extracted as instance methods. Verifiable: contract tests pass.
 
-C5. **AudioFilterBuilder raises UngainablePeakError, not RuntimeError.** Linear-or-refused contract preserved per `linear-loudnorm.feature.md`. The ungainable-peak branch raises a typed `UngainablePeakError(MediaFileId, SourceIntegratedLufs, Gain, PredictedPeak, TargetTp)` -- a `RuntimeError` subclass so existing catch-RuntimeError sites stay compatible. Verifiable: `Tests/Contract/TestAudioFilterBuilder.py::test_ungainable_raises_typed_error`.
+C5. **Audio emission routes through `AudioFilterEmitter.EmitTracks`.** Every shape (`TranscodeShape` / `RemuxShape` / `SubtitleFixShape`) reads Demucs premix keys from `Context` (`DemucsPremixPath`, `VocalsRmsDbfs`, `PremixMeasured*`) and forwards them to `EmitTracks`. Empty `Blocks` OR missing `Policy` raises `AudioPolicyUnresolvedError` -- no `-c:a copy` fallback, no `ProfileAudioCeiling` reencode fallback. Verifiable: `Tests/Contract/TestAudioFilterEmitter.py` + `TestRemuxShape.py`.
 
 C6. **VideoFilterBuilder owns yadif + scale composition.** Pure value computation. yadif applied only when `IsInterlaced=True`. Verifiable: `Tests/Contract/TestVideoFilterBuilder.py`.
 
@@ -40,7 +40,7 @@ C10. **RemuxShape emits `-f mp4` + `-movflags +faststart` unconditionally.** The
 
 C11. **SubtitleFixShape emits the same invariants + `-c:s mov_text`.** ASS/SSA -> mov_text conversion is the SubtitleFix shape's defining transform; container/faststart invariants match Remux. Verifiable: `Tests/Contract/TestSubtitleFixShape.py`.
 
-C12. **TranscodeShape composes 5 collaborators via constructor.** ResolutionCalculator + OutputFilenameBuilder + CodecParameterAssembler + VideoFilterBuilder + MediaProbeAdapter, plus injectable audio seams (Resolver, Emitter, StreamProbe, CodecPolicy) that default to production instances. Audio emission runs through `AudioFilterEmitter.EmitTracks` (which reads `AudioComplianceRules` per encode); the pre-two-track `AudioCodecArgsBuilder` + `AudioFilterBuilder` legacy args are no longer present. NVENC dispatch via `ProfileSettings.UseNvidiaHardware=1`; SVT-AV1 fallback otherwise. Verifiable: `Tests/Contract/TestTranscodeShape.py`.
+C12. **TranscodeShape composes 5 collaborators via constructor.** ResolutionCalculator + OutputFilenameBuilder + CodecParameterAssembler + VideoFilterBuilder + MediaProbeAdapter, plus injectable audio seams (Resolver, Emitter, StreamProbe) that default to production instances. Audio emission runs through `AudioFilterEmitter.EmitTracks` (which reads `AudioComplianceRules` per encode). NVENC dispatch via `ProfileSettings.UseNvidiaHardware=1`; SVT-AV1 fallback otherwise. Verifiable: `Tests/Contract/TestTranscodeShape.py`.
 
 ## Seams
 
@@ -49,7 +49,7 @@ C12. **TranscodeShape composes 5 collaborators via constructor.** ResolutionCalc
 | S1 | `ProcessTranscodeQueueService.BuildTranscodeCommand -> EncodeShapeRegistry.Get` | ProcessTranscodeQueueService | `(ProcessingMode: str)` | `Get` returns `EncodeShape` (raises KeyError on unknown) | `Tests/Contract/TestEncodeShapeRegistry.py` |
 | S2 | `EncodeShape.Build -> CommandSpec` | TranscodeShape / RemuxShape / SubtitleFixShape | `(MediaFile, Job, Context: Dict)` | `Optional[CommandSpec]` (None on refusal) | Per-shape contract tests |
 | S3 | `RemuxShape.Build -> ffmpeg argv invariants` | RemuxShape | argv string | substring `'-f mp4'` AND substring `'-movflags +faststart'` AND substring `'-c:v copy'` | `Tests/Contract/TestRemuxShape.py` |
-| S4 | `AudioFilterBuilder.Build -> typed error` | AudioFilterBuilder | `(MediaFile)` with measurement attributes | `Optional[str]` OR `raise UngainablePeakError` OR `raise RuntimeError(missing measurements)` | `Tests/Contract/TestAudioFilterBuilder.py` |
+| S4 | `AudioFilterEmitter.EmitTracks -> raise on empty` | AudioFilterEmitter | `(MediaFile, Policy, AudioStreams, DemucsPremixPath, ...)` | `List[TrackBlock]` (Track 0 always; Track 1 iff premix present + vocals RMS > fallback); empty raises `AudioPolicyUnresolvedError` | `Tests/Contract/TestAudioFilterEmitter.py` |
 | S5 | `MediaProbeAdapter.RunAnalysis -> FFmpegAnalysisService` | MediaProbeAdapter | `(InputPath: str)` | `Optional[Analysis]` (None on subprocess failure -- never propagates) | `Tests/Contract/TestMediaProbeAdapter.py` |
 
 ## Status
@@ -64,9 +64,7 @@ ACTIVE -- Phase 2 of `perfect-solid-transcode-pipeline` shipped. CommandBuilder 
 | `Features/TranscodeJob/Emit/ResolutionCalculator.py` | C2 |
 | `Features/TranscodeJob/Emit/OutputFilenameBuilder.py` | C3 |
 | `Features/TranscodeJob/Emit/CodecParameterAssembler.py` | C4 |
-| `Features/TranscodeJob/Emit/AudioCodecArgsBuilder.py` | C4 |
-| `Features/TranscodeJob/Emit/UngainablePeakError.py` | C5 typed error |
-| `Features/TranscodeJob/Emit/AudioFilterBuilder.py` | C5 |
+| `Features/TranscodeJob/Emit/AudioCodecArgsBuilder.py` | C4 (legacy; unused post-two-track) |
 | `Features/TranscodeJob/Emit/VideoFilterBuilder.py` | C6 |
 | `Features/TranscodeJob/Emit/MediaProbeAdapter.py` | C7 |
 | `Features/TranscodeJob/Emit/SystemCapabilityProbe.py` | C8 |
@@ -79,9 +77,6 @@ ACTIVE -- Phase 2 of `perfect-solid-transcode-pipeline` shipped. CommandBuilder 
 | `Tests/Contract/TestResolutionCalculator.py` | C2 |
 | `Tests/Contract/TestOutputFilenameBuilder.py` | C3 |
 | `Tests/Contract/TestCodecParameterAssembler.py` | C4 |
-| `Tests/Contract/TestAudioCodecArgsBuilder.py` | C4 |
-| `Tests/Contract/TestUngainablePeakError.py` | C5 |
-| `Tests/Contract/TestAudioFilterBuilder.py` | C5 |
 | `Tests/Contract/TestVideoFilterBuilder.py` | C6 |
 | `Tests/Contract/TestMediaProbeAdapter.py` | C7 |
 | `Tests/Contract/TestSystemCapabilityProbe.py` | C8 |

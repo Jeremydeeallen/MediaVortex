@@ -15,14 +15,17 @@ When a file contains multiple audio streams, the English track is selected autom
 
 ### 2. Normalization: Industry-Standard Loudness
 
-Audio is normalized so volume is consistent across the library. The
-parameter contract, mode selection (linear vs dynamic), measurement
-requirements, and operator-tunable knobs are owned by
-`Features/LoudnessAnalysis/linear-loudnorm.feature.md`. See that
-document for current values and the why behind them.
+Audio is normalized so volume is consistent across the library. Every encoded
+output ships two tracks per kept language: Track 0 (Original, linear-mode
+loudnorm, source dynamics preserved) + Track 1 (Dialog Boost, Demucs vocal
+isolation + tight loudnorm). The parameter contract, measurement requirements,
+and operator-tunable knobs are owned by
+`Features/AudioNormalization/audio-normalization.feature.md` (see C36 for the
+linear-mode two-pass invariant, C37 for single-emit-path across all six
+ProcessingModes, C38 for the transparent kbps/ch floor).
 
-**Applies to:** Transcode, Remux, and SubtitleFix paths -- the same
-loudnorm filter chain runs on each, governed by the contract above.
+**Applies to:** Transcode, Remux, AudioFix, Quick, SubtitleFix, TestVariant --
+all six paths route through the same `AudioFilterEmitter.EmitTracks`.
 
 ### 3. Codec: Source-Preserving with MP4 Fallback (revised 2026-05-10)
 Output audio matches the source codec, channel count, and bitrate whenever the source is MP4-compatible. The previous "always AAC stereo 128k" policy was retired because audio is a small fraction of total bitrate (~10% on a 720p AV1 file) and forcing stereo AAC threw away surround sound for very little space saved.

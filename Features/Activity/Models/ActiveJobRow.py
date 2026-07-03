@@ -27,3 +27,5 @@ class ActiveJobRow:
     SourceCodec: Optional[str] = None
     TargetCodec: Optional[str] = None
     EstimatedSavingsBytes: Optional[int] = None
+    # directive: audio-dialog-boost-real | # see audio-normalization.C34
+    CurrentPhase: Optional[str] = None

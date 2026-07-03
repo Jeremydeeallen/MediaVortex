@@ -152,7 +152,7 @@ class DashboardSnapshotService:
             "SELECT aj.Id AS AjId, aj.WorkerName, aj.ServiceName, aj.StartedAt, "
             "tq.MediaFileId, tq.FileName, tq.SizeMB, tq.ProcessingMode, tq.SizeBytes, "
             "lta.Id AS AttemptId, lta.ProfileName, "
-            "tp.ProgressPercent, tp.CurrentFrame, tp.TotalFrames, tp.CurrentSpeed, tp.LastProgressUpdate, "
+            "tp.ProgressPercent, tp.CurrentFrame, tp.TotalFrames, tp.CurrentSpeed, tp.LastProgressUpdate, tp.CurrentPhase, "
             "mf.ResolutionCategory AS SourceResolutionCategory, mf.Codec AS SourceCodec, "
             "mf.VideoBitrateKbps AS SourceVideoKbps, "
             "p.TargetResolutionCategory AS TargetResolutionCategory, p.Codec AS TargetCodec, "
@@ -200,6 +200,7 @@ class DashboardSnapshotService:
                 SourceCodec=R.get('SourceCodec'),
                 TargetCodec=R.get('TargetCodec'),
                 EstimatedSavingsBytes=EstSavings,
+                CurrentPhase=R.get('CurrentPhase'),
             ))
         return Out
 

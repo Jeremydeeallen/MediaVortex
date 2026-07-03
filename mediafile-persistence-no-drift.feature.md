@@ -75,7 +75,7 @@ DRAFT -- criteria not yet approved.
 - [ ] Contract tests: round-trip (criterion 1), drift detection (criterion 2), single-source add (criterion 3), COALESCE preservation (criterion 4), enumerated column closure (criterion 5).
 - [ ] Re-run canary 2 (Brooklyn Nine-Nine 38571) to verify criterion 7 cutover health on a live transcode.
 - [ ] Mark BUG-0017/0019/0021 Resolved in memory/KNOWN-ISSUES.md with the architectural fix described.
-- [ ] Update FileReplacement.feature.md criterion 14 (BUG-0021 tag) and any sibling tags (BUG-0019 in linear-loudnorm.feature.md) to IMPLEMENTED.
+- [ ] Update FileReplacement.feature.md criterion 14 (BUG-0021 tag) and any sibling tags (BUG-0019, originally tracked in the deleted `linear-loudnorm.feature.md`; now covered by `Features/AudioNormalization/audio-normalization.feature.md` C36) to IMPLEMENTED.
 
 ## Files
 
@@ -89,4 +89,4 @@ DRAFT -- criteria not yet approved.
 | Tests/Contract/TestMediaFilePersistence.py | New contract test suite -- round-trip, drift, single-source-add, COALESCE preservation. |
 | memory/KNOWN-ISSUES.md | BUG-0017/0019/0021 moved to Resolved with the architectural cutover date. |
 | Features/FileReplacement/FileReplacement.feature.md | Criterion 14 (BUG-0021) marked IMPLEMENTED on ship. |
-| Features/LoudnessAnalysis/linear-loudnorm.feature.md | Criterion 14 (BUG-0019, AudioNormalizationMode) marked IMPLEMENTED on ship. |
+| Features/AudioNormalization/audio-normalization.feature.md | C36 (linear-mode two-pass; supersedes deleted linear-loudnorm doc) covers the BUG-0019 AudioNormalizationMode contract. |
