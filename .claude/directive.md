@@ -509,7 +509,7 @@ Populated at VERIFYING.
       - (g) SubtitleSlot hdmv_pgs_subtitle -> `[]` + WARN log; dvd_subtitle -> `[]` + WARN; mixed PGS+SRT -> mov_text + WARN.
     - **12 paused workers un-paused:** `Status='Online' AND TranscodeEnabled=TRUE` on dot-1..4, larry-1..4, wakko-1..4. All 13 workers Online + Transcode-enabled.
 - **Phase:** IMPLEMENTING
-- **Last commit:** `<pending Reset 11 commit>` (previous: `7bc6439 feat(reset10): tier ladder backfill + BucketKey wire-up + SmartConfidence write-back`)
+- **Last commit:** `9715a29 feat(reset11): Transcoding /settings card + composite endpoint (C15)`
 - **Reset 11 SHIPPED 2026-07-04 (this session):**
   - `GET/PUT /api/SystemSettings/Transcoding` composite endpoint added to `SystemSettingsController.py` (6 sub-sections: BitrateLadder + IcqLadder + Adequacy + Confidence + QualityTestEnabled + ConfidenceStats review).
   - `Features/Profiles/TierLadderRepository.py` CREATED -- `GetBitrateLadder / GetIcqLadder / UpdateBitrateCell / UpdateIcqCell`; grid queries collapse to (Family, ContentClass[, Resolution]) x Tier1..Tier5 shape.
