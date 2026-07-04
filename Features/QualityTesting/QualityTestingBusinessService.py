@@ -1469,7 +1469,11 @@ class QualityTestingBusinessService:
         SourceStill = os.path.join(CacheDir, f"{CacheKey}_source.png")
         TranscodedStill = os.path.join(CacheDir, f"{CacheKey}_transcoded.png")
 
-        FFmpeg = (Ctx.FFmpegPath if (Ctx and Ctx.FFmpegPath) else None) or r"C:\Code\MediaVortex\FFmpegMaster\bin\ffmpeg.exe"
+        from Core.WorkerContext import WorkerContext
+        _CtxSP = WorkerContext.Current()
+        FFmpeg = _CtxSP.FFmpegPath if _CtxSP and _CtxSP.FFmpegPath else None
+        if not FFmpeg or not LocalExists(FFmpeg):
+            return {'Success': False, 'ErrorMessage': f'FFmpeg binary unresolved on WorkerContext.FFmpegPath (got {FFmpeg!r})'}
 
         ViewFilter = "scale=1920:1080:flags=lanczos,unsharp=5:5:0.5" if ViewMode == 'tv_fair' else None
 
