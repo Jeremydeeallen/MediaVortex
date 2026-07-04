@@ -59,6 +59,9 @@ class EncoderKnobs:  # see transcode.ST6
     QsvBStrategy: Optional[int] = None
     QsvTileCols: Optional[int] = None
     QsvTileRows: Optional[int] = None
+    # directive: transcode-flow-canonical -- tier ladder rate columns.
+    TargetKbps: Optional[int] = None
+    IcqQ: Optional[int] = None
 
     # directive: nvenc-rate-anchored-remediation
     def ToDict(self) -> Dict[str, Any]:
@@ -94,7 +97,8 @@ class EncoderKnobRepository(BaseRepository):
                 "       pt.RcLookahead, pt.BFrames, pt.BRefMode, "
                 "       pt.ScaleHeight, "
                 "       pt.QsvExtBrc, pt.QsvAdaptiveI, pt.QsvAdaptiveB, pt.QsvLookaheadDepth, "
-                "       pt.QsvBStrategy, pt.QsvTileCols, pt.QsvTileRows "
+                "       pt.QsvBStrategy, pt.QsvTileCols, pt.QsvTileRows, "
+                "       pt.TargetKbps, pt.IcqQ "
                 "FROM Profiles p "
                 "JOIN ProfileThresholds pt ON pt.ProfileId = p.Id "
                 "WHERE p.ProfileName = %s AND pt.Resolution = %s "
@@ -156,6 +160,8 @@ class EncoderKnobRepository(BaseRepository):
                 QsvBStrategy=Row.get('QsvBStrategy'),
                 QsvTileCols=Row.get('QsvTileCols'),
                 QsvTileRows=Row.get('QsvTileRows'),
+                TargetKbps=Row.get('TargetKbps'),
+                IcqQ=Row.get('IcqQ'),
             )
         except Exception as e:
             LoggingService.LogException(
