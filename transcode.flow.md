@@ -145,8 +145,9 @@ See `Features/TranscodeQueue/priority-materialization.feature.md` and `Features/
 
 **Safety guards summary:**
 - **Audio language** (CRITICAL): files with `HasExplicitEnglishAudio = false` blocked at all queue paths
+- **Adequacy gate** (`admission-adequacy-gate.feature.md`, Reset 10 C13): Reencode admission calls `AdequacyGate.Evaluate(MediaFile)`. If `SourceKbps <= Tier1TargetKbps` for the assigned profile's `(Family, ContentClass, ResolutionTier)`, admission short-circuits `Excluded/AlreadyCompact`. Container/audio still eligible for StreamCopy (`Remux`/`AudioFix`) if compliance columns fail. `MediaFiles.AdequacyDecision + AdequacyDecisionAt` audit written on Exclude. See directive `transcode-flow-canonical` C13.
 - **VMAF quality gate**: files with VMAF >= 80 not re-transcoded. Bypassed by `AddJobToQueue(ForceAdd=True)` (used by `QueueAdmissionAppService.AdmitOne` from /Work/<bucket> per-row Queue button); WARN log records the override -- see `TranscodeQueue.feature.md` C11 [BUG-0078]
-- **CRF floor**: adjusted CRF cannot go below 15; files logged to ProblemFiles
+- **Tier escalation on Requeue** (Reset 10 C12): `DispositionDispatcher._MaybeScheduleRequeue` calls `NextTierAdjuster.Get(currentProfile)` to escalate to the next `(Family, QualityTier+1, ContentClass, TargetResolutionCategory)` sibling profile. Chain terminates when tuple has no next-tier row -> Reject/QualityCeilingReached (through RetryBudget). Replaces the legacy CRF-only adjustment. See `profile-tier-ladder.feature.md`.
 - **Marginal-savings gate** (`marginal-savings-gate.feature.md`): see below.
 - **Dedup**: files already in queue are skipped
 - **No-savings filter**: files with `MediaFiles.LastTranscodeOutcome = 'NoSavings'` are blocked from re-queueing at all entry paths (set by Stage 7 post-flight gate)
@@ -286,6 +287,11 @@ The disposition decision is **the only post-transcode branch point**. It reads f
 
 **Decision table** (canonical -- code MUST mirror this 1:1). Post `transcode-flow-canonical` C6: enum is closed at `{Pending, Replace, Reject, Requeue}`. `NoReplace` + `Discard` folded into `Reject`; RetainInprogressPolicy consulted per Reason for `.inprogress` disk semantic (`TestMode` retains; every other reason cleans up). No `BypassReplace`; every attempt verified (VMAF for Reencode, checksum for StreamCopy).
 
+Post `transcode-flow-canonical` C14 + C16 (Reset 10):
+
+- `QualityTestEnabled=false` globally (`PostTranscodeGateConfig.QualityTestEnabled`): `Replace/QualityTestingGloballyDisabled` early-return, restored from Reset 9's overshoot. See directive C16 + `vmaf-smart-sampling.feature.md`.
+- `SmartConfidenceSkip` branch: when the source's `(ProfileId, SourceCodec, SourceResolutionTier, BitratePerPixelBucket, ContentClass)` bucket has `SampleCount >= MinConfidenceSampleCount AND PassRate >= MinConfidencePassRate AND (VmafMean - SigmaMargin * VmafStdDev) >= VmafAutoReplaceMinThreshold`, returns `Replace/QualityTestConfident`. VMAF skipped; bucket stats trusted. Rolling window in `VmafConfidenceStats`; DB-fresh per call. See `vmaf-smart-sampling.feature.md`.
+
 | Success | NewSize >= OldSize | QualityTestRequired | VMAF score | Disposition | Reason |
 |---|---|---|---|---|---|
 | false | n/a | n/a | n/a | `Reject` | `TranscodeFailed` |
@@ -304,7 +310,7 @@ The disposition decision is **the only post-transcode branch point**. It reads f
 |---|---|
 | `Replace` | FileReplacement proceeds: archive original, rename `.inprogress` -> `-mv.<ext>`, re-probe, update MediaFiles, delete source. On post-rename update failure the rename is rolled back (no orphan, source intact) and `Success=False` is returned with the real error. See `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4. |
 | `Reject` | Verify-failure / operator-fail terminal. Reasons: `VmafAboveMax`, `NoSavings`, `TranscodeFailed`, `RetryBudgetExhausted`, `ComplianceGateFailed`, `OperatorDiscarded`, `TestMode`. `RetainInprogressPolicy.ShouldRetain(Reason)` decides `.inprogress` disposal: `TestMode` retains for A/B comparison; every other reason deletes. TFP row always cleared. |
-| `Requeue` | Staged file deleted; TFP row cleared; new `TranscodeQueue` row inserted for the same `MediaFileId` via canonical `AddJobToQueue(ForceAdd=True)` unless `RetryBudgetService.HasBudgetRemaining=False` (in which case Requeue folds to `Reject/RetryBudgetExhausted`). Next claim picks up the requeued row with adjustment knobs applied. BUG-0079 fix. |
+| `Requeue` | Staged file deleted; TFP row cleared; `NextTierAdjuster.Get(currentProfile)` returns next-tier sibling Profile via `(Family, QualityTier+1, ContentClass, TargetResolutionCategory)` tuple lookup. If non-None, new `TranscodeQueue` row inserted for the same `MediaFileId` with the escalated ProfileId via canonical `AddJobToQueue(ForceAdd=True)`. Chain terminates at Tier 5 -> Reject/QualityCeilingReached. `RetryBudgetService.HasBudgetRemaining=False` overrides to `Reject/RetryBudgetExhausted` regardless of tier. BUG-0079 + `profile-tier-ladder.feature.md`. |
 | `Pending` | Awaiting VMAF. The row lands in `QualityTestingQueue`; disposition re-evaluated when the score lands. |
 
 **Audit trail (queryable):**

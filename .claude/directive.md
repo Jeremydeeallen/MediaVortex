@@ -145,6 +145,25 @@ Inherits transcode-worker-unification C5 (MediaFileId=621412 replay -- becomes a
 
 **C11. Compliance-gate MaxAudioChannels must not fire against Track-0-preserves-source outputs.** `audio-dialog-boost-real` shipped a 2-track pipeline (Track 0 preserves source layout up to 7.1; Track 1 forced stereo Dialog Boost) but did NOT sweep the `compliance-symmetry` (closed 2026-06-22 C9) `MaxAudioChannels=2` cap in `AudioPolicyAdmissionGate.AdmitOrDefer`. Result: every 5.1+ source triggers `DispositionReason=ComplianceGateFailed:channels_exceed_max:6>2` post-encode, `.inprogress` deleted, no `Replace`. Reset 7 NVENC smoke on 688909 hit this. **Owning docs:** `Features/AudioNormalization/audio-normalization.feature.md` (2-track contract SOT) + `Features/AudioNormalization/audio-normalization.flow.md`. **Fix:** the source-vs-cap check in `AudioPolicyAdmissionGate.py:127-134` is dead under the 2-track contract (Track 0 always preserves source, Track 1 always 2ch); delete the check; leave `MaxAudioChannels` column intact for potential future per-track caps (documented as inactive in audio-normalization.feature.md). Also unblocks Reset 7 smoke (a). Verification: re-run NVENC smoke on MediaFileId=688909 -> `Disposition=Replace`, `FileReplaced=TRUE`; audio-emit check (per C9) passes.
 
+**C12. Profile tier-ladder model.** `Profiles` gains `Family TEXT NOT NULL` + `QualityTier INT NOT NULL CHECK (QualityTier BETWEEN 1 AND 5)` + `ContentClass TEXT NOT NULL CHECK (ContentClass IN ('live_action','animation','mixed'))`. UNIQUE `(Family, QualityTier, ContentClass, TargetResolutionCategory)`. Two families kept: `'NVENC AV1 CANARY'` (VBR, av1_nvenc, p7 preset — p6 for 4K) and `'QSV AV1 CANARY'` (ICQ, av1_qsv, p1 preset). `ProfileThresholds.TargetKbps` INT NOT NULL added — absolute target per (Profile, Resolution). Dead columns retired via `AlignProfileTierModel_2026_07_XX.py` migration: `SourceBitratePercent`, `MinBitrateKbps`, `MaxBitrateKbps`, `Quality` (moved into `ProfileThresholds.IcqQ` when RateControlMode='icq'). `NvencEncoderArgsStrategy` + `QsvEncoderArgsStrategy` rewritten to consume `TargetKbps` (VBR) or `IcqQ` (ICQ) directly. Every non-CANARY AV1 profile deleted; orphaned `MediaFiles.AssignedProfile` re-classified via ContentClassifier. Bitrate table live-action calibration (per Q1 2026-07-03 operator design):
+
+| Resolution | Codec | Tier 1 | Tier 2 | Tier 3 | Tier 4 | Tier 5 |
+|---|---|---|---|---|---|---|
+| 480p | AV1 | 400 | 550 | 700 | 900 | 1200 |
+| 720p | AV1 | 900 | 1400 | 1900 | 2500 | 3200 |
+| 1080p | AV1 | 1800 | 2400 | 3200 | 4200 | 5500 |
+| 2160p | AV1 | 4000 | 6000 | 8500 | 12000 | 18000 |
+
+Animation-class rows may drop 30% (live-action first per Reset 10 backend; animation dimension exercised via smoke). ICQ ladder: q34/q30/q28/q26/q22 across tiers 1-5. Verification: `Tests/Contract/TestProfileTierLadder.py` proves (Family, ContentClass, Resolution) -> Tier 1..5 rows present; encoder-args tests assert absolute -b:v / -global_quality flow from TargetKbps / IcqQ columns; grep `SourceBitratePercent` in `Features/**/*.py` returns 0.
+
+**C13. Admission-adequacy gate.** New service `Features/TranscodeQueue/AdequacyGate.Evaluate(MediaFile)`. Computes `SourceKbps` at admission; if `SourceKbps <= Tier1TargetKbps` for `(Family=AssignedProfile.Family, ContentClass=..., ResolutionCategory=SourceResolutionTier)`, admission short-circuits: no re-encode enqueued. Container/audio still eligible for StreamCopy (Remux / AudioFix) if their compliance columns fail. Otherwise `MediaFile.WorkBucket -> NULL` (already compact enough). Emits `MediaFiles.AdequacyDecision TEXT` + `AdequacyDecisionAt TIMESTAMP` for audit. Verification: `Tests/Contract/TestAdequacyGate.py` -- source at Tier1-1kbps admitted, source at Tier1+1kbps excluded; live smoke on a 700 kbps 720p live-action source proves exclusion + no queue row.
+
+**C14. Smart VMAF sampling (statistical confidence skip).** New table `VmafConfidenceStats(ProfileId, SourceCodec, SourceResolutionTier, BitratePerPixelBucket, ContentClass, SampleCount, VmafMean, VmafStdDev, PassRate, LastUpdated)` UNIQUE per bucket. `PostTranscodeGateConfig` gains `MinConfidenceSampleCount INT DEFAULT 10`, `MinConfidencePassRate NUMERIC DEFAULT 0.95`, `SigmaMargin NUMERIC DEFAULT 2.0`. Decider gains `SmartConfidenceSkip` branch: when `bucket.SampleCount >= MinConfidenceSampleCount AND bucket.PassRate >= MinConfidencePassRate AND (bucket.VmafMean - SigmaMargin*bucket.VmafStdDev) >= VmafAutoReplaceMinThreshold` -> `Replace/QualityTestConfident` (skips VMAF, deterministically). Every VMAF completion writes result back into the matching bucket via `VmafConfidenceStatsRepository.RecordResult`. Rolling window trims oldest samples at N=100. Bootstrap: new bucket at SampleCount=0 forces VMAF. Drift detection: PassRate drops naturally -> VMAF resumes. Verification: `Tests/Contract/TestSmartConfidenceSkip.py` -- bootstrap forces VMAF, N clean passes flips skip, one fail drops pass rate below threshold, VMAF resumes; live smoke: run 10 CANARY tier 2 encodes of same source-class, observe 11th attempt skips VMAF.
+
+**C15. GUI /settings transcoding card.** `/settings` gains a "Transcoding" card (sibling to "Post-Transcode"). Fields: (a) bitrate ladder editor per `(Family, ContentClass, Resolution)` -> tier 1..5 grid, save writes `ProfileThresholds.TargetKbps` rows. (b) ICQ ladder (per Family) tier 1..5 -> `IcqQ`. (c) adequacy-gate section: Tier1 exclusion enabled toggle + margin (%). (d) VMAF confidence: `MinConfidenceSampleCount`, `MinConfidencePassRate`, `SigmaMargin`. (e) Global `QualityTestEnabled` checkbox (writes `PostTranscodeGateConfig.QualityTestEnabled`). (f) `VmafConfidenceStats` review table: read-only per-bucket display (ProfileId + bucket key -> SampleCount / PassRate / VmafMean / VmafStdDev / LastUpdated). Endpoints `GET/PUT /api/SystemSettings/Transcoding`. Verification: UI form submits round-trip; live edit reflects on next Decider call (no restart).
+
+**C16. Restore global `QualityTestEnabled=false -> auto-Replace`.** Reset 9 folded this to `Pending/AwaitingVmaf` per qt-queue-visibility-and-override C7. Per 2026-07-03 operator decision (Q4), restore auto-Replace semantic. `PostTranscodeDispositionDecider.Decide` re-adds branch: `if not GateConfig.QualityTestEnabled: return Disposition(Action='Replace', Reason='QualityTestingGloballyDisabled')`. `qt-queue-visibility-and-override.feature.md` C1 wording tightens: "always enqueue when VMAF required AND QualityTestEnabled=true"; C7 rewritten to acknowledge global-off as legitimate auto-replace. Verification: `Tests/Contract/TestDispositionDecider.py` gains `test_global_off_returns_replace_qualitytestinggloballydisabled`; live smoke: flip `PostTranscodeGateConfig.QualityTestEnabled=false`, enqueue a Transcode job, observe `Disposition=Replace/QualityTestingGloballyDisabled`, restore flag before commit.
+
 ## Out of Scope
 
 Every item tagged (a) or (b) per `call-graph-audit.md` Signal 4. Default (a) = behavior preserved + duplication collapsed in-flight.
@@ -201,9 +220,11 @@ Every item tagged (a) or (b) per `call-graph-audit.md` Signal 4. Default (a) = b
 | 8 | C3 + C4 code: collapse claim + orchestration. Route through Strategy. Delete the 9+ mode-branches Signal 2 named. Live smoke (b) web GUI enqueue -> StreamCopy -> Replace. | `TestClaimAuthority` full-green; mode-branch grep = 0; smoke (b) recorded. | **RESET 7** |
 | 9 | C5 code: populate shared columns for every strategy. Extend `PostEncodeMeasurementService` for StreamCopy path. Live smoke (c) scanner auto-enqueue -> Replace. | Shared-columns SQL audit green (100% per column per strategy for new rows); smoke (c) recorded. | **RESET 8** |
 | 10 | C6 code: delete BypassReplace. StreamCopy emits checksum. Fix BUG-0079 (Requeue inserts new queue row). Live smoke (d) Requeue -> new row -> Replace. | `SELECT DISTINCT disposition` returns subset {Replace,Reject,Requeue}; smoke (d) recorded. | **RESET 9** |
-| 11 | C7 sweep: grep audit; remove silent fallbacks. Contract test `TestFailLoud` green. Fix BUG-0077 as instance (freeze -> Success=FALSE). | `TestFailLoud` green. | **RESET 10** |
-| 12 | VERIFYING: run every criterion's verification, record evidence in `### Verification`. Four live smokes documented. Directive size snapshot. | Criteria all IMPLEMENTED with evidence; snapshot recorded. | **RESET 11** |
-| 13 | DELIVERING: `### Promotions` populated (should already be incremental). Directive size <= 110% snapshot. Delivery report. Operator close. | Operator agrees closed. | -- |
+| 11 | C12 + C13 + C14 + C16 backend: Profile tier-ladder schema + migrate + delete non-CANARY profiles + rewrite encoder-args strategies + admission-adequacy gate + smart VMAF sampling + global-off restore. Contract tests + live smokes (compact-source excluded, tier escalation on VMAF-fail terminates, smart-skip after N passes, global-off auto-Replace). | Schema migration executed; TestProfileTierLadder + TestAdequacyGate + TestSmartConfidenceSkip green; four backend smokes recorded. | **RESET 10** |
+| 12 | C15 GUI: `/settings` Transcoding card wiring bitrate ladder + ICQ ladder + adequacy toggle + VMAF confidence knobs + global QualityTestEnabled + VmafConfidenceStats review. `GET/PUT /api/SystemSettings/Transcoding`. Form-submit round-trip test. Live edit -> next Decider call reflects change. | UI form saves persist round-trip; live-edit test green. | **RESET 11** |
+| 13 | C7 sweep: grep audit; remove silent fallbacks. Contract test `TestFailLoud` green. Fix BUG-0077 as instance (freeze -> Success=FALSE). | `TestFailLoud` green. | **RESET 12** |
+| 14 | VERIFYING: run every criterion's verification, record evidence in `### Verification`. Four live smokes documented. Directive size snapshot. | Criteria all IMPLEMENTED with evidence; snapshot recorded. | **RESET 13** |
+| 15 | DELIVERING: `### Promotions` populated (should already be incremental). Directive size <= 110% snapshot. Delivery report. Operator close. | Operator agrees closed. | -- |
 
 ## Status
 
@@ -271,7 +292,34 @@ Features/TranscodeQueue/QueueManagementBusinessService.py                   -- E
 Scripts/SQLScripts/DropBypassReplaceDisposition_2026_07_XX.py               -- CREATE (migration; retire enum value)
 Tests/Contract/TestNoBypassReplace.py                                       -- CREATE
 
-# Reset 10 -- C7 sweep + BUG-0077
+# Reset 10 -- C12 + C13 + C14 + C16 profile tier ladder + adequacy + smart sampling + global-off restore
+Scripts/SQLScripts/AlignProfileTierModel_2026_07_XX.py                      -- CREATE (schema: Profiles.Family/QualityTier/ContentClass; ProfileThresholds.TargetKbps/IcqQ; drop SourceBitratePercent/MinBitrateKbps/MaxBitrateKbps; VmafConfidenceStats table; PostTranscodeGateConfig new cols)
+Scripts/SQLScripts/BackfillCanaryTierLadder_2026_07_XX.py                   -- CREATE (populate two families x 4 resolutions x 5 tiers x live-action rows; ProfileThresholds.TargetKbps + IcqQ)
+Scripts/SQLScripts/DeleteNonCanaryProfiles_2026_07_XX.py                    -- CREATE (delete AV1 profiles outside CANARY families; reassign MediaFiles.AssignedProfile via ContentClassifier)
+Features/Profiles/EncoderKnobRepository.py                                  -- EDIT (return TargetKbps + IcqQ; drop dead-column pass-through)
+Features/TranscodeJob/Emit/EncoderArgsStrategies/NvencEncoderArgsStrategy.py -- EDIT (consume TargetKbps directly; no percent math; no clamps)
+Features/TranscodeJob/Emit/EncoderArgsStrategies/QsvEncoderArgsStrategy.py   -- EDIT (consume IcqQ directly)
+Features/TranscodeQueue/AdequacyGate.py                                     -- CREATE (SourceKbps <= Tier1TargetKbps -> exclude; writes MediaFiles.AdequacyDecision)
+Features/TranscodeQueue/QueueManagementBusinessService.py                   -- EDIT (call AdequacyGate at admission; short-circuit when excluded)
+Features/QualityTesting/VmafConfidenceStatsRepository.py                    -- CREATE (bucket read/write; rolling window trim)
+Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.py     -- EDIT (add global-off short-circuit; add SmartConfidenceSkip branch)
+Features/QualityTesting/QualityTestingBusinessService.py                   -- EDIT (call VmafConfidenceStatsRepository.RecordResult on VMAF completion)
+Features/TranscodeJob/Adjustments/NextTierAdjustmentCalculator.py          -- CREATE (Profile -> next-tier Profile via UNIQUE tuple; None at ceiling)
+Features/TranscodeJob/Adjustments/AdjustmentRegistry.py                    -- EDIT (single NextTierAdjuster; retire per-RateControlMode branch)
+Features/ContentClassifier/*.py                                            -- EDIT (assign Family + ContentClass columns on classification; use new UNIQUE tuple)
+Tests/Contract/TestProfileTierLadder.py                                    -- CREATE
+Tests/Contract/TestAdequacyGate.py                                         -- CREATE
+Tests/Contract/TestSmartConfidenceSkip.py                                  -- CREATE
+Tests/Contract/TestNextTierAdjuster.py                                     -- CREATE
+Tests/Contract/TestDispositionDecider.py                                   -- EDIT (add test_global_off_returns_replace_qualitytestinggloballydisabled)
+
+# Reset 11 -- C15 GUI transcoding card
+Features/SystemSettings/SystemSettingsController.py                        -- EDIT (GET/PUT /api/SystemSettings/Transcoding)
+Features/SystemSettings/Templates/settings.html                            -- EDIT (Transcoding card partial)
+Features/SystemSettings/Static/settings.js                                 -- EDIT (form save + live-refresh probe)
+Tests/Contract/TestTranscodingSettingsRoundTrip.py                         -- CREATE
+
+# Reset 12 -- C7 sweep + BUG-0077
 <production files with silent fallbacks>                                    -- EDIT (grep-driven; filled at IMPLEMENTING)
 Features/ServiceControl/StuckJobDetectionService.py                         -- EDIT (Success=FALSE on freeze)
 Features/QualityTesting/ProcessQualityTestQueueService.py                  -- EDIT (refuse freeze-marker admission)
@@ -292,6 +340,13 @@ Persistent seam SOT lives in flow docs (`.claude/rules/seam-verification.md`). D
 | S3 (change) `TranscodeQueue.INSERT contract` | All admission producers | Non-null: audiopolicyjson, storagerootid, relativepath, processingmode | Claim query + JobProcessor read as guaranteed non-null | Contract test `TestEnqueueContract` |
 | S4 (change) `TranscodeAttempts shared-column write` | Every strategy | AudioPolicyResolved, AudioPolicyJson, AudioTracksEmittedJson all non-null | Compliance + dashboards read as guaranteed non-null | SQL audit + smoke |
 | S5 (change) `Requeue disposition -> new TranscodeQueue row` | `DispositionDispatcher.Requeue` | `INSERT INTO transcodequeue ...` via `AddJobToQueue` | Next claim finds the requeued row | Smoke (d) + BUG-0079 |
+| S6 (new) `Profile tuple identity` | `Profiles.(Family, QualityTier, ContentClass, TargetResolutionCategory)` | UNIQUE tuple; `NextTierAdjuster.Get(currentProfile)` walks `QualityTier + 1` | Escalation deterministic; `None` at ceiling; RetryBudget still caps | `TestProfileTierLadder` + `TestNextTierAdjuster` |
+| S7 (new) `ProfileThresholds.TargetKbps / IcqQ` | `ProfileThresholds` per (ProfileId, Resolution) | absolute INT kbps for VBR profiles; INT q for ICQ profiles | `NvencEncoderArgsStrategy` emits `-b:v <TargetKbps>k`; `QsvEncoderArgsStrategy` emits `-global_quality <IcqQ>` | encoder-args unit tests |
+| S8 (new) `AdequacyGate seam at admission` | `QueueManagementBusinessService.AddJobToQueue -> AdequacyGate.Evaluate(MediaFile)` | `AdequacyDecision {Excluded, Admitted, RouteToStreamCopy}` + reason | Admission short-circuits on Excluded; writes `MediaFiles.AdequacyDecision` audit | `TestAdequacyGate` + smoke |
+| S9 (new) `Decider -> VmafConfidenceStatsRepository (read)` | `PostTranscodeDispositionDecider.Decide` computes bucket, calls Repository.LookupBucket | `Bucket key` -> `Stats(SampleCount, VmafMean, VmafStdDev, PassRate)` | `SmartConfidenceSkip` branch reads Stats fresh per call; DB-authority | `TestSmartConfidenceSkip` |
+| S10 (new) `QualityTestingBusinessService -> VmafConfidenceStatsRepository (write)` | On VMAF completion, worker calls `Repository.RecordResult(bucket, score, passed)` | `RecordResult` updates SampleCount + rolling window + VmafMean/StdDev/PassRate | Next Decider call reads updated stats | `TestSmartConfidenceSkip` roundtrip |
+| S11 (new) `Global QualityTestEnabled short-circuit` | `PostTranscodeDispositionDecider.Decide` reads GateConfig | `GateConfig.QualityTestEnabled=false` -> `Replace/QualityTestingGloballyDisabled` | Restored per Reset 10 C16; overrides all other branches except TranscodeFailed/NoSavings | `TestDispositionDecider.test_global_off_returns_replace_qualitytestinggloballydisabled` |
+| S12 (new) `GUI /settings Transcoding card seam` | `PUT /api/SystemSettings/Transcoding` | JSON body per section (bitrate ladder rows, ICQ ladder rows, adequacy toggle, confidence knobs, global-off, review-panel filter) | Persists to `ProfileThresholds` (TargetKbps/IcqQ) + `PostTranscodeGateConfig` (new cols) + reads `VmafConfidenceStats` for review panel | `TestTranscodingSettingsRoundTrip` |
 
 ### Promotions
 
@@ -349,7 +404,7 @@ Populated at VERIFYING.
 - **Follow-ups (filed to backlog, not scope-blocking):**
   - `BUG-0082` `SaveTranscodeAttempt __UNRESOLVED__` phantom row insertion (attempts 41048 Success=False + 41061 Success=True observed; deleted from live DB post-audit).
   - `adjustment-registry-wiring` directive: apply CRF/bitrate knob override on requeued rows so retry converges to Replace instead of same-fail loop.
-- **Next:** Reset 10 -- C7 sweep (fail-loud grep audit; remove silent fallbacks; BUG-0077 QT admission refuses freeze-marker rows). `Tests/Contract/TestFailLoud.py` green.
+- **Next:** Reset 10 -- C12 + C13 + C14 + C16 backend (Profile tier ladder + admission-adequacy gate + smart VMAF sampling + global-off restore). See parked `profile-tier-ladder.feature.md`, `admission-adequacy-gate.feature.md`, `vmaf-smart-sampling.feature.md`. Reset 11 = C15 GUI. Reset 12 = C7 fail-loud sweep.
 - **Phase:** IMPLEMENTING
 - **Last commit:** (Reset 9 pending commit)
 - **Follow-ups noted:**
@@ -532,4 +587,162 @@ Operator can bypass this flow entirely via `POST /api/QualityTest/Override` (see
 - `Features/QualityTesting/QualityTesting.feature.md` -- intra-feature seams (filter chain, resolution policy, still capture).
 - `Features/QualityTesting/post-transcode-disposition.feature.md` -- Decider + Dispatcher contract.
 - `Features/QualityTesting/qt-queue-visibility-and-override.feature.md` -- operator override + queue visibility.
+```
+
+---
+
+### Parked -- profile-tier-ladder.feature.md
+
+R13 refuses new `*.feature.md` outside DELIVERING. Content below parked for Promotion at DELIVERING. Target path: `Features/Profiles/profile-tier-ladder.feature.md`.
+
+```markdown
+# Profile Tier Ladder
+
+**Slug:** profile-tier-ladder
+
+## What It Does
+
+Replaces per-profile-name proliferation with a 3-axis tuple: `(Family, QualityTier, ContentClass)` at `TargetResolutionCategory`. Family names the encoder + preset (e.g. `NVENC AV1 CANARY`, `QSV AV1 CANARY`). QualityTier ranges 1..5 (small/low-quality -> large/near-source). ContentClass ∈ `{live_action, animation, mixed}`. TargetResolutionCategory reuses the resolution-types tier registry. Every combination = one Profile row. Deleting non-CANARY AV1 profiles kills naming variance that was driving operator confusion.
+
+## Workflows
+
+| # | User action | Surface | Handler | Backing |
+|---|---|---|---|---|
+| W1 | Operator edits a tier's TargetKbps on /settings Transcoding card | `/settings` bitrate ladder editor | `PUT /api/SystemSettings/Transcoding` | `SystemSettingsController.SaveTranscodingSettings` -> `ProfileThresholds.TargetKbps` UPDATE |
+| W2 | ContentClassifier auto-assigns a Family + Tier + ContentClass to a new MediaFile | (internal) | ContentClassifier.Classify | `ContentClassifier.Classify` -> writes `MediaFiles.AssignedProfile` (by tuple lookup) |
+| W3 | Dispatcher escalates on VMAF fail -> next-tier profile | (internal) | `NextTierAdjuster.Get` | `Features/TranscodeJob/Adjustments/NextTierAdjustmentCalculator` |
+
+## Success Criteria
+
+C1. `Profiles` schema adds `Family TEXT NOT NULL`, `QualityTier INT NOT NULL CHECK (QualityTier BETWEEN 1 AND 5)`, `ContentClass TEXT NOT NULL CHECK (ContentClass IN ('live_action','animation','mixed'))`. UNIQUE `(Family, QualityTier, ContentClass, TargetResolutionCategory)`. Verifiable: `\d Profiles` shows the three columns + CHECKs + UNIQUE.
+
+C2. `ProfileThresholds` schema adds `TargetKbps INT NOT NULL`. Dead columns `SourceBitratePercent`, `MinBitrateKbps`, `MaxBitrateKbps` dropped. `IcqQ INT NULL` added (populated for ICQ profiles). Verifiable: `\d ProfileThresholds` matches; grep `SourceBitratePercent` in `Features/**/*.py` returns 0.
+
+C3. Two families kept: `'NVENC AV1 CANARY'` + `'QSV AV1 CANARY'`. Every non-CANARY AV1 profile deleted via `DeleteNonCanaryProfiles_2026_07_XX.py`. Orphaned `MediaFiles.AssignedProfile` reassigned via ContentClassifier. Verifiable: `SELECT COUNT(*) FROM Profiles WHERE Codec IN ('av1_nvenc','av1_qsv','libsvtav1') AND Family NOT IN ('NVENC AV1 CANARY','QSV AV1 CANARY')` returns 0.
+
+C4. Backfill populates two families x four resolutions x five tiers x live-action rows. TargetKbps table (live-action calibration, values from directive C12): 480p=[400,550,700,900,1200] / 720p=[900,1400,1900,2500,3200] / 1080p=[1800,2400,3200,4200,5500] / 2160p=[4000,6000,8500,12000,18000]. ICQ ladder q34/q30/q28/q26/q22 per QSV rows. Verifiable: `SELECT * FROM Profiles p JOIN ProfileThresholds pt ON pt.ProfileId=p.Id WHERE p.Family='NVENC AV1 CANARY' AND p.ContentClass='live_action'` returns 20 rows (4 res x 5 tier).
+
+C5. `NvencEncoderArgsStrategy` consumes `TargetKbps` directly. Emits `-b:v <TargetKbps>k -maxrate:v <TargetKbps * MaxBitrateMultiplier>k -bufsize:v <same>k`. No percent-of-source math, no min/max clamps. Verifiable: unit test asserts emitted argv contains the raw TargetKbps value.
+
+C6. `QsvEncoderArgsStrategy` consumes `IcqQ` directly. Emits `-global_quality <IcqQ>` (or ICQ-specific flag). No percent-of-source. Verifiable: unit test asserts emitted argv contains the raw IcqQ value.
+
+C7. `NextTierAdjuster.Get(currentProfile)` returns `Optional[Profile]` by walking the UNIQUE tuple with `QualityTier + 1`. Returns None when ceiling hit (Tier 5). Verifiable: `Tests/Contract/TestNextTierAdjuster.py` covers tier-1 -> tier-5 chain + ceiling terminates.
+
+C8. `DispositionDispatcher._MaybeScheduleRequeue` passes escalated `ProfileId` to `AddJobToQueue` when adjuster returns non-None. Chain terminates at Tier 5 -> Reject/QualityCeilingReached (folds through RetryBudget). Verifiable: dispatcher contract test proves ProfileId in the requeued queue row differs from previous when adjuster escalates.
+
+## Seams
+
+| ID | Seam | Producer | Wire shape | Consumer expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `Profiles UNIQUE tuple` | Backfill migration | `(Family, QualityTier, ContentClass, TargetResolutionCategory)` | ContentClassifier + NextTierAdjuster | `TestProfileTierLadder` |
+| S2 | `ProfileThresholds.TargetKbps -> NvencEncoderArgsStrategy` | EncoderKnobRepository row | absolute INT kbps | encoder argv contains `-b:v <TargetKbps>k` | unit test |
+| S3 | `NextTierAdjuster -> AddJobToQueue` | Dispatcher on Requeue | escalated ProfileId | requeued row uses new profile knobs | `TestNextTierAdjuster` + smoke |
+
+## Status
+
+Draft parked in `transcode-flow-canonical` directive. Promotes at DELIVERING per R13.
+```
+
+---
+
+### Parked -- admission-adequacy-gate.feature.md
+
+R13 refuses new `*.feature.md` outside DELIVERING. Content below parked for Promotion at DELIVERING. Target path: `Features/TranscodeQueue/admission-adequacy-gate.feature.md`.
+
+```markdown
+# Admission Adequacy Gate
+
+**Slug:** admission-adequacy-gate
+
+## What It Does
+
+Refuses to enqueue re-encode work when the source is already at or below the lowest tier's target bitrate for its resolution. Prevents wasted CPU on already-compact sources and prevents doomed VMAF chases on sources whose bitrate is fundamentally below what the profile targets. Container/audio compliance issues still route to StreamCopy (Remux/AudioFix) -- adequacy only refuses full re-encode admission.
+
+## Workflows
+
+| # | User action | Surface | Handler | Backing |
+|---|---|---|---|---|
+| W1 | Operator adds a MediaFile via WorkBucket that turns out to already be compact | `/api/Work/<Bucket>/Queue/<mfid>` POST | WorkBucketController.queue_one -> QueueAdmissionAppService.AdmitOne -> AddJobToQueue | AdequacyGate.Evaluate short-circuits before INSERT; response Status='skipped', reason='AlreadyCompact' |
+| W2 | Scanner surfaces an eligible MediaFile that AdequacyGate excludes | (internal PopulateQueueFromMediaFiles) | scanner -> AddJobToQueue | AdequacyGate.Evaluate short-circuits; MediaFile.AdequacyDecision written for audit |
+
+## Success Criteria
+
+C1. `Features/TranscodeQueue/AdequacyGate.py` exists with public method `Evaluate(MediaFile) -> AdequacyDecision`. `AdequacyDecision` is a dataclass `{Action: str in ('Admit','Exclude','RouteToStreamCopy'), Reason: str, Notes: dict}`. Verifiable: import + call.
+
+C2. `SourceKbps` computed at admission from `MediaFile.VideoBitrateKbps`. If `MediaFile.AssignedProfile` is a Reencode family (VBR or ICQ):
+   - Look up Tier 1 TargetKbps for `(AssignedProfile.Family, ContentClass, SourceResolutionTier)`.
+   - If `SourceKbps <= Tier1TargetKbps` -> `Exclude(reason='AlreadyCompact', Notes={SourceKbps, Tier1TargetKbps})`.
+   - Else `Admit`.
+   Verifiable: unit test with mocked ProfileThresholds proves the boundary.
+
+C3. Container / audio compliance columns still consulted after adequacy: if `MediaFile.WorkBucket IN ('Remux','AudioFix')`, adequacy is skipped and StreamCopy admission proceeds (no video re-encode, but container/audio work still needed). Verifiable: unit test.
+
+C4. `MediaFiles` schema adds `AdequacyDecision TEXT NULL`, `AdequacyDecisionAt TIMESTAMP NULL`. Every Evaluate() call that returns Exclude writes the row (through MediaFilesRepository). Admit does not write (no state change needed). Verifiable: SQL audit `SELECT COUNT(*) FROM MediaFiles WHERE AdequacyDecision IS NOT NULL AND AdequacyDecisionAt > <cutover>`.
+
+C5. `QueueManagementBusinessService.AddJobToQueue` calls AdequacyGate.Evaluate at the start of the Reencode admission path. On Exclude, returns `{Success=True, Skipped=True, ErrorMessage='AlreadyCompact: <SourceKbps> <= <Tier1TargetKbps>'}`. Verifiable: contract test.
+
+## Seams
+
+| ID | Seam | Producer | Wire shape | Consumer expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `AddJobToQueue -> AdequacyGate.Evaluate` | admission entry | `(MediaFile)` | `AdequacyDecision` VO | `TestAdequacyGate` |
+| S2 | `AdequacyGate -> ProfileThresholds` | Repository lookup | `(Family, ContentClass, ResolutionTier)` | Tier 1 TargetKbps INT | unit test |
+| S3 | `MediaFiles.AdequacyDecision audit` | AdequacyGate writes on Exclude | `TEXT + TIMESTAMP` | operator SQL query | SQL audit |
+
+## Status
+
+Draft parked. Promotes at DELIVERING.
+```
+
+---
+
+### Parked -- vmaf-smart-sampling.feature.md
+
+R13 refuses new `*.feature.md` outside DELIVERING. Content below parked for Promotion at DELIVERING. Target path: `Features/QualityTesting/vmaf-smart-sampling.feature.md`.
+
+```markdown
+# VMAF Smart Sampling
+
+**Slug:** vmaf-smart-sampling
+
+## What It Does
+
+Skips VMAF for source+profile combinations that have accumulated statistical confidence over prior successful runs. Groups sources into buckets by `(ProfileId, SourceCodec, SourceResolutionTier, BitratePerPixelBucket, ContentClass)`. Tracks rolling pass-rate + mean/stddev per bucket. When a bucket has enough samples AND high pass rate AND mean minus N-sigma exceeds the auto-replace threshold, VMAF is skipped and the disposition returns `Replace/QualityTestConfident`. New buckets bootstrap at SampleCount=0 and force VMAF until confidence builds. Drift automatic: pass-rate drops -> VMAF resumes.
+
+## Workflows
+
+| # | User action | Surface | Handler | Backing |
+|---|---|---|---|---|
+| W1 | Attempt lands with a bucket that already has confidence | (internal) | Decider.Decide | SmartConfidenceSkip branch -> Replace/QualityTestConfident |
+| W2 | VMAF completes on a Pending attempt | (internal) | QualityTestingBusinessService | VmafConfidenceStatsRepository.RecordResult updates bucket stats |
+| W3 | Operator tunes confidence knobs on /settings | `/settings` VMAF section | PUT /api/SystemSettings/Transcoding | PostTranscodeGateConfig update |
+| W4 | Operator reviews per-bucket stats | `/settings` review panel | GET /api/SystemSettings/Transcoding | VmafConfidenceStatsRepository.ListStats |
+
+## Success Criteria
+
+C1. New table `VmafConfidenceStats` with columns `(Id BIGSERIAL PK, ProfileId BIGINT REFERENCES Profiles(Id), SourceCodec TEXT NOT NULL, SourceResolutionTier TEXT NOT NULL, BitratePerPixelBucket INT NOT NULL, ContentClass TEXT NOT NULL, SampleCount INT NOT NULL DEFAULT 0, VmafMean NUMERIC(5,2), VmafStdDev NUMERIC(5,2), PassRate NUMERIC(5,4), LastUpdated TIMESTAMP DEFAULT NOW())`. UNIQUE `(ProfileId, SourceCodec, SourceResolutionTier, BitratePerPixelBucket, ContentClass)`. Verifiable: `\d VmafConfidenceStats`.
+
+C2. `PostTranscodeGateConfig` gains `MinConfidenceSampleCount INT NOT NULL DEFAULT 10`, `MinConfidencePassRate NUMERIC NOT NULL DEFAULT 0.95`, `SigmaMargin NUMERIC NOT NULL DEFAULT 2.0`. Verifiable: `\d PostTranscodeGateConfig`.
+
+C3. `VmafConfidenceStatsRepository.LookupBucket(ProfileId, SourceCodec, SourceResolutionTier, BitratePerPixelBucket, ContentClass)` reads DB fresh per call (db-is-authority). Returns None when bucket has no row. Verifiable: unit test.
+
+C4. `VmafConfidenceStatsRepository.RecordResult(bucket_key, vmaf_score, passed)` INSERTs on first sample OR UPDATEs an existing row via a rolling-window recompute: SampleCount += 1 (capped at 100 via trim), VmafMean/StdDev recomputed over the retained window, PassRate = passed_count / retained_count. Idempotent within a single VMAF completion. Verifiable: unit test.
+
+C5. `PostTranscodeDispositionDecider.Decide` adds `SmartConfidenceSkip` branch between the QualityTestNotRequired short-circuit and the VMAF-NULL Pending short-circuit. Logic: `if stats.SampleCount >= MinConfidenceSampleCount AND stats.PassRate >= MinConfidencePassRate AND (stats.VmafMean - SigmaMargin * stats.VmafStdDev) >= VmafAutoReplaceMinThreshold: return Disposition('Replace', 'QualityTestConfident')`. Verifiable: `Tests/Contract/TestSmartConfidenceSkip.py` covers bootstrap (SampleCount=0 forces VMAF), confidence-built (N pass -> skip), drift (one fail drops PassRate below threshold -> VMAF resumes).
+
+C6. `BitratePerPixelBucket` computed as INT bucket over `(SourceKbps * 1000) / (Width * Height * (fps/24.0))` with 5 quintile boundaries persisted in `SystemSettings.BitratePerPixelBoundaries` (JSON array). Bucket 1 = lowest, Bucket 5 = highest. Verifiable: unit test asserts boundary math + bucket assignment.
+
+C7. Reason vocabulary gains `QualityTestConfident`. `SELECT DISTINCT DispositionReason FROM TranscodeAttempts` still returns only closed-list values. Verifiable: audit query.
+
+## Seams
+
+| ID | Seam | Producer | Wire shape | Consumer expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `Decider -> VmafConfidenceStatsRepository.LookupBucket` | Decider computes bucket key | `(ProfileId, SourceCodec, SourceResolutionTier, BitratePerPixelBucket, ContentClass)` | `Stats(SampleCount, VmafMean, VmafStdDev, PassRate)` or None | `TestSmartConfidenceSkip` |
+| S2 | `QualityTestingBusinessService -> VmafConfidenceStatsRepository.RecordResult` | On VMAF completion | `(bucket_key, VmafScore, Passed: bool)` | rolling-window update commits | `TestSmartConfidenceSkip` roundtrip |
+| S3 | `PostTranscodeGateConfig confidence knobs` | operator via /settings | `MinConfidenceSampleCount / MinConfidencePassRate / SigmaMargin` | Decider reads fresh per call | UI form save + Decider unit test |
+
+## Status
+
+Draft parked. Promotes at DELIVERING.
 ```
