@@ -57,11 +57,12 @@ class DispositionDispatcher:
             GateInput = self._BuildGateInput(GateConfig)
 
             Outcome = self.Decider.Decide(Attempt, GateInput)
+            Outcome, EscalatedProfileId = self._EnforceQualityCeiling(Outcome, Row, TranscodeAttemptId)
             Outcome = self._EnforceRetryBudget(Outcome, Row, TranscodeAttemptId)
 
             self._CommitDisposition(TranscodeAttemptId, Outcome.Action, Outcome.Reason)
             self._MaybeCleanupArtifacts(TranscodeAttemptId, Outcome.Action, Outcome.Reason)
-            self._MaybeScheduleRequeue(TranscodeAttemptId, Outcome.Action, Row)
+            self._MaybeScheduleRequeue(TranscodeAttemptId, Outcome.Action, Row, EscalatedProfileId)
 
             AuditPayload = self._BuildAuditPayload(TranscodeAttemptId, Attempt, VmafCapableWorkerOnline, GateConfig)
             LoggingService.LogInfo(
@@ -82,7 +83,7 @@ class DispositionDispatcher:
         """Read the attempt row needed for the disposition decision; returns None if not found."""
         Rows = self.DatabaseService.ExecuteQuery(
             "SELECT Success, OldSizeBytes, NewSizeBytes, QualityTestRequired, VMAF, "
-            "Disposition, DispositionReason, TestVariantSetId, MediaFileId "
+            "Disposition, DispositionReason, TestVariantSetId, MediaFileId, ProfileName "
             "FROM TranscodeAttempts WHERE Id = %s",
             (TranscodeAttemptId,),
         )
@@ -181,6 +182,27 @@ class DispositionDispatcher:
             'QualityTestEnabled': bool(getattr(GateConfig, 'QualityTestEnabled', True)),
         }
 
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- NextTierAdjuster ceiling fold
+    def _EnforceQualityCeiling(self, Outcome: Disposition, Row: dict, TranscodeAttemptId: int):
+        if Outcome.Action != 'Requeue':
+            return Outcome, None
+        CurrentProfileName = Row.get('ProfileName')
+        if not CurrentProfileName:
+            return Outcome, None
+        from Features.TranscodeJob.Adjustments.NextTierAdjustmentCalculator import NextTierAdjuster
+        NextProfile = NextTierAdjuster(self.DatabaseService).Get(CurrentProfileName)
+        if NextProfile is None:
+            LoggingService.LogWarning(
+                f"QualityCeiling reached (TranscodeAttemptId={TranscodeAttemptId}, ProfileName={CurrentProfileName}): overriding Requeue -> Reject/QualityCeilingReached",
+                "DispositionDispatcher", "_EnforceQualityCeiling",
+            )
+            return Disposition(Action='Reject', Reason='QualityCeilingReached'), None
+        LoggingService.LogInfo(
+            f"NextTier escalation (TranscodeAttemptId={TranscodeAttemptId}): {CurrentProfileName} -> {NextProfile.ProfileName} (Tier {NextProfile.QualityTier})",
+            "DispositionDispatcher", "_EnforceQualityCeiling",
+        )
+        return Outcome, NextProfile.ProfileId
+
     # directive: transcode-flow-canonical | # see transcode.ST7 -- BUG-0079 cap
     def _EnforceRetryBudget(self, Outcome: Disposition, Row: dict, TranscodeAttemptId: int) -> Disposition:
         """Requeue -> Reject/RetryBudgetExhausted when MediaFile.MaxRequeueAttempts already hit. Prevents infinite loops."""
@@ -245,9 +267,8 @@ class DispositionDispatcher:
             return
         self.AttemptCleanupService.Cleanup(TranscodeAttemptId)
 
-    # directive: transcode-flow-canonical | # see transcode.ST7 -- BUG-0079
-    def _MaybeScheduleRequeue(self, TranscodeAttemptId: int, Action: str, Row: dict) -> None:
-        """On Requeue, insert a new TranscodeQueue row for the MediaFile via canonical AddJobToQueue."""
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- BUG-0079 + NextTier escalation
+    def _MaybeScheduleRequeue(self, TranscodeAttemptId: int, Action: str, Row: dict, EscalatedProfileId: Optional[int] = None) -> None:
         if Action != 'Requeue':
             return
         MediaFileId = Row.get('MediaFileId')
@@ -259,9 +280,9 @@ class DispositionDispatcher:
             return
         Scheduler = self.RequeueScheduler or self._DefaultRequeueScheduler
         try:
-            Result = Scheduler(MediaFileId, TranscodeAttemptId)
+            Result = Scheduler(MediaFileId, TranscodeAttemptId, EscalatedProfileId)
             LoggingService.LogInfo(
-                f"Requeue for TranscodeAttempt {TranscodeAttemptId} (MediaFileId={MediaFileId}): scheduler result={Result}",
+                f"Requeue for TranscodeAttempt {TranscodeAttemptId} (MediaFileId={MediaFileId}, EscalatedProfileId={EscalatedProfileId}): scheduler result={Result}",
                 "DispositionDispatcher", "_MaybeScheduleRequeue",
             )
         except Exception as Ex:
@@ -270,10 +291,9 @@ class DispositionDispatcher:
                 Ex, "DispositionDispatcher", "_MaybeScheduleRequeue",
             )
 
-    # directive: transcode-flow-canonical | # see transcode.ST7 -- BUG-0079
-    def _DefaultRequeueScheduler(self, MediaFileId: int, TranscodeAttemptId: int) -> dict:
-        """Default scheduler: reuse QueueManagementBusinessService.AddJobToQueue with ForceAdd=True."""
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- BUG-0079 + NextTier escalation
+    def _DefaultRequeueScheduler(self, MediaFileId: int, TranscodeAttemptId: int, EscalatedProfileId: Optional[int] = None) -> dict:
         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
         from Repositories.DatabaseManager import DatabaseManager
         Service = QueueManagementBusinessService(DatabaseManager())
-        return Service.AddJobToQueue(MediaFileId=MediaFileId, ForceAdd=True)
+        return Service.AddJobToQueue(MediaFileId=MediaFileId, ForceAdd=True, ProfileId=EscalatedProfileId)

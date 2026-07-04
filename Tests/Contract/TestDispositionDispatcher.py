@@ -195,7 +195,7 @@ class TestDispositionDispatcher:
         """RetryBudget=True + Requeue -> scheduler invoked with (MediaFileId, TranscodeAttemptId); cleanup fires."""
         Row = {'Success': True, 'OldSizeBytes': 100, 'NewSizeBytes': 80, 'QualityTestRequired': True,
                'VMAF': 70.0, 'Disposition': None, 'DispositionReason': None,
-               'TestVariantSetId': None, 'MediaFileId': 7}
+               'TestVariantSetId': None, 'MediaFileId': 7, 'ProfileName': None}
         BudgetSvc = MagicMock()
         BudgetSvc.HasBudgetRemaining.return_value = True
         Scheduler = MagicMock(return_value={'Success': True, 'QueueId': 999})
@@ -207,5 +207,6 @@ class TestDispositionDispatcher:
         Disp.RequeueScheduler = Scheduler
         Result = Disp.Dispatch(TranscodeAttemptId=42)
         assert Result.Disposition == 'Requeue'
-        Scheduler.assert_called_once_with(7, 42)
+        # ProfileName=None -> ceiling short-circuit skipped; EscalatedProfileId is None
+        Scheduler.assert_called_once_with(7, 42, None)
         Cleanup.Cleanup.assert_called_once_with(42)
