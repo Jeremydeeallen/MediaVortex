@@ -515,7 +515,7 @@ Populated at VERIFYING.
       - (g) SubtitleSlot hdmv_pgs_subtitle -> `[]` + WARN log; dvd_subtitle -> `[]` + WARN; mixed PGS+SRT -> mov_text + WARN.
     - **12 paused workers un-paused:** `Status='Online' AND TranscodeEnabled=TRUE` on dot-1..4, larry-1..4, wakko-1..4. All 13 workers Online + Transcode-enabled.
 - **Phase:** IMPLEMENTING
-- **Last commit:** `<reset12 commit pending>`
+- **Last commit:** `28d41dd feat(reset12): C7 fail-loud test + baseline ratchet + BUG-0075 remainder`
 - **Reset 12 SHIPPED 2026-07-04 (this session, C7 sweep + BUG-0075 remainder):**
   - `Tests/Contract/TestFailLoud.py` CREATED (4 tests: bare-except zero + no-growth vs baseline + baseline-files-exist + baseline-not-stale). Enforces `.claude/rules/fail-loud.md`.
   - `Tests/Contract/failloud_baseline.json` CREATED as ratchet-only whitelist: `{file_relpath: max_hits}`. Current baseline: 178 files / 1335 hits across Features/, Workers/, WorkerService/, WebService/, Repositories/, Core/, Composition/, Services/. Follow-up directives shrink baseline; test refuses growth.
