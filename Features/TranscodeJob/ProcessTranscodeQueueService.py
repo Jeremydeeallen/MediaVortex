@@ -149,8 +149,11 @@ class ProcessTranscodeQueueService:
         Db = DatabaseService()
         Cleanup = AttemptCleanupService(Db)
         Retry = RetryBudgetService(AttemptRepository=self.DatabaseManager, GateConfigRepository=GateRepo)
+        # directive: transcode-flow-canonical | # see transcode.ST7 -- C14 SmartConfidenceRepo composition
+        from Features.QualityTesting.VmafConfidenceStatsRepository import VmafConfidenceStatsRepository
+        SmartRepo = VmafConfidenceStatsRepository(Db)
         return DispositionDispatcher(
-            Decider=PostTranscodeDispositionDecider(),
+            Decider=PostTranscodeDispositionDecider(SmartConfidenceRepo=SmartRepo),
             GateConfigRepository=GateRepo,
             AttemptCleanupService=Cleanup,
             DatabaseService=Db,

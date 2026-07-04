@@ -142,9 +142,8 @@ class DispositionDispatcher:
             )
             return False
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- C14 BucketKey wire-up
     def _BuildDeciderInput(self, Row: dict, VmafCapableWorkerOnline: bool) -> dict:
-        """Project the DB row into the pure-function Decider's expected input shape."""
         return {
             'Success': bool(Row.get('Success')),
             'OldSize': Row.get('OldSizeBytes') or 0,
@@ -153,7 +152,78 @@ class DispositionDispatcher:
             'VmafScore': Row.get('VMAF'),
             'VmafCapableWorkerOnline': VmafCapableWorkerOnline,
             'MediaFileId': Row.get('MediaFileId'),
+            'BucketKey': self._BuildBucketKey(Row),
         }
+
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- C14 BucketKey wire-up
+    def _BuildBucketKey(self, Row: dict):
+        MediaFileId = Row.get('MediaFileId')
+        ProfileName = Row.get('ProfileName')
+        if MediaFileId is None or not ProfileName:
+            return None
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT p.Id AS ProfileId, p.ContentClass, mf.Codec, mf.ResolutionCategory, mf.Resolution, "
+            "  mf.VideoBitrateKbps, mf.FrameRate "
+            "FROM Profiles p, MediaFiles mf "
+            "WHERE p.ProfileName = %s AND mf.Id = %s",
+            (ProfileName, MediaFileId),
+        )
+        if not Rows:
+            return None
+        R = Rows[0]
+        ProfileId = R.get('profileid')
+        SourceCodec = R.get('codec')
+        SourceResolutionTier = R.get('resolutioncategory')
+        ContentClass = R.get('contentclass')
+        Kbps = R.get('videobitratekbps')
+        Fps = R.get('framerate')
+        Resolution = R.get('resolution') or ''
+        if ProfileId is None or not SourceCodec or not SourceResolutionTier or not ContentClass:
+            return None
+        Bucket = self._ComputeBitratePerPixelBucket(Kbps, Fps, Resolution)
+        if Bucket is None:
+            return None
+        from Features.QualityTesting.VmafConfidenceStatsRepository import BucketKey
+        return BucketKey(
+            ProfileId=int(ProfileId),
+            SourceCodec=str(SourceCodec).lower(),
+            SourceResolutionTier=str(SourceResolutionTier),
+            BitratePerPixelBucket=Bucket,
+            ContentClass=str(ContentClass),
+        )
+
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- C14 BucketKey wire-up
+    def _ComputeBitratePerPixelBucket(self, Kbps, Fps, Resolution: str):
+        if not Kbps or not Fps or 'x' not in Resolution:
+            return None
+        try:
+            W, H = Resolution.split('x', 1)
+            Pixels = int(W) * int(H)
+            FpsF = float(Fps)
+            KbpsF = float(Kbps)
+        except (ValueError, TypeError):
+            return None
+        if Pixels <= 0 or FpsF < 1.0 or FpsF > 120.0 or KbpsF <= 0:
+            return None
+        Bpp = (KbpsF * 1000.0) / (Pixels * (FpsF / 24.0))
+        Boundaries = self._LoadBitratePerPixelBoundaries()
+        for I, Boundary in enumerate(Boundaries):
+            if Bpp < float(Boundary):
+                return I + 1
+        return len(Boundaries) + 1
+
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- C14 BucketKey wire-up
+    def _LoadBitratePerPixelBoundaries(self):
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'BitratePerPixelBoundaries' LIMIT 1",
+            (),
+        )
+        if not Rows:
+            return [0.03, 0.06, 0.10, 0.16]
+        Raw = Rows[0].get('settingvalue')
+        if not Raw:
+            return [0.03, 0.06, 0.10, 0.16]
+        return json.loads(Raw)
 
     # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
     def _BuildGateInput(self, GateConfig) -> dict:

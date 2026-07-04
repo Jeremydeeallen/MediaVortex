@@ -39,6 +39,42 @@ class QualityTestingBusinessService:
         self.ActiveFFmpegThread = None
         self._Worker: Worker = worker if worker is not None else Worker.Current()
 
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- C14 VmafConfidenceStats write-back
+    def _RecordVmafConfidenceStats(self, TranscodeAttemptId: int, VmafScore: float) -> None:
+        try:
+            from Features.QualityTesting.Disposition.DispositionDispatcher import DispositionDispatcher
+            from Features.QualityTesting.Disposition.PostTranscodeDispositionDecider import PostTranscodeDispositionDecider
+            from Features.QualityTesting.Disposition.AttemptCleanupService import AttemptCleanupService
+            from Features.QualityTesting.Disposition.RetryBudgetService import RetryBudgetService
+            from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
+            from Features.QualityTesting.VmafConfidenceStatsRepository import VmafConfidenceStatsRepository
+            from Core.Database.DatabaseService import DatabaseService
+            Db = DatabaseService()
+            GateRepo = PostTranscodeGateConfigRepository()
+            Dispatcher = DispositionDispatcher(
+                Decider=PostTranscodeDispositionDecider(),
+                GateConfigRepository=GateRepo,
+                AttemptCleanupService=AttemptCleanupService(Db),
+                DatabaseService=Db,
+                RetryBudgetService=RetryBudgetService(AttemptRepository=self.DatabaseManager, GateConfigRepository=GateRepo),
+            )
+            Row = Dispatcher._ReadAttemptRow(TranscodeAttemptId)
+            if not Row:
+                return
+            BucketKey = Dispatcher._BuildBucketKey(Row)
+            if BucketKey is None:
+                return
+            GateConfig = GateRepo.Get()
+            MinThreshold = float(GateConfig.VmafAutoReplaceMinThreshold)
+            MaxThreshold = float(GateConfig.VmafAutoReplaceMaxThreshold)
+            Passed = (VmafScore is not None and MinThreshold <= float(VmafScore) <= MaxThreshold)
+            VmafConfidenceStatsRepository(Db).RecordResult(BucketKey, float(VmafScore), Passed)
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"_RecordVmafConfidenceStats non-fatal failure for TranscodeAttemptId={TranscodeAttemptId}",
+                Ex, "QualityTestingBusinessService", "_RecordVmafConfidenceStats",
+            )
+
     # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C11
     def _BuildDispositionDispatcher(self):
         """Compose DispositionDispatcher with default deps; Phase 3 lifts this to WorkerCompositionRoot."""
@@ -50,8 +86,11 @@ class QualityTestingBusinessService:
         from Core.Database.DatabaseService import DatabaseService
         GateRepo = PostTranscodeGateConfigRepository()
         Db = DatabaseService()
+        # directive: transcode-flow-canonical | # see transcode.ST7 -- C14 SmartConfidenceRepo composition
+        from Features.QualityTesting.VmafConfidenceStatsRepository import VmafConfidenceStatsRepository
+        SmartRepo = VmafConfidenceStatsRepository(Db)
         return DispositionDispatcher(
-            Decider=PostTranscodeDispositionDecider(),
+            Decider=PostTranscodeDispositionDecider(SmartConfidenceRepo=SmartRepo),
             GateConfigRepository=GateRepo,
             AttemptCleanupService=AttemptCleanupService(Db),
             DatabaseService=Db,
@@ -375,6 +414,7 @@ class QualityTestingBusinessService:
                         ta_id,
                         {"VMAF": vmaf_score, "QualityTestCompleted": True}
                     )
+                    self._RecordVmafConfidenceStats(ta_id, vmaf_score)
                     try:
                         self._AutoCaptureStillsIfPolicyFires(ta_id)
                     except Exception as AutoCapEx:
@@ -445,6 +485,7 @@ class QualityTestingBusinessService:
             except Exception:
                 pass
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {"VMAF": VmafScore, "QualityTestCompleted": True})
+            self._RecordVmafConfidenceStats(TranscodeAttemptId, VmafScore)
             LoggingService.LogInfo(f"Mode A VMAF for attempt {TranscodeAttemptId}: score={VmafScore}", "QualityTestingBusinessService", "RunLocalVmafForAttempt")
             return {"Success": True, "VMAFScore": VmafScore}
         except Exception as Ex:
