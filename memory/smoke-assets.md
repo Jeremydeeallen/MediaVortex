@@ -12,5 +12,5 @@ Registry of local read-only source files used as smoke-test canaries. Not manage
 
 - **Read-only.** Files have Windows read-only attribute set. Do not clear it.
 - **Do not scan.** Directory is not a MediaVortex StorageRoot.
-- **Refresh workflow.** When a smoke needs this file, copy to the target StorageRoot (e.g. `M:\Hotel Chevalier (2007)\...`) and enqueue against the copy. If pipeline destroys the copy, delete + re-copy from here.
+- **Refresh workflow.** Smokes always enqueue against the network StorageRoot copy (`M:\Hotel Chevalier (2007)\...`), NOT the read-only master. Before smoke: if network copy is missing or damaged, copy the master from `C:\Users\jerem\Videos\` to `M:\Hotel Chevalier (2007)\`, refresh MediaFiles row (rescan MFID 620351 OR manual UPDATE of StorageRootId + RelativePath + Codec + Container + SizeMB), then enqueue against MFID 620351. Pipeline mutates the network copy; master stays intact for the next refresh.
 - **Add assets by appending to the table.** Each row names the read-only path + shape + smoke purpose.
