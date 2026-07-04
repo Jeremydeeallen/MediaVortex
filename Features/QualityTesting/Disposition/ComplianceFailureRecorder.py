@@ -13,14 +13,14 @@ class ComplianceFailureRecorder:
         self.DatabaseService = DatabaseService
         self.AttemptCleanupService = AttemptCleanupService
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
+    # directive: transcode-flow-canonical | # see transcode.ST7
     def Record(self, TranscodeAttemptId: int, CascadeReason: str) -> None:
-        """Mark attempt NoReplace/ComplianceGateFailed + ErrorMessage; idempotent; triggers TFP cleanup."""
+        """Mark attempt Reject/ComplianceGateFailed + ErrorMessage; idempotent; triggers TFP cleanup."""
         self._WriteErrorMessage(TranscodeAttemptId, CascadeReason)
         self._WriteDispositionOverride(TranscodeAttemptId)
         self.AttemptCleanupService.Cleanup(TranscodeAttemptId)
         LoggingService.LogInfo(
-            f"Disposition overridden for TranscodeAttempt {TranscodeAttemptId}: NoReplace (Reason=ComplianceGateFailed, CascadeReason={CascadeReason})",
+            f"Disposition overridden for TranscodeAttempt {TranscodeAttemptId}: Reject (Reason=ComplianceGateFailed, CascadeReason={CascadeReason})",
             "ComplianceFailureRecorder", "Record",
         )
 
@@ -38,13 +38,13 @@ class ComplianceFailureRecorder:
                 Ex, "ComplianceFailureRecorder", "_WriteErrorMessage",
             )
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
+    # directive: transcode-flow-canonical | # see transcode.ST7
     def _WriteDispositionOverride(self, TranscodeAttemptId: int) -> None:
-        """UPDATE TranscodeAttempts.Disposition='NoReplace', Reason='ComplianceGateFailed'."""
+        """UPDATE TranscodeAttempts.Disposition='Reject', Reason='ComplianceGateFailed'."""
         try:
             self.DatabaseService.ExecuteNonQuery(
                 "UPDATE TranscodeAttempts SET Disposition = %s, DispositionReason = %s, DispositionDecidedAt = %s WHERE Id = %s",
-                ('NoReplace', 'ComplianceGateFailed', datetime.now(timezone.utc), TranscodeAttemptId),
+                ('Reject', 'ComplianceGateFailed', datetime.now(timezone.utc), TranscodeAttemptId),
             )
         except Exception as Ex:
             LoggingService.LogException(

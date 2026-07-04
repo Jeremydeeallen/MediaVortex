@@ -1054,8 +1054,8 @@ def OverrideQualityTest():
         Data = request.get_json() or {}
         QueueId = Data.get('QueueId') or Data.get('queueId')
         ForceDisposition = Data.get('ForceDisposition') or Data.get('forceDisposition')
-        if not QueueId or ForceDisposition not in ('Replace', 'Discard'):
-            return jsonify({"Success": False, "Message": "QueueId and ForceDisposition in {'Replace','Discard'} required"}), 400
+        if not QueueId or ForceDisposition not in ('Replace', 'Reject'):
+            return jsonify({"Success": False, "Message": "QueueId and ForceDisposition in {'Replace','Reject'} required"}), 400
 
         Db = DatabaseService()
 
@@ -1088,7 +1088,7 @@ def OverrideQualityTest():
         AttemptId = AttemptRows[0]['TranscodeAttemptId']
 
         # Commit disposition on the attempt.
-        Disposition = 'Replace' if ForceDisposition == 'Replace' else 'Discard'
+        Disposition = 'Replace' if ForceDisposition == 'Replace' else 'Reject'
         Reason = 'OperatorForcedReplace' if ForceDisposition == 'Replace' else 'OperatorDiscarded'
         Db.ExecuteNonQuery(
             """
@@ -1113,7 +1113,7 @@ def OverrideQualityTest():
                 "Detail": Result if isinstance(Result, dict) else None,
             }), 200
 
-        # Discard: drop the inprogress file + TFP row.
+        # Reject: drop the inprogress file + TFP row.
         TfpRows = Db.ExecuteQuery(
             "SELECT Id, OutputStorageRootId, OutputRelativePath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
             (AttemptId,),

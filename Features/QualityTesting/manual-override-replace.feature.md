@@ -4,7 +4,7 @@
 
 ## What It Does
 
-Adds an operator-driven path to replace a transcoded file whose `Disposition='Requeue'` (or `'NoReplace'`) decision the user wants to override. The action transitions the attempt to `Disposition='Replace'` with `DispositionReason='manual-override: <reason>'`, records who/when/why on the attempt, and runs the same `FileReplacementBusinessService.ProcessFileReplacement` path that an auto-approved attempt would.
+Adds an operator-driven path to replace a transcoded file whose `Disposition='Requeue'` (or `'Reject'`) decision the user wants to override. The action transitions the attempt to `Disposition='Replace'` with `DispositionReason='manual-override: <reason>'`, records who/when/why on the attempt, and runs the same `FileReplacementBusinessService.ProcessFileReplacement` path that an auto-approved attempt would.
 
 Every override is recorded in a new `ManualOverrideEvents` audit table so trending statistics ("we're force-overriding 30% of Sister Wives attempts -- the VMAF gate is mis-calibrated for that show") are queryable without log grep.
 
@@ -16,7 +16,7 @@ Without trend statistics, repeated overrides become a tribal-knowledge problem -
 
 ## Surface
 
-UI button on the `/VmafCompare` page (and any attempt-detail surface that shows VMAF/disposition) -- visible only when `Disposition IN ('Requeue','NoReplace')` and the staged output still exists on disk. Button label: "Replace anyway (override)". Click opens a modal that requires a free-text reason (>=10 chars) before submission.
+UI button on the `/VmafCompare` page (and any attempt-detail surface that shows VMAF/disposition) -- visible only when `Disposition IN ('Requeue','Reject')` and the staged output still exists on disk. Button label: "Replace anyway (override)". Click opens a modal that requires a free-text reason (>=10 chars) before submission.
 
 API endpoint: `POST /api/QualityTest/OverrideReplace` with body `{TranscodeAttemptId, Reason}`. Returns `{Success, NewDisposition, ReplacementResult}`.
 
@@ -26,9 +26,9 @@ Stats surface: `/Activity` page gains an "Override trends" panel showing count-p
 
 1. `ManualOverrideEvents` table exists with columns `(Id, TranscodeAttemptId, MediaFileId, OldDisposition, NewDisposition, Reason, ReasonCategory, OverriddenBy, OverriddenAt)`. `\d ManualOverrideEvents` shows the columns; FK on `TranscodeAttemptId` references `TranscodeAttempts(Id)`.
 
-2. `POST /api/QualityTest/OverrideReplace` with a valid attempt id whose current `Disposition IN ('Requeue','NoReplace','Reject')` returns `Success=true`, sets `TranscodeAttempts.Disposition='Replace'`, sets `DispositionReason` to `'manual-override: <truncated reason>'`, and creates one `ManualOverrideEvents` row. Verifiable: integration test invokes the endpoint, queries both tables, asserts the columns updated and a row appeared.
+2. `POST /api/QualityTest/OverrideReplace` with a valid attempt id whose current `Disposition IN ('Requeue','Reject','Reject')` returns `Success=true`, sets `TranscodeAttempts.Disposition='Replace'`, sets `DispositionReason` to `'manual-override: <truncated reason>'`, and creates one `ManualOverrideEvents` row. Verifiable: integration test invokes the endpoint, queries both tables, asserts the columns updated and a row appeared.
 
-3. Same endpoint refuses (HTTP 400, `Success=false`, descriptive Message) when the attempt's current `Disposition` is `Replace`, `Discard`, or NULL. No DB state changes. Verifiable: integration test invokes against each forbidden state and asserts no `ManualOverrideEvents` row was created.
+3. Same endpoint refuses (HTTP 400, `Success=false`, descriptive Message) when the attempt's current `Disposition` is `Replace` or NULL. No DB state changes. Verifiable: integration test invokes against each forbidden state and asserts no `ManualOverrideEvents` row was created.
 
 4. Same endpoint refuses (HTTP 400) when `Reason` is missing or has fewer than 10 characters. No DB state changes. Verifiable: integration test posts an empty and a 5-char reason and asserts rejection.
 

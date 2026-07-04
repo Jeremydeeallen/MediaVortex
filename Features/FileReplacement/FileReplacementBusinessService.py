@@ -230,7 +230,7 @@ class FileReplacementBusinessService:
                     f"Defense-in-depth: refusing to replace because "
                     f"NewSize ({transcode_attempt.NewSizeBytes:,}) >= "
                     f"OldSize ({EffectiveOldBytes:,}). "
-                    f"This case should have been routed to Disposition='Discard' "
+                    f"This case should have been routed to Disposition='Reject' "
                     f"upstream -- log a bug if it reaches here."
                 )
                 LoggingService.LogWarning(errorMsg, "FileReplacementBusinessService", "ProcessFileReplacement")

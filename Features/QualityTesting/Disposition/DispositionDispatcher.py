@@ -11,14 +11,14 @@ from Features.QualityTesting.Models.DispositionResult import DispositionResult
 class DispositionDispatcher:
     """Orchestrates ST7 disposition: read attempt + gate config, delegate to Decider, write outcome, cleanup TFP (replaces PostTranscodeDispositionService.DecidePostTranscodeDisposition)."""
 
-    TERMINAL_DISPOSITIONS = ('Reject', 'NoReplace', 'Requeue', 'Discard')
-    VALID_DISPOSITIONS = ('Pending', 'Replace', 'Reject', 'NoReplace', 'Requeue', 'Discard')
+    TERMINAL_DISPOSITIONS = ('Reject', 'Requeue')
+    VALID_DISPOSITIONS = ('Pending', 'Replace', 'Reject', 'Requeue')
 
     # directive: transcode-flow-canonical | # see transcode.ST7
     def __init__(self, Decider, GateConfigRepository, AttemptCleanupService, DatabaseService,
                  RetranscodeDecider=None, AdjustmentRegistry=None, RetryBudgetService=None,
-                 RequeueScheduler=None):
-        """Inject core dependencies plus optional Phase-2 strategies + Requeue scheduler (BUG-0079)."""
+                 RequeueScheduler=None, RetainInprogressPolicy=None):
+        """Inject core dependencies plus optional Phase-2 strategies, Requeue scheduler (BUG-0079), and retain-inprogress policy."""
         self.Decider = Decider
         self.GateConfigRepository = GateConfigRepository
         self.AttemptCleanupService = AttemptCleanupService
@@ -27,6 +27,8 @@ class DispositionDispatcher:
         self.AdjustmentRegistry = AdjustmentRegistry
         self.RetryBudgetService = RetryBudgetService
         self.RequeueScheduler = RequeueScheduler
+        from Features.QualityTesting.Disposition.RetainInprogressPolicy import RetainInprogressPolicy as _DefaultPolicy
+        self.RetainPolicy = RetainInprogressPolicy or _DefaultPolicy()
 
     # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
     def Dispatch(self, TranscodeAttemptId: int) -> DispositionResult:
@@ -34,7 +36,7 @@ class DispositionDispatcher:
         try:
             Row = self._ReadAttemptRow(TranscodeAttemptId)
             if Row is None:
-                return DispositionResult(Disposition='Discard', Reason='TranscodeFailed',
+                return DispositionResult(Disposition='Reject', Reason='TranscodeFailed',
                                          AuditPayload={'error': 'attempt_not_found'})
 
             Cached = self._CheckCachedDisposition(Row)
@@ -55,10 +57,10 @@ class DispositionDispatcher:
             GateInput = self._BuildGateInput(GateConfig)
 
             Outcome = self.Decider.Decide(Attempt, GateInput)
-            self._LogAdvisoryBudget(Outcome, Row, TranscodeAttemptId)
+            Outcome = self._EnforceRetryBudget(Outcome, Row, TranscodeAttemptId)
 
             self._CommitDisposition(TranscodeAttemptId, Outcome.Action, Outcome.Reason)
-            self._MaybeCleanupTfp(TranscodeAttemptId, Outcome.Action)
+            self._MaybeCleanupArtifacts(TranscodeAttemptId, Outcome.Action, Outcome.Reason)
             self._MaybeScheduleRequeue(TranscodeAttemptId, Outcome.Action, Row)
 
             AuditPayload = self._BuildAuditPayload(TranscodeAttemptId, Attempt, VmafCapableWorkerOnline, GateConfig)
@@ -104,19 +106,19 @@ class DispositionDispatcher:
             )
         return None
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
+    # directive: transcode-flow-canonical | # see transcode.ST7
     def _TestVariantShortCircuit(self, TranscodeAttemptId: int, Row: dict) -> Optional[DispositionResult]:
-        """Test-variant attempts always disposition as NoReplace/TestMode (source preservation guaranteed)."""
+        """Test-variant attempts always disposition as Reject/TestMode; RetainInprogressPolicy keeps the artifact for comparison."""
         TestVariantSetId = Row.get('TestVariantSetId')
         if TestVariantSetId is None:
             return None
-        self._CommitDisposition(TranscodeAttemptId, 'NoReplace', 'TestMode')
+        self._CommitDisposition(TranscodeAttemptId, 'Reject', 'TestMode')
         LoggingService.LogInfo(
-            f"Disposition for TranscodeAttempt {TranscodeAttemptId}: NoReplace (Reason=TestMode, TestVariantSetId={TestVariantSetId})",
+            f"Disposition for TranscodeAttempt {TranscodeAttemptId}: Reject (Reason=TestMode, TestVariantSetId={TestVariantSetId})",
             "DispositionDispatcher", "_TestVariantShortCircuit",
         )
         return DispositionResult(
-            Disposition='NoReplace',
+            Disposition='Reject',
             Reason='TestMode',
             AuditPayload={'TranscodeAttemptId': TranscodeAttemptId, 'TestVariantSetId': TestVariantSetId, 'shortCircuit': True},
         )
@@ -179,27 +181,35 @@ class DispositionDispatcher:
             'QualityTestEnabled': bool(getattr(GateConfig, 'QualityTestEnabled', True)),
         }
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
-    def _LogAdvisoryBudget(self, Outcome: Disposition, Row: dict, TranscodeAttemptId: int) -> None:
-        """For Requeue dispositions, emit an advisory budget log line (Phase 2 will use this to override Requeue->Discard)."""
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- BUG-0079 cap
+    def _EnforceRetryBudget(self, Outcome: Disposition, Row: dict, TranscodeAttemptId: int) -> Disposition:
+        """Requeue -> Reject/RetryBudgetExhausted when MediaFile.MaxRequeueAttempts already hit. Prevents infinite loops."""
         if Outcome.Action != 'Requeue':
-            return
+            return Outcome
         if self.RetryBudgetService is None:
-            return
+            return Outcome
         MediaFileId = Row.get('MediaFileId')
         if MediaFileId is None:
-            return
+            return Outcome
         try:
             HasBudget = self.RetryBudgetService.HasBudgetRemaining(MediaFileId)
-            LoggingService.LogInfo(
-                f"RetryBudget advisory (TranscodeAttemptId={TranscodeAttemptId}, MediaFileId={MediaFileId}): HasBudgetRemaining={HasBudget}",
-                "DispositionDispatcher", "_LogAdvisoryBudget",
-            )
         except Exception as Ex:
             LoggingService.LogException(
-                "RetryBudget advisory probe failed (non-fatal)",
-                Ex, "DispositionDispatcher", "_LogAdvisoryBudget",
+                "RetryBudget probe failed; leaving Requeue in place",
+                Ex, "DispositionDispatcher", "_EnforceRetryBudget",
             )
+            return Outcome
+        if HasBudget:
+            LoggingService.LogInfo(
+                f"RetryBudget OK (TranscodeAttemptId={TranscodeAttemptId}, MediaFileId={MediaFileId}): Requeue proceeds",
+                "DispositionDispatcher", "_EnforceRetryBudget",
+            )
+            return Outcome
+        LoggingService.LogWarning(
+            f"RetryBudget exhausted (TranscodeAttemptId={TranscodeAttemptId}, MediaFileId={MediaFileId}): overriding Requeue -> Reject/RetryBudgetExhausted",
+            "DispositionDispatcher", "_EnforceRetryBudget",
+        )
+        return Disposition(Action='Reject', Reason='RetryBudgetExhausted')
 
     # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
     def _CommitDisposition(self, TranscodeAttemptId: int, Action: str, Reason: str) -> None:
@@ -222,11 +232,18 @@ class DispositionDispatcher:
                 Ex, "DispositionDispatcher", "_CommitDisposition",
             )
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
-    def _MaybeCleanupTfp(self, TranscodeAttemptId: int, Action: str) -> None:
-        """For terminal dispositions, drop the TFP row via AttemptCleanupService."""
-        if Action in self.TERMINAL_DISPOSITIONS:
-            self.AttemptCleanupService.Cleanup(TranscodeAttemptId)
+    # directive: transcode-flow-canonical | # see transcode.ST7
+    def _MaybeCleanupArtifacts(self, TranscodeAttemptId: int, Action: str, Reason: str) -> None:
+        """For terminal dispositions, drop TFP row via AttemptCleanupService unless the Reason retains inprogress for operator inspection."""
+        if Action not in self.TERMINAL_DISPOSITIONS:
+            return
+        if self.RetainPolicy.ShouldRetain(Reason or ''):
+            LoggingService.LogInfo(
+                f"Retaining inprogress artifact for TranscodeAttempt {TranscodeAttemptId} (Reason={Reason})",
+                "DispositionDispatcher", "_MaybeCleanupArtifacts",
+            )
+            return
+        self.AttemptCleanupService.Cleanup(TranscodeAttemptId)
 
     # directive: transcode-flow-canonical | # see transcode.ST7 -- BUG-0079
     def _MaybeScheduleRequeue(self, TranscodeAttemptId: int, Action: str, Row: dict) -> None:

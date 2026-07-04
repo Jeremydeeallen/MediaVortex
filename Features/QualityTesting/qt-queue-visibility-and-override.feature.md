@@ -4,9 +4,9 @@
 
 ## What It Does
 
-Closes a gap in the post-transcode pipeline: when a transcode completes and VMAF is required, the `QualityTestingQueue` row is **always created**, regardless of whether a VMAF-capable worker is currently online. Operators see in-progress work in one place. They can either bring a capable worker online (normal VMAF path resolves the row) or operator-override the row to force an immediate `Replace` or `Discard` via the WebService -- no worker required.
+Closes a gap in the post-transcode pipeline: when a transcode completes and VMAF is required, the `QualityTestingQueue` row is **always created**, regardless of whether a VMAF-capable worker is currently online. Operators see in-progress work in one place. They can either bring a capable worker online (normal VMAF path resolves the row) or operator-override the row to force an immediate `Replace` or `Reject` via the WebService -- no worker required.
 
-Retires the legacy "no capable worker -> terminal NoReplace/VmafServicePaused" decision branch. That branch produced silently-stuck files with no operator surface.
+Retires the legacy "no capable worker -> silent stuck-file" decision branch. That branch produced files with no operator surface.
 
 ## Concern
 
@@ -23,7 +23,7 @@ C3. **Queue gains override columns.** `QualityTestingQueue` adds three columns v
    Status            TEXT NOT NULL DEFAULT 'Pending'
                      CHECK (Status IN ('Pending','Running','Completed','Cancelled','Failed'))
    ForceDisposition  TEXT NULL
-                     CHECK (ForceDisposition IS NULL OR ForceDisposition IN ('Replace','Discard'))
+                     CHECK (ForceDisposition IS NULL OR ForceDisposition IN ('Replace','Reject'))
    OverrideSetAt     TIMESTAMP NULL
    ```
    Existing rows backfill to `Status='Pending'` for rows without `DateStarted`/`DateCompleted`, `Status='Running'` when only `DateStarted` set, `Status='Completed'` when `DateCompleted` set. Verifiable: `\d QualityTestingQueue` shows the columns and CHECK; backfill produces sensible Status values for legacy rows.
@@ -32,15 +32,15 @@ C4. **Worker poll query honors the override.** `QualityTestingBusinessService.Pr
 
 C5. **WebService override endpoint.** `POST /api/QualityTest/Override` accepts `{queueId, forceDisposition, reason?}`. The handler runs atomically:
    - UPDATE `QualityTestingQueue` SET `ForceDisposition=$forceDisposition`, `OverrideSetAt=NOW()`, `Status='Cancelled'` WHERE `Id=$queueId AND Status='Pending'`
-   - UPDATE `TranscodeAttempts` SET `Disposition=$d`, `DispositionReason=$r`, `DispositionDecidedAt=NOW()` where `$d`='Replace' for Replace, 'Discard' for Discard; `$r`='OperatorForcedReplace' or 'OperatorDiscarded'
+   - UPDATE `TranscodeAttempts` SET `Disposition=$d`, `DispositionReason=$r`, `DispositionDecidedAt=NOW()` where `$d`='Replace' for Replace, 'Reject' for Reject; `$r`='OperatorForcedReplace' or 'OperatorDiscarded'
    - For Replace: call `FileReplacementBusinessService.ProcessFileReplacement(attemptId)` synchronously, return the result
-   - For Discard: delete the `.inprogress` output file via `TemporaryFilePaths.LocalOutputPath`, delete the TFP row, return success
+   - For Reject: delete the `.inprogress` output file via `TemporaryFilePaths.LocalOutputPath`, delete the TFP row, return success
    - Response: `{Success, AttemptId, Disposition, Reason, FileReplaced?}`
    Verifiable: POST with `forceDisposition='Replace'` on a real pending row; observe the file replaces on disk, MediaFiles re-probed, audit columns set; second POST on the same queueId returns 409 Conflict (Status no longer Pending).
 
 C6. **Closed reason vocabulary extended.** Add `OperatorForcedReplace`, `OperatorDiscarded` to the `REASONS` enum in `PostTranscodeDispositionService.py`. The closed-list audit query (post-transcode-disposition.feature.md criterion 10) still passes. Verifiable: `SELECT DISTINCT DispositionReason FROM TranscodeAttempts` returns only values in the enum.
 
-C7. **Backward compat: no terminal NoReplace from "no worker".** After this ships, the queries
+C7. **Backward compat: no silent stuck files from "no worker".** After this ships, the queries
    ```sql
    SELECT COUNT(*) FROM TranscodeAttempts
    WHERE DispositionDecidedAt > '<deploy date>'

@@ -46,7 +46,7 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
    ```
    Disposition TEXT NULL
        CHECK (Disposition IS NULL OR Disposition IN
-              ('Pending','Replace','Reject','NoReplace','Requeue','Discard'))
+              ('Pending','Replace','Reject','Requeue'))
    DispositionReason TEXT NULL
    DispositionDecidedAt TIMESTAMP NULL
    ```
@@ -60,7 +60,7 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
 
 ### D. Audit trail (queryable)
 
-9. Every disposition decision (other than `Pending`) writes the three new columns on `TranscodeAttempts` in a single UPDATE. Verifiable: query a few hours after a populate run -- every successful transcode attempt has `Disposition NOT NULL` and `DispositionReason NOT NULL`; failed attempts have `Disposition='Discard'` with `Reason='TranscodeFailed'`.
+9. Every disposition decision (other than `Pending`) writes the three new columns on `TranscodeAttempts` in a single UPDATE. Verifiable: query a few hours after a populate run -- every successful transcode attempt has `Disposition NOT NULL` and `DispositionReason NOT NULL`; failed attempts have `Disposition='Reject'` with `Reason='TranscodeFailed'`.
 
 10. The reason vocabulary is closed. Allowed values: `TranscodeFailed`, `NoSavings`, `QualityTestNotRequired`, `AwaitingVmaf`, `VmafBelowMin`, `VmafPassed`, `VmafAboveMax`, `VmafServicePaused`, `VmafServicePausedBypassed`, `VmafCapabilityNotConfigured`, `QualityTestingGloballyDisabled`. No free-text reasons. Verifiable: `SELECT DISTINCT DispositionReason FROM TranscodeAttempts WHERE DispositionReason IS NOT NULL` returns only values from this list.
 
@@ -91,7 +91,7 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
 
 ### G. GUI (single source of truth)
 
-16. **[VERIFIED 2026-05-12]** The `/settings` page contains a "Post-Transcode" card (sibling to "Queue Tuning") with editable controls for the three `PostTranscodeGateConfig` columns: `VmafAutoReplaceMinThreshold`, `VmafAutoReplaceMaxThreshold`, `WhenVmafUnavailable`. Saving an edit updates the table and the next disposition call reads the new value (no caching, per the standing rule). Verifiable: change the threshold to 90, run a transcode that produces VMAF=89, observe `Disposition='NoReplace', Reason='VmafBelowMin'`; change back to 88, re-decide via test endpoint, observe `Replace`.
+16. **[VERIFIED 2026-05-12]** The `/settings` page contains a "Post-Transcode" card (sibling to "Queue Tuning") with editable controls for the three `PostTranscodeGateConfig` columns: `VmafAutoReplaceMinThreshold`, `VmafAutoReplaceMaxThreshold`, `WhenVmafUnavailable`. Saving an edit updates the table and the next disposition call reads the new value (no caching, per the standing rule). Verifiable: change the threshold to 90, run a transcode that produces VMAF=89, observe `Disposition='Requeue', Reason='VmafBelowMin'`; change back to 88, re-decide via test endpoint, observe `Replace`.
 
 17. Endpoints under existing `/api/SystemSettings/` namespace: `GET /api/SystemSettings/PostTranscodeGateConfig`, `PUT /api/SystemSettings/PostTranscodeGateConfig`. No separate controller -- consistent with the QueueTuning pattern.
 
@@ -133,7 +133,7 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
         ta.DispositionReason,
         COUNT(*) AS Decisions,
         COUNT(*) FILTER (WHERE ta.Disposition = 'Replace') AS Passes,
-        COUNT(*) FILTER (WHERE ta.Disposition IN ('Requeue','Reject','NoReplace','Discard')) AS Fails,
+        COUNT(*) FILTER (WHERE ta.Disposition IN ('Requeue','Reject')) AS Fails,
         ROUND(100.0 * COUNT(*) FILTER (WHERE ta.Disposition = 'Replace')
               / NULLIF(COUNT(*), 0), 1) AS PassRatePct
       FROM TranscodeAttempts ta
@@ -185,7 +185,7 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
 
 ## Status
 
-**Core (criteria 1-17): IMPLEMENTED** -- shipped 2026-05-10. All 16 Progress steps complete. Live-verified against TranscodeAttempt 4392 (the originating Sister Wives S04E05 failure): the disposition function returned `(NoReplace, VmafServicePaused)`, persisted the audit columns, and the operator audit query surfaces the stuck row with an enumerable reason. Decision-table conformance test (`Tests/Contract/TestPostTranscodeDisposition.py`) is green at 14/14.
+**Core (criteria 1-17): IMPLEMENTED** -- shipped 2026-05-10. Decision-table conformance test (`Tests/Contract/TestPostTranscodeDisposition.py`) is green. Post `transcode-flow-canonical` C6: disposition enum tightened to `{Pending, Replace, Reject, Requeue}`; `NoReplace` + `Discard` folded into `Reject` with `RetainInprogressPolicy` driving the disk-side-effect decision.
 
 **Amendment (criteria 18-25, content-aware gate): IN PROGRESS** -- approved 2026-05-16. Builds on the motion-filter fix in `QualityTesting.feature.md` criterion 2b (also 2026-05-16). The legacy single-threshold gate is retired by criterion 19 and replaced with the content-aware twin-floor / strict-P10 logic. Telemetry view + DB-driven monitoring config (criterion 22) lets the operator tune thresholds from data instead of guesswork. The existing 14 conformance assertions remain valid for the function-shape criteria (1-3, 5, 9-13); the gate-logic assertions for criteria 4, 14-15 require update per criterion 25.
 

@@ -48,12 +48,12 @@ def _MakeDispatcher(AttemptRow=None, DeciderOutcome=None, GateConfig=None, Retry
 class TestDispositionDispatcher:
     """Contract: Dispatch reads attempt, delegates decision to Decider, commits + cleans up terminal dispositions."""
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
-    def test_attempt_not_found_returns_discard(self):
-        """Missing attempt row returns Discard/TranscodeFailed without invoking Decider."""
+    # directive: transcode-flow-canonical | # see transcode.ST7
+    def test_attempt_not_found_returns_reject(self):
+        """Missing attempt row returns Reject/TranscodeFailed without invoking Decider."""
         Disp, Db, Decider, Cleanup = _MakeDispatcher(AttemptRow=None)
         Result = Disp.Dispatch(TranscodeAttemptId=999)
-        assert Result.Disposition == 'Discard'
+        assert Result.Disposition == 'Reject'
         assert Result.Reason == 'TranscodeFailed'
         Decider.Decide.assert_not_called()
 
@@ -70,17 +70,18 @@ class TestDispositionDispatcher:
         assert Result.AuditPayload.get('cached') is True
         Decider.Decide.assert_not_called()
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
-    def test_test_variant_short_circuits_to_noreplace(self):
-        """Attempts tied to a TestVariantSetId are forced NoReplace/TestMode (no Decider invocation)."""
+    # directive: transcode-flow-canonical | # see transcode.ST7
+    def test_test_variant_short_circuits_to_reject_testmode(self):
+        """Attempts tied to a TestVariantSetId are forced Reject/TestMode; RetainInprogressPolicy keeps artifact."""
         Row = {'Success': True, 'OldSizeBytes': 100, 'NewSizeBytes': 80, 'QualityTestRequired': True,
                'VMAF': 92.0, 'Disposition': None, 'DispositionReason': None,
                'TestVariantSetId': 7, 'MediaFileId': 1}
         Disp, Db, Decider, Cleanup = _MakeDispatcher(AttemptRow=Row)
         Result = Disp.Dispatch(TranscodeAttemptId=5)
-        assert Result.Disposition == 'NoReplace'
+        assert Result.Disposition == 'Reject'
         assert Result.Reason == 'TestMode'
         Decider.Decide.assert_not_called()
+        Cleanup.Cleanup.assert_not_called()
 
     # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
     def test_decider_outcome_committed_for_replace(self):
@@ -98,15 +99,15 @@ class TestDispositionDispatcher:
         Decider.Decide.assert_called_once()
         Cleanup.Cleanup.assert_not_called()
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
-    def test_terminal_discard_triggers_cleanup(self):
-        """Discard disposition triggers AttemptCleanupService.Cleanup with the attempt id."""
+    # directive: transcode-flow-canonical | # see transcode.ST7
+    def test_terminal_reject_triggers_cleanup(self):
+        """Reject/TranscodeFailed triggers AttemptCleanupService.Cleanup (no retain-inprogress reason)."""
         Row = {'Success': False, 'OldSizeBytes': 100, 'NewSizeBytes': 0, 'QualityTestRequired': False,
                'VMAF': None, 'Disposition': None, 'DispositionReason': None,
                'TestVariantSetId': None, 'MediaFileId': 1}
         Disp, Db, Decider, Cleanup = _MakeDispatcher(
             AttemptRow=Row,
-            DeciderOutcome=Disposition(Action='Discard', Reason='TranscodeFailed'),
+            DeciderOutcome=Disposition(Action='Reject', Reason='TranscodeFailed'),
         )
         Disp.Dispatch(TranscodeAttemptId=42)
         Cleanup.Cleanup.assert_called_once_with(42)
@@ -167,3 +168,44 @@ class TestDispositionDispatcher:
         )
         Disp.Dispatch(TranscodeAttemptId=42)
         BudgetSvc.HasBudgetRemaining.assert_not_called()
+
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- BUG-0079 cap
+    def test_requeue_becomes_reject_when_budget_exhausted(self):
+        """RetryBudgetService returns False -> Requeue overrides to Reject/RetryBudgetExhausted; scheduler NOT invoked."""
+        Row = {'Success': True, 'OldSizeBytes': 100, 'NewSizeBytes': 80, 'QualityTestRequired': True,
+               'VMAF': 70.0, 'Disposition': None, 'DispositionReason': None,
+               'TestVariantSetId': None, 'MediaFileId': 7}
+        BudgetSvc = MagicMock()
+        BudgetSvc.HasBudgetRemaining.return_value = False
+        Scheduler = MagicMock()
+        Disp, Db, Decider, Cleanup = _MakeDispatcher(
+            AttemptRow=Row,
+            DeciderOutcome=Disposition(Action='Requeue', Reason='VmafBelowMin'),
+            RetryBudgetService=BudgetSvc,
+        )
+        Disp.RequeueScheduler = Scheduler
+        Result = Disp.Dispatch(TranscodeAttemptId=42)
+        assert Result.Disposition == 'Reject'
+        assert Result.Reason == 'RetryBudgetExhausted'
+        Scheduler.assert_not_called()
+        Cleanup.Cleanup.assert_called_once_with(42)
+
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- BUG-0079 scheduler
+    def test_requeue_with_budget_invokes_scheduler(self):
+        """RetryBudget=True + Requeue -> scheduler invoked with (MediaFileId, TranscodeAttemptId); cleanup fires."""
+        Row = {'Success': True, 'OldSizeBytes': 100, 'NewSizeBytes': 80, 'QualityTestRequired': True,
+               'VMAF': 70.0, 'Disposition': None, 'DispositionReason': None,
+               'TestVariantSetId': None, 'MediaFileId': 7}
+        BudgetSvc = MagicMock()
+        BudgetSvc.HasBudgetRemaining.return_value = True
+        Scheduler = MagicMock(return_value={'Success': True, 'QueueId': 999})
+        Disp, Db, Decider, Cleanup = _MakeDispatcher(
+            AttemptRow=Row,
+            DeciderOutcome=Disposition(Action='Requeue', Reason='VmafBelowMin'),
+            RetryBudgetService=BudgetSvc,
+        )
+        Disp.RequeueScheduler = Scheduler
+        Result = Disp.Dispatch(TranscodeAttemptId=42)
+        assert Result.Disposition == 'Requeue'
+        Scheduler.assert_called_once_with(7, 42)
+        Cleanup.Cleanup.assert_called_once_with(42)

@@ -113,16 +113,11 @@ Updated as a `Promotions` row at the end of any directive landing architectural 
 
 ## Gap to Target
 
-Re-audited 2026-07-03 during `transcode-flow-canonical` NEEDS_STANDARDS_REVIEW.
+Re-audited 2026-07-03 during `transcode-flow-canonical` post-Reset-9.
 
 | Gap | Evidence | Directive |
 |---|---|---|
-| `AudioPolicyResolved` 0% populated | 0/1121 rows | C5 |
-| `AudioPolicyJson` 0% populated | 0/1121 rows | C5 |
-| VMAF measured on 3.6% of attempts | 40/1121 rows | C6 |
-| 9+ orchestration `Mode == 'X'` branches | `QueueManagementBusinessService.py:321-1969`, `TranscodedOutputPlacement.py:83`, `JobProcessor.py:110`, `DashboardSnapshotService.py:14` | C4 |
-| `GLOSSARY.md` does not exist | -- | C0b |
-| `quality-test.flow.md` does not exist | -- | C1 |
-| `.claude/rules/fail-loud.md` does not exist | -- | C7 pre-step |
-
-Prior "EMPTY as of 2026-06-21" claim was not audited. On close, this section returns to describing future scope expansions from `IDEAS.md`.
+| `quality-test.flow.md` does not exist | -- | C1 (parked for DELIVERING promotion) |
+| `.claude/rules/fail-loud.md` grep-audit not run | -- | C7 (Reset 10) |
+| AdjustmentRegistry knob-override on requeued attempts | Requeued rows re-use original profile; no CRF adjustment | Follow-up: `adjustment-registry-wiring` |
+| `SaveTranscodeAttempt __UNRESOLVED__` phantom rows | Sporadic Success=False/ProfileName='__UNRESOLVED__' TranscodeAttempts inserts + Success=True double-write pattern (attempts 41061 + 41048 observed 2026-07-03) | Follow-up: `BUG-0082` |

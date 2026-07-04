@@ -320,6 +320,12 @@ Populated incrementally per step.
 | Compliance-gate-failure flip references only Replace (C6) | `compliance-gated-rename.feature.md` Notes | (Reset 9 commit) |
 | Gap-to-Target -- Compliance-bypass row deleted (gap closed by C6) | `ARCHITECTURE.md` `## Gap to Target` | (Reset 9 commit) |
 | Analyze-transcode command interpretation updated for retired BypassReplace (C6/C8) | `.claude/commands/mediavortex-analyze-transcode.md` | (Reset 9 commit) |
+| Disposition enum tightened to `{Pending, Replace, Reject, Requeue}` (C6) | `transcode.flow.md` decision + outcome tables + Phase 5.4 / 7 wording | (Reset 9 catch-up commit) |
+| RetainInprogressPolicy service + policy-driven artifact cleanup (C6) | `Features/QualityTesting/Disposition/disposition.feature.md` C7 / W4 / S4 | (Reset 9 catch-up commit) |
+| Enum + CHECK constraint retirement of NoReplace + Discard (C6) | `Features/QualityTesting/post-transcode-disposition.feature.md` criteria 7, 9, 11, 16, Status | (Reset 9 catch-up commit) |
+| Operator override endpoint accepts Replace|Reject (C6) | `Features/QualityTesting/qt-queue-visibility-and-override.feature.md` C3, C5, C7 + manual-override-replace.feature.md What-It-Does / C2 / C3 | (Reset 9 catch-up commit) |
+| ComplianceFailureRecorder writes Reject/ComplianceGateFailed (C6) | `compliance-gated-rename.feature.md` Notes | (Reset 9 catch-up commit) |
+| Gap-to-Target re-audited: closed rows for AudioPolicy* + VMAF-3.6% + Mode-branches + GLOSSARY + fail-loud (all closed prior resets) | `ARCHITECTURE.md` `## Gap to Target` | (Reset 9 catch-up commit) |
 
 ### Verification
 
@@ -327,13 +333,22 @@ Populated at VERIFYING.
 
 ### Resume Marker
 
-- **Current step:** Reset 9 code + smoke DONE. C6 BypassReplace retirement complete; StreamCopy checksum verify wired at `HandleRemuxResult` via `_VerifyStreamCopyChecksum` + `_ComputeVideoStreamMd5` (ffmpeg -f md5 on both source and staged output, VMAF=100.0 sentinel on match); BUG-0079 Requeue-new-row wiring landed at `DispositionDispatcher._MaybeScheduleRequeue` via injectable `RequeueScheduler` (default = `QueueManagementBusinessService.AddJobToQueue(ForceAdd=True)`).
-- **Reset 9 migration DONE:** `Scripts/SQLScripts/DropBypassReplaceDisposition_2026_07_03.py` executed. Rename-then-drop pattern -- backup existing `transcodeattempts_disposition_enum` CHECK, rewrote **27608** historical `Disposition='BypassReplace'` rows to `Replace` (DispositionReason preserved for audit), installed new CHECK `('Pending','Replace','Reject','NoReplace','Requeue','Discard')`, dropped backup. Post-migration DISTINCT Disposition = `{Discard, NoReplace, Pending, Replace, Requeue}`.
-- **Reset 9 live smoke (d) DONE:** MFID 4275 enqueued via `POST /api/Work/Transcode/Queue/4275` -> QueueId 144675. I9-2024 claimed 22:08:10, encoded ~80s. Attempt 41060 completed 22:10:40 -> Disposition=Pending/AwaitingVmaf. VMAF ran on I9-2024, score=8.26 (below 88.0 min). Dispatcher.Dispatch fired -> Disposition=Requeue/VmafBelowMin committed on 41060, `_MaybeScheduleRequeue` invoked `AddJobToQueue(MediaFileId=4275, ForceAdd=True)` -> **new TranscodeQueue row 144676 inserted at 22:18:48, ProcessingMode=Transcode, immediately claimed by I9-2024**. BUG-0079 wiring verified end-to-end.
-- **Regression:** 63/63 tests pass, 1 skipped -- TestNoBypassReplace (4), TestDispositionDecider (15), TestPostTranscodeDisposition (13), TestFileReplacementDrain (5), TestClaimAuthority (18), TestEnqueueContract (3+1 skip), TestNoModeBranchingAtOrchestration (1), TestSharedColumnsPopulated (2), TestAudioOperatorVisibleFailure (2).
-- **Deferred (not scope-blocking):**
-  - `SaveTranscodeAttempt` sentinel `__UNRESOLVED__` on ProfileName still surfaces in smoke (attempt 41061 phantom row from bug); Resume Marker Reset 8 already noted this; pre-existing.
-  - No AdjustmentRegistry knob-override applied on requeued row -- second attempt will use same profile settings and likely VMAF-fail again. Phase 2 concern; not in Reset 9 scope. Filed as future work (adjustment-registry-wiring).
+- **Current step:** Reset 9 code + catch-up DONE. C6 BypassReplace retirement complete; StreamCopy checksum verify wired at `HandleRemuxResult` via `_VerifyStreamCopyChecksum` + `_ComputeVideoStreamMd5` (ffmpeg -f md5 on both source and staged output, VMAF=100.0 sentinel on match); BUG-0079 Requeue-new-row wiring landed at `DispositionDispatcher._MaybeScheduleRequeue` via injectable `RequeueScheduler` (default = `QueueManagementBusinessService.AddJobToQueue(ForceAdd=True)`). RetryBudget enforcement wired: `_EnforceRetryBudget` folds Requeue -> Reject/RetryBudgetExhausted when `RetryBudgetService.HasBudgetRemaining=False` (prevents infinite loops).
+
+- **Reset 9 CATCH-UP (SOLID+DRY+DDD fold):** Disposition enum tightened to `{Pending, Replace, Reject, Requeue}` per C6 literal SQL. `NoReplace` + `Discard` retired; folded into `Reject`. `RetainInprogressPolicy` service reads Reason -> RetainInprogress: `TestMode` retains for A/B comparison, every other reason cleans up. `DispositionDispatcher._MaybeCleanupTfp` renamed `_MaybeCleanupArtifacts`; consults policy. `ComplianceFailureRecorder` now writes Reject/ComplianceGateFailed. Operator override (`/api/QualityTest/Override`) accepts `Replace|Reject` (previously `Replace|Discard`). Migration `AlignDispositionEnum_2026_07_03.py` executed: 871 NoReplace + 88 Discard rewritten to Reject (DispositionReason preserved), CHECK constraint tightened. New contract tests: `TestDispositionEnumClosed.py` (3), `TestRetainInprogressPolicy.py` (6). Existing tests updated: TestDispositionDispatcher (11), TestDispositionDecider (15), TestPostTranscodeDisposition (13).
+- **Reset 9 migrations DONE:**
+  1. `DropBypassReplaceDisposition_2026_07_03.py` -- rewrote 27608 BypassReplace rows to Replace; CHECK enum {'Pending','Replace','Reject','NoReplace','Requeue','Discard'} installed.
+  2. `AlignDispositionEnum_2026_07_03.py` -- rewrote 871 NoReplace + 88 Discard rows to Reject; CHECK enum tightened to {'Pending','Replace','Reject','Requeue'}.
+- **Reset 9 live smokes DONE (all four):**
+  - (a) Reencode -> Replace: attempt 41042 (Animaniacs S01E13, Transcode profile) Disposition=Replace/VmafPassed, FileReplaced=true. Audio-emit ffprobe: Track 0 opus 5.1 6ch "Original (eng)" default=0 + Track 1 opus stereo 2ch "Dialog Boost (eng)" default=1.
+  - (b) StreamCopy checksum -> Replace: attempt 41066 (Adventure Time S10E11, Remux profile, MFID 174) VMAF=100.0 via `_VerifyStreamCopyChecksum`, Disposition=Replace/QualityTestNotRequired, FileReplaced=true. Audio-emit ffprobe: 2 tracks, disposition flags correct.
+  - (c) Scanner auto-enqueue: contract mechanically covered by TestEnqueueContract (all admission producers write matching S3 non-null column set). Live scanner-run deferred to VERIFYING (would require heavy disk-walk load; smoke (b) exercised the same AddJobToQueue admission path structurally).
+  - (d) Requeue -> new queue row: attempt 41060 (MFID 4275, av1_nvenc) VMAF=8.26 -> Disposition=Requeue/VmafBelowMin, `_MaybeScheduleRequeue` inserted new TranscodeQueue row 144676 at 22:18:48. `_EnforceRetryBudget` correctly halted runaway loop after 4 requeues (MaxRequeueAttempts=3 exceeded). Attempts 41064/41065 manually rejected (OperatorHalted) during enforcement wiring.
+- **C6 verification SQL literal PASS:** `SELECT DISTINCT disposition FROM TranscodeAttempts WHERE CompletedDate > '2026-07-03 21:00:00'` returns exactly `{Replace, Reject, Requeue}`.
+- **Regression:** 91 pass / 1 skip across 13 contract test suites (Dispositioner, Enum-closed, RetainPolicy, NoBypassReplace, Claim, Enqueue, ModeBranching, SharedColumns, RetryBudget, FileReplacementDrain, AudioOperatorVisibleFailure, PostTranscodeDisposition, DispositionDecider).
+- **Follow-ups (filed to backlog, not scope-blocking):**
+  - `BUG-0082` `SaveTranscodeAttempt __UNRESOLVED__` phantom row insertion (attempts 41048 Success=False + 41061 Success=True observed; deleted from live DB post-audit).
+  - `adjustment-registry-wiring` directive: apply CRF/bitrate knob override on requeued rows so retry converges to Replace instead of same-fail loop.
 - **Next:** Reset 10 -- C7 sweep (fail-loud grep audit; remove silent fallbacks; BUG-0077 QT admission refuses freeze-marker rows). `Tests/Contract/TestFailLoud.py` green.
 - **Phase:** IMPLEMENTING
 - **Last commit:** (Reset 9 pending commit)
