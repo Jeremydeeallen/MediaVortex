@@ -50,10 +50,14 @@ class PostTranscodeGateConfigRepository(BaseRepository):
             )
             return PostTranscodeGateConfigModel()
 
+    # directive: transcode-flow-canonical | # see post-transcode-disposition.C26
     def Update(self, VmafAutoReplaceMinThreshold: Optional[float] = None,
                VmafAutoReplaceMaxThreshold: Optional[float] = None,
                WhenVmafUnavailable: Optional[str] = None,
-               QualityTestEnabled: Optional[bool] = None) -> bool:
+               QualityTestEnabled: Optional[bool] = None,
+               MinConfidenceSampleCount: Optional[int] = None,
+               MinConfidencePassRate: Optional[float] = None,
+               SigmaMargin: Optional[float] = None) -> bool:
         try:
             Sets = []
             Values = []
@@ -76,6 +80,27 @@ class PostTranscodeGateConfigRepository(BaseRepository):
             if QualityTestEnabled is not None:
                 Sets.append("QualityTestEnabled = %s")
                 Values.append(bool(QualityTestEnabled))
+            if MinConfidenceSampleCount is not None:
+                Count = int(MinConfidenceSampleCount)
+                if Count < 1:
+                    LoggingService.LogError(f"Update rejected: MinConfidenceSampleCount={Count} must be >= 1", "PostTranscodeGateConfigRepository", "Update")
+                    return False
+                Sets.append("MinConfidenceSampleCount = %s")
+                Values.append(Count)
+            if MinConfidencePassRate is not None:
+                Rate = float(MinConfidencePassRate)
+                if not (0.0 <= Rate <= 1.0):
+                    LoggingService.LogError(f"Update rejected: MinConfidencePassRate={Rate} must be in [0.0,1.0]", "PostTranscodeGateConfigRepository", "Update")
+                    return False
+                Sets.append("MinConfidencePassRate = %s")
+                Values.append(Rate)
+            if SigmaMargin is not None:
+                Sigma = float(SigmaMargin)
+                if Sigma < 0.0:
+                    LoggingService.LogError(f"Update rejected: SigmaMargin={Sigma} must be >= 0.0", "PostTranscodeGateConfigRepository", "Update")
+                    return False
+                Sets.append("SigmaMargin = %s")
+                Values.append(Sigma)
             if not Sets:
                 return True
             Sets.append("LastUpdated = NOW()")

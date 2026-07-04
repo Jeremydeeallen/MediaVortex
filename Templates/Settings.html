@@ -460,17 +460,6 @@
                 <table class="table settings-table">
                     <tbody>
                         <tr>
-                            <th>Run VMAF quality tests
-                                <br><small class="text-muted">Master switch. When OFF, every successful transcode replaces the original without quality testing. Audit reason: <code>QualityTestingGloballyDisabled</code>.</small>
-                            </th>
-                            <td>
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="QualityTestEnabled" role="switch">
-                                    <label class="form-check-label" for="QualityTestEnabled">VMAF quality testing enabled</label>
-                                </div>
-                            </td>
-                        </tr>
-                        <tr>
                             <th>Minimum acceptable VMAF
                                 <br><small class="text-muted">Below this score, the transcode is rejected as too low quality</small>
                             </th>
@@ -502,6 +491,131 @@
                         </tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- =============== SECTION: Transcoding (tier ladder + adequacy + confidence) =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#TranscodingSection">
+                <span><i class="fas fa-sliders-h me-2"></i> Transcoding &mdash; tier ladder, adequacy, VMAF confidence</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="TranscodingSection" class="collapse">
+                <div class="settings-block">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0">Bitrate ladder (VBR TargetKbps by Resolution &times; Tier)</h6>
+                        <div>
+                            <label for="TranscodingContentClass" class="form-label small mb-0 me-1">Content class:</label>
+                            <select id="TranscodingContentClass" class="form-select form-select-sm d-inline-block" style="width:auto;" onchange="RenderTranscodingLadders()">
+                                <option value="live_action">live_action</option>
+                                <option value="animation">animation</option>
+                                <option value="mixed">mixed</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="BitrateLadderContainer" class="mb-3"><em class="text-muted small">Loading&hellip;</em></div>
+
+                    <h6 class="mb-2">ICQ ladder (per-tier IcqQ)</h6>
+                    <div id="IcqLadderContainer" class="mb-3"><em class="text-muted small">Loading&hellip;</em></div>
+
+                    <h6 class="mb-2">Admission adequacy gate</h6>
+                    <table class="table settings-table mb-3">
+                        <tbody>
+                            <tr>
+                                <th>Enable Tier 1 exclusion
+                                    <br><small class="text-muted">When ON, files whose source kbps already sits at or below the Tier 1 target are excluded from re-encode admission.</small>
+                                </th>
+                                <td>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="AdequacyGateEnabled" role="switch">
+                                        <label class="form-check-label" for="AdequacyGateEnabled">Adequacy gate active</label>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>Margin (%)
+                                    <br><small class="text-muted">Boundary = Tier1TargetKbps &times; (1 + margin/100). Higher margin excludes more sources.</small>
+                                </th>
+                                <td><input type="number" step="0.5" id="AdequacyGateMarginPercent" class="form-control form-control-sm" min="0" max="100" style="max-width: 140px;"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h6 class="mb-2">VMAF confidence-skip</h6>
+                    <table class="table settings-table mb-3">
+                        <tbody>
+                            <tr>
+                                <th>Min sample count
+                                    <br><small class="text-muted">Bucket must have this many prior samples before skip may fire.</small>
+                                </th>
+                                <td><input type="number" step="1" id="MinConfidenceSampleCount" class="form-control form-control-sm" min="1" style="max-width: 140px;"></td>
+                            </tr>
+                            <tr>
+                                <th>Min pass rate
+                                    <br><small class="text-muted">Rolling-window pass rate must meet or exceed this fraction (0.0&ndash;1.0).</small>
+                                </th>
+                                <td><input type="number" step="0.01" id="MinConfidencePassRate" class="form-control form-control-sm" min="0" max="1" style="max-width: 140px;"></td>
+                            </tr>
+                            <tr>
+                                <th>Sigma margin
+                                    <br><small class="text-muted">(Mean &minus; SigmaMargin &times; StdDev) must clear VmafAutoReplaceMinThreshold to skip.</small>
+                                </th>
+                                <td><input type="number" step="0.1" id="SigmaMargin" class="form-control form-control-sm" min="0" style="max-width: 140px;"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h6 class="mb-2">Global master switch</h6>
+                    <table class="table settings-table mb-3">
+                        <tbody>
+                            <tr>
+                                <th>Run VMAF quality tests
+                                    <br><small class="text-muted">Master switch. When OFF, every successful transcode replaces the original without quality testing. Audit reason: <code>QualityTestingGloballyDisabled</code>.</small>
+                                </th>
+                                <td>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="QualityTestEnabled" role="switch">
+                                        <label class="form-check-label" for="QualityTestEnabled">VMAF quality testing enabled</label>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="mb-3">
+                        <button class="btn btn-sm btn-primary" onclick="SaveTranscodingSettings()">Save transcoding settings</button>
+                        <small class="text-muted ms-2" id="TranscodingLastSaved"></small>
+                    </div>
+
+                    <h6 class="mb-2">VMAF confidence stats (review)</h6>
+                    <div class="d-flex gap-2 mb-2">
+                        <input type="text" id="ConfidenceStatsFilter" class="form-control form-control-sm" placeholder="Filter by profile name..." style="max-width: 260px;">
+                        <button class="btn btn-sm btn-secondary" onclick="LoadTranscodingSettings()"><i class="fas fa-sync me-1"></i> Reload</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped" id="ConfidenceStatsTable">
+                            <thead>
+                                <tr>
+                                    <th>Profile</th>
+                                    <th>Family</th>
+                                    <th>Tier</th>
+                                    <th>Source codec</th>
+                                    <th>Source res</th>
+                                    <th>BPP bucket</th>
+                                    <th>Class</th>
+                                    <th>N</th>
+                                    <th>Mean</th>
+                                    <th>StdDev</th>
+                                    <th>Pass rate</th>
+                                    <th>Last updated</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ConfidenceStatsBody">
+                                <tr><td colspan="12" class="text-center text-muted small">Loading&hellip;</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -2095,7 +2209,6 @@ function LoadPostTranscodeGateConfig() {
         $('#VmafAutoReplaceMinThreshold').val(R.Config.VmafAutoReplaceMinThreshold);
         $('#VmafAutoReplaceMaxThreshold').val(R.Config.VmafAutoReplaceMaxThreshold);
         $('#WhenVmafUnavailable').val(R.Config.WhenVmafUnavailable);
-        $('#QualityTestEnabled').prop('checked', !!R.Config.QualityTestEnabled);
         if (R.Config.LastUpdated) {
             $('#PostTranscodeLastUpdated').text('Last updated: ' + R.Config.LastUpdated.substring(0, 19).replace('T', ' '));
         }
@@ -2112,8 +2225,7 @@ function SavePostTranscodeGateConfig() {
     var Body = {
         VmafAutoReplaceMinThreshold: Min,
         VmafAutoReplaceMaxThreshold: Max,
-        WhenVmafUnavailable: $('#WhenVmafUnavailable').val(),
-        QualityTestEnabled: $('#QualityTestEnabled').is(':checked')
+        WhenVmafUnavailable: $('#WhenVmafUnavailable').val()
     };
     $.ajax({
         url: '/api/SystemSettings/PostTranscodeGateConfig',
@@ -2124,6 +2236,161 @@ function SavePostTranscodeGateConfig() {
         if (R.Success) {
             alert('Post-transcode gate config saved.');
             LoadPostTranscodeGateConfig();
+        } else {
+            alert('Save failed: ' + (R.Error || 'unknown'));
+        }
+    }).fail(function(X) { alert('Save failed: ' + X.responseText); });
+}
+
+var _TranscodingSettings = { BitrateLadder: [], IcqLadder: [] };
+
+function LoadTranscodingSettings() {
+    var Filter = ($('#ConfidenceStatsFilter').val() || '').trim();
+    var Url = '/api/SystemSettings/Transcoding' + (Filter ? ('?filter=' + encodeURIComponent(Filter)) : '');
+    $.get(Url).done(function(R) {
+        if (!R.Success) {
+            alert('Load failed: ' + (R.Error || 'unknown'));
+            return;
+        }
+        _TranscodingSettings.BitrateLadder = R.BitrateLadder || [];
+        _TranscodingSettings.IcqLadder = R.IcqLadder || [];
+        $('#AdequacyGateEnabled').prop('checked', !!(R.Adequacy && R.Adequacy.Enabled));
+        $('#AdequacyGateMarginPercent').val((R.Adequacy && R.Adequacy.MarginPercent) || 0);
+        $('#MinConfidenceSampleCount').val((R.Confidence && R.Confidence.MinConfidenceSampleCount) || 10);
+        $('#MinConfidencePassRate').val((R.Confidence && R.Confidence.MinConfidencePassRate) || 0.95);
+        $('#SigmaMargin').val((R.Confidence && R.Confidence.SigmaMargin) || 2.0);
+        $('#QualityTestEnabled').prop('checked', !!R.QualityTestEnabled);
+        RenderTranscodingLadders();
+        RenderConfidenceStats(R.ConfidenceStats || []);
+    }).fail(function(X) { alert('Load failed: ' + X.responseText); });
+}
+
+function RenderTranscodingLadders() {
+    var CC = $('#TranscodingContentClass').val() || 'live_action';
+    var BR = (_TranscodingSettings.BitrateLadder || []).filter(function(R) { return R.ContentClass === CC; });
+    var Icq = (_TranscodingSettings.IcqLadder || []).filter(function(R) { return R.ContentClass === CC; });
+
+    var Families = Array.from(new Set(BR.map(function(R) { return R.Family; }))).sort();
+    var BC = $('#BitrateLadderContainer').empty();
+    if (Families.length === 0) {
+        BC.append('<em class="text-muted small">No bitrate ladder rows for ' + CC + '. Backfill via BackfillFullCanaryTierLadder migration.</em>');
+    }
+    Families.forEach(function(F) {
+        var Rows = BR.filter(function(R) { return R.Family === F; }).sort(function(A, B) { return (A.Resolution || '').localeCompare(B.Resolution || ''); });
+        var H = '<div class="mb-2"><strong>' + F + '</strong></div>';
+        H += '<table class="table table-sm table-bordered mb-3"><thead><tr><th>Resolution</th><th>Tier 1</th><th>Tier 2</th><th>Tier 3</th><th>Tier 4</th><th>Tier 5</th></tr></thead><tbody>';
+        Rows.forEach(function(Row) {
+            H += '<tr data-family="' + F + '" data-contentclass="' + CC + '" data-resolution="' + Row.Resolution + '">';
+            H += '<td class="fw-bold">' + Row.Resolution + '</td>';
+            for (var T = 1; T <= 5; T++) {
+                var V = Row['Tier' + T];
+                H += '<td><input type="number" class="form-control form-control-sm bitrate-cell" data-tier="' + T + '" min="1" value="' + (V != null ? V : '') + '" style="max-width: 110px;"></td>';
+            }
+            H += '</tr>';
+        });
+        H += '</tbody></table>';
+        BC.append(H);
+    });
+
+    var IcqFamilies = Array.from(new Set(Icq.map(function(R) { return R.Family; }))).sort();
+    var IC = $('#IcqLadderContainer').empty();
+    if (IcqFamilies.length === 0) {
+        IC.append('<em class="text-muted small">No ICQ ladder rows for ' + CC + '.</em>');
+    }
+    IcqFamilies.forEach(function(F) {
+        var Row = Icq.filter(function(R) { return R.Family === F; })[0] || {};
+        var H = '<div class="mb-2"><strong>' + F + '</strong></div>';
+        H += '<table class="table table-sm table-bordered mb-3"><thead><tr><th>Family</th><th>Tier 1</th><th>Tier 2</th><th>Tier 3</th><th>Tier 4</th><th>Tier 5</th></tr></thead><tbody>';
+        H += '<tr data-family="' + F + '" data-contentclass="' + CC + '">';
+        H += '<td class="fw-bold">' + F + '</td>';
+        for (var T = 1; T <= 5; T++) {
+            var V = Row['Tier' + T];
+            H += '<td><input type="number" class="form-control form-control-sm icq-cell" data-tier="' + T + '" min="1" max="51" value="' + (V != null ? V : '') + '" style="max-width: 110px;"></td>';
+        }
+        H += '</tr>';
+        H += '</tbody></table>';
+        IC.append(H);
+    });
+}
+
+function RenderConfidenceStats(Rows) {
+    var Tbody = $('#ConfidenceStatsBody').empty();
+    if (!Rows.length) {
+        Tbody.append('<tr><td colspan="12" class="text-center text-muted small">No stats yet. Run a few VMAF-completed transcodes to seed.</td></tr>');
+        return;
+    }
+    Rows.forEach(function(R) {
+        var Last = R.LastUpdated ? R.LastUpdated.substring(0, 19).replace('T', ' ') : '';
+        Tbody.append(
+            '<tr>' +
+            '<td>' + (R.ProfileName || '') + '</td>' +
+            '<td>' + (R.Family || '') + '</td>' +
+            '<td>' + (R.QualityTier != null ? R.QualityTier : '') + '</td>' +
+            '<td>' + (R.SourceCodec || '') + '</td>' +
+            '<td>' + (R.SourceResolutionTier || '') + '</td>' +
+            '<td>' + R.BitratePerPixelBucket + '</td>' +
+            '<td>' + (R.ContentClass || '') + '</td>' +
+            '<td>' + R.SampleCount + '</td>' +
+            '<td>' + (R.VmafMean != null ? R.VmafMean.toFixed(2) : '') + '</td>' +
+            '<td>' + (R.VmafStdDev != null ? R.VmafStdDev.toFixed(2) : '') + '</td>' +
+            '<td>' + (R.PassRate != null ? (R.PassRate * 100).toFixed(1) + '%' : '') + '</td>' +
+            '<td>' + Last + '</td>' +
+            '</tr>'
+        );
+    });
+}
+
+function SaveTranscodingSettings() {
+    var BitrateRows = [];
+    $('#BitrateLadderContainer tr[data-family]').each(function() {
+        var Tr = $(this);
+        var Row = {
+            Family: Tr.data('family'),
+            ContentClass: Tr.data('contentclass'),
+            Resolution: Tr.data('resolution')
+        };
+        Tr.find('.bitrate-cell').each(function() {
+            var T = $(this).data('tier');
+            var V = $(this).val();
+            if (V !== '' && V != null) Row['Tier' + T] = parseInt(V, 10);
+        });
+        BitrateRows.push(Row);
+    });
+    var IcqRows = [];
+    $('#IcqLadderContainer tr[data-family]').each(function() {
+        var Tr = $(this);
+        var Row = { Family: Tr.data('family'), ContentClass: Tr.data('contentclass') };
+        Tr.find('.icq-cell').each(function() {
+            var T = $(this).data('tier');
+            var V = $(this).val();
+            if (V !== '' && V != null) Row['Tier' + T] = parseInt(V, 10);
+        });
+        IcqRows.push(Row);
+    });
+    var Body = {
+        BitrateLadder: BitrateRows,
+        IcqLadder: IcqRows,
+        Adequacy: {
+            Enabled: $('#AdequacyGateEnabled').is(':checked'),
+            MarginPercent: parseFloat($('#AdequacyGateMarginPercent').val() || '0')
+        },
+        Confidence: {
+            MinConfidenceSampleCount: parseInt($('#MinConfidenceSampleCount').val() || '10', 10),
+            MinConfidencePassRate: parseFloat($('#MinConfidencePassRate').val() || '0.95'),
+            SigmaMargin: parseFloat($('#SigmaMargin').val() || '2.0')
+        },
+        QualityTestEnabled: $('#QualityTestEnabled').is(':checked')
+    };
+    $.ajax({
+        url: '/api/SystemSettings/Transcoding',
+        method: 'PUT',
+        contentType: 'application/json',
+        data: JSON.stringify(Body)
+    }).done(function(R) {
+        if (R.Success) {
+            var Stamp = new Date().toISOString().substring(0, 19).replace('T', ' ');
+            $('#TranscodingLastSaved').text('Saved ' + Stamp + ' (bitrate cells: ' + (R.Updated ? R.Updated.BitrateCells : '?') + ', icq cells: ' + (R.Updated ? R.Updated.IcqCells : '?') + ')');
+            LoadTranscodingSettings();
         } else {
             alert('Save failed: ' + (R.Error || 'unknown'));
         }
@@ -2168,6 +2435,9 @@ $(function() {
     });
     $('#PostTranscodeSection').on('shown.bs.collapse', function() {
         LoadPostTranscodeGateConfig();
+    });
+    $('#TranscodingSection').on('shown.bs.collapse', function() {
+        LoadTranscodingSettings();
     });
     $('#LocalStagingSection').on('shown.bs.collapse', function() {
         LoadLocalStagingConfig();

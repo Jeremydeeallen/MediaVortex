@@ -420,6 +420,11 @@ Populated incrementally per step.
 | Mode-coverage matrix rewritten to Plan tuples (C17) | `Features/AudioNormalization/audio-normalization.flow.md` `## Mode coverage matrix` | (Reset 10 T5+T6+T15 commit) |
 | Audio no-fallback invariant relocated to `AudioSlot._EmitReencode` (C17/C26) | `Features/AudioNormalization/audio-normalization.feature.md` C14, C26, C36, C37, S3 | (Reset 10 T5+T6+T15 commit) |
 | Strategy table's BuildCommand column rewritten to Plan (C17) | `transcode.flow.md` Stage 6 strategy table | (Reset 10 T5+T6+T15 commit) |
+| GET/PUT `/api/SystemSettings/Transcoding` composite endpoint (C15) | `Features/SystemSettings/SystemSettings.feature.md` HTTP API surface | (Reset 11 commit) |
+| Transcoding card carries QualityTestEnabled master switch; PostTranscodeSection surface trimmed to VMAF thresholds + WhenVmafUnavailable (C15 one-editor rule) | `Features/QualityTesting/post-transcode-disposition.feature.md` C26 | (Reset 11 commit) |
+| AdequacyGate honors SystemSettings `AdequacyGateEnabled` + `AdequacyGateMarginPercent` (C13/C15) | `Features/TranscodeQueue/TranscodeQueue.feature.md` AdequacyGate seam | (Reset 11 commit) |
+| TierLadderRepository new home for (Family, ContentClass, Resolution) x Tier grid queries (C12/C15) | `Features/Profiles/Profiles.feature.md` Files table | (Reset 11 commit) |
+| VmafConfidenceStatsRepository.GetAllForReview surfaces review-panel rows (C14/C15) | `Features/QualityTesting/post-transcode-disposition.feature.md` C14 | (Reset 11 commit) |
 
 ### Verification
 
@@ -504,7 +509,21 @@ Populated at VERIFYING.
       - (g) SubtitleSlot hdmv_pgs_subtitle -> `[]` + WARN log; dvd_subtitle -> `[]` + WARN; mixed PGS+SRT -> mov_text + WARN.
     - **12 paused workers un-paused:** `Status='Online' AND TranscodeEnabled=TRUE` on dot-1..4, larry-1..4, wakko-1..4. All 13 workers Online + Transcode-enabled.
 - **Phase:** IMPLEMENTING
-- **Last commit:** `7bc6439 feat(reset10): tier ladder backfill + BucketKey wire-up + SmartConfidence write-back`
+- **Last commit:** `<pending Reset 11 commit>` (previous: `7bc6439 feat(reset10): tier ladder backfill + BucketKey wire-up + SmartConfidence write-back`)
+- **Reset 11 SHIPPED 2026-07-04 (this session):**
+  - `GET/PUT /api/SystemSettings/Transcoding` composite endpoint added to `SystemSettingsController.py` (6 sub-sections: BitrateLadder + IcqLadder + Adequacy + Confidence + QualityTestEnabled + ConfidenceStats review).
+  - `Features/Profiles/TierLadderRepository.py` CREATED -- `GetBitrateLadder / GetIcqLadder / UpdateBitrateCell / UpdateIcqCell`; grid queries collapse to (Family, ContentClass[, Resolution]) x Tier1..Tier5 shape.
+  - `Features/QualityTesting/PostTranscodeGateConfigRepository.Update` extended -- accepts `MinConfidenceSampleCount / MinConfidencePassRate / SigmaMargin` with range validation.
+  - `Features/QualityTesting/VmafConfidenceStatsRepository.GetAllForReview` NEW -- LEFT JOIN Profiles for the review panel; filter+limit params.
+  - `Features/TranscodeQueue/AdequacyGate.Evaluate` wired to read fresh `SystemSettings.AdequacyGateEnabled` + `AdequacyGateMarginPercent` per call (db-is-authority); OFF -> `GateDisabled`, margin -> effective threshold `Tier1TargetKbps * (1 + margin/100)`.
+  - `Templates/Settings.html` new Transcoding card (sibling to Post-Transcode) with 4-res x 5-tier bitrate grid per Family + per-tier ICQ ladder + adequacy toggle+margin + confidence knobs + global QT toggle + confidence-stats review table. QualityTestEnabled row MOVED out of Post-Transcode card into Transcoding card (one-editor invariant).
+  - `Tests/Contract/TestTranscodingSettingsRoundTrip.py` CREATED -- 11/11 green (GET shape / bitrate-ladder / icq-ladder / adequacy round-trip / confidence knobs round-trip / bad-pass-rate rejected / global-off round-trip / bitrate-cell writes ProfileThresholds / confidence-stats returned / filter narrows / persistence via PostTranscodeGateConfigRepository fresh-read).
+  - Live smokes:
+    - AdequacyGate OFF -> `GateDisabled` on 380 kbps 720p (previously ExcludedCompactSource).
+    - AdequacyGate ON margin=0 -> `ExcludedCompactSource` on 380 kbps 720p (Tier 1 = 400).
+    - AdequacyGate ON margin=25 -> `ExcludedCompactSource` on 480 kbps 720p (effective threshold = 500).
+    - `PostTranscodeGateConfigRepository.Get` fresh-reads `QualityTestEnabled=False` immediately after PUT (mid-flight db-authority verified).
+  - Regression: 34 pass on adjacent suites (AdequacyGate 9 / SmartConfidenceSkip 8 / DispositionDecider 15 / NoLegacyResidue 2).
 - **Follow-ups noted:**
   - Directive C9 `+/-1 LU` LUFS tolerance vs DB `LoudnessTolerance=4.0` mismatch; reconcile at VERIFYING or via doc-only edit before Reset 12.
   - `AudioPolicyAdmissionGate.AdmitOrDefer` can return `PolicyJson=None` (DEFERRED_UNGAINABLE), leaving `TranscodeQueue.AudioPolicyJson` NULL despite S3 contract. Live-DB audit currently skips; will fail if a policy-deferred file lands post-cutover. File as bug at Reset 11.

@@ -12,15 +12,17 @@ class AdequacyDecision:
     Tier1TargetKbps: Optional[int]
 
 
-# directive: transcode-flow-canonical | # see transcode.ST2
+# directive: transcode-flow-canonical | # see transcodequeue.C1
 class AdequacyGate:
 
-    # directive: transcode-flow-canonical | # see transcode.ST2
+    # directive: transcode-flow-canonical | # see transcodequeue.C1
     def __init__(self, Db: Optional[DatabaseService] = None):
         self.Db = Db or DatabaseService()
 
-    # directive: transcode-flow-canonical | # see transcode.ST2
+    # directive: transcode-flow-canonical | # see transcodequeue.C1
     def Evaluate(self, MediaFile) -> AdequacyDecision:
+        if not self._IsEnabled():
+            return self._Emit(MediaFile, 'GateDisabled', Excluded=False, SourceKbps=self._ResolveSourceKbps(MediaFile), Tier1TargetKbps=None)
         Family = self._ResolveFamily(MediaFile)
         SourceRes = getattr(MediaFile, 'ResolutionCategory', None)
         SourceKbps = self._ResolveSourceKbps(MediaFile)
@@ -35,10 +37,36 @@ class AdequacyGate:
         if Tier1TargetKbps is None:
             return self._Emit(MediaFile, f'InsufficientData:NoTier1Reference:{Family}/{ContentClass}/{SourceRes}',
                             Excluded=False, SourceKbps=SourceKbps, Tier1TargetKbps=None)
-        if SourceKbps <= Tier1TargetKbps:
+        MarginPercent = self._MarginPercent()
+        EffectiveThreshold = int(round(Tier1TargetKbps * (1.0 + MarginPercent / 100.0)))
+        if SourceKbps <= EffectiveThreshold:
             return self._Emit(MediaFile, 'ExcludedCompactSource',
                             Excluded=True, SourceKbps=SourceKbps, Tier1TargetKbps=Tier1TargetKbps)
         return self._Emit(MediaFile, 'Admitted', Excluded=False, SourceKbps=SourceKbps, Tier1TargetKbps=Tier1TargetKbps)
+
+    # directive: transcode-flow-canonical | # see transcodequeue.C1
+    def _IsEnabled(self) -> bool:
+        Row = self.Db.ExecuteQuery(
+            "SELECT SettingValue FROM SystemSettings WHERE SettingKey = %s",
+            ('AdequacyGateEnabled',),
+        )
+        if not Row:
+            return True
+        Val = (Row[0].get('settingvalue') or 'true').strip().lower()
+        return Val not in ('false', '0', 'no', 'off')
+
+    # directive: transcode-flow-canonical | # see transcodequeue.C1
+    def _MarginPercent(self) -> float:
+        Row = self.Db.ExecuteQuery(
+            "SELECT SettingValue FROM SystemSettings WHERE SettingKey = %s",
+            ('AdequacyGateMarginPercent',),
+        )
+        if not Row:
+            return 0.0
+        try:
+            return float(Row[0].get('settingvalue') or '0')
+        except (TypeError, ValueError):
+            return 0.0
 
     # directive: transcode-flow-canonical | # see transcode.ST2
     def _ResolveFamily(self, MediaFile) -> Optional[str]:

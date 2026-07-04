@@ -51,6 +51,22 @@ def _ShapeEquals(A: str, B: str) -> bool:
     return NormA == NormB
 
 
+# directive: transcode-flow-canonical | # see systemsettings.C10
+def _CellsToGrid(Cells, ValueKey: str, PerResolution: bool):
+    """Fold flat cell rows into (Family, ContentClass[, Resolution]) rows with Tier1..Tier5 columns."""
+    Grouped = {}
+    for C in Cells:
+        if PerResolution:
+            Key = (C.Family, C.ContentClass, C.Resolution)
+        else:
+            Key = (C.Family, C.ContentClass)
+        Row = Grouped.setdefault(Key, {'Family': C.Family, 'ContentClass': C.ContentClass})
+        if PerResolution:
+            Row['Resolution'] = C.Resolution
+        Row[f'Tier{C.Tier}'] = getattr(C, ValueKey)
+    return list(Grouped.values())
+
+
 # directive: path-schema-migration | # see path.S9
 class SystemSettingsController:
     """Controller for system settings management."""
@@ -415,6 +431,134 @@ class SystemSettingsController:
                 return jsonify({'Success': True, 'Message': 'PostTranscodeGateConfig updated'})
             except Exception as e:
                 LoggingService.LogException("Error updating PostTranscodeGateConfig", e, 'UpdatePostTranscodeGateConfig', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
+        @self.Blueprint.route('/Transcoding', methods=['GET'])
+        # directive: transcode-flow-canonical | # see systemsettings.C10
+        def GetTranscodingSettings():
+            try:
+                from Features.Profiles.TierLadderRepository import TierLadderRepository
+                from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
+                from Features.QualityTesting.VmafConfidenceStatsRepository import VmafConfidenceStatsRepository
+
+                LadderRepo = TierLadderRepository()
+                BitrateCells = LadderRepo.GetBitrateLadder()
+                IcqCells = LadderRepo.GetIcqLadder()
+
+                BitrateLadder = _CellsToGrid(BitrateCells, ValueKey='TargetKbps', PerResolution=True)
+                IcqLadder = _CellsToGrid(IcqCells, ValueKey='IcqQ', PerResolution=False)
+
+                GateCfg = PostTranscodeGateConfigRepository().Get()
+
+                AdequacyEnabledRow = self.Repository.GetSystemSetting('AdequacyGateEnabled')
+                AdequacyMarginRow = self.Repository.GetSystemSetting('AdequacyGateMarginPercent')
+                AdequacyEnabled = True if AdequacyEnabledRow is None else (AdequacyEnabledRow.strip().lower() not in ('false', '0', 'no', 'off'))
+                try:
+                    AdequacyMargin = float(AdequacyMarginRow) if AdequacyMarginRow is not None else 0.0
+                except (TypeError, ValueError):
+                    AdequacyMargin = 0.0
+
+                Filter = request.args.get('filter', '').strip() or None
+                Limit = int(request.args.get('limit', '200'))
+                ReviewRows = VmafConfidenceStatsRepository().GetAllForReview(ProfileNameFilter=Filter, Limit=Limit)
+
+                return jsonify({
+                    'Success': True,
+                    'BitrateLadder': BitrateLadder,
+                    'IcqLadder': IcqLadder,
+                    'Adequacy': {
+                        'Enabled': AdequacyEnabled,
+                        'MarginPercent': AdequacyMargin,
+                    },
+                    'Confidence': {
+                        'MinConfidenceSampleCount': int(GateCfg.MinConfidenceSampleCount),
+                        'MinConfidencePassRate': float(GateCfg.MinConfidencePassRate),
+                        'SigmaMargin': float(GateCfg.SigmaMargin),
+                    },
+                    'QualityTestEnabled': bool(GateCfg.QualityTestEnabled),
+                    'ConfidenceStats': ReviewRows,
+                })
+            except Exception as e:
+                LoggingService.LogException("Error getting Transcoding settings", e, 'GetTranscodingSettings', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
+        @self.Blueprint.route('/Transcoding', methods=['PUT'])
+        # directive: transcode-flow-canonical | # see systemsettings.C10
+        def UpdateTranscodingSettings():
+            try:
+                Data = request.get_json() or {}
+                from Features.Profiles.TierLadderRepository import TierLadderRepository
+                from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
+
+                LadderRepo = TierLadderRepository()
+                Updated = {'BitrateCells': 0, 'IcqCells': 0}
+
+                for Row in (Data.get('BitrateLadder') or []):
+                    Family = Row.get('Family')
+                    CC = Row.get('ContentClass')
+                    Res = Row.get('Resolution')
+                    if not Family or not CC or not Res:
+                        continue
+                    for Tier in range(1, 6):
+                        Key = f'Tier{Tier}'
+                        if Key not in Row or Row[Key] is None:
+                            continue
+                        try:
+                            Kbps = int(Row[Key])
+                        except (TypeError, ValueError):
+                            continue
+                        if Kbps <= 0:
+                            continue
+                        Updated['BitrateCells'] += LadderRepo.UpdateBitrateCell(Family, CC, Res, Tier, Kbps)
+
+                for Row in (Data.get('IcqLadder') or []):
+                    Family = Row.get('Family')
+                    CC = Row.get('ContentClass')
+                    if not Family or not CC:
+                        continue
+                    for Tier in range(1, 6):
+                        Key = f'Tier{Tier}'
+                        if Key not in Row or Row[Key] is None:
+                            continue
+                        try:
+                            Icq = int(Row[Key])
+                        except (TypeError, ValueError):
+                            continue
+                        Updated['IcqCells'] += LadderRepo.UpdateIcqCell(Family, CC, Tier, Icq)
+
+                Adequacy = Data.get('Adequacy') or {}
+                if 'Enabled' in Adequacy:
+                    Val = 'true' if bool(Adequacy['Enabled']) else 'false'
+                    self.Repository.AddOrUpdateSystemSetting('AdequacyGateEnabled', Val,
+                        'Whether AdequacyGate excludes files whose SourceKbps <= Tier1TargetKbps at admission.', 'boolean')
+                if 'MarginPercent' in Adequacy and Adequacy['MarginPercent'] is not None:
+                    try:
+                        Margin = float(Adequacy['MarginPercent'])
+                    except (TypeError, ValueError):
+                        return jsonify({'Success': False, 'Error': f"Adequacy.MarginPercent must be numeric"}), 400
+                    if Margin < 0.0 or Margin > 100.0:
+                        return jsonify({'Success': False, 'Error': "Adequacy.MarginPercent must be in [0.0,100.0]"}), 400
+                    self.Repository.AddOrUpdateSystemSetting('AdequacyGateMarginPercent', str(Margin),
+                        'Percent margin applied to Tier1TargetKbps before AdequacyGate compares to SourceKbps.', 'numeric')
+
+                Confidence = Data.get('Confidence') or {}
+                GateArgs = {}
+                if 'MinConfidenceSampleCount' in Confidence:
+                    GateArgs['MinConfidenceSampleCount'] = Confidence['MinConfidenceSampleCount']
+                if 'MinConfidencePassRate' in Confidence:
+                    GateArgs['MinConfidencePassRate'] = Confidence['MinConfidencePassRate']
+                if 'SigmaMargin' in Confidence:
+                    GateArgs['SigmaMargin'] = Confidence['SigmaMargin']
+                if 'QualityTestEnabled' in Data:
+                    GateArgs['QualityTestEnabled'] = Data['QualityTestEnabled']
+                if GateArgs:
+                    Ok = PostTranscodeGateConfigRepository().Update(**GateArgs)
+                    if not Ok:
+                        return jsonify({'Success': False, 'Error': 'PostTranscodeGateConfig update rejected'}), 400
+
+                return jsonify({'Success': True, 'Message': 'Transcoding settings updated', 'Updated': Updated})
+            except Exception as e:
+                LoggingService.LogException("Error updating Transcoding settings", e, 'UpdateTranscodingSettings', 'SystemSettingsController')
                 return jsonify({'Success': False, 'Error': str(e)}), 500
 
         @self.Blueprint.route('/TestFFmpegPaths', methods=['POST'])

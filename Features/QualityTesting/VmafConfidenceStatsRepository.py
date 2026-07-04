@@ -110,3 +110,40 @@ class VmafConfidenceStatsRepository:
         if Value is None:
             return None
         return float(Value)
+
+    # directive: transcode-flow-canonical | # see transcode.ST7
+    def GetAllForReview(self, ProfileNameFilter: Optional[str] = None, Limit: int = 200) -> List[dict]:
+        Query = (
+            "SELECT vcs.Id, vcs.ProfileId, p.ProfileName, p.Family, p.QualityTier, "
+            "  vcs.SourceCodec, vcs.SourceResolutionTier, vcs.BitratePerPixelBucket, "
+            "  vcs.ContentClass, vcs.SampleCount, vcs.VmafMean, vcs.VmafStdDev, "
+            "  vcs.PassRate, vcs.LastUpdated "
+            "FROM VmafConfidenceStats vcs "
+            "LEFT JOIN Profiles p ON p.Id = vcs.ProfileId "
+        )
+        Params: List = []
+        if ProfileNameFilter:
+            Query += "WHERE p.ProfileName ILIKE %s "
+            Params.append(f"%{ProfileNameFilter}%")
+        Query += "ORDER BY vcs.LastUpdated DESC LIMIT %s"
+        Params.append(int(Limit))
+        Rows = self.Db.ExecuteQuery(Query, tuple(Params))
+        Out = []
+        for R in Rows:
+            Out.append({
+                'Id': int(R.get('id') or 0),
+                'ProfileId': int(R.get('profileid') or 0),
+                'ProfileName': R.get('profilename') or '',
+                'Family': R.get('family') or '',
+                'QualityTier': int(R.get('qualitytier') or 0) if R.get('qualitytier') is not None else None,
+                'SourceCodec': R.get('sourcecodec') or '',
+                'SourceResolutionTier': R.get('sourceresolutiontier') or '',
+                'BitratePerPixelBucket': int(R.get('bitrateperpixelbucket') or 0),
+                'ContentClass': R.get('contentclass') or '',
+                'SampleCount': int(R.get('samplecount') or 0),
+                'VmafMean': self._Float(R.get('vmafmean')),
+                'VmafStdDev': self._Float(R.get('vmafstddev')),
+                'PassRate': self._Float(R.get('passrate')),
+                'LastUpdated': R.get('lastupdated').isoformat() if R.get('lastupdated') else None,
+            })
+        return Out
