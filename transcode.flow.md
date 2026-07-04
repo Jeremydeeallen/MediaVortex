@@ -248,11 +248,11 @@ ST6 has one orchestration body (`Features/TranscodeJob/Worker/JobProcessor.Proce
 
 | Mode | Strategy class | BuildCommand emits | HandleResult marks |
 |---|---|---|---|
-| Transcode | `TranscodeJobStrategy` | Full re-encode argv via `EncodeShapeRegistry.Get('Transcode').Build` | `QualityTestRequired=<config>` |
-| Remux | `RemuxJobStrategy` | `-c:v copy` + audio normalize (loudnorm) + mp4 container | `QualityTestRequired=False` (no VMAF; remux quality is byte-defined) |
-| AudioFix | `AudioFixJobStrategy` | Same as Remux but with audio-policy attestation forced | `QualityTestRequired=False` |
-| SubtitleFix | `SubtitleFixJobStrategy` | Subtitle extraction + stream selection per `Services.FFmpegAnalysisService.SelectPreferredSubtitleStream` | `QualityTestRequired=False` |
-| Quick | `RemuxJobStrategy` (alias) | Same as Remux | `QualityTestRequired=False` |
+| Transcode | `TranscodeJobStrategy` | Full re-encode argv via `CommandComposer.Build` with `Plan(Reencode, Reencode, Preserve, Mp4)` | `QualityTestRequired=<config>` |
+| Remux | `RemuxJobStrategy` | `CommandComposer.Build` with `Plan(Copy, Reencode, Preserve, Mp4)` | `QualityTestRequired=False` (no VMAF; remux quality is byte-defined) |
+| AudioFix | `AudioFixJobStrategy` | Same Plan as Remux; audio-policy attestation forced | `QualityTestRequired=False` |
+| SubtitleFix | `SubtitleFixJobStrategy` | Same Plan as Remux; SubtitleSlot handles per-container subtitle codec + stream selection per `Services.FFmpegAnalysisService.SelectPreferredSubtitleStream` | `QualityTestRequired=False` |
+| Quick | `QuickJobStrategy` | Same Plan as Remux | `QualityTestRequired=False` |
 
 The orchestration shape (ActiveJob create -> Mark Running -> Load MediaFile -> Setup file prep -> BuildCommand -> ExecuteFFmpeg -> Verify output -> `PostEncodeMeasurementService.Probe` -> HandleResult -> Cleanup) is identical for every mode. PostEncode measurement runs universally; per-mode strategies cannot opt out.
 

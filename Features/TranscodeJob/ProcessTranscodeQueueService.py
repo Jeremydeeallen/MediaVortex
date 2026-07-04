@@ -10,16 +10,16 @@ from Core.Models.MediaFileModel import MediaFileModel
 from Core.Models.TranscodeAttemptModel import TranscodeAttemptModel
 from Core.Models.TranscodeFileModel import TranscodeFileModel
 from Repositories.DatabaseManager import DatabaseManager
-from Features.TranscodeJob.Emit.EncodeShapeRegistry import EncodeShapeRegistry
-from Features.TranscodeJob.Emit.TranscodeShape import TranscodeShape
-from Features.TranscodeJob.Emit.RemuxShape import RemuxShape
-from Features.TranscodeJob.Emit.SubtitleFixShape import SubtitleFixShape
+from Features.TranscodeJob.Emit.CommandComposer import CommandComposer
 from Features.TranscodeJob.Emit.ResolutionCalculator import ResolutionCalculator
 from Features.TranscodeJob.Emit.OutputFilenameBuilder import OutputFilenameBuilder
-from Features.TranscodeJob.Emit.CodecParameterAssembler import CodecParameterAssembler
-from Features.TranscodeJob.Emit.AudioCodecArgsBuilder import AudioCodecArgsBuilder
 from Features.TranscodeJob.Emit.VideoFilterBuilder import VideoFilterBuilder
 from Features.TranscodeJob.Emit.MediaProbeAdapter import MediaProbeAdapter
+from Features.TranscodeJob.Emit.Slots.VideoSlot import VideoSlot
+from Features.TranscodeJob.Emit.Slots.AudioSlot import AudioSlot
+from Features.TranscodeJob.Emit.Slots.SubtitleSlot import SubtitleSlot
+from Features.TranscodeJob.Emit.Slots.ContainerSlot import ContainerSlot
+from Features.TranscodeJob.Emit.Plan import PlanFactory
 from Features.TranscodeJob.VideoTranscodingService import VideoTranscodingService
 from Services.QueueManagementService import QueueManagementService
 from Features.QualityTesting.Disposition.DispositionDispatcher import DispositionDispatcher
@@ -118,8 +118,8 @@ class ProcessTranscodeQueueService:
         self.CodecFlagsRepository = CodecFlagsRepositoryInstance or CodecFlagsRepository()
         self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
         self.ActiveJobRepository = ActiveJobRepositoryInstance or ActiveJobRepository()
-        # directive: perfect-solid-transcode-pipeline-phase3 -- compose AFTER FFprobePath resolved
-        self.EncodeShapeRegistry = self._BuildDefaultEncodeShapeRegistry()
+        # directive: transcode-flow-canonical | # see transcode.ST5
+        self.CommandComposer = self._BuildDefaultCommandComposer()
 
         # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S3
         from Features.AudioNormalization.Workers.PostEncodeAudioHandler import PostEncodeAudioHandler
@@ -128,25 +128,19 @@ class ProcessTranscodeQueueService:
             FFprobePath=self.FFprobePath,
         )
 
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C16
-    def _BuildDefaultEncodeShapeRegistry(self) -> EncodeShapeRegistry:
-        """Compose the default EncodeShapeRegistry; Phase 3 lifts this to WorkerCompositionRoot."""
-        Resolution = ResolutionCalculator()
-        Filename = OutputFilenameBuilder()
-        CodecAssembler = CodecParameterAssembler()
-        AudioCodec = AudioCodecArgsBuilder()
-        VideoFilter = VideoFilterBuilder()
+    # directive: transcode-flow-canonical | # see transcode.ST5
+    def _BuildDefaultCommandComposer(self) -> CommandComposer:
         Probe = MediaProbeAdapter(FFprobePath=self.FFprobePath)
-        TranscodeS = TranscodeShape(Resolution, Filename, CodecAssembler, VideoFilter, Probe)
-        RemuxS = RemuxShape(Filename, AudioCodec, Probe)
-        SubtitleS = SubtitleFixShape(Filename, AudioCodec, Probe)
-        return EncodeShapeRegistry({
-            'Transcode': TranscodeS,
-            'Remux': RemuxS,
-            'Quick': RemuxS,
-            'AudioFix': RemuxS,
-            'SubtitleFix': SubtitleS,
-        })
+        return CommandComposer(
+            VideoSlotInstance=VideoSlot(VideoFilterBuilder=VideoFilterBuilder()),
+            AudioSlotInstance=AudioSlot(),
+            SubtitleSlotInstance=SubtitleSlot(),
+            ContainerSlotInstance=ContainerSlot(),
+            ResolutionCalculatorInstance=ResolutionCalculator(),
+            OutputFilenameBuilderInstance=OutputFilenameBuilder(),
+            MediaProbeAdapterInstance=Probe,
+            PlanFactoryInstance=PlanFactory(),
+        )
 
     # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C9
     def _BuildDefaultDispositionDispatcher(self) -> DispositionDispatcher:
@@ -930,12 +924,11 @@ class ProcessTranscodeQueueService:
             return None
 
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
+    # directive: transcode-flow-canonical | # see transcode.ST5
     def BuildTranscodeCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel,
                               TranscodingSettings: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Build the complete transcoding command via EncodeShapeRegistry; admission gate prevents ungainable files reaching here."""
         try:
-            Spec = self.EncodeShapeRegistry.Get(Job.ProcessingMode).Build(MediaFile, Job, TranscodingSettings)
+            Spec = self.CommandComposer.Build(MediaFile, Job, TranscodingSettings)
             if Spec is None:
                 return None
             return {'Command': Spec.Command, 'OutputPath': Spec.OutputPath}

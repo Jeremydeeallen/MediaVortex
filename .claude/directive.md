@@ -415,6 +415,11 @@ Populated incrementally per step.
 | Operator override endpoint accepts Replace|Reject (C6) | `Features/QualityTesting/qt-queue-visibility-and-override.feature.md` C3, C5, C7 + manual-override-replace.feature.md What-It-Does / C2 / C3 | (Reset 9 catch-up commit) |
 | ComplianceFailureRecorder writes Reject/ComplianceGateFailed (C6) | `compliance-gated-rename.feature.md` Notes | (Reset 9 catch-up commit) |
 | Gap-to-Target re-audited: closed rows for AudioPolicy* + VMAF-3.6% + Mode-branches + GLOSSARY + fail-loud (all closed prior resets) | `ARCHITECTURE.md` `## Gap to Target` | (Reset 9 catch-up commit) |
+| CommandComposer + 4-Slot architecture SOT (C17) | `Features/TranscodeJob/Emit/encode-emit.feature.md` What-It-Does + W1-W5 + C1-C12 + S1-S7 + Files table | (Reset 10 T5+T6+T15 commit) |
+| Plan tuple + PlanFactory contract (C17) | `Features/TranscodeJob/Emit/encode-emit.feature.md` C9 | (Reset 10 T5+T6+T15 commit) |
+| Mode-coverage matrix rewritten to Plan tuples (C17) | `Features/AudioNormalization/audio-normalization.flow.md` `## Mode coverage matrix` | (Reset 10 T5+T6+T15 commit) |
+| Audio no-fallback invariant relocated to `AudioSlot._EmitReencode` (C17/C26) | `Features/AudioNormalization/audio-normalization.feature.md` C14, C26, C36, C37, S3 | (Reset 10 T5+T6+T15 commit) |
+| Strategy table's BuildCommand column rewritten to Plan (C17) | `transcode.flow.md` Stage 6 strategy table | (Reset 10 T5+T6+T15 commit) |
 
 ### Verification
 
@@ -468,9 +473,23 @@ Populated at VERIFYING.
     - **Decider C16 global-off restore + C14 SmartConfidenceSkip branch SHIPPED**: Global `QualityTestEnabled=false` -> `Replace/QualityTestingGloballyDisabled` short-circuit (undoes Reset 9 overshoot). `SmartConfidenceSkip` branch fires when SmartConfidenceRepo present + BucketKey provided + `SampleCount >= MinConfidenceSampleCount AND PassRate >= MinConfidencePassRate AND (Mean - Sigma*StdDev) >= VmafAutoReplaceMinThreshold` -> `Replace/QualityTestConfident`. `PostTranscodeGateConfigModel` + `Repository.Get` extended with `MinConfidenceSampleCount / MinConfidencePassRate / SigmaMargin` (default 10 / 0.95 / 2.0). `_BuildGateInput` projects the three knobs. `TestSmartConfidenceSkip.py` 8/8 + `TestDispositionDecider` 15/15 (one existing test rewritten for restored global-off semantics). Wire of BucketKey-construction in `_BuildDeciderInput` deferred to next step (needs source-metadata + BitratePerPixel bucket computation).
     - **TestProfileTierLadder.py CREATED** (12/12 green): schema invariants -- Family/QualityTier/ContentClass columns; TargetKbps/IcqQ columns; CHECK constraints (`profiles_qualitytier_range`, `profiles_contentclass_enum`); UNIQUE (`profiles_profilename_unique`, `profilethresholds_profile_res_unique`, `vmafconfidencestats_bucket_unique`); CANARY families populated; Tier 1 kbps reference present for AdequacyGate; VmafConfidenceStats.SamplesJson column; PostTranscodeGateConfig confidence knobs.
     - Regression: 34 pass (Decider/Dispatcher/SmartSkip suite) + 22 pass (Adequacy/NextTier/Ladder/Confidence) + 21 pass 1 skip (EnqueueContract/ClaimAuthority) + 13 pass (SubtitleSlot). No known regressions.
+  - **Reset 10 T5+T6+T15 CommandComposer collapse SHIPPED 2026-07-04 (this session):**
+    - `Features/TranscodeJob/Emit/Plan.py` CREATED (`Plan` frozen dataclass + `PlanFactory.FromProcessingMode`: Transcode -> `(Reencode, Reencode, Preserve, Mp4)`; Remux / Quick / AudioFix / SubtitleFix -> `(Copy, Reencode, Preserve, Mp4)`).
+    - `Features/TranscodeJob/Emit/Slots/VideoSlot.py` CREATED (Copy variant emits `-map 0:v:0 -c:v copy [-tag:v hvc1]`; Reencode dispatches NVENC-inline / QSV-inline / SVT-AV1 via `SvtAv1EncoderArgsStrategy`; NVENC VBR reads `TargetKbps + MaxBitrateMultiplier`; QSV ICQ reads `IcqQ`).
+    - `Features/TranscodeJob/Emit/Slots/AudioSlot.py` CREATED (Reencode calls `AudioPolicyResolver.GetEffectivePolicy` + `AudioFilterEmitter.EmitTracks`; empty Blocks / missing Policy raises `AudioPolicyUnresolvedError`; returns `AudioEmission(InputArgs, StreamArgs)`).
+    - `Features/TranscodeJob/Emit/Slots/ContainerSlot.py` CREATED (`Mp4` -> `-f mp4 -movflags +faststart`).
+    - `Features/TranscodeJob/Emit/CommandComposer.py` CREATED (composes 4 slots + fixed scaffolding + `_ResolveOutputPath` + `_ResolveScaleFilter`).
+    - `ProcessTranscodeQueueService.EncodeShapeRegistry` REPLACED with `CommandComposer`; `_BuildDefaultCommandComposer` composition-root helper.
+    - 4 stream-copy strategies (Remux / Quick / AudioFix / SubtitleFix) `BuildCommand` rewired to `QueueService.CommandComposer.Build`.
+    - 9 production files DELETED: `EncodeShape.py`, `EncodeShapeRegistry.py`, `TranscodeShape.py`, `RemuxShape.py`, `SubtitleFixShape.py`, `CodecParameterAssembler.py`, `AudioCodecArgsBuilder.py`, `NvencEncoderArgsStrategy.py`, `QsvEncoderArgsStrategy.py`.
+    - 8 legacy test files DELETED (TestEncodeShape / TestEncodeShapeRegistry / TestTranscodeShape / TestRemuxShape / TestSubtitleFixShape / TestCodecParameterAssembler / TestAudioCodecArgsBuilder / TestAudioPolicyUnresolvedRaises).
+    - `Tests/Contract/TestCommandComposer.py` CREATED -- 29/29 green (PlanFactory + VideoSlot + AudioSlot + ContainerSlot + CommandComposer end-to-end).
+    - `Tests/Contract/TestNoLegacyResidue.py` CREATED -- 2/2 green (grep-fence RETIRED_SYMBOLS across production tree + deleted-file assertion).
+    - `TestAudioPipelineNoSilentFallback.py` retargeted from `TranscodeShape` to `AudioSlot._EmitReencode` (AST-scoped).
+    - Doc sweep: `encode-emit.feature.md` rewritten (What-It-Does, 5 Workflows, 12 Success Criteria, 7 Seams, Files table); `audio-normalization.flow.md` mode-coverage + ST3 + S2/S3/S4 seams updated; `audio-normalization.feature.md` C14/C26/C36/C37 + intra-feature S3 seam updated; `transcode.flow.md` Stage 6 strategy table updated; `worker-loop.feature.md` What-It-Does updated; `compliance-gated-rename.feature.md` C7 progress note updated; `TranscodeJob.feature.md` known-gap updated.
+    - Regression: 77/77 green on emit-layer (TestCommandComposer + TestNoLegacyResidue + TestSubtitleSlot + TestJobProcessorRegistry + TestOutputFilenameBuilder + TestResolutionCalculator + TestVideoFilterBuilder + TestCommandSpec). No regressions from collapse.
+    - **Preexisting failing test noted (not scope):** `TestAudioPipelineNoSilentFallback::test_audio_filter_emitter_routes_review_through_disposition_resolver` -- asserts `_BuildReviewFallbackBlock` in `AudioFilterEmitter`; method never landed post `perfect-audio-vertical` close. Predates this session; file as follow-up bug.
   - **Reset 10 backend still open next session:**
-    - T5 + T6 + T15 (full CommandComposer collapse): VideoSlot / AudioSlot / ContainerSlot + delete TranscodeShape / RemuxShape / SubtitleFixShape / EncodeShape / EncodeShapeRegistry / NvencEncoderArgsStrategy / QsvEncoderArgsStrategy. Strategy.BuildCommand delegates to CommandComposer.
-    - T7 TestCommandComposer + TestNoLegacyResidue.
     - T12 ContentClassifier: assign Family + ContentClass + Plan tuple; migrate away from AssignedProfile string.
     - Wire BucketKey construction in Dispatcher._BuildDeciderInput to activate SmartConfidenceSkip end-to-end (needs SourceCodec + ResolutionCategory + BitratePerPixel bucket computed from SystemSettings.BitratePerPixelBoundaries).
     - Remaining smokes (a) compact-source excluded, (b) tier escalation on VMAF-fail, (c) smart-skip after N passes, (d) global-off auto-Replace, (f) StreamCopy Remux subtitle preservation, (g) PGS image-sub drop-with-WARN.

@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 AUDIO_FILTER_EMITTER = os.path.join(REPO_ROOT, 'Features', 'AudioNormalization', 'AudioFilterEmitter.py')
-TRANSCODE_SHAPE = os.path.join(REPO_ROOT, 'Features', 'TranscodeJob', 'Emit', 'TranscodeShape.py')
+AUDIO_SLOT = os.path.join(REPO_ROOT, 'Features', 'TranscodeJob', 'Emit', 'Slots', 'AudioSlot.py')
 
 
 # directive: audio-pipeline-fail-loud
@@ -58,22 +58,32 @@ class TestAudioPipelineNoSilentFallback(unittest.TestCase):
             "_PickDefaultLanguage must consult AudioDispositionResolver.PickDefaultLanguage; no implicit chain.",
         )
 
-    def test_transcode_shape_has_no_literal_c_a_copy_extend(self):
-        Source = _ReadSource(TRANSCODE_SHAPE)
-        BadPattern = re.compile(
-            r"CommandParts\.extend\(\[[^\]]*['\"]-c:a['\"]\s*,\s*['\"]copy['\"]",
-        )
+    def test_audio_slot_reencode_has_no_literal_c_a_copy_fallback(self):
+        Source = _ReadSource(AUDIO_SLOT)
+        Tree = ast.parse(Source)
+        ReencodeBody = None
+        for Node in ast.walk(Tree):
+            if isinstance(Node, ast.FunctionDef) and Node.name == '_EmitReencode':
+                ReencodeBody = ast.unparse(Node)
+                break
+        self.assertIsNotNone(ReencodeBody, "AudioSlot._EmitReencode must exist.")
+        BadPattern = re.compile(r"['\"]-c:a['\"]\s*,\s*['\"]copy['\"]")
         self.assertIsNone(
-            BadPattern.search(Source),
-            "TranscodeShape must not extend CommandParts with a literal ['-c:a', 'copy'] pair; codec must come from AudioCodecPolicy.",
+            BadPattern.search(ReencodeBody),
+            "AudioSlot._EmitReencode must not emit literal '-c:a copy'; the Reencode path must raise AudioPolicyUnresolvedError on missing Policy / empty Blocks.",
         )
 
-    def test_transcode_shape_consumes_codec_policy(self):
-        Source = _ReadSource(TRANSCODE_SHAPE)
+    def test_audio_slot_reencode_raises_on_empty_blocks(self):
+        Source = _ReadSource(AUDIO_SLOT)
         self.assertIn(
-            'self.CodecPolicy.Decide',
+            'AudioPolicyUnresolvedError',
             Source,
-            "TranscodeShape must consult self.CodecPolicy.Decide for the empty-Blocks branch.",
+            "AudioSlot must raise AudioPolicyUnresolvedError for missing Policy / empty Blocks (no silent fallback).",
+        )
+        self.assertIn(
+            'EmitTracksReturnedEmpty',
+            Source,
+            "AudioSlot must raise on the empty-Blocks branch (EmitTracksReturnedEmpty reason).",
         )
 
     def test_audio_filter_emitter_emit_tracks_returns_typed_blocks_or_raises(self):

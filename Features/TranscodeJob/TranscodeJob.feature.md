@@ -39,7 +39,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 
 ## Known Gaps
 
-1. **Missing `Features/Subtitles/` feature doc.** SubtitleFix is a first-class ProcessingMode with its own queue population path (`QueueManagementBusinessService.PopulateQueueForSubtitleFix`), JobProcessor strategy (`Features/TranscodeJob/Worker/Strategies/SubtitleFixJobStrategy.py`), Shape (`Features/TranscodeJob/Emit/SubtitleFixShape.py`), and ffprobe stream-selection (`Services/FFmpegAnalysisService.SelectPreferredSubtitleStream`). No `*.feature.md` claims the contract. Deferred to a future `subtitle-pipeline-promote` directive that would create `Features/Subtitles/subtitle-fix.feature.md` + the corresponding flow doc as Promotions.
+1. **Missing `Features/Subtitles/` feature doc.** SubtitleFix is a first-class ProcessingMode with its own queue population path (`QueueManagementBusinessService.PopulateQueueForSubtitleFix`), JobProcessor strategy (`Features/TranscodeJob/Worker/Strategies/SubtitleFixJobStrategy.py`), argv path (`Features/TranscodeJob/Emit/CommandComposer` + `Slots/SubtitleSlot`), and ffprobe stream-selection (`Services/FFmpegAnalysisService.SelectPreferredSubtitleStream`). No `*.feature.md` claims the contract. Deferred to a future `subtitle-pipeline-promote` directive that would create `Features/Subtitles/subtitle-fix.feature.md` + the corresponding flow doc as Promotions.
 
 2. **Burn-in subtitle codec list triplication.** Three slightly-different definitions of "which subtitle codecs need fixing":
    - `QueueManagementBusinessService.py:2511` -- `{'ass','ssa'}` (narrow)

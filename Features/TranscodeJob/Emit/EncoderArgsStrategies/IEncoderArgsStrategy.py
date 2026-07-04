@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 
 class IEncoderArgsStrategy(ABC):
-    """ABC: per-codec ffmpeg argv emission. CodecParameterAssembler dispatches on Profile.codec."""
+    """ABC: per-codec ffmpeg argv emission for software encoders. VideoSlot delegates to concrete strategy on Codec key."""
 
     @abstractmethod
     def AddCodecParameters(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
