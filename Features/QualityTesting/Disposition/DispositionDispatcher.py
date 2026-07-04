@@ -163,6 +163,9 @@ class DispositionDispatcher:
             'VmafAutoReplaceMaxThreshold': float(GateConfig.VmafAutoReplaceMaxThreshold),
             'WhenVmafUnavailable': GateConfig.WhenVmafUnavailable,
             'QualityTestEnabled': bool(getattr(GateConfig, 'QualityTestEnabled', True)),
+            'MinConfidenceSampleCount': int(getattr(GateConfig, 'MinConfidenceSampleCount', 10)),
+            'MinConfidencePassRate': float(getattr(GateConfig, 'MinConfidencePassRate', 0.95)),
+            'SigmaMargin': float(getattr(GateConfig, 'SigmaMargin', 2.0)),
         }
 
     # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8

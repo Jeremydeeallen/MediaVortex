@@ -29,13 +29,12 @@ class TestPostTranscodeDispositionDecider(unittest.TestCase):
         self.assertEqual(Result.Action, 'Reject')
         self.assertEqual(Result.Reason, 'TranscodeFailed')
 
-    # directive: transcode-flow-canonical | # see transcode.ST7
-    def test_quality_test_globally_disabled_defers_to_pending(self):
-        """GateConfig.QualityTestEnabled is advisory only; VMAF pipeline still gates. See qt-queue-visibility-and-override.C1."""
+    # directive: transcode-flow-canonical | # see transcode.ST7 -- C16 global-off restore
+    def test_global_off_returns_replace_qualitytestinggloballydisabled(self):
         Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 800, 'QualityTestRequired': True, 'VmafScore': None}
         Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate(QualityTestEnabled=False))
-        self.assertEqual(Result.Action, 'Pending')
-        self.assertEqual(Result.Reason, 'AwaitingVmaf')
+        self.assertEqual(Result.Action, 'Replace')
+        self.assertEqual(Result.Reason, 'QualityTestingGloballyDisabled')
 
     # directive: transcode-flow-canonical | # see transcode.ST7
     def test_quality_test_not_required_returns_replace(self):

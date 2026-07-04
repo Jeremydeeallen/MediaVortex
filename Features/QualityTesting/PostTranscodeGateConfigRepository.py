@@ -17,7 +17,9 @@ class PostTranscodeGateConfigRepository(BaseRepository):
             Rows = self.ExecuteQuery(
                 "SELECT Id, VmafAutoReplaceMinThreshold, VmafAutoReplaceMaxThreshold, "
                 "WhenVmafUnavailable, QualityTestEnabled, MaxRequeueAttempts, "
-                "WorkerHeartbeatWindowSec, RetranscodeVmafThreshold, LastUpdated "
+                "WorkerHeartbeatWindowSec, RetranscodeVmafThreshold, "
+                "MinConfidenceSampleCount, MinConfidencePassRate, SigmaMargin, "
+                "LastUpdated "
                 "FROM PostTranscodeGateConfig WHERE Id = 1"
             )
             if not Rows:
@@ -37,6 +39,9 @@ class PostTranscodeGateConfigRepository(BaseRepository):
                 MaxRequeueAttempts=int(R['MaxRequeueAttempts']),
                 WorkerHeartbeatWindowSec=int(R['WorkerHeartbeatWindowSec']),
                 RetranscodeVmafThreshold=int(R['RetranscodeVmafThreshold']),
+                MinConfidenceSampleCount=int(R.get('MinConfidenceSampleCount') or 10),
+                MinConfidencePassRate=float(R.get('MinConfidencePassRate') or 0.95),
+                SigmaMargin=float(R.get('SigmaMargin') or 2.0),
                 LastUpdated=R.get('LastUpdated'),
             )
         except Exception as Ex:

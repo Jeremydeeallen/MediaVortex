@@ -18,4 +18,7 @@ class PostTranscodeGateConfigModel:
     MaxRequeueAttempts: int = 3  # see perfect-solid-transcode-pipeline.C1 / C7
     WorkerHeartbeatWindowSec: int = 90  # see transcode-worker-unification.T25
     RetranscodeVmafThreshold: int = 80  # see transcode-worker-unification.T25
+    MinConfidenceSampleCount: int = 10  # see transcode-flow-canonical.C14 (SmartConfidenceSkip)
+    MinConfidencePassRate: float = 0.95  # see transcode-flow-canonical.C14
+    SigmaMargin: float = 2.0  # see transcode-flow-canonical.C14
     LastUpdated: Optional[datetime] = None
