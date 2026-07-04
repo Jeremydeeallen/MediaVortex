@@ -496,7 +496,7 @@ Populated at VERIFYING.
     - T3 (DeleteNonCanaryProfiles) execution once ContentClassifier reassigns the 38 orphans.
     - Un-pause the other 12 workers once (f) + (g) subtitle smokes pass.
 - **Phase:** IMPLEMENTING
-- **Last commit:** `f679b9f wip(reset10): draft DeleteNonCanaryProfiles migration (survey-only mode)`
+- **Last commit:** `77b8177 feat(emit): C17 CommandComposer + 4-Slot collapse`
 - **Follow-ups noted:**
   - Directive C9 `+/-1 LU` LUFS tolerance vs DB `LoudnessTolerance=4.0` mismatch; reconcile at VERIFYING or via doc-only edit before Reset 12.
   - `AudioPolicyAdmissionGate.AdmitOrDefer` can return `PolicyJson=None` (DEFERRED_UNGAINABLE), leaving `TranscodeQueue.AudioPolicyJson` NULL despite S3 contract. Live-DB audit currently skips; will fail if a policy-deferred file lands post-cutover. File as bug at Reset 11.
