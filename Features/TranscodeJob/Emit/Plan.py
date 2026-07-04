@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from Features.TranscodeJob import ProcessingModeMetadata
+
 
 # directive: transcode-flow-canonical | # see transcode.ST5
 @dataclass(frozen=True)
@@ -15,9 +17,12 @@ class PlanFactory:
 
     # directive: transcode-flow-canonical | # see transcode.ST5
     def FromProcessingMode(self, ProcessingMode: str) -> Plan:
-        Mode = (ProcessingMode or '').strip()
-        if Mode == 'Transcode':
-            return Plan(VideoOp='Reencode', AudioOp='Reencode', SubtitleOp='Preserve', ContainerOp='Mp4')
-        if Mode in ('Remux', 'Quick', 'AudioFix', 'SubtitleFix'):
-            return Plan(VideoOp='Copy', AudioOp='Reencode', SubtitleOp='Preserve', ContainerOp='Mp4')
-        raise ValueError(f"PlanFactory.FromProcessingMode: unknown ProcessingMode={ProcessingMode!r}")
+        Meta = ProcessingModeMetadata.Get((ProcessingMode or '').strip())
+        if Meta is None:
+            raise ValueError(f"PlanFactory.FromProcessingMode: unknown ProcessingMode={ProcessingMode!r}")
+        return Plan(
+            VideoOp=Meta['PlanVideoOp'],
+            AudioOp=Meta['PlanAudioOp'],
+            SubtitleOp=Meta['PlanSubtitleOp'],
+            ContainerOp=Meta['PlanContainerOp'],
+        )

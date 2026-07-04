@@ -4,11 +4,11 @@ from typing import Optional
 
 
 _METADATA = {
-    'Transcode':   {'WorkBucket': 'Transcode',   'WorkBucketFilterSql': "m.WorkBucket = 'Transcode'",            'SupportsFocus': False, 'RequiresProfileGates': True,  'RequiresInterlacedFilter': True,  'RequiresVmaf': True,  'DefaultProfileNameFallback': 'Transcode'},
-    'Remux':       {'WorkBucket': 'Remux',       'WorkBucketFilterSql': "m.WorkBucket = 'Remux'",                'SupportsFocus': False, 'RequiresProfileGates': False, 'RequiresInterlacedFilter': False, 'RequiresVmaf': False, 'DefaultProfileNameFallback': 'Remux'},
-    'AudioFix':    {'WorkBucket': 'AudioFix',    'WorkBucketFilterSql': "m.WorkBucket = 'AudioFix'",             'SupportsFocus': False, 'RequiresProfileGates': False, 'RequiresInterlacedFilter': False, 'RequiresVmaf': False, 'DefaultProfileNameFallback': 'AudioFix'},
-    'SubtitleFix': {'WorkBucket': 'SubtitleFix', 'WorkBucketFilterSql': "m.WorkBucket = 'SubtitleFix'",          'SupportsFocus': False, 'RequiresProfileGates': False, 'RequiresInterlacedFilter': False, 'RequiresVmaf': False, 'DefaultProfileNameFallback': 'SubtitleFix'},
-    'Quick':       {'WorkBucket': None,          'WorkBucketFilterSql': "m.WorkBucket IN ('Remux', 'AudioFix')", 'SupportsFocus': True,  'RequiresProfileGates': False, 'RequiresInterlacedFilter': False, 'RequiresVmaf': False, 'DefaultProfileNameFallback': 'Quick'},
+    'Transcode':   {'WorkBucket': 'Transcode',   'WorkBucketFilterSql': "m.WorkBucket = 'Transcode'",            'SupportsFocus': False, 'RequiresProfileGates': True,  'RequiresInterlacedFilter': True,  'RequiresVmaf': True,  'DefaultProfileNameFallback': 'Transcode',   'PlanVideoOp': 'Reencode', 'PlanAudioOp': 'Reencode', 'PlanSubtitleOp': 'Preserve', 'PlanContainerOp': 'Mp4'},
+    'Remux':       {'WorkBucket': 'Remux',       'WorkBucketFilterSql': "m.WorkBucket = 'Remux'",                'SupportsFocus': False, 'RequiresProfileGates': False, 'RequiresInterlacedFilter': False, 'RequiresVmaf': False, 'DefaultProfileNameFallback': 'Remux',       'PlanVideoOp': 'Copy',     'PlanAudioOp': 'Reencode', 'PlanSubtitleOp': 'Preserve', 'PlanContainerOp': 'Mp4'},
+    'AudioFix':    {'WorkBucket': 'AudioFix',    'WorkBucketFilterSql': "m.WorkBucket = 'AudioFix'",             'SupportsFocus': False, 'RequiresProfileGates': False, 'RequiresInterlacedFilter': False, 'RequiresVmaf': False, 'DefaultProfileNameFallback': 'AudioFix',    'PlanVideoOp': 'Copy',     'PlanAudioOp': 'Reencode', 'PlanSubtitleOp': 'Preserve', 'PlanContainerOp': 'Mp4'},
+    'SubtitleFix': {'WorkBucket': 'SubtitleFix', 'WorkBucketFilterSql': "m.WorkBucket = 'SubtitleFix'",          'SupportsFocus': False, 'RequiresProfileGates': False, 'RequiresInterlacedFilter': False, 'RequiresVmaf': False, 'DefaultProfileNameFallback': 'SubtitleFix', 'PlanVideoOp': 'Copy',     'PlanAudioOp': 'Reencode', 'PlanSubtitleOp': 'Preserve', 'PlanContainerOp': 'Mp4'},
+    'Quick':       {'WorkBucket': None,          'WorkBucketFilterSql': "m.WorkBucket IN ('Remux', 'AudioFix')", 'SupportsFocus': True,  'RequiresProfileGates': False, 'RequiresInterlacedFilter': False, 'RequiresVmaf': False, 'DefaultProfileNameFallback': 'Quick',       'PlanVideoOp': 'Copy',     'PlanAudioOp': 'Reencode', 'PlanSubtitleOp': 'Preserve', 'PlanContainerOp': 'Mp4'},
 }
 
 VALID_MODES = frozenset(_METADATA.keys())
