@@ -164,6 +164,24 @@ Animation-class rows may drop 30% (live-action first per Reset 10 backend; anima
 
 **C16. Restore global `QualityTestEnabled=false -> auto-Replace`.** Reset 9 folded this to `Pending/AwaitingVmaf` per qt-queue-visibility-and-override C7. Per 2026-07-03 operator decision (Q4), restore auto-Replace semantic. `PostTranscodeDispositionDecider.Decide` re-adds branch: `if not GateConfig.QualityTestEnabled: return Disposition(Action='Replace', Reason='QualityTestingGloballyDisabled')`. `qt-queue-visibility-and-override.feature.md` C1 wording tightens: "always enqueue when VMAF required AND QualityTestEnabled=true"; C7 rewritten to acknowledge global-off as legitimate auto-replace. Verification: `Tests/Contract/TestDispositionDecider.py` gains `test_global_off_returns_replace_qualitytestinggloballydisabled`; live smoke: flip `PostTranscodeGateConfig.QualityTestEnabled=false`, enqueue a Transcode job, observe `Disposition=Replace/QualityTestingGloballyDisabled`, restore flag before commit.
 
+**C17. Collapse Emit-layer ProcessingMode branching into a slot-composed CommandComposer + fix subtitle-drop bug (BUG-0083).** Operator 2026-07-04 identified that Reset 7 mode-blind orchestration (C4) stopped at the orchestration layer -- `Features/TranscodeJob/Emit/EncodeShapeRegistry` still keys by `ProcessingMode ('Transcode' | 'Remux' | 'SubtitleFix' | ...)` and dispatches to `TranscodeShape` / `RemuxShape` / `SubtitleFixShape`. Every non-SubtitleFix shape omits `-map 0:s`, silently dropping subtitle streams on every Replace (~27127 files auto-replaced all-time; Hotel Chevalier smoke exposed it). New single composer:
+
+`Features/TranscodeJob/Emit/CommandComposer.Build(Job, MediaFile, Plan) -> ffmpeg argv` composes 4 slots per Plan:
+- `VideoSlot.Emit(Plan.VideoOp, ...)` -- Reencode (NVENC VBR / QSV ICQ per Family) or StreamCopy
+- `AudioSlot.Emit(Plan.AudioOp, ...)` -- 2-track pipeline (Original preserved + Dialog Boost) always; StreamCopy variant when AudioOp='Copy'
+- `SubtitleSlot.Emit(Plan.SubtitleOp, ...)` -- **ALWAYS fires**; container-appropriate codec: MP4 target -> `-map 0:s? -c:s mov_text`; MKV target -> `-map 0:s? -c:s copy`; image-based subs (PGS/DVB) targeted to MP4 -> WARN + drop (needs OCR pass, deferred)
+- `ContainerSlot.Emit(Plan.ContainerOp, ...)` -- container-format change or preserve
+
+`Plan` is the tuple `{VideoOp, AudioOp, SubtitleOp, ContainerOp}` derived from `MediaFile.WorkBucket` + AssignedProfile at admission. ProcessingMode retires at Emit layer: `EncodeShapeRegistry`, `TranscodeShape`, `RemuxShape`, `SubtitleFixShape` DELETED (code + `Features/TranscodeJob/Emit/*Shape*.feature.md` + doc references). `NvencEncoderArgsStrategy` + `QsvEncoderArgsStrategy` collapse into VideoSlot Reencode implementations (Family + RateControlMode data-driven).
+
+Verification:
+- `Tests/Contract/TestCommandComposer.py` CREATE -- covers every Plan combination; asserts SubtitleSlot fires on every path; MP4 target emits mov_text, MKV target emits copy.
+- `Tests/Contract/TestNoLegacyResidue.py` extended -- grep `EncodeShapeRegistry`, `TranscodeShape(`, `RemuxShape(`, `SubtitleFixShape(`, `class.*Shape.*:` under `Features/TranscodeJob/Emit/` = 0 outside CommandComposer/Slot files + tests + migration.
+- Grep `-map 0:s` count in `Features/TranscodeJob/Emit/` >= 1 (present in SubtitleSlot); grep of any shape file returns "not found" (deleted).
+- Live smokes: (a) Reencode with source that has English + French text subs -> emitted `-mv.mp4` retains both subs with `mov_text` codec + language metadata; (b) StreamCopy Remux on mkv source with SRT subs -> emitted `-mv.mp4` retains subs converted to mov_text; (c) Reencode on source with PGS image subs -> emitted `-mv.mp4` has no subs + WARN log naming the dropped codec.
+
+BUG-0083 filed. Un-pause `Workers.TranscodeEnabled=TRUE` gated on C17 live smokes passing.
+
 ## Out of Scope
 
 Every item tagged (a) or (b) per `call-graph-audit.md` Signal 4. Default (a) = behavior preserved + duplication collapsed in-flight.
@@ -221,7 +239,7 @@ Every item tagged (a) or (b) per `call-graph-audit.md` Signal 4. Default (a) = b
 | 8 | C3 + C4 code: collapse claim + orchestration. Route through Strategy. Delete the 9+ mode-branches Signal 2 named. Live smoke (b) web GUI enqueue -> StreamCopy -> Replace. | `TestClaimAuthority` full-green; mode-branch grep = 0; smoke (b) recorded. | **RESET 7** |
 | 9 | C5 code: populate shared columns for every strategy. Extend `PostEncodeMeasurementService` for StreamCopy path. Live smoke (c) scanner auto-enqueue -> Replace. | Shared-columns SQL audit green (100% per column per strategy for new rows); smoke (c) recorded. | **RESET 8** |
 | 10 | C6 code: delete BypassReplace. StreamCopy emits checksum. Fix BUG-0079 (Requeue inserts new queue row). Live smoke (d) Requeue -> new row -> Replace. | `SELECT DISTINCT disposition` returns subset {Replace,Reject,Requeue}; smoke (d) recorded. | **RESET 9** |
-| 11 | C12 + C13 + C14 + C16 backend: Profile tier-ladder schema + migrate + delete non-CANARY profiles + rewrite encoder-args strategies + admission-adequacy gate + smart VMAF sampling + global-off restore. **No-legacy sweep:** delete `SourceBitratePercent` / `MinBitrateKbps` / `MaxBitrateKbps` from Profiles code AND doc references; delete old profile-name literals from tests + scripts; delete legacy `RateControlMode`-branched AdjustmentRegistry code + doc mentions. `TestNoLegacyResidue.py` CREATE. Contract tests + live smokes (compact-source excluded, tier escalation on VMAF-fail terminates, smart-skip after N passes, global-off auto-Replace). | Schema migration executed; TestProfileTierLadder + TestAdequacyGate + TestSmartConfidenceSkip + TestNoLegacyResidue green; four backend smokes recorded; grep of retired symbols in production tree = 0. | **RESET 10** |
+| 11 | C12 + C13 + C14 + C16 + C17 backend: Profile tier-ladder schema + migrate + delete non-CANARY profiles + collapse Emit layer into CommandComposer + 4 slots (VideoSlot/AudioSlot/SubtitleSlot/ContainerSlot) + delete EncodeShapeRegistry + 3 Shape classes + rewrite encoder-args strategies as VideoSlot Reencode variants + admission-adequacy gate + smart VMAF sampling + global-off restore. **No-legacy sweep:** delete `SourceBitratePercent` / `MinBitrateKbps` / `MaxBitrateKbps` from Profiles code AND doc references; delete `TranscodeShape.py` / `RemuxShape.py` / `SubtitleFixShape.py` / `EncodeShape.py` / `EncodeShapeRegistry.py` + doc references + tests referencing them; delete legacy `RateControlMode`-branched AdjustmentRegistry code + doc mentions; delete old profile-name literals from tests + scripts. `TestNoLegacyResidue.py` CREATE. Contract tests + live smokes: (a) compact-source excluded, (b) tier escalation on VMAF-fail terminates, (c) smart-skip after N passes, (d) global-off auto-Replace, (e) Reencode subtitle preservation (text subs -> mov_text), (f) StreamCopy subtitle preservation, (g) image-sub drop-with-WARN. | Schema migration executed; TestProfileTierLadder + TestAdequacyGate + TestSmartConfidenceSkip + TestCommandComposer + TestNoLegacyResidue green; seven backend smokes recorded; grep of retired symbols (SourceBitratePercent, EncodeShapeRegistry, `Shape\(`, MinBitrateKbps, MaxBitrateKbps) in production tree = 0; Workers.TranscodeEnabled un-paused only after subtitle-preservation smokes pass. | **RESET 10** |
 | 12 | C15 GUI: `/settings` Transcoding card wiring bitrate ladder + ICQ ladder + adequacy toggle + VMAF confidence knobs + global QualityTestEnabled + VmafConfidenceStats review. `GET/PUT /api/SystemSettings/Transcoding`. Form-submit round-trip test. Live edit -> next Decider call reflects change. **No-legacy sweep:** delete any deprecated `/settings` field bindings + old form JS + legacy endpoint routes + docs of prior /settings shape. `TestNoLegacyResidue.py` extended with GUI patterns. | UI form saves persist round-trip; live-edit test green; TestNoLegacyResidue green. | **RESET 11** |
 | 13 | C7 sweep: grep audit; remove silent fallbacks. Contract test `TestFailLoud` green. Fix BUG-0077 as instance (freeze -> Success=FALSE). **No-legacy sweep:** delete every `except: pass` / `or 0` / `or ''` / `if X is None: X = ...` pattern the audit surfaces AND their justifying comments; delete `# fail-loud-ok:` markers whose covered patterns were removed; delete doc paragraphs describing silent-fallback tolerances. | `TestFailLoud` + `TestNoLegacyResidue` green. | **RESET 12** |
 | 14 | VERIFYING: run every criterion's verification, record evidence in `### Verification`. Four live smokes documented. Directive size snapshot. | Criteria all IMPLEMENTED with evidence; snapshot recorded. | **RESET 13** |
@@ -293,13 +311,24 @@ Features/TranscodeQueue/QueueManagementBusinessService.py                   -- E
 Scripts/SQLScripts/DropBypassReplaceDisposition_2026_07_XX.py               -- CREATE (migration; retire enum value)
 Tests/Contract/TestNoBypassReplace.py                                       -- CREATE
 
-# Reset 10 -- C12 + C13 + C14 + C16 profile tier ladder + adequacy + smart sampling + global-off restore
+# Reset 10 -- C12 + C13 + C14 + C16 + C17 profile tier ladder + adequacy + smart sampling + global-off restore + Emit slot collapse + subtitle preservation (BUG-0083)
 Scripts/SQLScripts/AlignProfileTierModel_2026_07_XX.py                      -- CREATE (schema: Profiles.Family/QualityTier/ContentClass; ProfileThresholds.TargetKbps/IcqQ; drop SourceBitratePercent/MinBitrateKbps/MaxBitrateKbps; VmafConfidenceStats table; PostTranscodeGateConfig new cols)
 Scripts/SQLScripts/BackfillCanaryTierLadder_2026_07_XX.py                   -- CREATE (populate two families x 4 resolutions x 5 tiers x live-action rows; ProfileThresholds.TargetKbps + IcqQ)
 Scripts/SQLScripts/DeleteNonCanaryProfiles_2026_07_XX.py                    -- CREATE (delete AV1 profiles outside CANARY families; reassign MediaFiles.AssignedProfile via ContentClassifier)
 Features/Profiles/EncoderKnobRepository.py                                  -- EDIT (return TargetKbps + IcqQ; drop dead-column pass-through)
-Features/TranscodeJob/Emit/EncoderArgsStrategies/NvencEncoderArgsStrategy.py -- EDIT (consume TargetKbps directly; no percent math; no clamps)
-Features/TranscodeJob/Emit/EncoderArgsStrategies/QsvEncoderArgsStrategy.py   -- EDIT (consume IcqQ directly)
+Features/TranscodeJob/Emit/CommandComposer.py                              -- CREATE (single Build(Job, MediaFile, Plan) -> ffmpeg argv; composes 4 slots)
+Features/TranscodeJob/Emit/Slots/VideoSlot.py                              -- CREATE (Reencode variants per Family: NvencVbr, QsvIcq; StreamCopy variant)
+Features/TranscodeJob/Emit/Slots/AudioSlot.py                              -- CREATE (2-track Original + DialogBoost; StreamCopy variant)
+Features/TranscodeJob/Emit/Slots/SubtitleSlot.py                           -- CREATE (ALWAYS fires: MP4 target -> `-map 0:s? -c:s mov_text`; MKV target -> `-map 0:s? -c:s copy`; PGS/DVB -> WARN drop; fixes BUG-0083)
+Features/TranscodeJob/Emit/Slots/ContainerSlot.py                          -- CREATE (container-format change/preserve)
+Features/TranscodeJob/Emit/TranscodeShape.py                               -- DELETE (folded into CommandComposer)
+Features/TranscodeJob/Emit/RemuxShape.py                                   -- DELETE
+Features/TranscodeJob/Emit/SubtitleFixShape.py                             -- DELETE
+Features/TranscodeJob/Emit/EncodeShape.py                                  -- DELETE (abstract base retired)
+Features/TranscodeJob/Emit/EncodeShapeRegistry.py                          -- DELETE (mode-branching registry retired)
+Features/TranscodeJob/Emit/EncoderArgsStrategies/NvencEncoderArgsStrategy.py -- DELETE (folded into VideoSlot.NvencVbrImpl)
+Features/TranscodeJob/Emit/EncoderArgsStrategies/QsvEncoderArgsStrategy.py  -- DELETE (folded into VideoSlot.QsvIcqImpl)
+Features/TranscodeJob/Worker/Strategies/*.py                              -- EDIT (BuildCommand delegates to CommandComposer; drops ProcessingMode-keyed Registry lookup)
 Features/TranscodeQueue/AdequacyGate.py                                     -- CREATE (SourceKbps <= Tier1TargetKbps -> exclude; writes MediaFiles.AdequacyDecision)
 Features/TranscodeQueue/QueueManagementBusinessService.py                   -- EDIT (call AdequacyGate at admission; short-circuit when excluded)
 Features/QualityTesting/VmafConfidenceStatsRepository.py                    -- CREATE (bucket read/write; rolling window trim)
@@ -307,11 +336,13 @@ Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.py     -- ED
 Features/QualityTesting/QualityTestingBusinessService.py                   -- EDIT (call VmafConfidenceStatsRepository.RecordResult on VMAF completion)
 Features/TranscodeJob/Adjustments/NextTierAdjustmentCalculator.py          -- CREATE (Profile -> next-tier Profile via UNIQUE tuple; None at ceiling)
 Features/TranscodeJob/Adjustments/AdjustmentRegistry.py                    -- EDIT (single NextTierAdjuster; retire per-RateControlMode branch)
-Features/ContentClassifier/*.py                                            -- EDIT (assign Family + ContentClass columns on classification; use new UNIQUE tuple)
+Features/ContentClassifier/*.py                                            -- EDIT (assign Family + ContentClass + Plan tuple on classification; use new UNIQUE tuple)
 Tests/Contract/TestProfileTierLadder.py                                    -- CREATE
 Tests/Contract/TestAdequacyGate.py                                         -- CREATE
 Tests/Contract/TestSmartConfidenceSkip.py                                  -- CREATE
 Tests/Contract/TestNextTierAdjuster.py                                     -- CREATE
+Tests/Contract/TestCommandComposer.py                                     -- CREATE (all Plan combos; SubtitleSlot always fires; container-appropriate codec; image-sub drop-with-WARN)
+Tests/Contract/TestNoLegacyResidue.py                                     -- CREATE (grep for retired symbols: SourceBitratePercent, EncodeShapeRegistry, TranscodeShape/RemuxShape/SubtitleFixShape/EncodeShape/NvencEncoderArgsStrategy/QsvEncoderArgsStrategy, MinBitrateKbps, MaxBitrateKbps)
 Tests/Contract/TestDispositionDecider.py                                   -- EDIT (add test_global_off_returns_replace_qualitytestinggloballydisabled)
 
 # Reset 11 -- C15 GUI transcoding card
@@ -348,6 +379,8 @@ Persistent seam SOT lives in flow docs (`.claude/rules/seam-verification.md`). D
 | S10 (new) `QualityTestingBusinessService -> VmafConfidenceStatsRepository (write)` | On VMAF completion, worker calls `Repository.RecordResult(bucket, score, passed)` | `RecordResult` updates SampleCount + rolling window + VmafMean/StdDev/PassRate | Next Decider call reads updated stats | `TestSmartConfidenceSkip` roundtrip |
 | S11 (new) `Global QualityTestEnabled short-circuit` | `PostTranscodeDispositionDecider.Decide` reads GateConfig | `GateConfig.QualityTestEnabled=false` -> `Replace/QualityTestingGloballyDisabled` | Restored per Reset 10 C16; overrides all other branches except TranscodeFailed/NoSavings | `TestDispositionDecider.test_global_off_returns_replace_qualitytestinggloballydisabled` |
 | S12 (new) `GUI /settings Transcoding card seam` | `PUT /api/SystemSettings/Transcoding` | JSON body per section (bitrate ladder rows, ICQ ladder rows, adequacy toggle, confidence knobs, global-off, review-panel filter) | Persists to `ProfileThresholds` (TargetKbps/IcqQ) + `PostTranscodeGateConfig` (new cols) + reads `VmafConfidenceStats` for review panel | `TestTranscodingSettingsRoundTrip` |
+| S13 (new) `CommandComposer -> ffmpeg argv` | `Features/TranscodeJob/Emit/CommandComposer.Build(Job, MediaFile, Plan)` composes VideoSlot + AudioSlot + SubtitleSlot + ContainerSlot | Plan tuple `{VideoOp, AudioOp, SubtitleOp, ContainerOp}` -> ffmpeg argv list | Strategy.BuildCommand consumes; no ProcessingMode-keyed Registry lookup | `TestCommandComposer` all Plan combos + smoke |
+| S14 (new) `SubtitleSlot always fires` | `SubtitleSlot.Emit(Plan.SubtitleOp, TargetContainer, MediaFile)` | MP4 target -> `-map 0:s? -c:s mov_text`; MKV target -> `-map 0:s? -c:s copy`; PGS/DVB image subs targeted to MP4 -> `[]` + WARN log naming dropped codec | Every Plan path retains text subs; image-sub drop is explicit + logged | `TestCommandComposer::test_subtitle_slot_always_fires` + BUG-0083 smokes (e/f/g) |
 
 ### Promotions
 
@@ -408,7 +441,8 @@ Populated at VERIFYING.
 - **Gap 1 CLOSED 2026-07-04:** Golden path Reencode + VMAF + Replace live smoke on current code (post-Reset-9 fold + RetryBudget + BUG-0079). MFID 620351 Hotel Chevalier (2007) 1080p live-action h264 2499 kbps 258MB enqueued via `POST /api/Work/Transcode/Queue/620351` -> QueueId 144701. I9-2024 claimed, encoded av1_nvenc 1080p -> 720p. Attempt 41077 landed 02:10:09 Success=True Disposition=Pending/AwaitingVmaf. VMAF ran, score=**94.93** PassesThreshold=True. Decider returned Replace/VmafPassed. FileReplaceService moved output to `Hotel Chevalier (2007) Bluray-720p-mv.mp4` on M: drive at 02:14:05. Audio-emit ffprobe on emitted output: Track 0 opus 5.1 6ch "Original (eng)" default=0 + Track 1 opus stereo 2ch "Dialog Boost (eng)" default=1. Golden path verified end-to-end with current code.
 - **Gap 2 status:** planned in directive C16 (Reset 10 backend restores global `QualityTestEnabled=false -> Replace/QualityTestingGloballyDisabled` semantic). Code not shipped yet -- currently routes to Pending/AwaitingVmaf per Reset 9 overshoot.
 - **Cleanup during Gap 1 smoke:** deleted 4 stale QualityTestingQueue rows (Ids 2070/2004/2001/1998 -- MLP OperatorHalted 41064 + three pre-session orphans 40987/40991/41000). Marked stale ActiveJob 70332 Completed.
-- **Next:** Reset 10 -- C12 + C13 + C14 + C16 backend (Profile tier ladder + admission-adequacy gate + smart VMAF sampling + global-off restore). See parked `profile-tier-ladder.feature.md`, `admission-adequacy-gate.feature.md`, `vmaf-smart-sampling.feature.md`. Reset 11 = C15 GUI. Reset 12 = C7 fail-loud sweep.
+- **STOP-THE-LINE 2026-07-04:** Subtitle-drop BUG-0083 identified after Hotel Chevalier smoke. ffmpeg command omits `-map 0:s` on every non-SubtitleFix path (Reencode + Remux + AudioFix + Quick). Blast radius up to 27127 auto-replaced files -- all lost subtitle streams. Not recoverable (source files deleted by FileReplacement). All 13 workers paused (`Workers.Status='Paused' AND TranscodeEnabled=FALSE`). Un-pause gated on Reset 10 C17 subtitle-preservation smokes.
+- **Next:** Reset 10 -- C12 + C13 + C14 + C16 + C17 backend (Profile tier ladder + admission-adequacy gate + smart VMAF sampling + global-off restore + Emit-layer collapse into CommandComposer + 4 slots + subtitle-preservation fix). See parked `profile-tier-ladder.feature.md`, `admission-adequacy-gate.feature.md`, `vmaf-smart-sampling.feature.md`, `command-composer.feature.md`. Reset 11 = C15 GUI. Reset 12 = C7 fail-loud sweep.
 - **Phase:** IMPLEMENTING
 - **Last commit:** (Reset 9 pending commit)
 - **Follow-ups noted:**
@@ -745,6 +779,65 @@ C7. Reason vocabulary gains `QualityTestConfident`. `SELECT DISTINCT Disposition
 | S1 | `Decider -> VmafConfidenceStatsRepository.LookupBucket` | Decider computes bucket key | `(ProfileId, SourceCodec, SourceResolutionTier, BitratePerPixelBucket, ContentClass)` | `Stats(SampleCount, VmafMean, VmafStdDev, PassRate)` or None | `TestSmartConfidenceSkip` |
 | S2 | `QualityTestingBusinessService -> VmafConfidenceStatsRepository.RecordResult` | On VMAF completion | `(bucket_key, VmafScore, Passed: bool)` | rolling-window update commits | `TestSmartConfidenceSkip` roundtrip |
 | S3 | `PostTranscodeGateConfig confidence knobs` | operator via /settings | `MinConfidenceSampleCount / MinConfidencePassRate / SigmaMargin` | Decider reads fresh per call | UI form save + Decider unit test |
+
+## Status
+
+Draft parked. Promotes at DELIVERING.
+```
+
+---
+
+### Parked -- command-composer.feature.md
+
+R13 refuses new `*.feature.md` outside DELIVERING. Content below parked for Promotion at DELIVERING. Target path: `Features/TranscodeJob/Emit/command-composer.feature.md`.
+
+```markdown
+# Command Composer
+
+**Slug:** command-composer
+
+## What It Does
+
+Retires the ProcessingMode-keyed `EncodeShapeRegistry` + three separate `Shape` classes (`TranscodeShape`, `RemuxShape`, `SubtitleFixShape`) that duplicated ffmpeg-argv construction across Reencode / StreamCopy / SubtitleFix paths. Replaces with one composer function that takes a `Plan` tuple (`{VideoOp, AudioOp, SubtitleOp, ContainerOp}`) and composes four SRP-clean Slot services in a fixed order. Every path goes through the same 4 slots. Fixes BUG-0083 (subtitle-drop across all non-SubtitleFix paths -- ~27127 files) because `SubtitleSlot` always fires with container-appropriate codec.
+
+## Workflows
+
+| # | User action | Surface | Handler | Backing |
+|---|---|---|---|---|
+| W1 | Worker claims a queued job and builds ffmpeg argv | (internal) | `ITranscodeJobStrategy.BuildCommand` -> `CommandComposer.Build` | `Features/TranscodeJob/Emit/CommandComposer.Build` |
+
+## Success Criteria
+
+C1. `Features/TranscodeJob/Emit/CommandComposer.py` exists. Public method `Build(Job, MediaFile, Plan) -> CommandSpec` composes 4 slots in fixed order: input(s) + VideoSlot + AudioSlot + SubtitleSlot + ContainerSlot + output. Slot services are DIP-injected. Verifiable: import + call + argv shape.
+
+C2. `Features/TranscodeJob/Emit/Slots/VideoSlot.py` exposes Reencode + StreamCopy implementations. Reencode dispatches by Family (NvencVbrImpl / QsvIcqImpl) reading Family from Profile row. Absolute knobs from `ProfileThresholds.TargetKbps` / `IcqQ` (per `profile-tier-ladder.feature.md`). StreamCopy emits `-c:v copy`. Verifiable: unit tests per Op.
+
+C3. `Features/TranscodeJob/Emit/Slots/AudioSlot.py` emits the 2-track pipeline (Original preserved up to 7.1 + Dialog Boost forced stereo) for AudioOp='Reencode'. For AudioOp='Copy' emits `-c:a copy` on all source audio streams. Verifiable: unit tests per Op + audio-emit ffprobe on smoke output.
+
+C4. **`Features/TranscodeJob/Emit/Slots/SubtitleSlot.py` ALWAYS fires.** MP4 target -> `-map 0:s? -c:s mov_text`; MKV target -> `-map 0:s? -c:s copy`; source contains image-based subs (PGS `hdmv_pgs_subtitle`, DVB `dvbsub`, HDMV `hdmv_text_subtitle`) targeted to MP4 -> emit `[]` for those streams + `LoggingService.LogWarning` naming dropped codec + attempt id. Metadata preserved (`-metadata:s:s:N language=...`). Verifiable: `Tests/Contract/TestCommandComposer.py::test_subtitle_slot_always_fires` + smokes (e/f/g).
+
+C5. `Features/TranscodeJob/Emit/Slots/ContainerSlot.py` emits container-format switches (`.mkv -> .mp4` etc.) or preserves. Reads `Plan.ContainerOp` + `Profile.Container`. Verifiable: unit tests per Op.
+
+C6. Legacy classes DELETED (not deprecated, not archived, not comment-marked):
+- `Features/TranscodeJob/Emit/EncodeShapeRegistry.py`
+- `Features/TranscodeJob/Emit/EncodeShape.py`
+- `Features/TranscodeJob/Emit/TranscodeShape.py`
+- `Features/TranscodeJob/Emit/RemuxShape.py`
+- `Features/TranscodeJob/Emit/SubtitleFixShape.py`
+- `Features/TranscodeJob/Emit/EncoderArgsStrategies/NvencEncoderArgsStrategy.py`
+- `Features/TranscodeJob/Emit/EncoderArgsStrategies/QsvEncoderArgsStrategy.py`
+
+Verifiable: `Tests/Contract/TestNoLegacyResidue.py` greps `class TranscodeShape|class RemuxShape|class SubtitleFixShape|class EncodeShape|class EncodeShapeRegistry|class NvencEncoderArgsStrategy|class QsvEncoderArgsStrategy` in `Features/**/*.py` returns 0.
+
+C7. `ITranscodeJobStrategy.BuildCommand` delegates to `CommandComposer.Build`. No Shape-registry lookup by ProcessingMode remains at the Emit layer. Verifiable: `grep 'EncodeShapeRegistry' Features/**/*.py` returns 0.
+
+## Seams
+
+| ID | Seam | Producer | Wire shape | Consumer expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `Strategy -> CommandComposer.Build` | `ITranscodeJobStrategy.BuildCommand` | `(Job, MediaFile, Plan)` | `CommandSpec {Command, OutputPath}` | `TestCommandComposer` |
+| S2 | `CommandComposer -> Slot ordering` | Composer internal | 4-slot fixed order Video + Audio + Subtitle + Container | argv list assembled deterministically | `TestCommandComposer::test_slot_ordering` |
+| S3 | `SubtitleSlot -> ffmpeg argv` | Slot emitter | container-appropriate codec + optional map | 0 dropped text-sub streams; image subs dropped with WARN | `TestCommandComposer::test_subtitle_slot_always_fires` + smokes |
 
 ## Status
 
