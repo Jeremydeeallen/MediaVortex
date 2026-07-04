@@ -7,6 +7,7 @@ from Features.AudioNormalization.AudioPolicyResolver import AudioPolicyResolver
 from Features.AudioNormalization.Services.AudioStreamProbe import AudioStreamProbe
 from Features.TranscodeJob.Emit.CommandSpec import CommandSpec
 from Features.TranscodeJob.Emit.EncodeShape import EncodeShape
+from Features.TranscodeJob.Emit.Slots.SubtitleSlot import SubtitleSlot
 
 
 # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
@@ -102,7 +103,7 @@ class SubtitleFixShape(EncodeShape):
                         CommandParts.append(Block.InputArgs[I])
                         CommandParts.append(f'"{Block.InputArgs[I+1]}"')
 
-            CommandParts.extend(['-map', '0:v:0', '-map', f'0:s:{SubtitleStreamIndex}'])
+            CommandParts.extend(['-map', '0:v:0'])
             CommandParts.extend(['-c:v', 'copy'])
 
             VideoCodec = (getattr(MediaFile, 'Codec', '') or '').lower()
@@ -118,7 +119,10 @@ class SubtitleFixShape(EncodeShape):
                 CommandParts.extend(Block.MetadataArgs)
                 CommandParts.extend(Block.DispositionArgs)
 
-            CommandParts.extend(['-c:s', 'mov_text'])
+            # directive: transcode-flow-canonical | # see transcode.ST5 -- BUG-0083 subtitle preservation
+            SubtitleFormats = getattr(MediaFile, 'SubtitleFormats', None)
+            CommandParts.extend(SubtitleSlot().Emit('mp4', SubtitleFormats))
+
             CommandParts.extend(['-f', 'mp4'])
             CommandParts.extend(['-movflags', '+faststart'])
             CommandParts.append('-y')

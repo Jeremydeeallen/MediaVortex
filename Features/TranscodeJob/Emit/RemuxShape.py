@@ -8,6 +8,7 @@ from Features.AudioNormalization.Services.AudioStreamProbe import AudioStreamPro
 from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
 from Features.TranscodeJob.Emit.CommandSpec import CommandSpec
 from Features.TranscodeJob.Emit.EncodeShape import EncodeShape
+from Features.TranscodeJob.Emit.Slots.SubtitleSlot import SubtitleSlot
 
 
 # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
@@ -117,6 +118,10 @@ class RemuxShape(EncodeShape):
                         CommandParts.append(f'"{Block.FilterArgs[1]}"')
                     CommandParts.extend(Block.MetadataArgs)
                     CommandParts.extend(Block.DispositionArgs)
+
+            # directive: transcode-flow-canonical | # see transcode.ST5 -- BUG-0083 subtitle preservation
+            SubtitleFormats = getattr(MediaFile, 'SubtitleFormats', None)
+            CommandParts.extend(SubtitleSlot().Emit('mp4', SubtitleFormats))
 
             CommandParts.extend(['-f', 'mp4'])
             CommandParts.extend(['-movflags', '+faststart'])

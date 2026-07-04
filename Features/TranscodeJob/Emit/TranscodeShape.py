@@ -10,6 +10,7 @@ from Features.AudioNormalization.Services.AudioStreamProbe import AudioStreamPro
 from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
 from Features.TranscodeJob.Emit.CommandSpec import CommandSpec
 from Features.TranscodeJob.Emit.EncodeShape import EncodeShape
+from Features.TranscodeJob.Emit.Slots.SubtitleSlot import SubtitleSlot
 
 
 # directive: perfect-audio-vertical | # see perfect-audio-vertical.C14
@@ -134,6 +135,10 @@ class TranscodeShape(EncodeShape):
 
             self.CodecParameterAssembler.AddFilmGrainParameter(CommandParts, CodecParameters, ProfileSettings)
             self.CodecParameterAssembler.AddPixelFormatParameter(CommandParts, CodecParameters, ProfileSettings)
+
+            # directive: transcode-flow-canonical | # see transcode.ST5 -- BUG-0083 subtitle preservation
+            SubtitleFormats = getattr(MediaFile, 'SubtitleFormats', None)
+            CommandParts.extend(SubtitleSlot().Emit('mp4', SubtitleFormats))
 
             EffectiveContainer = (ProfileSettings.get('Container') or ContainerType or '').lower()
             if EffectiveContainer:
