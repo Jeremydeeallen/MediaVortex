@@ -489,14 +489,22 @@ Populated at VERIFYING.
     - Doc sweep: `encode-emit.feature.md` rewritten (What-It-Does, 5 Workflows, 12 Success Criteria, 7 Seams, Files table); `audio-normalization.flow.md` mode-coverage + ST3 + S2/S3/S4 seams updated; `audio-normalization.feature.md` C14/C26/C36/C37 + intra-feature S3 seam updated; `transcode.flow.md` Stage 6 strategy table updated; `worker-loop.feature.md` What-It-Does updated; `compliance-gated-rename.feature.md` C7 progress note updated; `TranscodeJob.feature.md` known-gap updated.
     - Regression: 77/77 green on emit-layer (TestCommandComposer + TestNoLegacyResidue + TestSubtitleSlot + TestJobProcessorRegistry + TestOutputFilenameBuilder + TestResolutionCalculator + TestVideoFilterBuilder + TestCommandSpec). No regressions from collapse.
     - **Preexisting failing test noted (not scope):** `TestAudioPipelineNoSilentFallback::test_audio_filter_emitter_routes_review_through_disposition_resolver` -- asserts `_BuildReviewFallbackBlock` in `AudioFilterEmitter`; method never landed post `perfect-audio-vertical` close. Predates this session; file as follow-up bug.
-  - **Reset 10 backend still open next session:**
-    - T12 ContentClassifier: assign Family + ContentClass + Plan tuple; migrate away from AssignedProfile string.
-    - Wire BucketKey construction in Dispatcher._BuildDeciderInput to activate SmartConfidenceSkip end-to-end (needs SourceCodec + ResolutionCategory + BitratePerPixel bucket computed from SystemSettings.BitratePerPixelBoundaries).
-    - Remaining smokes (a) compact-source excluded, (b) tier escalation on VMAF-fail, (c) smart-skip after N passes, (d) global-off auto-Replace, (f) StreamCopy Remux subtitle preservation, (g) PGS image-sub drop-with-WARN.
-    - T3 (DeleteNonCanaryProfiles) execution once ContentClassifier reassigns the 38 orphans.
-    - Un-pause the other 12 workers once (f) + (g) subtitle smokes pass.
+  - **Reset 10 wrap-up SHIPPED 2026-07-04 (this session, commit `7bc6439`):**
+    - Full 2 x 4 x 5 x live_action CANARY tier ladder backfilled: `BackfillFullCanaryTierLadder_2026_07_04.py` idempotent + executed against live DB. Final grid: 20 NVENC + 20 QSV CANARY profiles = 40 rows.
+    - 51,247 MediaFiles rows remapped from legacy CANARY names to canonical Tier names via `ConsolidateCanaryProfileNames_2026_07_04.py`; 38 non-CANARY orphan references reassigned; 6 legacy CANARY duplicate Profile rows deleted.
+    - `DeleteNonCanaryProfiles_2026_07_04.py` executed; 34 non-CANARY AV1 profiles deleted; zero orphans on MediaFiles.AssignedProfile.
+    - **BucketKey wire-up SHIPPED:** `DispositionDispatcher._BuildBucketKey / _ComputeBitratePerPixelBucket / _LoadBitratePerPixelBoundaries` compute the (ProfileId, SourceCodec, SourceResolutionTier, BitratePerPixelBucket, ContentClass) tuple; `_BuildDeciderInput` populates `Attempt.BucketKey`; production composition roots pass `PostTranscodeDispositionDecider(SmartConfidenceRepo=VmafConfidenceStatsRepository(Db))`.
+    - **SmartConfidence write-back SHIPPED:** `QualityTestingBusinessService._RecordVmafConfidenceStats(TranscodeAttemptId, VmafScore)` called after every VMAF write in both Mode B and Mode A paths; `RecordResult(BucketKey, VmafScore, Passed)` updates the rolling window.
+    - **Six Reset 10 smokes PASS 2026-07-04:**
+      - (a) AdequacyGate at 380 kbps 720p live-action -> Excluded/CompactSource (Tier 1 threshold 400).
+      - (b) NextTierAdjuster ladder walk NVENC Tier 1..5 -> None (ceiling terminates).
+      - (c) SmartConfidence stub N=12 mean=92 std=2 rate=0.98 -> `Replace/QualityTestConfident`; bootstrap N=0 -> `Pending/AwaitingVmaf`.
+      - (d) Global `QualityTestEnabled=False` -> `Replace/QualityTestingGloballyDisabled`; True -> `Pending/AwaitingVmaf`.
+      - (f) SubtitleSlot mkv+subrip -> `-map 0:s? -c:s mov_text` argv.
+      - (g) SubtitleSlot hdmv_pgs_subtitle -> `[]` + WARN log; dvd_subtitle -> `[]` + WARN; mixed PGS+SRT -> mov_text + WARN.
+    - **12 paused workers un-paused:** `Status='Online' AND TranscodeEnabled=TRUE` on dot-1..4, larry-1..4, wakko-1..4. All 13 workers Online + Transcode-enabled.
 - **Phase:** IMPLEMENTING
-- **Last commit:** `77b8177 feat(emit): C17 CommandComposer + 4-Slot collapse`
+- **Last commit:** `7bc6439 feat(reset10): tier ladder backfill + BucketKey wire-up + SmartConfidence write-back`
 - **Follow-ups noted:**
   - Directive C9 `+/-1 LU` LUFS tolerance vs DB `LoudnessTolerance=4.0` mismatch; reconcile at VERIFYING or via doc-only edit before Reset 12.
   - `AudioPolicyAdmissionGate.AdmitOrDefer` can return `PolicyJson=None` (DEFERRED_UNGAINABLE), leaving `TranscodeQueue.AudioPolicyJson` NULL despite S3 contract. Live-DB audit currently skips; will fail if a policy-deferred file lands post-cutover. File as bug at Reset 11.
