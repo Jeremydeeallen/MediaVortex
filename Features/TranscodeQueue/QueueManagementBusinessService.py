@@ -2005,6 +2005,15 @@ class QueueManagementBusinessService:
                 return {"Success": False, "ErrorMessage": errorMsg}
 
             if IsTranscodeMode:
+                # directive: transcode-flow-canonical | # see transcode.ST2 -- AdequacyGate refuses compact-source admissions (C13).
+                if not ForceAdd:
+                    from Features.TranscodeQueue.AdequacyGate import AdequacyGate
+                    AdequacyResult = AdequacyGate(self.DatabaseManager.DatabaseService).Evaluate(mediaFile)
+                    if AdequacyResult.Excluded:
+                        Reason = (f"AdequacyGate excluded: {AdequacyResult.Reason} "
+                                f"(source={AdequacyResult.SourceKbps}kbps <= Tier1Target={AdequacyResult.Tier1TargetKbps}kbps)")
+                        LoggingService.LogInfo(f"AdequacyGate excluded {mediaFile.FileName}: {Reason}", "QueueManagementBusinessService", "AddJobToQueue")
+                        return {"Success": False, "ErrorMessage": Reason, "CanOverride": True, "AdequacyDecision": AdequacyResult.Reason}
                 # Marginal-savings gate; ForceAdd bypasses so operator can pin same-resolution re-encodes.
                 if not ForceAdd:
                     shouldSkip, skipReason = self.EvaluateQueueAdmissionForProfile(mediaFile, mediaFile.AssignedProfile)
