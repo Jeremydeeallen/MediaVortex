@@ -30,7 +30,8 @@ def UpdateExistingCanaryTagging(Db: DatabaseService) -> None:
     """Tag existing CANARY profiles with (Family, QualityTier, ContentClass) inferred from ProfileName. Live-action default."""
     Rows = Db.ExecuteQuery(
         "SELECT Id, ProfileName, RateControlMode, UseNvidiaHardware, UseIntelHardware "
-        "FROM Profiles WHERE Active = TRUE AND ProfileName ILIKE '%CANARY%'"
+        "FROM Profiles WHERE Active = TRUE AND ProfileName ILIKE %s",
+        ('%CANARY%',),
     )
     for R in Rows:
         Name = R['profilename']
