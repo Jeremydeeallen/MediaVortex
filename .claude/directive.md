@@ -455,7 +455,11 @@ Populated at VERIFYING.
     - `POST /api/Work/Transcode/Queue/620351` -> QueueId 144702, ProcessingMode=Transcode.
     - Encoded successfully: AttemptId 41078, Success=True, av1_nvenc VBR 600k -b:v 720p output. `TranscodeAttempts.ffpmpegcommand` inspection: `-map 0:s? -c:s mov_text` PRESENT (BUG-0083 fix live at argv level).
     - `.inprogress` output ffprobe: `stream index 3, codec=mov_text, TAG:language=eng` (BUG-0083 fix live at output level).
-    - VMAF Running on I9-2024 (Progress 40%, 81 fps, ETA ~9min). Awaiting completion + Replace disposition.
+    - VMAF completed 10:49; VMAFScore=**94.61** PassesThreshold=True.
+    - Decider returned Replace/VmafPassed. FileReplaceService moved output to `M:\Hotel Chevalier (2007)\Hotel Chevalier (2007) Bluray-720p-mv.mp4`.
+    - **Smoke (e) end-to-end ffprobe on emitted final:** Stream 0 = av1 1280x534 lang=eng default=1; Stream 1 = opus 6ch "Original (eng)" default=0; Stream 2 = opus 2ch "Dialog Boost (eng)" default=1; Stream 3 = **mov_text lang=eng default=1** (BUG-0083 fix verified through complete FileReplace lifecycle).
+    - Smokes (f) StreamCopy Remux subtitle preservation + (g) PGS image-sub drop-with-WARN: NOT run this session. Deferred to next session with dedicated canary registrations.
+    - I9-2024 remains Online. Other 12 workers remain Paused. Mass un-pause gated on smokes (f) + (g) per directive C17.
   - **Next after smoke pass:** promote SubtitleSlot to full CommandComposer (T15: Video/Audio/Container slots + delete EncodeShapeRegistry + 3 Shape files + 2 EncoderArgsStrategies + Strategy.BuildCommand delegation). Then Tier 1/5 backfill, AdequacyGate, NextTierAdjuster, Decider global-off + SmartConfidenceSkip, VmafConfidenceStatsRepository, ContentClassifier reassignment, T3 execution, contract tests, remaining smokes (a-g).
 - **Phase:** IMPLEMENTING
 - **Last commit:** `f679b9f wip(reset10): draft DeleteNonCanaryProfiles migration (survey-only mode)`
