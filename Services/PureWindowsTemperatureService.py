@@ -83,7 +83,7 @@ class PureWindowsTemperatureService:
                 try:
                     import psutil
                     total_cores = psutil.cpu_count(logical=False) or psutil.cpu_count()
-                except:
+                except (ImportError, AttributeError, OSError):
                     total_cores = 24  # Default for i9-14900KF
                 
                 # Create cores list with N/A (Windows doesn't provide per-core temps)

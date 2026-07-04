@@ -277,7 +277,7 @@ class FFmpegService:
                     seconds = float(parts[2])
                     return hours * 3600 + minutes * 60 + seconds
             return float(TimeString)
-        except:
+        except (ValueError, TypeError):
             return 0.0
     
     def FormatSecondsToTime(self, Seconds: float) -> str:
@@ -287,7 +287,7 @@ class FFmpegService:
             minutes = int((Seconds % 3600) // 60)
             seconds = int(Seconds % 60)
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-        except:
+        except (TypeError, ValueError, OverflowError):
             return "00:00:00"
     
     def ExecuteFFmpeg(self, Arguments: List[str], InputFile: str = None, OutputFile: str = None) -> Dict[str, Any]:

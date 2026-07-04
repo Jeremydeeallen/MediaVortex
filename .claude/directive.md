@@ -515,6 +515,18 @@ Populated at VERIFYING.
       - (g) SubtitleSlot hdmv_pgs_subtitle -> `[]` + WARN log; dvd_subtitle -> `[]` + WARN; mixed PGS+SRT -> mov_text + WARN.
     - **12 paused workers un-paused:** `Status='Online' AND TranscodeEnabled=TRUE` on dot-1..4, larry-1..4, wakko-1..4. All 13 workers Online + Transcode-enabled.
 - **Phase:** IMPLEMENTING
+- **Last commit:** `<reset12 commit pending>`
+- **Reset 12 SHIPPED 2026-07-04 (this session, C7 sweep + BUG-0075 remainder):**
+  - `Tests/Contract/TestFailLoud.py` CREATED (4 tests: bare-except zero + no-growth vs baseline + baseline-files-exist + baseline-not-stale). Enforces `.claude/rules/fail-loud.md`.
+  - `Tests/Contract/failloud_baseline.json` CREATED as ratchet-only whitelist: `{file_relpath: max_hits}`. Current baseline: 178 files / 1335 hits across Features/, Workers/, WorkerService/, WebService/, Repositories/, Core/, Composition/, Services/. Follow-up directives shrink baseline; test refuses growth.
+  - Marker: `# fail-loud-ok: <reason>` within 3 lines skips a line per rule.
+  - Bare `except:` fully swept (4 sites): `Services/FFmpegService.py:280` (`except (ValueError, TypeError)`), `:290` (`except (TypeError, ValueError, OverflowError)`), `Services/PureWindowsTemperatureService.py:86` (`except (ImportError, AttributeError, OSError)`), `Services/SystemMonitoringService.py:114` (`except (AttributeError, OSError)`). Test asserts zero globally.
+  - `Services/QualityTestQueueService.AddToQualityTestQueue` freeze-marker refusal tightened (BUG-0075 remainder): `Attempt.Success is False` -> refused with "freeze marker" log naming ErrorMessage; `Attempt.Success is None` -> refused with "still in-flight" log. Explicit branches replace prior `if not Attempt.Success` conflation. Refusal precedes any QT queue INSERT.
+  - `Tests/Contract/TestQualityTestQueueFreezeMarkerRefusal.py` CREATED -- 4 tests (Success-False branch present, Success-None branch present, log names "freeze marker", refusal precedes CreateQualityTestQueueEntry).
+  - Smoke: mock-DB exec proved (1) Success=False -> None returned + zero INSERT calls, (2) Success=None -> None returned + zero INSERT calls. Live-DB audit: `SELECT COUNT(*) FROM qualitytestingqueue q JOIN transcodeattempts a ON q.transcodeattemptid=a.id WHERE a.success=FALSE` = 0 across all live rows (no historical leak).
+  - Regression: TestFailLoud 4/4 + TestQualityTestQueueFreezeMarkerRefusal 4/4 + TestNoLegacyResidue 2/2; TestDispositionDecider 15 + TestDispositionDispatcher + TestSmartConfidenceSkip 8 + TestAdequacyGate 9 + TestCommandComposer 29 + TestSubtitleSlot 13 = 85 pass on adjacent suites. No known regressions.
+- **Reset 12 out-of-scope carry-forward (per baseline ratchet policy):**
+  - 178 files still carry `except Exception:` w/o raise + coalesce-default + is-None-substitution hits. Baseline pins them; test refuses growth. Broader sweep is follow-up work (`failloud-baseline-sweep` directive can shrink baseline reset-by-reset).
 - **Last commit:** `9715a29 feat(reset11): Transcoding /settings card + composite endpoint (C15)`
 - **Reset 11 SHIPPED 2026-07-04 (this session):**
   - `GET/PUT /api/SystemSettings/Transcoding` composite endpoint added to `SystemSettingsController.py` (6 sub-sections: BitrateLadder + IcqLadder + Adequacy + Confidence + QualityTestEnabled + ConfidenceStats review).

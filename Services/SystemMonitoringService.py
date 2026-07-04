@@ -111,7 +111,7 @@ class SystemMonitoringService:
                 if detected_cores:
                     try:
                         total_cores = psutil.cpu_count(logical=False) or psutil.cpu_count()
-                    except:
+                    except (AttributeError, OSError):
                         total_cores = 24  # Default for i9-14900KF
 
                     # Ensure all core slots exist

@@ -37,8 +37,18 @@ class QualityTestQueueService:
                 LoggingService.LogError(f"TranscodeAttempt {TranscodeAttemptId} not found", "QualityTestQueueService", "AddToQualityTestQueue")
                 return None
 
-            if not Attempt.Success:
-                LoggingService.LogError(f"TranscodeAttempt {TranscodeAttemptId} was not successful", "QualityTestQueueService", "AddToQualityTestQueue")
+            # directive: transcode-flow-canonical | # see transcode.ST8
+            if Attempt.Success is False:
+                LoggingService.LogError(
+                    f"TranscodeAttempt {TranscodeAttemptId} refused for QT admission: freeze marker (Success=FALSE, ErrorMessage={Attempt.ErrorMessage!r})",
+                    "QualityTestQueueService", "AddToQualityTestQueue",
+                )
+                return None
+            if Attempt.Success is None:
+                LoggingService.LogError(
+                    f"TranscodeAttempt {TranscodeAttemptId} refused for QT admission: attempt still in-flight (Success IS NULL)",
+                    "QualityTestQueueService", "AddToQualityTestQueue",
+                )
                 return None
 
             # Duplicate-check via repository helper; in-memory filter avoids inline SQL
