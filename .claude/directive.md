@@ -472,6 +472,7 @@ Features/QualityTesting/QualityTestingBusinessService.py                    -- E
 Tests/Contract/TestJobPhaseTransitions.py                                   -- CREATE (each transition writes column + timestamp)
 Tests/Contract/TestPhaseDetectors.py                                        -- CREATE (per-phase timeout + false-positive-guard)
 Tests/Contract/TestStuckJobDetectionPhaseAware.py                           -- CREATE (registry dispatch by phase)
+Features/TranscodeJob/Emit/Slots/VideoSlot.py                               -- EDIT (scope -global_quality to :v; libopus rejected unscoped)
 Tests/Contract/TestStuckJobFrozenSetupPhase.py                              -- DELETE (bandaid superseded by phase model)
 
 # Reset 16 -- C20 WorkerContext thread-local binding (BUG-0086 deep cause)

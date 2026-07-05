@@ -134,7 +134,7 @@ class TestVideoSlot(unittest.TestCase):
             [], None, None,
         )
         self.assertIn('av1_qsv', Argv)
-        self.assertIn('-global_quality', Argv)
+        self.assertIn('-global_quality:v', Argv)
         self.assertIn('30', Argv)
 
     def test_reencode_qsv_icq_raises_without_icq_q(self):

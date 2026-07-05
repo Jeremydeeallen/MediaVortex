@@ -142,7 +142,7 @@ class VideoSlot:
             IcqQ = ProfileSettings.get('IcqQ')
             if IcqQ is None:
                 raise ValueError("QSV ICQ profile missing ProfileThresholds.IcqQ.")
-            Parts.extend(['-global_quality', str(int(IcqQ))])
+            Parts.extend(['-global_quality:v', str(int(IcqQ))])
         else:
             raise ValueError(f"av1_qsv RateControlMode={RateControlMode!r} not implemented.")
         LowPower = ProfileSettings.get('LowPower')
