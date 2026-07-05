@@ -757,6 +757,30 @@ Populated incrementally per step.
   - `DetectAndCleanStuckTranscodeJobs` false-positive killed Chalet Girl attempt 41018 pre-VMAF-write (still emitted output OK). Pre-existing.
   - `DetectAndCleanStuck/StaleQualityTestJobs` claims "No running quality test jobs found" while VMAF process actively running (per MonitorVMAFProgress logs). Pre-existing bug in stale detector.
 
+**Reset 15 SHIPPED 2026-07-05 (C21 phase-aware stuck detection + C19 deploy hardening + BUG-0085 retirement):**
+
+**C21 phase-aware stuck detection SHIPPED:**
+- `Features/ServiceControl/JobPhase.py` enum. `ActiveJobs.Phase TEXT + PhaseTransitionedAt TIMESTAMP` via `AddActiveJobsPhaseColumn_2026_07_05.py`. CHECK constraint enum enforced.
+- Phase-owning writes: CreateActiveJob writes Setup at claim; VideoTranscodingService writes Encoding pre-Popen + PostEncode post-Process.wait (clears FFmpegPid); QualityTestingBusinessService writes Verifying at QT claim.
+- Strategy dispatch: `PhaseDetectorRegistry` + 4 `IPhaseDetector` impls (Setup default 30min / Encoding default 5min frame-advance + PID liveness / PostEncode default 15min / Verifying default 30min); per-cycle SystemSettings reads.
+- `StuckJobDetectionService.IsJobStuck` refactored to Tier 1 heartbeat -> Registry dispatch. `_IsJobFrozen` DELETED (folded into EncodingPhaseDetector). Tier 3 PID liveness DELETED (folded into EncodingPhaseDetector).
+- `ProcessInspector` extracted for PID name+alive checks (DRY with cleanup path).
+- Tests: `TestJobPhaseTransitions.py` 8/8, `TestPhaseDetectors.py` 15/15, `TestStuckJobDetectionPhaseAware.py` 8/8.
+
+**Bare-metal orphan systemd services discovered + retired 2026-07-05:**
+- Dot + Wakko bare-metal hosts had legacy `mediavortex-worker@1..4.service` systemd units running WorkerService from `/opt/mediavortex/src/` since 2026-07-02 (pre-Reset-15). Docker deploy didn't touch systemd. Orphans registered as workers alongside docker containers, ran pre-Reset-15 stuck-detector, cross-host false-positive killed Wakko attempts (41147/41148/41149/41151/41153) via `CleanupStuckJob` DB writes (host-locality guard skipped PID kill but wrote Success=FALSE).
+- Diagnosed via `Logs.Message` for job 144781 kill at 20:28:44: `Skipping kill for stuck job 144781: owned by 'wakko-worker-1', this host is 'client-z490v-01'` -- dot bare-metal host.
+- Fix: `systemctl stop 'mediavortex-worker@*.service'` + `systemctl disable mediavortex-worker@{1,2,3,4}.service` on dot + wakko. Fleet count post-fix: 4 procs per host (docker containers only). Larry unaffected (LXC without systemd worker units).
+
+**VideoSlot ICQ `-global_quality` scoping fix:**
+- Wakko QSV smoke exposed `libopus @ Quality-based encoding not supported` -- unscoped `-global_quality 28` from QSV ICQ profile applied to libopus stream. Fix: `Features/TranscodeJob/Emit/Slots/VideoSlot.py:145` scoped to `-global_quality:v`. TestCommandComposer 29/29 green.
+
+**C19 exit gate met via wakko QSV smoke (attempt 41156):**
+- MFID 8653 Walking Dead S09E03 (h264 720p 405MB) enqueued via `POST /api/Work/Transcode/Queue/8653` -> QueueId 144783.
+- wakko-worker-1 claimed at 21:15:xx. Phase transitions written (Setup at claim -> Encoding pre-Popen -> PostEncode post-wait). Demucs pre-pass ran ~13 min without stuck-detector firing (Setup 30min budget). av1_qsv ICQ q28 720p encode with `-global_quality:v 28` (libopus accepted).
+- Attempt 41156 landed **Success=True, Disposition=Pending/AwaitingVmaf, AudioPolicyResolved='resolved'** (real Probe output, not backfill sentinel). AudioPolicyJson = real EmitTracks + Scope policy. AudioTracksEmittedJson = real Probe measurement `AchievedLra=22.0, vocals_rms_dbfs=-31, demucs_failed=false`.
+- Attestation columns populate from live Probe run on freshly-deployed Linux worker (Wakko QSV path) -- proves C19 deploy hardening + C20 forerunner (Probe writes attestation) working on fresh QSV pipeline post-orphan-retirement.
+
 **Reset 15 SHIPPED 2026-07-05 (C19 deploy hardening + BUG-0085 retirement):**
 - `deploy/Dockerfile`: `RUN find /opt/mediavortex -type d -name __pycache__ -exec rm -rf {} + || true` inserted after `COPY . .`. Purges any build-cache-leaked .pyc before image finalization.
 - `deploy/deploy-linux-worker.py`: `STALE_PYC_PROBE_SCRIPT` (pathlib-based; OS-neutral; walks `**/__pycache__/*.pyc`, mtime-compares against sibling `.py` two dirs up) + `StepStalePycProbe(Target, Friendly)` step 7. Enumerates running `mediavortex-worker-*` containers via `docker ps --filter name=`; base64-pipes probe into `docker exec sh -c`. Fail-loud abort (exit 2) naming container + head sample on stale-pyc detection. Total steps 8 -> 9.
