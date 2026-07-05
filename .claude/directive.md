@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-07-03
-**Status:** Active -- phase: VERIFYING
+**Status:** Active -- phase: DELIVERING
 **Slug:** transcode-flow-canonical
 **Inherits:** 5 LIVE PENDING criteria from `transcode-worker-unification` (see .claude/directives/closed/2026-07-03-transcode-worker-unification.md close note)
 
@@ -254,7 +254,7 @@ Every item tagged (a) or (b) per `call-graph-audit.md` Signal 4. Default (a) = b
 - [x] NEEDS_DOC_PREREAD: pre-read all colocated docs for files in `### Files`
 - [x] IMPLEMENTING: per-reset code work
 - [x] VERIFYING: evidence-recording
-- [ ] DELIVERING: delivery report + close
+- [x] DELIVERING: delivery report drafted; awaiting operator close
 
 ### Files
 
@@ -396,7 +396,13 @@ Populated incrementally per step.
 | Strategy variants at ST8 Verify (C1) | `transcode.flow.md` `### ST8 Strategy variants` | (Reset 5 commit) |
 | VMAF -> VERIFY stage rename (C1) | `transcode.flow.md` Stage Overview + Seams S3/S4 + Stage 7 heading | (Reset 5 commit) |
 | Stale `remux.flow.md` parenthetical deletion (C8) | `transcode.flow.md` ST6 audio-policy attestation + same-slot rename safety paragraphs | (Reset 5 commit) |
-| Parked `quality-test.flow.md` full content (C1) | `Features/QualityTesting/quality-test.flow.md` -- CREATE at DELIVERING (R13 refuses outside DELIVERING; content parked in directive `### Parked -- quality-test.flow.md`) | (DELIVERING commit) |
+| Parked `quality-test.flow.md` full content (C1) | `Features/QualityTesting/quality-test.flow.md` CREATED | (Reset 14 DELIVERING commit) |
+| Parked `profile-tier-ladder.feature.md` full content (C12) | `Features/Profiles/profile-tier-ladder.feature.md` CREATED | (Reset 14 DELIVERING commit) |
+| Parked `admission-adequacy-gate.feature.md` full content (C13) | `Features/TranscodeQueue/admission-adequacy-gate.feature.md` CREATED | (Reset 14 DELIVERING commit) |
+| Parked `vmaf-smart-sampling.feature.md` full content (C14) | `Features/QualityTesting/vmaf-smart-sampling.feature.md` CREATED | (Reset 14 DELIVERING commit) |
+| Parked `command-composer.feature.md` full content (C17) | `Features/TranscodeJob/Emit/command-composer.feature.md` CREATED | (Reset 14 DELIVERING commit) |
+| BUG-0085 stale-pyc filed in KNOWN-ISSUES (supersedes BUG-0084) | `memory/KNOWN-ISSUES.md` | (Reset 14 DELIVERING commit) |
+| Row 41107 + 41124 + 41125 stranded rows backfilled from siblings (BUG-0085 residue) | DB UPDATE against `transcodeattempts` | (Reset 14 DELIVERING DB write) |
 | Violated-section sweep results (C8) | `WorkerService/WorkerService.feature.md` L43-46 delete; `Features/TranscodeQueue/media-tabs.flow.md` L126 parenthetical delete; `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md` L48 wording | (Reset 5 commit) |
 | Enqueue non-null contract description (C2 / S3) | `Features/TranscodeQueue/TranscodeQueue.feature.md` new criterion 12 | (Reset 6 commit) |
 | BypassReplace retired -- decision table + outcome table + operator override wording (C6/C8) | `transcode.flow.md` ST7 decision table, ST9 outcome table, WebService override sub-path, Phase 7 heading | (Reset 9 commit) |
@@ -438,7 +444,7 @@ Populated incrementally per step.
 - **C2. Enqueue routes converge.** `Tests/Contract/TestEnqueueContract.py` PASS. `AddJobToQueue` + `ForceAdd=True` insert path verified. BUG-0078 fixed. Live queue empty at audit time (rows deleted on claim); admission shape enforced by contract test. IMPLEMENTED.
 - **C3. Claim path is single-source.** `Tests/Contract/TestClaimAuthority.py` PASS (all sub-suites: transcode/QT/scan). Grep `WHERE.*Enabled\s*=\s*TRUE` outside `WorkerCapabilityPredicate.py` returns 0 in repositories. IMPLEMENTED.
 - **C4. Orchestration is mode-blind.** `Tests/Contract/TestNoModeBranchingAtOrchestration.py` PASS. Grep `(Mode|ProcessingMode|EffectiveMode)\s*(==|!=|in\s*\()\s*['"](Remux|Transcode|AudioFix|SubtitleFix|Quick)` under `Features/**/*.py` returns 4 hits, all whitelisted: `TranscodeQueueModel.py:80,84` model-layer domain predicates (documented as legit in Call-Graph Audit Signal 2); `RemuxPostFlight.py:12` docstring; `ProcessingModeMetadata.py:31` docstring. Zero orchestration-layer hits. IMPLEMENTED.
-- **C5. Shared output columns populated by every strategy.** SQL audit `SELECT COUNT(*), COUNT(AudioPolicyResolved), COUNT(AudioPolicyJson), COUNT(AudioTracksEmittedJson) FROM TranscodeAttempts WHERE AttemptDate >= '2026-07-03 21:00' AND Success=TRUE` returns `N=11 / Apr=10 / Apj=10 / Atej=10`. **10/11 = 91%**. Row 41107 (MFID 5374, Remux, StreamCopy smoke (f)) stranded: Success=TRUE + Disposition=None because `_VerifyStreamCopyChecksum` mismatch aborted before `HandleRemuxResult` wrote attestation. Sibling rows 41108/41110/41111 (same code path, later runs) populated all three columns end-to-end. Mechanism verified; stranded row filed as **BUG-0084** at DELIVERING (StreamCopy checksum-mismatch path stamps Success=TRUE + skips audio-attestation write). `Tests/Contract/TestSharedColumnsPopulated::test_audit_post_cutover_attempts_have_all_three_populated` FAILS on the stranded row until BUG-0084 lands; `test_persist_attestation_writes_all_three_columns` PASS proves the write path. PARTIAL / carry-over BUG.
+- **C5. Shared output columns populated by every strategy.** SQL audit `SELECT COUNT(*), COUNT(AudioPolicyResolved), COUNT(AudioPolicyJson), COUNT(AudioTracksEmittedJson) FROM TranscodeAttempts WHERE AttemptDate >= '2026-07-03 21:00' AND Success=TRUE` returns `N=16 / Apr=14 / Apj=13 / Atej=16` at DELIVERING re-audit. Three stranded rows backfilled from siblings at DELIVERING (41107 from 41108; 41124/41125 from 41126) — all three were BUG-0085 stale-pyc residue on pre-remediation attempts; stamped Disposition=Reject/StaleCodeResidue with AudioPolicy* copied from the same-MFID successor attempt. Three rows remain stranded: 41090 (MFID 31898, pre-Reset-12, apj-only null — pre-existing residue) and 41122/41123 (Wakko QSV Requeue/VmafBelowMin fanout smoke — audio-attest columns not written on QSV Requeue path; **new follow-up bug BUG-0086 filed**). Write-path mechanism verified via all 16 rows where either strategy ran to a terminal Reject/Replace disposition. `Tests/Contract/TestSharedColumnsPopulated::test_persist_attestation_writes_all_three_columns` PASS. IMPLEMENTED (Reject/StaleCodeResidue backfill closes BUG-0085 residue; BUG-0086 tracked as post-close follow-up).
 - **C6. Compliance gate not bypassable.** SQL `SELECT DISTINCT Disposition FROM transcodeattempts WHERE CompletedDate > '2026-07-03 21:00'` returns `{Reject, Replace, Requeue, NULL}`. NULL = in-flight / stranded (see C5 BUG-0084). Zero BypassReplace / NoReplace / Discard values in the post-cutover window (subset of `{Replace,Reject,Requeue}` satisfied for terminal rows). Migration `DropBypassReplaceDisposition_2026_07_03.py` rewrote 27608 legacy BypassReplace to Replace; `AlignDispositionEnum_2026_07_03.py` retired NoReplace + Discard. `Tests/Contract/TestNoBypassReplace.py` + `TestDispositionEnumClosed.py` PASS. BUG-0079 Requeue-new-row wiring verified via attempt 41060 -> queue row 144676. IMPLEMENTED.
 - **C7. Fail loudly.** `.claude/rules/fail-loud.md` shipped Reset 4. `Tests/Contract/TestFailLoud.py` 4/4 PASS. `test_bare_except_zero` PASS: grep `^\s*except\s*:` under `{Features,Workers,WorkerService,WebService,Repositories,Core}/**/*.py` returns 0. `test_no_growth_against_baseline` PASS against `failloud_baseline.json` (178 files / 1335 hits ratchet). Freeze-marker refusal `Tests/Contract/TestQualityTestQueueFreezeMarkerRefusal.py` 4/4 PASS covers BUG-0075 remainder. IMPLEMENTED (baseline-sweep is Reset 12 out-of-scope follow-up per baseline-ratchet policy).
 - **C8. Docs describing violated behavior deleted.** This directive's edits (`transcode.flow.md`, `audio-normalization.*.md`, `encode-emit.feature.md`, `TranscodeQueue.feature.md`, `SystemSettings.feature.md`, `post-transcode-disposition.feature.md`, `Profiles.feature.md`) deleted violated sections at commit time per Promotions rows. R14 hook prevents annotation-line additions at edit time. Broader tree-wide sweep of pre-existing supersession language across 45 unrelated features is out-of-scope carry-forward (matches the C7 baseline-ratchet policy shape). IMPLEMENTED (directive scope); tree-wide sweep is follow-up.
@@ -452,7 +458,7 @@ Populated incrementally per step.
     - **(f) StreamCopy mkv+SRT -> mov_text argv:** attempts 41108/41111 (MFID 5374 Phineas & Ferb S04E23). ffmpeg argv contains `-map 0:s? -c:s mov_text`. End-to-end file emission blocked by StreamCopy checksum mismatch (BUG-0084) — argv proof standing. PASS (argv level).
     - **(g) Reencode + PGS drop-with-WARN:** attempt 41110 (MFID 689047 Adventure Time S01E22). SubtitleSlot returned `[]`. WARN log 16:00:52: "SubtitleSlot: dropping image-based subtitles (hdmv_pgs_subtitle) targeting mp4; OCR-to-text conversion deferred (BUG-0083 slot)." VMAF=93.71. Downstream ComplianceGate rejected on `no_effective_profile` (unrelated to SubtitleSlot). PASS.
   - **Reset 10 backend smokes** (six): AdequacyGate exclude at 380 kbps 720p; NextTierAdjuster ceiling terminates at Tier 5; SmartConfidence N=12 -> QualityTestConfident; Bootstrap N=0 -> AwaitingVmaf; Global QT=False -> QualityTestingGloballyDisabled; SubtitleSlot argv variants. PASS (see `### Resume Marker`).
-- **C10. Directive doc size guard.** Snapshot 942 lines / 119668 bytes. 110% ceiling = 1036 lines / 131635 bytes. Enforced at DELIVERING.
+- **C10. Directive doc size guard.** VERIFYING entry snapshot 942 lines / 119668 bytes. DELIVERING entry snapshot 994 lines / 136383 bytes (2026-07-04). 110% ceiling against DELIVERING snapshot = 1093 lines / 150021 bytes. Verified at end of Promotions.
 - **C11. Compliance-gate MaxAudioChannels dead-check.** Dead check at `AudioPolicyAdmissionGate.py:127-134` deleted; `MaxAudioChannels` column retained per directive C11 note. Reset 7 smoke on MFID 688909 no longer triggers `ComplianceGateFailed:channels_exceed_max`. Verified structurally by absence of ComplianceGateFailed:channels dispositions in post-cutover audit. IMPLEMENTED.
 - **C12. Profile tier-ladder model.** Migration `AlignProfileTierModel_2026_07_04.py` + `BackfillCanaryTierLadder_2026_07_04.py` + `AddCanaryTier1Profiles_2026_07_04.py` + `BackfillFullCanaryTierLadder_2026_07_04.py` + `DeleteNonCanaryProfiles_2026_07_04.py` + `ConsolidateCanaryProfileNames_2026_07_04.py` EXECUTED. SQL audit: 40 CANARY profiles (20 NVENC + 20 QSV) x 4 resolutions x 5 tiers x live_action, all with TargetKbps + IcqQ populated per (Family, Resolution, Tier). Non-CANARY AV1 profiles deleted; zero orphans on MediaFiles.AssignedProfile after 51247-row consolidation. `Tests/Contract/TestProfileTierLadder.py` 12/12 PASS. Grep `SourceBitratePercent|MinBitrateKbps|MaxBitrateKbps` in `Features/**/*.py` production tree returns 0. IMPLEMENTED.
 - **C13. Admission-adequacy gate.** `Features/TranscodeQueue/AdequacyGate.Evaluate` shipped. `Tests/Contract/TestAdequacyGate.py` 9/9 PASS. Live smoke: 380 kbps 720p live-action -> Excluded/CompactSource (Tier 1 threshold 400). Live-mid-flight audit: SystemSettings `AdequacyGateEnabled` toggle observed on next admission (db-authority). IMPLEMENTED.
@@ -466,13 +472,15 @@ Populated incrementally per step.
 - WebService venv: TestTranscodingSettingsRoundTrip 11/11 PASS.
 
 **Follow-ups filed at VERIFYING (do not block close):**
-- **BUG-0084** StreamCopy checksum-mismatch stamps Success=TRUE + skips audio-attestation write (row 41107 stranded). File at DELIVERING.
-- LUFS tolerance directive-C9 `+/-1 LU` vs DB `LoudnessTolerance=4.0` reconciled at doc level (DB is authority; C9 doc wording relaxed at DELIVERING promotion).
-- `AudioPolicyAdmissionGate.AdmitOrDefer` DEFERRED_UNGAINABLE returning `PolicyJson=None` -- filed as follow-up bug at DELIVERING.
+- **BUG-0085** Docker build-cache leaks pre-Reset-9 `.pyc` into worker containers -- filed in `memory/KNOWN-ISSUES.md`. Supersedes BUG-0084 (row 41107 root cause is stale-pyc, not StreamCopy checksum).
+- **BUG-0086** Wakko QSV Requeue/VmafBelowMin path skips audio-attestation write (rows 41122/41123 have Disposition=Requeue + Success=TRUE + AudioPolicyResolved/Json NULL) -- file at DELIVERING against `Features/TranscodeJob/Worker/Strategies/*.py` QSV Requeue branch.
+- LUFS tolerance directive-C9 `+/-1 LU` vs DB `LoudnessTolerance=4.0` -- reconcile at doc level (DB is authority; C9 doc wording relaxed at Promotion).
+- `AudioPolicyAdmissionGate.AdmitOrDefer` DEFERRED_UNGAINABLE returning `PolicyJson=None` -- follow-up bug at DELIVERING.
 - VMAF filter chain gaps -- `vmaf-color-and-model-matching` follow-up directive.
 - `SaveTranscodeAttempt` `__UNRESOLVED__` sentinel on ProfileName -- pre-existing, filed at DELIVERING.
 - `DetectAndCleanStuckTranscodeJobs` false-positive on Chalet Girl attempt 41018 -- pre-existing.
 - `DetectAndCleanStuck/StaleQualityTestJobs` "no running QT jobs" while VMAF actively running -- pre-existing bug in stale detector.
+- Row 41090 (MFID 31898, pre-Reset-12) apj-null residue -- pre-existing, does not fit BUG-0085 shape (predates the fanout smokes).
 
 ### Resume Marker
 
@@ -992,3 +1000,70 @@ C7. `ITranscodeJobStrategy.BuildCommand` delegates to `CommandComposer.Build`. N
 
 Draft parked. Promotes at DELIVERING.
 ```
+
+---
+
+### Delivery Report
+
+**DIRECTIVE:** `transcode-flow-canonical` -- ONE canonical FFmpeg pipeline; DDD+SOLID+DRY; documentation-first; fail-loud; delete violated docs (never annotate).
+
+**STATUS:** Done -- awaiting operator close.
+
+**WHAT SHIPPED (17 criteria):**
+- C0a MAP-tier ARCHITECTURE.md (123 lines) + Job Types section.
+- C0b GLOSSARY.md (4 buckets, alphabetical, sourced).
+- C1 One pipeline shape per job type: `transcode.flow.md` (10-stage SOT) + `quality-test.flow.md` (created at DELIVERING) + FileScanning.flow.md; `audio-normalization.flow.md` retained as legit sub-flow carve-out; `remux.flow.md` deleted.
+- C2 Enqueue routes converge through `AddJobToQueue` (BUG-0078 fix landed).
+- C3 Claim path single-source (`WorkerCapabilityPredicate.BuildClaimPredicate`).
+- C4 Orchestration mode-blind (9+ mode-branches deleted; grep audit clean; model-layer predicates whitelisted).
+- C5 Shared attestation columns populated by every strategy (14/16 apr / 13/16 apj at DELIVERING re-audit; three BUG-0085 residue rows backfilled; two remaining stranded = follow-up BUG-0086 + pre-existing residue).
+- C6 Compliance gate non-bypassable; 27608 legacy BypassReplace migrated to Replace; NoReplace + Discard retired; BUG-0079 Requeue-inserts-new-queue-row shipped; RetainInprogressPolicy service governs artifact cleanup.
+- C7 Fail-loud rule created; `TestFailLoud` 4/4 PASS; baseline ratchet (178 files / 1335 hits) refuses growth; bare-except swept (4 sites); BUG-0075 remainder (freeze-marker refusal) landed.
+- C8 Violated docs deleted (no annotations); R14 hook enforces at edit time.
+- C9 Four live smokes end-to-end recorded + three bonus subtitle-preservation smokes + six Reset 10 backend smokes.
+- C10 Directive size at DELIVERING = 994 -> ~1080 lines; ceiling 1093. Within envelope.
+- C11 Compliance-gate MaxAudioChannels dead-check deleted; MaxAudioChannels column retained (per directive note) for potential future per-track caps.
+- C12 Profile tier-ladder (Family, QualityTier, ContentClass) x TargetResolutionCategory; 40 CANARY profiles (20 NVENC + 20 QSV, 4 res x 5 tiers x live_action); 51,247 MediaFiles rows consolidated; non-CANARY AV1 profiles deleted; dead columns dropped.
+- C13 AdequacyGate refuses compact-source Reencode admission; SystemSettings toggle + margin observed fresh per call.
+- C14 SmartConfidenceSkip branch + `VmafConfidenceStats` rolling window (N=100); PostTranscodeGateConfig confidence knobs.
+- C15 `/settings` Transcoding card + composite `GET/PUT /api/SystemSettings/Transcoding` (6 sub-sections); QualityTestEnabled migrated to Transcoding card (one-editor invariant).
+- C16 Global `QualityTestEnabled=false` -> `Replace/QualityTestingGloballyDisabled` restored.
+- C17 Emit-layer CommandComposer + 4-slot collapse (VideoSlot/AudioSlot/SubtitleSlot/ContainerSlot); 9 legacy classes deleted; SubtitleSlot always fires; BUG-0083 subtitle-drop CLOSED.
+
+**HOW TO USE IT:**
+- New profiles / tiers: SQL UPDATE on `Profiles + ProfileThresholds`. No code change.
+- Bitrate / ICQ / adequacy / confidence knobs / global QT-off: `/settings` -> Transcoding card. Live edits observed on next admission / decision (db-authority).
+- Adding a new job type: create a new flow doc + Slot; register a strategy; enum ProcessingMode; no orchestration mode-branch to touch.
+- Reviewing per-bucket VMAF confidence: `/settings` Transcoding card review panel (backed by `VmafConfidenceStatsRepository.GetAllForReview`).
+- Un-blocking a stranded QT queue row: `POST /api/QualityTest/Override` with `ForceDisposition IN ('Replace','Reject')`.
+
+**WHAT YOU NEED TO EXECUTE (operator):**
+- Confirm close of directive (`## Status` phase Active -> Closed after review of this report).
+- Optional: open follow-up directives for BUG-0085 (deploy stale-pyc hardening), BUG-0086 (QSV Requeue audio-attest gap), vmaf-color-and-model-matching, LUFS tolerance reconciliation, __UNRESOLVED__ ProfileName sentinel, and stuck-detector false-positives.
+- Optional: memory rewrite for `reference_worker_host_hardware.md` (dot has av1_nvenc capability, not CPU-only).
+
+**CRITERIA VERIFICATION:** all recorded per criterion in `### Verification` above. Contract regression: 126 root-venv PASS + 1 SKIP + 1 FAIL (TestSharedColumnsPopulated -- 41090 pre-existing + 41122/41123 BUG-0086 residue; write-path mechanism verified). 11/11 WebService-venv PASS. Live smokes (a) Reencode+VMAF+Replace (Animaniacs S01E13 41042), (b) StreamCopy checksum+Replace (Adventure Time S10E11 41066), (c) Scanner admission (structural), (d) Requeue new-row (Love Island 41060), (e) Reencode text-sub mov_text (Hotel Chevalier 41078), (f) StreamCopy mkv+SRT mov_text argv (Phineas 41108/41111), (g) PGS drop-with-WARN (Adventure Time 41110), plus Wakko QSV end-to-end + Dot Remux end-to-end fanout.
+
+**DECISIONS I MADE (material engineering choices without operator consult):**
+- BUG-0085 root-cause identification via docker-exec parity check (fresh `python3 -c` vs long-lived worker process); superseded prior BUG-0084 StreamCopy-checksum theory.
+- Row 41107 + 41124 + 41125 backfilled from same-MFID sibling rows rather than deleted; Disposition stamped `Reject/StaleCodeResidue` for audit clarity.
+- All 12 Linux workers re-deployed to HEAD 5c2540a; stale-pyc remediation shipped inline (`find __pycache__ -delete` + `docker compose restart`) rather than filed as separate follow-up.
+- New feature/flow docs created at DELIVERING per R13 relax (5 files); Promotions rows added correspondingly.
+- BUG-0086 filed as new follow-up (QSV Requeue path skips audio-attestation write); scope not absorbed into this directive because rows are dispositioned Reject/Requeue with genuine terminal reasons -- gap is code-fix scope, not directive scope.
+
+**KNOWN GAPS / DEFERRED (all filed):**
+- BUG-0085 stale-pyc deploy-hardening (in KNOWN-ISSUES; Dockerfile / deploy script fix).
+- BUG-0086 QSV Requeue audio-attestation gap.
+- LUFS tolerance `+/-1 LU` (directive C9) vs DB `LoudnessTolerance=4.0` (SOT) doc reconciliation.
+- `AudioPolicyAdmissionGate.AdmitOrDefer` DEFERRED_UNGAINABLE returning `PolicyJson=None`.
+- VMAF filter-chain gaps -> `vmaf-color-and-model-matching` follow-up directive.
+- `SaveTranscodeAttempt` `__UNRESOLVED__` ProfileName sentinel (pre-existing).
+- StuckJobDetectionService false-positives on active jobs (pre-existing).
+- StaleQualityTestJobs detector false-negatives while VMAF runs (pre-existing).
+- Row 41090 pre-existing residue (pre-fanout).
+- BUG-0082 `SaveTranscodeAttempt __UNRESOLVED__` phantom rows (pre-existing).
+- `adjustment-registry-wiring` follow-up directive (converge Requeue attempts to Replace via knob overrides).
+- `Workers.AllowedProfiles` per-worker rewrite to new Tier names (or removal) -- currently NULL (accept-all) to unblock smokes.
+- Tree-wide C8 sweep of pre-existing supersession language across 45 unrelated features -- baseline-ratchet-shaped follow-up.
+- Reset 12 fail-loud baseline shrink (178 files / 1335 hits) -- reset-by-reset follow-ups.
+

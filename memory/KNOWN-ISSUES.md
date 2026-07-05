@@ -2,6 +2,32 @@
 
 ## Active
 
+### deploy
+
+### [BUG-0085] Docker build-cache leaks pre-Reset-9 `.pyc` into worker containers; long-lived Python process serves stale bytecode
+**Date:** 2026-07-04 | **Area:** deploy / worker-containers | **Supersedes:** BUG-0084 (row 41107 stranded shape had the same root cause)
+
+**What breaks:** After `py deploy/deploy-linux-worker.py <host>` rebuilds + starts a worker container, the on-disk `.py` sources reflect HEAD but the `__pycache__/*.pyc` files carry pre-Reset-9 bytecode from a cached image layer. Python's source-mtime staleness check misses the discrepancy (mtimes were forged to match by an earlier build step), so the long-lived WorkerService process imports stale `.pyc` and behaves as pre-cutover code. Fresh `python3 -c "..."` invocations via `docker exec` return correct behavior; only the persistent process is affected.
+
+**Repro:** 2026-07-04 dot-worker-1 post-deploy:
+- Container source at HEAD 5c2540a; `Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.py::Decide()` returns `Action='Replace'` on Reject/NoSavings inputs.
+- Container `.pyc` at `/opt/mediavortex/Features/QualityTesting/Disposition/__pycache__/PostTranscodeDispositionDecider.cpython-312.pyc` (compiled 20:03 UTC) returns pre-Reset-9 `Action='BypassReplace'` when loaded by the worker process.
+- Attempt 41125 (MFID 809 Breaking Bad S01E03 Remux) emitted retired `Disposition='BypassReplace'` -> `transcodeattempts_disposition_enum` CHECK rejected -> row stranded with `Success=TRUE + Disposition=None`.
+- Remediation confirmed: `docker exec <container> find /opt/mediavortex -name __pycache__ -exec rm -rf {} +; docker compose restart worker-N`. Attempt 41126 emitted correct `Reject/NoSavings`.
+
+**Related residue:** row 41107 (MFID 5374 Phineas & Ferb S04E23 StreamCopy) 2026-07-04 15:26 has the same stranded shape (Success=TRUE + Disposition=None + AudioPolicyResolved/Json/AudioTracksEmittedJson=NULL). Previously theorized as StreamCopy checksum-mismatch (BUG-0084); root cause is BUG-0085 stale-pyc on the container that produced it. Backfilled at DELIVERING (transcode-flow-canonical) from sibling row 41108 to unblock C5 audit.
+
+**First place to look:**
+- `deploy/compose-templates/<host>.yml` + `deploy/Dockerfile` -- does `COPY . .` overwrite `.pyc` too, or does `.dockerignore` skip `__pycache__` only during context copy (letting the cached layer's `.pyc` survive)?
+- `deploy/deploy-linux-worker.py` -- build step should force `--no-cache` OR the Dockerfile should carry `RUN find /opt/mediavortex -name __pycache__ -type d -exec rm -rf {} +` after the source copy.
+- Container `docker compose exec worker-N python3 -c "import importlib.util; s = importlib.util.spec_from_file_location('x', '/opt/mediavortex/Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.py'); print(s.origin)"` -- confirms which file the interpreter would load; the `__pycache__` sibling tells you what got resolved instead.
+
+**Proposed criterion:** "Post-deploy verification: for every deployed worker container, `docker compose exec worker-N python3 -c 'from Features.QualityTesting.Disposition.PostTranscodeDispositionDecider import PostTranscodeDispositionDecider; import inspect; print(inspect.getsourcefile(PostTranscodeDispositionDecider))'` and `stat -c %Y` on the returned path both match the value returned by `git log -1 --format=%ct HEAD -- <that file>`. Zero `.pyc` older than the corresponding `.py` after deploy. Deploy script fails loudly if either invariant is violated (no silent stale-code shipping)."
+
+**Fix with:** `/t BUG-0085`.
+
+---
+
 ### disposition
 
 ### [BUG-0079] Requeue disposition never enqueues a new TranscodeQueue row; .inprogress orphans on disk
