@@ -238,6 +238,32 @@ Verification: `Tests/Deploy/TestDeployStalePycProbe.py` (post-deploy probe retur
 
 Verification: `Tests/Contract/TestWorkerContextThreadLocal.py` (bind + read on 2 threads returns different bindings; unbound Current() raises); `TestProbeStrictModeWhenContextBound.py` (fresh WorkerContext + Probe writes all three columns from ffprobe, not sentinel). Live smoke: Wakko QSV Requeue post-Reset-16 populates apr='resolved' + apj-from-queue + atej-from-ffprobe (real measurements), not 'unresolved' sentinel.
 
+**C21. Phase-aware stuck-job detection (retires Tier 2 / Tier 3 conflation).** `StuckJobDetectionService` today runs Tier 2 (frame-advance stale) + Tier 3 (FFmpegPid liveness) against every job whose `TranscodeQueue.Status='Running'`, but `Running` overloads four disjoint phases: Setup (path resolve + audio pre-pass demucs) / Encoding (main ffmpeg subprocess) / PostEncode (VMAF / Disposition / Replace / Reprobe) / Verifying (QT queue). Each phase has different valid signals (Setup: elapsed vs setup-timeout; Encoding: frame-advance vs threshold; PostEncode / Verifying: elapsed vs per-phase timeout). Result: false-positive kills (Reset 15 Wakko cycle: attempts 41147/41151 both killed by wrong-phase detector).
+
+Domain: `Features/ServiceControl/JobPhase.py` -- `JobPhase` enum (`Setup`, `Encoding`, `PostEncode`, `Verifying`). `ActiveJobs.Phase TEXT` + `PhaseTransitionedAt TIMESTAMP` columns via `Scripts/SQLScripts/AddActiveJobsPhaseColumn_2026_07_05.py` (idempotent, backfills existing rows to `Encoding`).
+
+Repository: `Features/ServiceControl/JobPhaseRepository.py` -- `SetPhase(ActiveJobId, JobPhase)` writes column + updates `PhaseTransitionedAt=NOW()`. `GetPhase(ActiveJobId)` reads fresh (no cache; db-authority).
+
+Phase transitions written by phase-owning components (SRP):
+- Claim -> `Setup` (`TranscodeQueueRepository.ClaimNextPendingJob` after ActiveJob creation).
+- `Setup` -> `Encoding` (`VideoTranscodingService.TranscodeVideo` before `subprocess.Popen`).
+- `Encoding` -> `PostEncode` (`VideoTranscodingService.TranscodeVideo` after `Process.wait()` returns).
+- `PostEncode` -> `Verifying` (`QualityTestingBusinessService` at QT claim / Disposition start).
+
+Strategy pattern: `IPhaseDetector` interface (`Detect(Job, ActiveJob) -> (bool, str)`). Four impls under `Features/ServiceControl/PhaseDetectors/`:
+- `SetupPhaseDetector`: elapsed since `PhaseTransitionedAt` > `SetupPhaseTimeoutMin` (SystemSettings, default 30 min -- covers longest demucs run).
+- `EncodingPhaseDetector`: `_IsJobFrozen` logic folded here -- frame-advance stale > `FrozenProgressThresholdMin` (default 5). Adds FFmpegPid liveness: if FFmpegPid recorded AND local host AND process gone / not ffmpeg-named -> stuck.
+- `PostEncodePhaseDetector`: elapsed since `PhaseTransitionedAt` > `PostEncodePhaseTimeoutMin` (SystemSettings, default 15 min).
+- `VerifyingPhaseDetector`: elapsed since `PhaseTransitionedAt` > `VerifyingPhaseTimeoutMin` (SystemSettings, default 30 min).
+
+Registry: `Features/ServiceControl/PhaseDetectorRegistry.py` -- static `dict[JobPhase, IPhaseDetector]`. Open/Closed: new phase = new detector + dict row. Zero touch to caller.
+
+`StuckJobDetectionService.IsJobStuck` refactored: reads `ActiveJob.Phase` via repo, dispatches to registry. `_IsJobFrozen` DELETED (folded). Tier 3 PID liveness DELETED (folded into `EncodingPhaseDetector`). Tier 1 (worker offline heartbeat) survives unchanged.
+
+FFmpegPid column retained as kill-target for `Encoding` phase. Cleared automatically at Encoding->PostEncode transition. Kill target lookup only queries FFmpegPid when Phase='Encoding'.
+
+Verification: `Tests/Contract/TestJobPhaseTransitions.py` (each transition writes column + timestamp); `TestPhaseDetectors.py` (per-phase timeout + false-positive-guard); `TestStuckJobDetectionPhaseAware.py` (registry dispatch by phase). Live smoke: Wakko QSV Transcode of MFID 8653 -- claim writes Setup, demucs runs 10+ min without stuck-detector firing, Encoding phase enters when Popen spawns, PostEncode enters when ffmpeg completes, Verifying enters at QT claim, attempt lands `Success=TRUE` with `AudioPolicyResolved='resolved'` + real `AudioPolicyJson` + `AudioTracksEmittedJson` (activates C19+C20 fresh-code proof on QSV path).
+
 ## Out of Scope
 
 Every item tagged (a) or (b) per `call-graph-audit.md` Signal 4. Default (a) = behavior preserved + duplication collapsed in-flight.
@@ -428,6 +454,25 @@ ARCHITECTURE.md                                                             -- E
 deploy/Dockerfile                                                           -- EDIT (add `RUN find /opt/mediavortex -name __pycache__ -type d -exec rm -rf {} +` post-COPY)
 deploy/deploy-linux-worker.py                                               -- EDIT (post-deploy stale-pyc probe; fail-loud abort)
 Tests/Contract/TestDeployStalePycProbe.py                                   -- CREATE (relocated from Tests/Deploy/ per R8)
+# Reset 15 -- C21 phase-aware stuck-job detection
+Features/ServiceControl/JobPhase.py                                         -- CREATE (JobPhase enum: Setup/Encoding/PostEncode/Verifying)
+Scripts/SQLScripts/AddActiveJobsPhaseColumn_2026_07_05.py                   -- CREATE (idempotent migration; backfill Running rows to Encoding)
+Features/ServiceControl/PhaseDetectors/IPhaseDetector.py                    -- CREATE (Detect(Job, ActiveJob) contract)
+Features/ServiceControl/PhaseDetectors/SetupPhaseDetector.py                -- CREATE (elapsed vs SetupPhaseTimeoutMin default 30)
+Features/ServiceControl/PhaseDetectors/EncodingPhaseDetector.py             -- CREATE (folds _IsJobFrozen + Tier 3 PID liveness)
+Features/ServiceControl/PhaseDetectors/PostEncodePhaseDetector.py           -- CREATE (elapsed vs PostEncodePhaseTimeoutMin default 15)
+Features/ServiceControl/PhaseDetectors/VerifyingPhaseDetector.py            -- CREATE (elapsed vs VerifyingPhaseTimeoutMin default 30)
+Features/ServiceControl/PhaseDetectorRegistry.py                            -- CREATE (dict[JobPhase, IPhaseDetector] dispatch)
+Features/ServiceControl/StuckJobDetectionService.py                         -- EDIT (IsJobStuck dispatches via registry; DELETE _IsJobFrozen + Tier 3 PID block)
+Features/ServiceControl/ActiveJobRepository.py                              -- EDIT (SetActiveJobFFmpegPid Optional[int]; SetJobPhase / GetJobPhase; CreateActiveJob writes Phase='Setup')
+Features/ServiceControl/ProcessInspector.py                                 -- CREATE (GetProcessName + IsFFmpegProcessName; used by EncodingPhaseDetector + cleanup)
+Features/TranscodeJob/VideoTranscodingService.py                            -- EDIT (SetPhase Encoding before Popen, PostEncode after wait)
+Features/TranscodeQueue/TranscodeQueueRepository.py                         -- EDIT (write Phase='Setup' at ActiveJob creation post-claim)
+Features/QualityTesting/QualityTestingBusinessService.py                    -- EDIT (write Phase='Verifying' at QT claim)
+Tests/Contract/TestJobPhaseTransitions.py                                   -- CREATE (each transition writes column + timestamp)
+Tests/Contract/TestPhaseDetectors.py                                        -- CREATE (per-phase timeout + false-positive-guard)
+Tests/Contract/TestStuckJobDetectionPhaseAware.py                           -- CREATE (registry dispatch by phase)
+Tests/Contract/TestStuckJobFrozenSetupPhase.py                              -- DELETE (bandaid superseded by phase model)
 
 # Reset 16 -- C20 WorkerContext thread-local binding (BUG-0086 deep cause)
 Core/WorkerContext.py                                                       -- EDIT (threading.local() backing; Bind + Current; raises WorkerContextNotBoundError)

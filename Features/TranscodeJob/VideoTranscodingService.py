@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalExists, LocalGetSize
 from Core.DateTimeHelpers import ToUtcIsoZ
+from Features.ServiceControl.JobPhase import JobPhase
 
 
 # directive: transcodejob-uses-path | # see path.S5
@@ -49,6 +50,10 @@ class VideoTranscodingService:
 
             LoggingService.LogInfo(f"About to execute subprocess.Popen with shell=True", "VideoTranscodingService", "TranscodeVideo")
             LoggingService.LogInfo(f"subprocess.Popen arguments: command={TranscodeCommand}, shell=True, stdout=PIPE, stderr=STDOUT", "VideoTranscodingService", "TranscodeVideo")
+
+            # directive: transcode-flow-canonical
+            if ActiveJobId and DatabaseManager:
+                DatabaseManager.SetJobPhase(ActiveJobId, JobPhase.Encoding)
 
             Process = subprocess.Popen(
                 TranscodeCommand,
@@ -146,6 +151,10 @@ class VideoTranscodingService:
             ReturnCode = Process.wait()
             EndTime = datetime.now(timezone.utc)
             Duration = (EndTime - StartTime).total_seconds()
+
+            # directive: transcode-flow-canonical
+            if ActiveJobId and DatabaseManager:
+                DatabaseManager.SetJobPhase(ActiveJobId, JobPhase.PostEncode)
 
             LoggingService.LogInfo(f"Process completed with return code: {ReturnCode}", "VideoTranscodingService", "TranscodeVideo")
             LoggingService.LogInfo(f"Duration: {Duration} seconds", "VideoTranscodingService", "TranscodeVideo")

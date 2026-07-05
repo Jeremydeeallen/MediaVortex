@@ -220,6 +220,10 @@ class QualityTestingBusinessService:
             if active_job_id == 0:
                 return {"Success": False, "Message": "Failed to create active job"}
 
+            # directive: transcode-flow-canonical
+            from Features.ServiceControl.JobPhase import JobPhase
+            self.ActiveJobRepository.SetJobPhase(active_job_id, JobPhase.Verifying)
+
             try:
                 # Create single progress tracking record
                 progress_id = self.CreateProgressRecord(JobId, job_details)

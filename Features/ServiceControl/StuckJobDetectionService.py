@@ -12,17 +12,20 @@ from Core.Logging.LoggingService import LoggingService
 from Core.DateTimeHelpers import AsAwareUtc
 from Services.ProcessManagementService import ProcessManagementService
 from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
+from Features.ServiceControl.PhaseDetectorRegistry import PhaseDetectorRegistry
 from Features.Workers.WorkersRepository import WorkersRepository
 
 
 class StuckJobDetectionService:
-    """Service for detecting and cleaning up stuck transcode jobs."""
+    """Detects and cleans up stuck transcode jobs via phase-aware strategy dispatch."""
 
-    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, ActiveJobRepositoryInstance: Optional[ActiveJobRepository] = None, WorkersRepositoryInstance: Optional[WorkersRepository] = None):
+    # directive: transcode-flow-canonical
+    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, ActiveJobRepositoryInstance: Optional[ActiveJobRepository] = None, WorkersRepositoryInstance: Optional[WorkersRepository] = None, PhaseDetectorRegistryInstance: Optional[PhaseDetectorRegistry] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.ActiveJobRepository = ActiveJobRepositoryInstance or ActiveJobRepository()
         self.WorkersRepository = WorkersRepositoryInstance or WorkersRepository()
         self.ProcessManagementService = ProcessManagementService()
+        self.PhaseDetectorRegistry = PhaseDetectorRegistryInstance or PhaseDetectorRegistry(self.DatabaseManager)
 
     def DetectAndCleanStuckTranscodeJobs(self) -> Dict[str, Any]:
         """Main entry point for detecting and cleaning up stuck transcode jobs."""
@@ -151,19 +154,13 @@ class StuckJobDetectionService:
         except Exception:
             return self.STUCK_SCAN_THRESHOLD_MINUTES
 
+    # directive: transcode-flow-canonical
     def IsJobStuck(self, Job) -> tuple[bool, str]:
-        """Check if a specific job is stuck using three-tier detection:
-        1. Worker heartbeat (distributed) - if the owning worker is offline
-        2. Progress stagnation - if no frame advance for 15 minutes
-        3. Local PID check - if the job is owned by this machine"""
+        """Phase-aware detection: Tier 1 (heartbeat) then phase-detector dispatch via PhaseDetectorRegistry."""
         try:
-            import socket
-
-            # Get active job record for this transcode job
             from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
             activeJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("TranscodeService"))
 
-            # Find the active job for this queue item
             relevantActiveJob = None
             for activeJob in activeJobs:
                 if activeJob.get('QueueId') == Job.Id:
@@ -171,50 +168,22 @@ class StuckJobDetectionService:
                     break
 
             if not relevantActiveJob:
-                # No active job record found - this could be stuck
                 return True, "No ActiveJob record found for running transcode job"
 
-            # Tier 1: Worker heartbeat check (for distributed workers)
             JobWorkerName = relevantActiveJob.get('WorkerName')
             if JobWorkerName:
                 isWorkerOffline, workerReason = self._IsWorkerOffline(JobWorkerName)
                 if isWorkerOffline:
                     return True, f"Worker '{JobWorkerName}' is offline: {workerReason}"
 
-            workerPid = relevantActiveJob.get('ProcessId')  # Python worker PID -- never killed
-            ffmpegPid = relevantActiveJob.get('FFmpegPid')   # FFmpeg subprocess PID -- correct kill target
+            ActiveJobId = relevantActiveJob.get('Id') or relevantActiveJob.get('id')
+            PhaseInfo = self.ActiveJobRepository.GetJobPhase(ActiveJobId) if ActiveJobId else None
+            if PhaseInfo is None:
+                return False, "ActiveJob.Phase not yet set (pre-Setup transition)"
 
-            # Tier 2: Progress stagnation check (works across all machines).
-            # Run BEFORE Tier 3 so a stalled FFmpeg with a still-alive PID is
-            # caught regardless of locality.
-            isFrozen, frozenReason = self._IsJobFrozen(Job)
-            if isFrozen:
-                return True, frozenReason
-
-            # Tier 3: FFmpeg-PID liveness (local jobs only).
-            # The "no FFmpeg processes on system" heuristic was REMOVED in
-            # stuck-job-detection.feature.md criterion D1: it false-positived
-            # during the gap between job claim and FFmpeg spawn, self-killing
-            # the worker on 2026-05-09 (Incident 2 in the feature doc).
-            LocalHostname = socket.gethostname()
-            IsLocalJob = (not JobWorkerName) or (JobWorkerName == LocalHostname)
-
-            if IsLocalJob:
-                if ffmpegPid is None:
-                    # FFmpeg has not started yet (or row predates this feature).
-                    # Defer to Tier 2; do NOT flag stuck on PID-absence alone.
-                    return False, "FFmpegPid not yet recorded -- relying on frame-stagnation check"
-
-                # Verify the recorded FFmpegPid is alive AND still an FFmpeg
-                # process by name (D1). Anything else means FFmpeg exited and
-                # the PID may have been reused by an unrelated process.
-                actualName = self._GetProcessName(ffmpegPid)
-                if actualName is None:
-                    return True, f"FFmpeg PID {ffmpegPid} recorded for job {Job.Id} is no longer alive"
-                if not self._IsFFmpegProcessName(actualName):
-                    return True, f"FFmpeg PID {ffmpegPid} recorded for job {Job.Id} is no longer alive (process name was '{actualName}')"
-
-            return False, "Process is alive and making progress"
+            Phase, TransitionedAt = PhaseInfo
+            Detector = self.PhaseDetectorRegistry.GetDetector(Phase)
+            return Detector.Detect(Job, relevantActiveJob, TransitionedAt)
 
         except Exception as e:
             LoggingService.LogException(f"Error checking if job {Job.Id} is stuck", e,
@@ -250,57 +219,6 @@ class StuckJobDetectionService:
             LoggingService.LogException(f"Error checking worker heartbeat for {WorkerName}", e,
                                      "StuckJobDetectionService", "_IsWorkerOffline")
             return False, f"Error checking heartbeat: {str(e)}"
-
-    # directive: path-schema-migration | # see path.S1
-    def _IsJobFrozen(self, Job) -> tuple[bool, str]:
-        """Frozen-progress check using LastFrameAdvance on the in-flight TranscodeAttempt."""
-        try:
-            # Join TranscodeProgress -> TranscodeAttempts on typed-pair (StorageRootId, RelativePath)
-            query = (
-                "SELECT tp.LastFrameAdvance, tp.LastProgressUpdate, tp.ProgressPercent, tp.CurrentFPS "
-                "FROM TranscodeProgress tp "
-                "INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id "
-                "WHERE ta.StorageRootId = %s AND ta.RelativePath = %s AND ta.Success IS NULL "
-                "ORDER BY tp.LastProgressUpdate DESC "
-                "LIMIT 1"
-            )
-            rows = self.DatabaseManager.DatabaseService.ExecuteQuery(query, (Job.StorageRootId, Job.RelativePath))
-
-            if not rows:
-                # No progress records yet - job may still be starting up, not frozen
-                return False, "No progress records found (job may be starting)"
-
-            row = rows[0]
-            # Prefer LastFrameAdvance; fall back to LastProgressUpdate for backward compat
-            lastUpdateValue = row.get('LastFrameAdvance') or row.get('LastProgressUpdate')
-            progressPercent = row['ProgressPercent']
-            currentFPS = row['CurrentFPS']
-
-            if not lastUpdateValue:
-                return False, "No LastFrameAdvance/LastProgressUpdate timestamp available"
-
-            # Parse the timestamp and check staleness
-            # PostgreSQL returns datetime objects directly, but handle string format as fallback
-            if isinstance(lastUpdateValue, str):
-                lastUpdate = datetime.strptime(lastUpdateValue, "%Y-%m-%d %H:%M:%S")
-            else:
-                lastUpdate = lastUpdateValue
-            minutesSinceUpdate = (datetime.now(timezone.utc) - AsAwareUtc(lastUpdate)).total_seconds() / 60.0
-
-            thresholdMin = self._GetFrozenProgressThresholdMin()
-            if minutesSinceUpdate >= thresholdMin:
-                return True, (
-                    f"FFmpeg process is alive but frozen - no frame advance for {minutesSinceUpdate:.1f} minutes "
-                    f"(threshold: {thresholdMin}min). "
-                    f"Last progress: {progressPercent:.1f}%, FPS: {currentFPS}"
-                )
-
-            return False, f"Frame advanced {minutesSinceUpdate:.1f} minutes ago"
-
-        except Exception as e:
-            LoggingService.LogException(f"Error checking if job {Job.Id} is frozen", e,
-                                     "StuckJobDetectionService", "_IsJobFrozen")
-            return False, f"Error checking progress stagnation: {str(e)}"
 
     def IsProcessAlive(self, ProcessId: int) -> bool:
         """Check if the worker process that owns a job is still alive.

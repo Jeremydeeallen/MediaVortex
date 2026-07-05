@@ -3,11 +3,60 @@ from datetime import datetime, timezone
 from Services.DatabaseService import DatabaseService
 from Services.LoggingService import LoggingService
 from Core.Database.DatabaseService import EscapeLikePattern
+from Features.ServiceControl.JobPhase import JobPhase
 
 
 class ActiveJobRepository:
     def __init__(self, DatabaseServiceInstance: Optional[DatabaseService] = None):
         self.DatabaseService = DatabaseServiceInstance or DatabaseService()
+
+    # directive: transcode-flow-canonical
+    def SetJobPhase(self, ActiveJobId: int, Phase: JobPhase) -> bool:
+        """Transition ActiveJob to Phase; stamps PhaseTransitionedAt=NOW(). Clears FFmpegPid when leaving Encoding."""
+        try:
+            if Phase == JobPhase.PostEncode:
+                Query = (
+                    "UPDATE ActiveJobs "
+                    "SET Phase = %s, PhaseTransitionedAt = NOW(), FFmpegPid = NULL, UpdatedAt = NOW() "
+                    "WHERE Id = %s"
+                )
+            else:
+                Query = (
+                    "UPDATE ActiveJobs "
+                    "SET Phase = %s, PhaseTransitionedAt = NOW(), UpdatedAt = NOW() "
+                    "WHERE Id = %s"
+                )
+            Affected = self.DatabaseService.ExecuteNonQuery(Query, (Phase.value, ActiveJobId))
+            return Affected > 0
+        # fail-loud-ok: phase-write failure logged; callers proceed (encode still runs); missing phase surfaces via GetJobPhase=None
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"SetJobPhase({ActiveJobId}, {Phase}) failed",
+                Ex, "ActiveJobRepository", "SetJobPhase",
+            )
+            return False
+
+    # directive: transcode-flow-canonical
+    def GetJobPhase(self, ActiveJobId: int):
+        """Return (JobPhase, PhaseTransitionedAt) or None."""
+        try:
+            Query = "SELECT Phase, PhaseTransitionedAt FROM ActiveJobs WHERE Id = %s"
+            Rows = self.DatabaseService.ExecuteQuery(Query, (ActiveJobId,))
+            if not Rows:
+                return None
+            Row = Rows[0]
+            PhaseVal = Row.get('Phase') or Row.get('phase')
+            TransitionedAt = Row.get('PhaseTransitionedAt') or Row.get('phasetransitionedat')
+            if PhaseVal is None:
+                return None
+            return (JobPhase.FromString(PhaseVal), TransitionedAt)
+        # fail-loud-ok: phase-read failure returns None; caller treats as pre-Setup (no false-positive kill)
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"GetJobPhase({ActiveJobId}) failed",
+                Ex, "ActiveJobRepository", "GetJobPhase",
+            )
+            return None
 
 
     def CancelActiveJob(self, job_id: int) -> bool:
@@ -91,16 +140,17 @@ class ActiveJobRepository:
             LoggingService.LogException("Exception completing active job", e, "DatabaseManager", "CompleteActiveJob")
             return False
 
+    # directive: transcode-flow-canonical
     def CreateActiveJob(self, ServiceName: str, JobType: str, QueueId: int, ProcessId: int = None, ThreadId: int = None, WorkerName: str = None) -> int:
-        """Create an active job record for tracking."""
+        """Create an active job record; initial Phase='Setup' + PhaseTransitionedAt=NOW()."""
         try:
             LoggingService.LogFunctionEntry("CreateActiveJob", "DatabaseManager", ServiceName, JobType, QueueId, ProcessId, ThreadId)
 
-            query = """
-                INSERT INTO ActiveJobs (ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName, Status, StartedAt)
-                VALUES (%s, %s, %s, %s, %s, %s, 'Running', NOW())
-                RETURNING Id
-            """
+            query = (
+                "INSERT INTO ActiveJobs (ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName, Status, StartedAt, Phase, PhaseTransitionedAt) "
+                "VALUES (%s, %s, %s, %s, %s, %s, 'Running', NOW(), 'Setup', NOW()) "
+                "RETURNING Id"
+            )
 
             result = self.DatabaseService.ExecuteNonQuery(query, (ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName))
 
@@ -269,16 +319,9 @@ class ActiveJobRepository:
             LoggingService.LogException("Exception getting all active jobs", e, "DatabaseManager", "GetAllActiveJobs")
             return []
 
-    def SetActiveJobFFmpegPid(self, ActiveJobId: int, FFmpegPid: int) -> bool:
-        """Record the FFmpeg subprocess PID for an active job.
-
-        ActiveJobs.ProcessId is the worker's Python PID (per IsProcessAlive
-        documentation in StuckJobDetectionService). ActiveJobs.FFmpegPid is
-        the FFmpeg subprocess PID -- the correct kill target for stuck-job
-        cleanup. See stuck-job-detection.feature.md criterion 6.
-
-        Returns True if a row was updated, False otherwise.
-        """
+    # directive: transcode-flow-canonical
+    def SetActiveJobFFmpegPid(self, ActiveJobId: int, FFmpegPid: Optional[int]) -> bool:
+        """Record the FFmpeg subprocess PID (None clears; used at Encoding->PostEncode transition)."""
         try:
             query = "UPDATE ActiveJobs SET FFmpegPid = %s, UpdatedAt = NOW() WHERE Id = %s"
             affected = self.DatabaseService.ExecuteNonQuery(query, (FFmpegPid, ActiveJobId))

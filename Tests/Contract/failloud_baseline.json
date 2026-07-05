@@ -118,7 +118,7 @@
     "Features/ServiceControl/ServiceStatusController.py": 5,
     "Features/ServiceControl/ServiceStatusHelperService.py": 7,
     "Features/ServiceControl/ServiceStatusService.py": 6,
-    "Features/ServiceControl/StuckJobDetectionService.py": 27,
+    "Features/ServiceControl/StuckJobDetectionService.py": 26,
     "Features/SystemSettings/SystemSettingsController.py": 25,
     "Features/SystemSettings/SystemSettingsRepository.py": 5,
     "Features/TeamStatus/TeamStatusController.py": 27,
