@@ -83,6 +83,9 @@ RUN pip install --no-cache-dir --break-system-packages \
 WORKDIR /opt/mediavortex
 COPY . .
 
+# BUG-0085: purge stale __pycache__ that build-cache may leak into cached layer.
+RUN find /opt/mediavortex -type d -name __pycache__ -exec rm -rf {} + || true
+
 # Create staging directory mount point
 RUN mkdir -p /mnt/media_tv/MediaVortex/Staging
 

@@ -48,6 +48,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import base64
 import re
 import subprocess
 import sys
@@ -330,6 +331,54 @@ def StepNvencProbe(Target: str, Friendly: str) -> tuple[bool, str]:
     return (False, f"av1_nvenc FAILED on {Friendly} (driver {Driver}). Upgrade host driver OR pick an older BtbN tag in deploy/ffmpeg-release.txt. stderr: {Stderr}")
 
 
+STALE_PYC_PROBE_SCRIPT = (
+    "import sys\n"
+    "from pathlib import Path\n"
+    "root = Path(sys.argv[1] if len(sys.argv) > 1 else '/opt/mediavortex')\n"
+    "stale = []\n"
+    "for pyc in root.rglob('__pycache__/*.pyc'):\n"
+    "    stem = pyc.name.split('.', 1)[0]\n"
+    "    src = pyc.parent.parent / (stem + '.py')\n"
+    "    try:\n"
+    "        src_m = src.stat().st_mtime\n"
+    "    except FileNotFoundError:\n"
+    "        continue\n"
+    "    if pyc.stat().st_mtime + 1 < src_m:\n"
+    "        stale.append(str(pyc))\n"
+    "if stale:\n"
+    "    print('STALE_PYC_COUNT=' + str(len(stale)))\n"
+    "    for p in stale[:5]:\n"
+    "        print('STALE=' + p)\n"
+    "    sys.exit(2)\n"
+    "print('STALE_PYC_COUNT=0')\n"
+)
+
+
+# directive: transcode-flow-canonical
+def StepStalePycProbe(Target: str, Friendly: str) -> tuple[bool, str]:
+    """Assert no .pyc predates its source .py inside any running worker container (BUG-0085)."""
+    R = _RunSsh(Target, "docker ps --filter 'name=mediavortex-worker-' --format '{{.Names}}'", Timeout=15)
+    if R.returncode != 0:
+        return False, f"docker ps failed: {(R.stderr or R.stdout).strip()[:200]}"
+    Containers = [L.strip() for L in (R.stdout or '').splitlines() if L.strip()]
+    if not Containers:
+        return False, f"no running mediavortex-worker-N containers on {Friendly}"
+    Encoded = base64.b64encode(STALE_PYC_PROBE_SCRIPT.encode('utf-8')).decode('ascii')
+    Findings: list[str] = []
+    for C in Containers:
+        Cmd = f"docker exec {C} sh -c 'echo {Encoded} | base64 -d | python3 -'"
+        Rp = _RunSsh(Target, Cmd, Timeout=60)
+        Output = ((Rp.stdout or '') + (Rp.stderr or '')).strip()
+        if Rp.returncode != 0:
+            Findings.append(f"{C}: {Output[:400]}")
+    if Findings:
+        Head = Findings[0]
+        if len(Findings) > 1:
+            return False, f"stale-pyc detected: {Head} (+ {len(Findings) - 1} more)"
+        return False, f"stale-pyc detected: {Head}"
+    return True, f"clean across {len(Containers)} container(s)"
+
+
 def StepPushCompose(Target: str, Friendly: str) -> bool:
     """Ensure /opt/mediavortex exists, then scp the per-host compose file."""
     R = _RunSsh(Target, "mkdir -p /opt/mediavortex", Timeout=15)
@@ -525,7 +574,7 @@ def Main(Argv: Optional[list] = None) -> int:
               "Deploy refuses to stamp an unknown version.", file=sys.stderr)
         return 2
 
-    Total = 1 if Args.check else 8
+    Total = 1 if Args.check else 9
     print("Pre-flight:")
     Ok, Diag = StepPreflight(Friendly, Target)
     if not Ok:
@@ -577,18 +626,25 @@ def Main(Argv: Optional[list] = None) -> int:
         _Status(6, Total, "nvenc probe", "FAILED", NvDetail)
         return 2
 
+    StaleOk, StaleDetail = StepStalePycProbe(Target, Friendly)
+    if StaleOk:
+        _Status(7, Total, "stale-pyc probe", "OK", StaleDetail)
+    else:
+        _Status(7, Total, "stale-pyc probe", "FAILED", StaleDetail)
+        return 2
+
     if not StepCleanupBuild(Target):
-        _Status(7, Total, "cleanup build", "FAILED",
+        _Status(8, Total, "cleanup build", "FAILED",
                 "non-fatal; /tmp/mediavortex-build may persist")
     else:
-        _Status(7, Total, "cleanup build", "OK")
+        _Status(8, Total, "cleanup build", "OK")
 
     print("\nVerify:")
     Ok, Summary = StepVerifyWorkers(Friendly, Sha)
     if Ok:
-        _Status(8, Total, "workers online", "OK", Summary)
+        _Status(9, Total, "workers online", "OK", Summary)
         return 0
-    _Status(8, Total, "workers online", "FAILED", Summary)
+    _Status(9, Total, "workers online", "FAILED", Summary)
     return 3
 
 

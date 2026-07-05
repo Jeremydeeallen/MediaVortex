@@ -427,7 +427,7 @@ ARCHITECTURE.md                                                             -- E
 # Reset 15 -- C19 deploy hardening (BUG-0085)
 deploy/Dockerfile                                                           -- EDIT (add `RUN find /opt/mediavortex -name __pycache__ -type d -exec rm -rf {} +` post-COPY)
 deploy/deploy-linux-worker.py                                               -- EDIT (post-deploy stale-pyc probe; fail-loud abort)
-Tests/Deploy/TestDeployStalePycProbe.py                                     -- CREATE
+Tests/Contract/TestDeployStalePycProbe.py                                   -- CREATE (relocated from Tests/Deploy/ per R8)
 
 # Reset 16 -- C20 WorkerContext thread-local binding (BUG-0086 deep cause)
 Core/WorkerContext.py                                                       -- EDIT (threading.local() backing; Bind + Current; raises WorkerContextNotBoundError)
@@ -710,6 +710,16 @@ Populated incrementally per step.
   - `SaveTranscodeAttempt` sentinel `__UNRESOLVED__` on ProfileName -- surfaced in both smoke (a) attempts. Pre-existing; not this directive's scope.
   - `DetectAndCleanStuckTranscodeJobs` false-positive killed Chalet Girl attempt 41018 pre-VMAF-write (still emitted output OK). Pre-existing.
   - `DetectAndCleanStuck/StaleQualityTestJobs` claims "No running quality test jobs found" while VMAF process actively running (per MonitorVMAFProgress logs). Pre-existing bug in stale detector.
+
+**Reset 15 SHIPPED 2026-07-05 (C19 deploy hardening + BUG-0085 retirement):**
+- `deploy/Dockerfile`: `RUN find /opt/mediavortex -type d -name __pycache__ -exec rm -rf {} + || true` inserted after `COPY . .`. Purges any build-cache-leaked .pyc before image finalization.
+- `deploy/deploy-linux-worker.py`: `STALE_PYC_PROBE_SCRIPT` (pathlib-based; OS-neutral; walks `**/__pycache__/*.pyc`, mtime-compares against sibling `.py` two dirs up) + `StepStalePycProbe(Target, Friendly)` step 7. Enumerates running `mediavortex-worker-*` containers via `docker ps --filter name=`; base64-pipes probe into `docker exec sh -c`. Fail-loud abort (exit 2) naming container + head sample on stale-pyc detection. Total steps 8 -> 9.
+- `Tests/Contract/TestDeployStalePycProbe.py` (relocated from `Tests/Deploy/` per R8): 3 tests. Clean tree returns 0; stale .pyc (mtime < source .py) returns 2 + `STALE_PYC_COUNT=1` + names offending file; orphan .pyc with no source ignored (returns 0). All 3 PASS.
+- Live re-deploy fleet 2026-07-05 18:30-19:00: `py deploy/deploy-linux-worker.py {dot,wakko,larry}`. All 12 containers rebuilt at HEAD `b31e12e`. Stale-pyc probe clean across each host (dot 4/4, wakko 4/4, larry 4/4). Nvenc probe: dot green (driver 595.71.05); wakko/larry skipped (no Nvidia). Workers verification green on all 12 rows.
+- **BUG-0086 fix activated cleanly on fresh code:** attempt 41150 (MFID 6572 Steven Universe S04E11 Remux via dot-worker-1 at 19:32) landed Success=True, Disposition=Reject/NoSavings (Remux MP4 grew, correct terminal). `AudioPolicyResolved='resolved'` (not 'unresolved' sentinel); `AudioPolicyJson` = real EmitTracks + Scope policy from queue snapshot; `AudioTracksEmittedJson` = real Probe measurement with `AchievedLra=10.7`, `vocals_rms_dbfs=-29.x`. Proves PostEncodeMeasurement.Probe populates all three attestation columns from actual sources on freshly-deployed Linux worker.
+- **Wakko QSV thrashed on Walking Dead (MFID 8653):** attempts 41147/41148/41149 all failed rc=234 due to concurrent demucs pile-up (4-thread CPU + StuckJobDetection false-positive relaunch cycle). Same pre-existing bug documented at VERIFYING follow-ups. Substituted dot-worker-1 attempt 41150 for C19 attestation-column proof; wakko QSV-specific smoke deferred (stuck detector false-positive pre-existing bug is out of C19 scope).
+- Regression: TestDeployStalePycProbe 3/3 + TestFailLoud 4/4 + TestNoLegacyResidue 2/2 green.
+- BUG-0085 retired (Docker build-cache stale-pyc leak). BUG-0086 activated (PostEncodeMeasurement.Probe attestation columns populated from live Probe run).
 
 **VERIFYING fanout smokes 2026-07-04 (post-Reset-12):**
 - **Wakko QSV end-to-end PASS:** MFID 8653 Walking Dead S09E03 (h264 720p 405MB) enqueued via `POST /api/Work/Transcode/Queue/8653` -> QueueId 144761. wakko-worker-1 claimed at 17:36:55. av1_qsv ICQ q28 Tier 3 720p encode. Attempt 41123 Success=True 235.7s -> 134MB (67% reduction) -> Pending/AwaitingVmaf -> QT-claimed by wakko-worker-1 -> VMAF=44.50 -> Disposition=Requeue/VmafBelowMin. Pipeline traversed enqueue -> claim -> encode -> QT-queue -> VMAF -> Disposition. Duplicate attempt 41122 (stuck-detector false-positive rerun) also completed same path Requeue/VmafBelowMin same VMAF. Follow-up: `DetectAndCleanStuckTranscodeJobs` false-positive kills completed ffmpeg PID + spawns spurious retry (pre-existing).
