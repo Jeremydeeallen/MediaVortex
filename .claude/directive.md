@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-07-03
-**Status:** Active -- phase: DELIVERING
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** transcode-flow-canonical
 **Inherits:** 5 LIVE PENDING criteria from `transcode-worker-unification` (see .claude/directives/closed/2026-07-03-transcode-worker-unification.md close note)
 
@@ -182,6 +182,62 @@ Verification:
 
 BUG-0083 filed. Un-pause `Workers.TranscodeEnabled=TRUE` gated on C17 live smokes passing.
 
+**C18. VMAF alignment + model matching (canonical measurement pipeline).** VMAF today is systematically wrong for diverse media because reference and distorted feeds are not aligned on 13 axes. Score noise dominates real quality signal; every disposition decision downstream (Replace / Requeue / Reject) is suspect. This criterion delivers a canonical measurement pipeline mirroring the encode-side pattern (Plan-derived composer) but shaped for VMAF's LINEAR filter chain domain.
+
+New verticals under `Features/QualityTesting/Vmaf/`:
+- **`AlignmentSpec`** value object. Immutable, invariants in ctor (raises on unparseable color primaries / fps / duration-delta > 1 frame). Fields: `ColorPrimaries`, `TransferFunction`, `ColorMatrix`, `ColorRange`, `SourceFps`, `TargetFps`, `VfrDetected`, `TargetResolution`, `SourceCrop`, `EncodedCrop`, `DeinterlaceNeeded`, `DetelecineNeeded`, `SourceBitDepth`, `TargetBitDepth`, `ChromaSubsampling`, `HdrDetected`, `MaxEdgePx`.
+- **`VmafAlignmentProbe`** domain service. `Probe(SourcePath, EncodedPath) -> AlignmentSpec`. Reads via shared `MediaProbeAdapter`; asserts duration parity; resolves reference-transformation strategy when source shape != encoded shape (tone-map HDR ref → SDR bt709 when encoded is SDR; NEVER transform distorted).
+- **`VmafModelSelector`** strategy (pure fn). `Select(spec) -> VmafModel` per rules: max-edge >= 1440 → `vmaf_4k_v0.6.1`; max-edge <= 540 → `vmaf_v0.6.1_phone`; HDR flag → `vmaf_v0.6.1neg`; else default `vmaf_v0.6.1`.
+- **`VmafFilterChainBuilder`** pure-function composition. `Build(spec) -> str`. Stages composed in fixed order: `setpts → deinterlace → detelecine → fps → colorspace → crop → scale → chroma → libvmaf(model)`. Each stage = pure fn `(spec, partial_chain) -> extended_chain`. No injection, no classes.
+- **`VmafCommandComposer`** thin shell. `Build(Attempt, spec) -> argv`. Owns: `-i <dist> -i <ref>` order, optional `-ss`, `-lavfi` injection, `-f null`, XML log path, `libvmaf` n_threads. Delegates chain to Builder + model to Selector.
+- **`ColorSpaceService`** cross-cutting. Centralizes color-triad parsing (primaries + transfer + matrix + range) with fail-loud on unparseable. Encode side migrates to consume it in follow-up directive.
+
+`QualityTestingBusinessService.BuildVMAFCommand` retires; replaced by call into `VmafCommandComposer`. `_BuildVmafFilterChain` retires (folded into `VmafFilterChainBuilder`). 24-fps silent fallback deleted.
+
+13 axes covered:
+1. Color primaries pin
+2. Transfer function pin (SDR gamma / PQ / HLG)
+3. Color matrix pin (bt709 / bt2020nc)
+4. Color range pin (TV / full, detected not hard-coded)
+5. Framerate pin + fail-loud parse (no 24 fps fallback)
+6. VFR → CFR detection + normalization
+7. VMAF model select (4K / phone / neg / default)
+8. Deinterlace detect + apply
+9. Detelecine detect + apply
+10. Crop / letterbox detect + normalize on both feeds
+11. Chroma subsampling pin (match source or downsample to 4:2:0 consistently on both)
+12. Duration parity assertion (delta ≤ 1 frame or fail-loud raise)
+13. Bit depth pin (match source; libvmaf 10-bit precision retained)
+
+**Live smoke matrix (10 smokes; each proves at least one axis):**
+- (a) SDR 1080p CFR 24fps live-action — baseline; score close to prior for this shape.
+- (b) HDR 4K PQ — color triad + 4K model + bit-depth.
+- (c) Animation 24p VFR — VFR detect + CFR normalize + motion=0 still applies.
+- (d) Interlaced 1080i broadcast — deinterlace applied; VMAF non-garbage.
+- (e) Telecined 24p → 30i film — detelecine applied.
+- (f) Letterbox 2.35:1 in 16:9 container — crop detect + apply on both feeds.
+- (g) Phone-source 540p vertical — phone model selected.
+- (h) Truncated encode (30s missing) — duration parity fail-loud.
+- (i) 4:2:2 source encoded to 4:2:0 — chroma pin + no false artifact scoring.
+- (j) Unparseable color primaries source — fail-loud raise, no fallback.
+
+Verification: `Tests/Contract/TestAlignmentSpec.py` (invariants + fail-loud), `TestVmafAlignmentProbe.py` (shape derivation), `TestVmafModelSelector.py` (model rules), `TestVmafFilterChainBuilder.py` (stage composition), `TestVmafCommandComposer.py` (end-to-end argv), `TestColorSpaceService.py`; 10 live smokes documented in `### Verification` with attempt id + VMAF score + axis-fired assertion.
+
+**C19. Deploy hardening (retires BUG-0085 hazard).** Every future Linux worker re-deploy is deterministic — no stale-pyc leak.
+- **`deploy/Dockerfile`** adds `RUN find /opt/mediavortex -name __pycache__ -type d -exec rm -rf {} +` after source COPY, before ENTRYPOINT. Ensures no cached-layer .pyc survives the source copy.
+- **`deploy/deploy-linux-worker.py`** post-deploy probe: for each container, run `docker exec worker-N python3 -c "import Features.QualityTesting.Disposition.PostTranscodeDispositionDecider as m; import inspect; import os; p=inspect.getsourcefile(m); assert os.stat(p).st_mtime >= os.stat(p.replace('.py', '.pyc') if os.path.exists(p.replace('.py', '.pyc')) else p).st_mtime, 'stale-pyc detected'"`. Fail loudly with host + container + file on assertion violation. Deploy aborts.
+- **Live smoke:** re-deploy all 12 Linux workers (dot/wakko/larry × 4). Verify zero stale-pyc post-deploy. Activate BUG-0086 fix cleanly (Wakko attestation lands on fresh QSV Requeue).
+
+Verification: `Tests/Deploy/TestDeployStalePycProbe.py` (post-deploy probe returns non-zero on synthetic stale-pyc); live re-deploy log documented; sample fresh Wakko QSV Requeue attempt has all three attestation columns populated by Probe (not backfill).
+
+**C20. WorkerContext thread-local binding (retires BUG-0086 deep cause).** `WorkerContext.Current()` returned None-or-degenerate for the JobProcessor thread on Linux workers, causing PostEncodeMeasurement.Probe to short-circuit. BUG-0086 fix at Reset 14 papered over the symptom (attest anyway); the binding gap persists and threatens every future code path that reads `WorkerContext.Current()`.
+
+- **`Core/WorkerContext.py`** switches to `threading.local()` backing when currently backed by process-global; `Bind(WorkerName, FFmpegPath, FFprobePath, ...)` sets the thread-local. Worker main thread binds at boot; each spawned processing thread inherits via explicit `WorkerContext.Bind(...)` at entry.
+- **`JobProcessor.Process`** re-binds WorkerContext to its running thread before any downstream call reads `Current()`. Same for `ProcessQualityTestQueueService.ProcessQueueLoop` daemon-thread `ProcessJob`.
+- **Fail-loud:** `Current()` raises `WorkerContextNotBoundError` when called on a thread without a Bind. NO silent None-return. `PostEncodeMeasurementService.Probe` reverts to strict-mode: raise if binaries None (BUG-0086 fix's defensive DB attestation remains as belt-and-suspenders but should never fire again).
+
+Verification: `Tests/Contract/TestWorkerContextThreadLocal.py` (bind + read on 2 threads returns different bindings; unbound Current() raises); `TestProbeStrictModeWhenContextBound.py` (fresh WorkerContext + Probe writes all three columns from ffprobe, not sentinel). Live smoke: Wakko QSV Requeue post-Reset-16 populates apr='resolved' + apj-from-queue + atej-from-ffprobe (real measurements), not 'unresolved' sentinel.
+
 ## Out of Scope
 
 Every item tagged (a) or (b) per `call-graph-audit.md` Signal 4. Default (a) = behavior preserved + duplication collapsed in-flight.
@@ -243,7 +299,14 @@ Every item tagged (a) or (b) per `call-graph-audit.md` Signal 4. Default (a) = b
 | 12 | C15 GUI: `/settings` Transcoding card wiring bitrate ladder + ICQ ladder + adequacy toggle + VMAF confidence knobs + global QualityTestEnabled + VmafConfidenceStats review. `GET/PUT /api/SystemSettings/Transcoding`. Form-submit round-trip test. Live edit -> next Decider call reflects change. **No-legacy sweep:** delete any deprecated `/settings` field bindings + old form JS + legacy endpoint routes + docs of prior /settings shape. `TestNoLegacyResidue.py` extended with GUI patterns. | UI form saves persist round-trip; live-edit test green; TestNoLegacyResidue green. | **RESET 11** |
 | 13 | C7 sweep: grep audit; remove silent fallbacks. Contract test `TestFailLoud` green. Fix BUG-0077 as instance (freeze -> Success=FALSE). **No-legacy sweep:** delete every `except: pass` / `or 0` / `or ''` / `if X is None: X = ...` pattern the audit surfaces AND their justifying comments; delete `# fail-loud-ok:` markers whose covered patterns were removed; delete doc paragraphs describing silent-fallback tolerances. | `TestFailLoud` + `TestNoLegacyResidue` green. | **RESET 12** |
 | 14 | VERIFYING: run every criterion's verification, record evidence in `### Verification`. Four live smokes documented. Directive size snapshot. | Criteria all IMPLEMENTED with evidence; snapshot recorded. | **RESET 13** |
-| 15 | DELIVERING: `### Promotions` populated (should already be incremental). Directive size <= 110% snapshot. Delivery report. Operator close. | Operator agrees closed. | -- |
+| 15 | DELIVERING draft 1: `### Promotions` populated; 5 parked feature/flow files created; delivery report drafted; BUG-0085 filed; row 41107 + 41124 + 41125 backfilled; BUG-0086 fix landed inline. Directive REOPENED at operator direction 2026-07-05 -- outcome not met while VMAF systematically wrong. | Draft delivery report present; directive stays open. | **RESET 14** |
+| 16 | C19 deploy hardening: Dockerfile `__pycache__` purge + `deploy-linux-worker.py` post-deploy stale-pyc probe. Live smoke: re-deploy all 12 Linux workers. Activates BUG-0086 fix cleanly. | `TestDeployStalePycProbe` green; live re-deploy log; fresh Wakko attempt has probe-populated attestation columns (not backfill). | **RESET 15** |
+| 17 | C20 WorkerContext thread-local binding: `Core/WorkerContext.py` rewrite + `Bind()` at every processing-thread entry (JobProcessor + ProcessQualityTestQueueService); `Current()` raises `WorkerContextNotBoundError` on unbound. `PostEncodeMeasurementService.Probe` reverts to strict-mode (defensive backfill remains as belt-and-suspenders). | `TestWorkerContextThreadLocal` + `TestProbeStrictModeWhenContextBound` green; live Wakko QSV Requeue attempt has apr='resolved' (not 'unresolved'). | **RESET 16** |
+| 18 | C18 core: `AlignmentSpec` VO + `VmafAlignmentProbe` domain service + `ColorSpaceService` cross-cutting. Unit tests: invariants + fail-loud on unparseable primaries / fps / duration-delta > 1 frame. | `TestAlignmentSpec` + `TestVmafAlignmentProbe` + `TestColorSpaceService` green. | **RESET 17** |
+| 19 | C18 chain: `VmafFilterChainBuilder` (pure-fn stage composition) + `VmafModelSelector` (strategy) + `VmafCommandComposer` (thin shell). `QualityTestingBusinessService.BuildVMAFCommand` retires. `_BuildVmafFilterChain` folded into Builder. | `TestVmafFilterChainBuilder` + `TestVmafModelSelector` + `TestVmafCommandComposer` green. | **RESET 18** |
+| 20 | C18 live smokes (a-j): 10 shape-diverse sources; each smoke records attempt id + VMAF score + axis-fired assertion. Fail-loud raises on unparseable / truncated / VFR-timeout. | All 10 smokes recorded in `### Verification`; axes 1-13 covered; no fallbacks fire. | **RESET 19** |
+| 21 | VERIFYING re-run: 20 criteria (C0-C17 + C18/C19/C20) all IMPLEMENTED with evidence. Fresh directive size snapshot at re-entry to IMPLEMENTING (2026-07-05) becomes the C10 anchor for final ceiling check. | Every criterion IMPLEMENTED + evidence recorded. | **RESET 20** |
+| 22 | DELIVERING final: `### Promotions` grown for C18/C19/C20 (new feature/flow docs promoted). Directive size ≤ 110% of Reset 15+ snapshot. Delivery report re-drafted with all 20 criteria + 10 VMAF smokes + deploy hardening + WorkerContext binding. Operator close. | Operator agrees closed. Directive file moved to `.claude/directives/closed/2026-07-XX-transcode-flow-canonical.md`. | **RESET 21** |
 
 ## Status
 
@@ -253,8 +316,9 @@ Every item tagged (a) or (b) per `call-graph-audit.md` Signal 4. Default (a) = b
 - [x] NEEDS_PLAN: criteria + Files + Reset Plan drafted; operator approved
 - [x] NEEDS_DOC_PREREAD: pre-read all colocated docs for files in `### Files`
 - [x] IMPLEMENTING: per-reset code work
-- [x] VERIFYING: evidence-recording
-- [x] DELIVERING: delivery report drafted; awaiting operator close
+- [x] VERIFYING: evidence-recording (Reset 13 stamp)
+- [~] DELIVERING: initial draft landed Reset 14; REOPENED 2026-07-05 to absorb C18/C19/C20 (VMAF alignment + deploy hardening + WorkerContext binding) -- outcome not met without them (VMAF systematically wrong = pipeline decisions garbage; disposition trust broken; system useless per operator)
+- [ ] REOPENED IMPLEMENTING: Reset 15+
 
 ### Files
 
@@ -359,6 +423,45 @@ Tests/Contract/TestFailLoud.py                                              -- C
 
 # ARCHITECTURE.md
 ARCHITECTURE.md                                                             -- EDIT (already listed above at Reset 2; noted here for completeness)
+
+# Reset 15 -- C19 deploy hardening (BUG-0085)
+deploy/Dockerfile                                                           -- EDIT (add `RUN find /opt/mediavortex -name __pycache__ -type d -exec rm -rf {} +` post-COPY)
+deploy/deploy-linux-worker.py                                               -- EDIT (post-deploy stale-pyc probe; fail-loud abort)
+Tests/Deploy/TestDeployStalePycProbe.py                                     -- CREATE
+
+# Reset 16 -- C20 WorkerContext thread-local binding (BUG-0086 deep cause)
+Core/WorkerContext.py                                                       -- EDIT (threading.local() backing; Bind + Current; raises WorkerContextNotBoundError)
+Features/TranscodeJob/Worker/JobProcessor.py                                -- EDIT (Bind at processing-thread entry in Process())
+Features/QualityTesting/ProcessQualityTestQueueService.py                   -- EDIT (Bind at daemon-thread entry in ProcessJob)
+Features/AudioNormalization/Services/PostEncodeMeasurementService.py       -- EDIT (revert Probe to strict-mode; defensive DB attestation kept as belt-and-suspenders)
+Tests/Contract/TestWorkerContextThreadLocal.py                              -- CREATE
+Tests/Contract/TestProbeStrictModeWhenContextBound.py                       -- CREATE
+Tests/Contract/TestPostEncodeMeasurementService.py                          -- EDIT (contract flips back: strict-mode assertions + defensive-write assertions coexist)
+
+# Reset 17 -- C18 core (AlignmentSpec + Probe + ColorSpaceService)
+Features/QualityTesting/Vmaf/AlignmentSpec.py                              -- CREATE (immutable VO; invariants raise on unparseable primaries / fps / duration-delta > 1 frame)
+Features/QualityTesting/Vmaf/VmafAlignmentProbe.py                         -- CREATE (Probe(SourcePath, EncodedPath) -> AlignmentSpec)
+Core/Media/ColorSpaceService.py                                            -- CREATE (color-triad + range + HDR detect + tone-map graph; fail-loud on unparseable)
+Features/TranscodeJob/Emit/MediaProbeAdapter.py                            -- EDIT (extend for color-triad + fps + duration + chroma + bit depth reads)
+Tests/Contract/TestAlignmentSpec.py                                        -- CREATE
+Tests/Contract/TestVmafAlignmentProbe.py                                   -- CREATE
+Tests/Contract/TestColorSpaceService.py                                    -- CREATE
+
+# Reset 18 -- C18 chain (FilterChainBuilder + ModelSelector + Composer)
+Features/QualityTesting/Vmaf/VmafFilterChainBuilder.py                     -- CREATE (9-stage pure-fn composition: setpts/deint/detelecine/fps/colorspace/crop/scale/chroma/libvmaf)
+Features/QualityTesting/Vmaf/VmafModelSelector.py                          -- CREATE (VmafModel enum + Select(spec) -> VmafModel)
+Features/QualityTesting/Vmaf/VmafCommandComposer.py                        -- CREATE (thin shell; -i pair + -ss + -lavfi injection + -f null + XML log path)
+Features/QualityTesting/QualityTestingBusinessService.py                   -- EDIT (BuildVMAFCommand retires; delegates to VmafCommandComposer; RunVmaf orchestrates Probe -> Selector -> Builder -> Composer)
+Features/QualityTesting/QualityTesting.feature.md                          -- EDIT (VMAF filter chain contract migrates from feature-doc invariant to VmafFilterChainBuilder tests; delete old ffprobe fallback wording)
+Tests/Contract/TestVmafFilterChainBuilder.py                               -- CREATE
+Tests/Contract/TestVmafModelSelector.py                                    -- CREATE
+Tests/Contract/TestVmafCommandComposer.py                                  -- CREATE
+
+# Reset 19 -- C18 live smokes (10 shape-diverse sources)
+memory/smoke-assets.md                                                     -- EDIT (register 10 VMAF alignment smoke canaries: HDR 4K PQ, animation VFR, interlaced 1080i, telecined 24p, letterbox 2.35, phone 540p, truncated 30s, 4:2:2 source, unparseable primaries)
+# Live-DB evidence only -- no code edits at Reset 19; directive Verification block accretes per-smoke rows.
+
+# Reset 20+21 -- VERIFYING re-run + DELIVERING final -- directive doc only.
 ```
 
 ### Seams
@@ -381,6 +484,12 @@ Persistent seam SOT lives in flow docs (`.claude/rules/seam-verification.md`). D
 | S12 (new) `GUI /settings Transcoding card seam` | `PUT /api/SystemSettings/Transcoding` | JSON body per section (bitrate ladder rows, ICQ ladder rows, adequacy toggle, confidence knobs, global-off, review-panel filter) | Persists to `ProfileThresholds` (TargetKbps/IcqQ) + `PostTranscodeGateConfig` (new cols) + reads `VmafConfidenceStats` for review panel | `TestTranscodingSettingsRoundTrip` |
 | S13 (new) `CommandComposer -> ffmpeg argv` | `Features/TranscodeJob/Emit/CommandComposer.Build(Job, MediaFile, Plan)` composes VideoSlot + AudioSlot + SubtitleSlot + ContainerSlot | Plan tuple `{VideoOp, AudioOp, SubtitleOp, ContainerOp}` -> ffmpeg argv list | Strategy.BuildCommand consumes; no ProcessingMode-keyed Registry lookup | `TestCommandComposer` all Plan combos + smoke |
 | S14 (new) `SubtitleSlot always fires` | `SubtitleSlot.Emit(Plan.SubtitleOp, TargetContainer, MediaFile)` | MP4 target -> `-map 0:s? -c:s mov_text`; MKV target -> `-map 0:s? -c:s copy`; PGS/DVB image subs targeted to MP4 -> `[]` + WARN log naming dropped codec | Every Plan path retains text subs; image-sub drop is explicit + logged | `TestCommandComposer::test_subtitle_slot_always_fires` + BUG-0083 smokes (e/f/g) |
+| S15 (new C18) `VmafAlignmentProbe -> AlignmentSpec` | `Probe(SourcePath, EncodedPath)` reads via MediaProbeAdapter + ColorSpaceService | Immutable VO with 17 fields (color triad + fps/VFR + resolution + crop + deint/detelecine + bit depth + chroma + HDR flag + duration parity assert) | `VmafFilterChainBuilder.Build(spec)` composes filter chain; `VmafModelSelector.Select(spec)` picks model | `TestVmafAlignmentProbe` + `TestAlignmentSpec` invariants + 10 live smokes |
+| S16 (new C18) `VmafFilterChainBuilder stages` | 9 pure functions composed in fixed order (setpts / deinterlace / detelecine / fps / colorspace / crop / scale / chroma / libvmaf) | `AlignmentSpec` -> str filter chain | `VmafCommandComposer` injects via `-lavfi` | `TestVmafFilterChainBuilder` per-stage + composition tests |
+| S17 (new C18) `VmafModelSelector.Select` | pure fn `(spec) -> VmafModel` | VmafModel enum `{Default, Model4K, Phone, Neg}` | libvmaf argv references model path | `TestVmafModelSelector` rule table |
+| S18 (new C18) `VmafCommandComposer -> argv` | replaces `QualityTestingBusinessService.BuildVMAFCommand` | `AlignmentSpec + Attempt` -> ffmpeg argv | `QualityTestingBusinessService.RunVmaf` invokes composer | `TestVmafCommandComposer` end-to-end argv + 10 live smokes |
+| S19 (new C19) `Deploy stale-pyc probe` | `deploy/deploy-linux-worker.py` post-COPY probe via `docker exec` | mtime comparison between .py and .pyc siblings | Deploy aborts + logs host + container + file on stale-pyc detected | `TestDeployStalePycProbe` + live re-deploy log |
+| S20 (new C20) `WorkerContext.Bind + Current` (thread-local) | `Core/WorkerContext.py` `threading.local()` backing + `Bind(...)` at each processing-thread entry | `Current() -> WorkerContext`; raises `WorkerContextNotBoundError` on unbound thread | `PostEncodeMeasurementService.Probe` (strict-mode) + every `Current()` caller | `TestWorkerContextThreadLocal` + `TestProbeStrictModeWhenContextBound` + live Wakko QSV Requeue apr='resolved' |
 
 ### Promotions
 
@@ -458,7 +567,7 @@ Populated incrementally per step.
     - **(f) StreamCopy mkv+SRT -> mov_text argv:** attempts 41108/41111 (MFID 5374 Phineas & Ferb S04E23). ffmpeg argv contains `-map 0:s? -c:s mov_text`. End-to-end file emission blocked by StreamCopy checksum mismatch (BUG-0084) — argv proof standing. PASS (argv level).
     - **(g) Reencode + PGS drop-with-WARN:** attempt 41110 (MFID 689047 Adventure Time S01E22). SubtitleSlot returned `[]`. WARN log 16:00:52: "SubtitleSlot: dropping image-based subtitles (hdmv_pgs_subtitle) targeting mp4; OCR-to-text conversion deferred (BUG-0083 slot)." VMAF=93.71. Downstream ComplianceGate rejected on `no_effective_profile` (unrelated to SubtitleSlot). PASS.
   - **Reset 10 backend smokes** (six): AdequacyGate exclude at 380 kbps 720p; NextTierAdjuster ceiling terminates at Tier 5; SmartConfidence N=12 -> QualityTestConfident; Bootstrap N=0 -> AwaitingVmaf; Global QT=False -> QualityTestingGloballyDisabled; SubtitleSlot argv variants. PASS (see `### Resume Marker`).
-- **C10. Directive doc size guard.** VERIFYING entry snapshot 942 lines / 119668 bytes. DELIVERING entry snapshot 994 lines / 136383 bytes (2026-07-04). 110% ceiling against DELIVERING snapshot = 1093 lines / 150021 bytes. Verified at end of Promotions.
+- **C10. Directive doc size guard.** VERIFYING entry snapshot 942 lines / 119668 bytes. DELIVERING entry snapshot 994 lines / 136383 bytes (2026-07-04). REOPENED 2026-07-05 to absorb C18/C19/C20; fresh IMPLEMENTING re-entry snapshot 1178 lines / 162201 bytes. New 110% ceiling = 1296 lines / 178421 bytes. Verified at end of Reset 21 Promotions.
 - **C11. Compliance-gate MaxAudioChannels dead-check.** Dead check at `AudioPolicyAdmissionGate.py:127-134` deleted; `MaxAudioChannels` column retained per directive C11 note. Reset 7 smoke on MFID 688909 no longer triggers `ComplianceGateFailed:channels_exceed_max`. Verified structurally by absence of ComplianceGateFailed:channels dispositions in post-cutover audit. IMPLEMENTED.
 - **C12. Profile tier-ladder model.** Migration `AlignProfileTierModel_2026_07_04.py` + `BackfillCanaryTierLadder_2026_07_04.py` + `AddCanaryTier1Profiles_2026_07_04.py` + `BackfillFullCanaryTierLadder_2026_07_04.py` + `DeleteNonCanaryProfiles_2026_07_04.py` + `ConsolidateCanaryProfileNames_2026_07_04.py` EXECUTED. SQL audit: 40 CANARY profiles (20 NVENC + 20 QSV) x 4 resolutions x 5 tiers x live_action, all with TargetKbps + IcqQ populated per (Family, Resolution, Tier). Non-CANARY AV1 profiles deleted; zero orphans on MediaFiles.AssignedProfile after 51247-row consolidation. `Tests/Contract/TestProfileTierLadder.py` 12/12 PASS. Grep `SourceBitratePercent|MinBitrateKbps|MaxBitrateKbps` in `Features/**/*.py` production tree returns 0. IMPLEMENTED.
 - **C13. Admission-adequacy gate.** `Features/TranscodeQueue/AdequacyGate.Evaluate` shipped. `Tests/Contract/TestAdequacyGate.py` 9/9 PASS. Live smoke: 380 kbps 720p live-action -> Excluded/CompactSource (Tier 1 threshold 400). Live-mid-flight audit: SystemSettings `AdequacyGateEnabled` toggle observed on next admission (db-authority). IMPLEMENTED.
