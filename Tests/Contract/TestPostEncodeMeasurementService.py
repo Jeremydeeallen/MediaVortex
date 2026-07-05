@@ -40,16 +40,30 @@ class TestPostEncodeMeasurementService(unittest.TestCase):
             self.assertEqual(Parsed[1]['Label'], 'Dialog Boost')
             self.assertEqual(Parsed[0]['AchievedIntegratedLufs'], -23.0)
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C15
-    def test_probe_returns_false_when_no_streams(self):
+    # directive: transcode-flow-canonical | # see transcode.ST5 -- BUG-0086 attestation lands regardless
+    def test_probe_attests_unresolved_when_no_streams(self):
         Svc = PostEncodeMeasurementService(FFmpegPath='/usr/bin/ffmpeg', FFprobePath='/usr/bin/ffprobe')
-        with patch.object(Svc, 'ListAudioStreams', return_value=[]):
-            self.assertFalse(Svc.Probe(TranscodeAttemptId=42, OutputFilePath='/tmp/out.mp4'))
+        with patch.object(Svc, 'ListAudioStreams', return_value=[]), \
+             patch('Features.AudioNormalization.Services.PostEncodeMeasurementService.DatabaseService') as MockDb:
+            Instance = MagicMock()
+            MockDb.return_value = Instance
+            Svc.Probe(TranscodeAttemptId=42, OutputFilePath='/tmp/out.mp4', QueueId=99)
+            Args = Instance.ExecuteNonQuery.call_args.args
+            self.assertEqual(json.loads(Args[1][0]), [])
+            self.assertEqual(Args[1][1], 'unresolved')
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C15
-    def test_probe_returns_false_when_binaries_unresolvable(self):
+    # directive: transcode-flow-canonical | # see transcode.ST5 -- BUG-0086 no silent skip on missing binaries
+    def test_probe_attests_unresolved_when_binaries_unresolvable(self):
         Svc = PostEncodeMeasurementService()
-        self.assertFalse(Svc.Probe(TranscodeAttemptId=42, OutputFilePath='/tmp/out.mp4'))
+        with patch('Features.AudioNormalization.Services.PostEncodeMeasurementService.DatabaseService') as MockDb, \
+             patch('Core.WorkerContext.WorkerContext') as MockCtx:
+            MockCtx.Current.return_value = None
+            Instance = MagicMock()
+            MockDb.return_value = Instance
+            Svc.Probe(TranscodeAttemptId=42, OutputFilePath='/tmp/out.mp4', QueueId=99)
+            Args = Instance.ExecuteNonQuery.call_args.args
+            self.assertEqual(json.loads(Args[1][0]), [])
+            self.assertEqual(Args[1][1], 'unresolved')
 
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C15
     def test_probe_records_measurement_failure_per_stream(self):

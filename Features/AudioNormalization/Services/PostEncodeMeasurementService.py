@@ -111,11 +111,16 @@ class PostEncodeMeasurementService:
 
     # directive: transcode-flow-canonical | # see transcode.ST5 | # see audio-normalization.C5
     def Probe(self, TranscodeAttemptId, OutputFilePath, QueueId=None):
-        """Measure every output audio stream; write AudioTracksEmittedJson + AudioPolicyResolved verdict + AudioPolicyJson snapshot in one UPDATE."""
+        """Measure every output audio stream; write AudioTracksEmittedJson + AudioPolicyResolved verdict + AudioPolicyJson snapshot in one UPDATE. BUG-0086: DB attestation lands regardless of binary availability so Requeue rows stay audit-complete."""
         Ffmpeg, Ffprobe = self._ResolveBinaries()
+        Streams = []
         if not Ffmpeg or not Ffprobe:
-            return False
-        Streams = self.ListAudioStreams(Ffprobe, OutputFilePath)
+            LoggingService.LogWarning(
+                f"PostEncode.Probe: ffmpeg/ffprobe unresolved (ffmpeg={Ffmpeg}, ffprobe={Ffprobe}) for AttemptId={TranscodeAttemptId}; AudioPolicy* still attested from queue snapshot",
+                "PostEncodeMeasurementService", "Probe",
+            )
+        else:
+            Streams = self.ListAudioStreams(Ffprobe, OutputFilePath)
         if not Streams:
             return self._PersistAttestation(TranscodeAttemptId, QueueId, [], 'unresolved')
 
