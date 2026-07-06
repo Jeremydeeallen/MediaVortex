@@ -1,23 +1,38 @@
-# directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C9
-from typing import Optional, Any
+# directive: transcode-flow-canonical
+import json
+from typing import Optional, Any, Dict
 from Core.Logging.LoggingService import LoggingService
 
 
-# directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C9
+# directive: transcode-flow-canonical
+class MediaProbeError(RuntimeError):
+    pass
+
+
+# directive: transcode-flow-canonical
 class MediaProbeAdapter:
     """Per-worker FFprobe adapter; injected FFprobePath rather than discovered live."""
 
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C9
+    # directive: transcode-flow-canonical
     def __init__(self, FFprobePath: Optional[str] = None):
-        """Stash FFprobePath; None defers discovery to the underlying FFmpegAnalysisService."""
         self.FFprobePath = FFprobePath
 
-    # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C9
+    # directive: transcode-flow-canonical
     def RunAnalysis(self, InputPath: str) -> Optional[Any]:
-        """Return the FFmpegAnalysisService.AnalyzeMediaFile result for the given input path; None on failure."""
         try:
             from Services.FFmpegAnalysisService import FFmpegAnalysisService
             return FFmpegAnalysisService(FFprobePath=self.FFprobePath).AnalyzeMediaFile(InputPath)
         except Exception as Ex:
             LoggingService.LogException(f"RunAnalysis failed for {InputPath}", Ex, "MediaProbeAdapter", "RunAnalysis")
             return None
+
+    # directive: transcode-flow-canonical
+    def ProbeStreams(self, InputPath: str) -> Dict[str, Any]:
+        from Services.FFmpegService import FFmpegService
+        Result = FFmpegService(FFprobePath=self.FFprobePath).ExecuteFFprobe(InputPath)
+        if not Result.get('Success'):
+            raise MediaProbeError(f"ffprobe failed for {InputPath}: {Result.get('ErrorMessage')}")
+        try:
+            return json.loads(Result['Output'])
+        except json.JSONDecodeError as Ex:
+            raise MediaProbeError(f"ffprobe JSON parse failed for {InputPath}: {Ex}") from Ex
