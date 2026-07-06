@@ -104,7 +104,7 @@
     "Features/QualityTesting/ProcessQualityTestQueueService.py": 12,
     "Features/QualityTesting/QualityTestController.py": 42,
     "Features/QualityTesting/QualityTestRepository.py": 29,
-    "Features/QualityTesting/QualityTestingBusinessService.py": 47,
+    "Features/QualityTesting/QualityTestingBusinessService.py": 42,
     "Features/QualityTesting/QualityTestingViewModel.py": 9,
     "Features/SQLQueries/SQLQueriesController.py": 10,
     "Features/ServiceControl/ActiveJobRepository.py": 14,

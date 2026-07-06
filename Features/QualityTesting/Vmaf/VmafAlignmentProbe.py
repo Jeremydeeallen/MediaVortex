@@ -54,8 +54,12 @@ class VmafAlignmentProbe:
         VfrDetected = abs(SourceFps - SourceAvgFps) > 0.02
         TargetFps = self._ParseFps(EncodedVideo.get('r_frame_rate'), "encoded r_frame_rate")
 
-        Width = int(EncodedVideo.get('width') or 0)
-        Height = int(EncodedVideo.get('height') or 0)
+        RawWidth = EncodedVideo.get('width')
+        RawHeight = EncodedVideo.get('height')
+        if RawWidth is None or RawHeight is None:
+            raise VmafAlignmentProbeError(f"Encoded resolution missing: width={RawWidth!r} height={RawHeight!r}")
+        Width = int(RawWidth)
+        Height = int(RawHeight)
         if Width <= 0 or Height <= 0:
             raise VmafAlignmentProbeError(f"Encoded resolution invalid: {Width}x{Height}")
         MaxEdgePx = max(Width, Height)

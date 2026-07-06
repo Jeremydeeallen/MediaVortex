@@ -815,6 +815,15 @@ Populated incrementally per step.
 - **Exit gate met:** `TestVmafFilterChainBuilder` + `TestVmafModelSelector` + `TestVmafCommandComposer` green (46 pass in 0.12s).
 - `QualityTestingBusinessService.BuildVMAFCommand` + `_BuildVmafFilterChain` retirement deferred to Reset 19 prep -- needs live Probe integration + AlignmentSpec construction from real ffprobe output before wiring can be end-to-end. Chain-layer SOT (Builder + Selector + Composer) shipped this reset.
 
+**Reset 19 prep SHIPPED 2026-07-06 (QTB wired to composer + 10-canary registry):**
+- `Features/QualityTesting/QualityTestingBusinessService.py` rewired: `BuildVMAFCommand` + `RunLocalVmafForAttempt` now call `_BuildVmafArgvViaComposer` -> `VmafAlignmentProbe.Probe` -> `VmafCommandComposer.Build`. Filter-chain SOT lives in `Features/QualityTesting/Vmaf/`. Fail-loud propagates: unparseable primaries/fps/pix_fmt or duration-parity delta > 1 frame raises before ffmpeg spawns.
+- Retired dead helpers: `_BuildVmafFilterChain` (folded into Builder), `GetVideoResolution` (superseded by Probe), `DetermineVMAFTargetResolution` (superseded by AlignmentSpec.TargetResolution). Grep confirms zero remaining callers.
+- `_ArgvToShellCommand` shell-quotes `-i/-lavfi/-ss` values for `subprocess.Popen(shell=True, ...)` (matches existing pattern; ffmpeg binary unquoted like before).
+- `VmafAlignmentProbe` coalesce-default on encoded width/height replaced with explicit None-raise (satisfies R7 fail-loud rule; `TestFailLoud` baseline ratcheted 47 -> 42 on QTB).
+- `Features/QualityTesting/quality-test.flow.md` ST3/ST4 code-path prose + S4 seam rewritten to name AlignmentSpec + Model + Builder + Composer chain (deletes references to retired helpers).
+- `memory/smoke-assets.md` extended with C18 canary registry: 10 shape-diverse VMAF sources, axes exercised, provisioning notes. (a) Hotel Chevalier registered; (b-j) source-file identification pending.
+- Regression: 110 pass across 8 suites (Vmaf 6 + ClaimAuthority + FailLoud). `TestVmafFilterChainBuilder` 24/24 + `TestVmafModelSelector` 8/8 + `TestVmafCommandComposer` 14/14 + `TestAlignmentSpec` 14/14 + `TestVmafAlignmentProbe` 12/12 + `TestColorSpaceService` 17/17 + `TestClaimAuthority` 17/17 + `TestFailLoud` 4/4 all green.
+
 ---
 
 ### Parked -- quality-test.flow.md

@@ -17,6 +17,9 @@ from Core.Path import Path, Worker, PathError
 from Core.Path.LocalPath import LocalExists
 from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+from Features.QualityTesting.Vmaf.VmafAlignmentProbe import VmafAlignmentProbe
+from Features.QualityTesting.Vmaf.VmafCommandComposer import VmafCommandComposer
+from Features.TranscodeJob.Emit.MediaProbeAdapter import MediaProbeAdapter
 
 
 # directive: path-schema-migration | # see path.S8
@@ -107,16 +110,43 @@ class QualityTestingBusinessService:
         return GetStorageRoots()
 
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: transcode-flow-canonical
     @staticmethod
-    def _BuildVmafFilterChain(SourceFps, TargetWidth, TargetHeight, XmlLogPath, NThreads=4):
-        """Single source of truth for the libvmaf ffmpeg filter chain. Both post-transcode VMAF (BuildVMAFCommand) and Mode A pre-flight VMAF (RunLocalVmafForAttempt) build the exact same chain. Layout: fps lock, PTS reset, lanczos scale to target with TV color range pinning, 10-bit precision, libvmaf n_threads."""
-        CompareScale = f"scale={TargetWidth}:{TargetHeight}:flags=lanczos:in_range=auto:out_range=tv,"
-        return (
-            f"[0:v]fps={SourceFps},setpts=PTS-STARTPTS,{CompareScale}format=yuv420p10le[dist];"
-            f"[1:v]fps={SourceFps},setpts=PTS-STARTPTS,{CompareScale}format=yuv420p10le[ref];"
-            f"[dist][ref]libvmaf=log_fmt=xml:log_path={XmlLogPath}:n_threads={NThreads}"
+    def _FFprobePathFromFFmpeg(FFmpegPath: str) -> str:
+        return FFmpegPath.replace('ffmpeg.exe', 'ffprobe.exe').replace('ffmpeg', 'ffprobe')
+
+    # directive: transcode-flow-canonical
+    @classmethod
+    def _BuildVmafArgvViaComposer(cls, FFmpegPath, SourcePath, EncodedPath, XmlLogPath, StartTime=None, NThreads=4):
+        FFprobePath = cls._FFprobePathFromFFmpeg(FFmpegPath)
+        Probe = VmafAlignmentProbe(Adapter=MediaProbeAdapter(FFprobePath=FFprobePath))
+        Spec = Probe.Probe(SourcePath, EncodedPath)
+        Argv = VmafCommandComposer.Build(
+            FFmpegPath=FFmpegPath,
+            DistortedPath=EncodedPath,
+            ReferencePath=SourcePath,
+            Spec=Spec,
+            XmlLogPath=XmlLogPath,
+            StartTime=StartTime,
+            NThreads=NThreads,
         )
+        return Argv, Spec
+
+    # directive: transcode-flow-canonical
+    @staticmethod
+    def _ArgvToShellCommand(Argv):
+        Out = [Argv[0]]
+        I = 1
+        while I < len(Argv):
+            Tok = Argv[I]
+            if Tok in ('-i', '-lavfi', '-ss') and I + 1 < len(Argv):
+                Out.append(Tok)
+                Out.append(f'"{Argv[I + 1]}"')
+                I += 2
+            else:
+                Out.append(Tok)
+                I += 1
+        return ' '.join(Out)
 
     def _CleanupTemporaryFilePathsForVmafFailure(self, TranscodeAttemptId: int) -> None:
         try:
@@ -313,62 +343,31 @@ class QualityTestingBusinessService:
             if not ffmpeg_binary or not os.path.exists(ffmpeg_binary):
                 return {"Success": False, "Error": f"FFmpeg executable not found: {ffmpeg_binary or '<no WorkerContext.FFmpegPath registered>'}"}
 
-            # Get video resolutions to check if scaling is needed
-            original_resolution = self.GetVideoResolution(original_file, ffmpeg_binary)
-            transcoded_resolution = self.GetVideoResolution(transcoded_file, ffmpeg_binary)
-
-            target_width, target_height = self.DetermineVMAFTargetResolution(original_resolution, transcoded_resolution)
-            try:
-                FpsProbe = subprocess.run(
-                    [ffmpeg_binary.replace('ffmpeg.exe', 'ffprobe.exe').replace('ffmpeg', 'ffprobe'),
-                     '-v', 'error', '-select_streams', 'v:0',
-                     '-show_entries', 'stream=avg_frame_rate', '-of', 'csv=p=0', original_file],
-                    capture_output=True, text=True, timeout=10,
-                )
-                FpsRaw = (FpsProbe.stdout or '').strip()
-                if '/' in FpsRaw:
-                    Num, Den = FpsRaw.split('/', 1)
-                    SourceFps = round(float(Num) / float(Den), 3) if float(Den) != 0 else 24
-                else:
-                    SourceFps = float(FpsRaw) if FpsRaw else 24
-            except Exception:
-                SourceFps = 24
-            vmaf_filter = self._BuildVmafFilterChain(SourceFps, target_width, target_height, "vmaf_output.xml")
-            if original_resolution == transcoded_resolution:
-                LoggingService.LogInfo(f"VMAF compare at native {target_width}x{target_height} (resolutions match)", "QualityTestingBusinessService", "BuildVMAFCommand")
-            else:
-                LoggingService.LogInfo(f"VMAF compare at {target_width}x{target_height} (original {original_resolution[0]}x{original_resolution[1]}, transcoded {transcoded_resolution[0]}x{transcoded_resolution[1]})", "QualityTestingBusinessService", "BuildVMAFCommand")
-
-            # Get StartTime from TranscodeAttempts table if available
             StartTime = None
             if JobDetails.get('TranscodeAttemptId'):
-                try:
-                    # Query TranscodeAttempts table for StartTime
-                    StartTimeResult = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                        "SELECT StartTime FROM TranscodeAttempts WHERE Id = %s",
-                        (JobDetails['TranscodeAttemptId'],)
-                    )
-                    if StartTimeResult and StartTimeResult[0]['StartTime']:
-                        StartTime = StartTimeResult[0]['StartTime']
-                        LoggingService.LogInfo(f"Retrieved StartTime {StartTime} for TranscodeAttempt {JobDetails['TranscodeAttemptId']}",
-                                             "QualityTestingBusinessService", "BuildVMAFCommand")
-                except Exception as e:
-                    LoggingService.LogException("Error retrieving StartTime from TranscodeAttempts", e,
-                                             "QualityTestingBusinessService", "BuildVMAFCommand")
-
-            command_parts = [ffmpeg_binary]
-
-            # Add start time parameter (applies to the next -i input)
-            if StartTime and StartTime.strip():
-                command_parts.extend(["-ss", StartTime.strip()])
-
-            # Inputs: encoded first (becomes [0:v] -> [dist]), original second (becomes [1:v] -> [ref]).
-            command_parts.extend(["-i", f'"{transcoded_file}"', "-i", f'"{original_file}"'])
-
-            command_parts.extend(["-lavfi", f'"{vmaf_filter}"', "-f", "null", "-"])
-
-            # Build final command string
-            command = " ".join(command_parts)
+                StartTimeResult = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                    "SELECT StartTime FROM TranscodeAttempts WHERE Id = %s",
+                    (JobDetails['TranscodeAttemptId'],)
+                )
+                if StartTimeResult and StartTimeResult[0]['StartTime']:
+                    StartTime = StartTimeResult[0]['StartTime']
+                    if StartTime:
+                        StartTime = StartTime.strip()
+            Argv, Spec = self._BuildVmafArgvViaComposer(
+                FFmpegPath=ffmpeg_binary,
+                SourcePath=original_file,
+                EncodedPath=transcoded_file,
+                XmlLogPath="vmaf_output.xml",
+                StartTime=StartTime if StartTime else None,
+            )
+            LoggingService.LogInfo(
+                f"VMAF align: model={Spec.MaxEdgePx}px edge, res={Spec.TargetResolution}, "
+                f"fps={Spec.TargetFps}, hdr={Spec.HdrDetected}, deint={Spec.DeinterlaceNeeded}, "
+                f"detelecine={Spec.DetelecineNeeded}, chroma={Spec.ChromaSubsampling}, "
+                f"transfer={Spec.TransferFunction}, primaries={Spec.ColorPrimaries}",
+                "QualityTestingBusinessService", "BuildVMAFCommand",
+            )
+            command = self._ArgvToShellCommand(Argv)
 
             LoggingService.LogInfo(f"Quality Test FFmpeg command: {command}", "QualityTestingBusinessService", "BuildVMAFCommand")
             LoggingService.LogInfo(f"Command type: {type(command)}", "QualityTestingBusinessService", "BuildVMAFCommand")
@@ -459,23 +458,19 @@ class QualityTestingBusinessService:
             FFmpegBinary = Ctx.FFmpegPath if Ctx and Ctx.FFmpegPath else None
             if not FFmpegBinary or not LocalExists(FFmpegBinary):
                 return {"Success": False, "Error": f"FFmpeg executable not found: {FFmpegBinary or '<no WorkerContext.FFmpegPath registered>'}"}
-            OriginalResolution = self.GetVideoResolution(LocalSourcePath, FFmpegBinary)
-            TranscodedResolution = self.GetVideoResolution(LocalOutputPath, FFmpegBinary)
-            TargetWidth, TargetHeight = self.DetermineVMAFTargetResolution(OriginalResolution, TranscodedResolution)
-            try:
-                FFprobeBinary = FFmpegBinary.replace('ffmpeg.exe', 'ffprobe.exe').replace('ffmpeg', 'ffprobe')
-                FpsProbe = subprocess.run([FFprobeBinary, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=avg_frame_rate', '-of', 'csv=p=0', LocalSourcePath], capture_output=True, text=True, timeout=10)
-                FpsRaw = (FpsProbe.stdout or '').strip()
-                if '/' in FpsRaw:
-                    Num, Den = FpsRaw.split('/', 1)
-                    SourceFps = round(float(Num) / float(Den), 3) if float(Den) != 0 else 24
-                else:
-                    SourceFps = float(FpsRaw) if FpsRaw else 24
-            except Exception:
-                SourceFps = 24
             XmlPath = f"vmaf_modea_{TranscodeAttemptId}.xml"
-            VmafFilter = self._BuildVmafFilterChain(SourceFps, TargetWidth, TargetHeight, XmlPath)
-            Command = f'"{FFmpegBinary}" -i "{LocalOutputPath}" -i "{LocalSourcePath}" -lavfi "{VmafFilter}" -f null -'
+            Argv, Spec = self._BuildVmafArgvViaComposer(
+                FFmpegPath=FFmpegBinary,
+                SourcePath=LocalSourcePath,
+                EncodedPath=LocalOutputPath,
+                XmlLogPath=XmlPath,
+            )
+            LoggingService.LogInfo(
+                f"Mode A VMAF align: res={Spec.TargetResolution}, fps={Spec.TargetFps}, "
+                f"hdr={Spec.HdrDetected}, chroma={Spec.ChromaSubsampling}",
+                "QualityTestingBusinessService", "RunLocalVmafForAttempt",
+            )
+            Command = self._ArgvToShellCommand(Argv)
             LoggingService.LogInfo(f"Mode A VMAF for attempt {TranscodeAttemptId}: {Command}", "QualityTestingBusinessService", "RunLocalVmafForAttempt")
             Result = subprocess.run(Command, shell=True, capture_output=True, text=True)
             if Result.returncode != 0:
@@ -495,90 +490,6 @@ class QualityTestingBusinessService:
         except Exception as Ex:
             LoggingService.LogException(f"RunLocalVmafForAttempt failed for attempt {TranscodeAttemptId}", Ex, "QualityTestingBusinessService", "RunLocalVmafForAttempt")
             return {"Success": False, "Error": str(Ex)}
-
-    # directive: nvenc-rate-anchored-remediation
-    def GetVideoResolution(self, VideoFilePath: str, FFmpegPath: str) -> tuple:
-        """Get video resolution (width, height) from video file."""
-        try:
-            import subprocess
-            import re
-
-            if not FFmpegPath:
-                LoggingService.LogError(
-                    f"GetVideoResolution called with FFmpegPath=None for {VideoFilePath}. "
-                    f"Caller must resolve FFmpegPath before calling this method.",
-                    "GetVideoResolution", "QualityTestingBusinessService"
-                )
-                return None, None
-
-            # Use FFprobe to get video resolution -- derive ffprobe path from ffmpeg path
-            FFprobePath = FFmpegPath.replace("ffmpeg.exe", "ffprobe.exe").replace("ffmpeg", "ffprobe")
-            probe_command = [
-                FFprobePath,
-                "-v", "quiet",
-                "-select_streams", "v:0",
-                "-show_entries", "stream=width,height",
-                "-of", "csv=p=0",
-                VideoFilePath
-            ]
-
-            result = subprocess.run(probe_command, capture_output=True, text=True, timeout=30)
-
-            if result.returncode == 0 and result.stdout.strip():
-                # Parse width,height from output
-                resolution_line = result.stdout.strip()
-                if ',' in resolution_line:
-                    width, height = resolution_line.split(',')
-                    return (int(width), int(height))
-
-            # Fallback: try to parse from ffmpeg info
-            info_command = [FFmpegPath, "-i", VideoFilePath, "-f", "null", "-"]
-            result = subprocess.run(info_command, capture_output=True, text=True, timeout=30)
-
-            if result.stderr:
-                # Look for resolution in stderr output
-                resolution_match = re.search(r'(\d+)x(\d+)', result.stderr)
-                if resolution_match:
-                    width = int(resolution_match.group(1))
-                    height = int(resolution_match.group(2))
-                    return (width, height)
-
-            # Default fallback
-            LoggingService.LogWarning(f"Could not determine resolution for {VideoFilePath}, using default 1920x1080", "QualityTestingBusinessService", "GetVideoResolution")
-            return (1920, 1080)
-
-        except Exception as e:
-            LoggingService.LogException(f"Error getting video resolution for {VideoFilePath}", e, "QualityTestingBusinessService", "GetVideoResolution")
-            return (1920, 1080)  # Default fallback
-
-    # directive: nvenc-rate-anchored-remediation
-    def DetermineVMAFTargetResolution(self, OriginalResolution: tuple, TranscodedResolution: tuple) -> tuple:
-        """Determine target resolution for VMAF comparison (use smaller resolution)."""
-        try:
-            original_width, original_height = OriginalResolution
-            transcoded_width, transcoded_height = TranscodedResolution
-
-            # Use the smaller resolution to avoid upscaling
-            if (transcoded_width * transcoded_height) <= (original_width * original_height):
-                target_width = transcoded_width
-                target_height = transcoded_height
-                LoggingService.LogInfo(f"Using transcoded resolution for VMAF: {target_width}x{target_height}", "QualityTestingBusinessService", "DetermineVMAFTargetResolution")
-            else:
-                target_width = original_width
-                target_height = original_height
-                LoggingService.LogInfo(f"Using original resolution for VMAF: {target_width}x{target_height}", "QualityTestingBusinessService", "DetermineVMAFTargetResolution")
-
-            # Ensure dimensions are even numbers (required by some codecs)
-            if target_width % 2 != 0:
-                target_width -= 1
-            if target_height % 2 != 0:
-                target_height -= 1
-
-            return (target_width, target_height)
-
-        except Exception as e:
-            LoggingService.LogException("Error determining VMAF target resolution", e, "QualityTestingBusinessService", "DetermineVMAFTargetResolution")
-            return (1920, 1080)  # Default fallback
 
     # directive: nvenc-rate-anchored-remediation
     def ParseVMAFMetrics(self, XmlPath: str = 'vmaf_output.xml') -> dict:
