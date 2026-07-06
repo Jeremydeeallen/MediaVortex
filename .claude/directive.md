@@ -799,6 +799,14 @@ Populated incrementally per step.
 - **Hardware inventory memory correction:** deploy-linux-worker reports `av1_nvenc probe -- initialized cleanly on dot (driver 595.71.05)` -- contradicts memory `reference_worker_host_hardware.md` claim "dot/larry=CPU". Dot has NVIDIA GPU. Memory rewrite deferred.
 - **Post-VERIFYING regression re-run:** 126 root-venv PASS + 1 SKIP + 1 FAIL (TestSharedColumnsPopulated 10/11 -- row 41107 pending BUG-0085 backfill or delete). 11/11 WebService-venv PASS.
 
+**Reset 17 SHIPPED 2026-07-06 (commit `78e0a3f`, C18 core -- AlignmentSpec + Probe + ColorSpaceService):**
+- `Features/QualityTesting/Vmaf/AlignmentSpec.py` -- frozen `@dataclass` VO with 19 fields covering the 13 alignment axes (color triad + range + fps + VFR flag + resolution + crop pair + deint + detelecine + bit depth pair + chroma + HDR flag + durations). `__post_init__` invariants raise `AlignmentSpecError` on empty color triad, non-positive fps, out-of-band bit depth (accepts 8/10/12), zero max-edge, non-positive durations, and duration parity delta > 1 source-frame.
+- `Core/Media/ColorSpaceService.py` -- centralized triad parsing. `ColorPrimaries` / `TransferFunction` / `ColorMatrix` / `ColorRange` enums. `ParsePrimaries` / `ParseTransfer` / `ParseMatrix` / `ParseRange` raise `ColorSpaceParseError` on unparseable input. `IsHdr` returns true for bt2020 primaries OR PQ/HLG transfer. `BuildToneMapGraph` emits `zscale+tonemap=hable` chain for PQ->bt709 and HLG->bt709; identity returns empty string; unsupported pairs raise.
+- `Features/QualityTesting/Vmaf/VmafAlignmentProbe.py` -- domain service. `Probe(SourcePath, EncodedPath) -> AlignmentSpec`. Uses `MediaProbeAdapter.ProbeStreams` (raw ffprobe JSON) + `ColorSpaceService` for triad parsing. Derives fps + VFR from `r_frame_rate` vs `avg_frame_rate`; interlaced/telecine detect from `field_order` + fps ratio; bit-depth + chroma from `pix_fmt` whitelist (fail-loud on unknown). `BuildReferenceToneMap(Spec, SourceTransferValue)` picks the tone-map chain for the REFERENCE feed only (never touches distorted).
+- `Features/TranscodeJob/Emit/MediaProbeAdapter.py` -- extended with `ProbeStreams(InputPath)` returning raw ffprobe JSON dict (streams + format). Existing `RunAnalysis` untouched.
+- **Tests (43 passing, 0.18s):** `Tests/Contract/TestAlignmentSpec.py` 14 tests (all invariants + fail-loud); `Tests/Contract/TestColorSpaceService.py` 17 tests (parse + HDR detect + tone-map); `Tests/Contract/TestVmafAlignmentProbe.py` 12 tests (shape derivation + unparseable primaries/fps/pix_fmt + missing video stream + zero resolution + duration parity + HDR ref tone-map). Adapter mocked; no live ffprobe dependency.
+- **Exit gate met:** `TestAlignmentSpec` + `TestVmafAlignmentProbe` + `TestColorSpaceService` green. Reset 18 (Builder + Selector + Composer) next.
+
 ---
 
 ### Parked -- quality-test.flow.md
