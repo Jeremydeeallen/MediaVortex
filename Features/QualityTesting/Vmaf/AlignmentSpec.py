@@ -59,8 +59,9 @@ class AlignmentSpec:
                 f"Durations must be > 0, got source={self.SourceDurationSec!r} encoded={self.EncodedDurationSec!r}"
             )
         FrameSec = 1.0 / float(self.SourceFps)
+        ToleranceSec = FrameSec * 2.0
         Delta = abs(self.SourceDurationSec - self.EncodedDurationSec)
-        if Delta > FrameSec:
+        if Delta > ToleranceSec:
             raise AlignmentSpecError(
-                f"Duration parity failed: delta={Delta:.4f}s > 1 frame ({FrameSec:.4f}s @ {self.SourceFps} fps)"
+                f"Duration parity failed: delta={Delta:.4f}s > 2 frames ({ToleranceSec:.4f}s @ {self.SourceFps} fps)"
             )

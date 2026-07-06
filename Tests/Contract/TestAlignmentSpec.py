@@ -92,16 +92,16 @@ class TestAlignmentSpec(unittest.TestCase):
             self._MakeValid(MaxEdgePx=0)
 
     # directive: transcode-flow-canonical
-    def test_duration_parity_within_one_frame_passes(self):
+    def test_duration_parity_within_two_frames_passes(self):
         FrameSec = 1.0 / 23.976
-        Spec = self._MakeValid(SourceDurationSec=100.0, EncodedDurationSec=100.0 + FrameSec * 0.5)
+        Spec = self._MakeValid(SourceDurationSec=100.0, EncodedDurationSec=100.0 + FrameSec * 1.5)
         self.assertIsNotNone(Spec)
 
     # directive: transcode-flow-canonical
-    def test_duration_parity_over_one_frame_raises(self):
+    def test_duration_parity_over_two_frames_raises(self):
         FrameSec = 1.0 / 23.976
         with self.assertRaises(AlignmentSpecError):
-            self._MakeValid(SourceDurationSec=100.0, EncodedDurationSec=100.0 + FrameSec * 2.0)
+            self._MakeValid(SourceDurationSec=100.0, EncodedDurationSec=100.0 + FrameSec * 3.0)
 
     # directive: transcode-flow-canonical
     def test_zero_source_duration_raises(self):

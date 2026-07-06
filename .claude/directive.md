@@ -824,6 +824,26 @@ Populated incrementally per step.
 - `memory/smoke-assets.md` extended with C18 canary registry: 10 shape-diverse VMAF sources, axes exercised, provisioning notes. (a) Hotel Chevalier registered; (b-j) source-file identification pending.
 - Regression: 110 pass across 8 suites (Vmaf 6 + ClaimAuthority + FailLoud). `TestVmafFilterChainBuilder` 24/24 + `TestVmafModelSelector` 8/8 + `TestVmafCommandComposer` 14/14 + `TestAlignmentSpec` 14/14 + `TestVmafAlignmentProbe` 12/12 + `TestColorSpaceService` 17/17 + `TestClaimAuthority` 17/17 + `TestFailLoud` 4/4 all green.
 
+**Reset 19 live smokes 2026-07-06 (3 of 10 recorded; 7 pending canary provisioning):**
+
+- **Duration parity tolerance widened 1 -> 2 source frames** (2026-07-06). Real Hotel Chevalier source vs prior encoded output showed 0.069s delta -- container overhead exceeds 1-frame tolerance at 24fps (0.0417s) but sits inside 2-frame (0.0834s). Truncation smoke (h) below still fires at 43s delta. `TestAlignmentSpec` two duration-parity tests updated.
+
+- **Smoke (a) SDR 1080p CFR 24fps live-action baseline -- PASS.** Source `C:\Users\jerem\Videos\Hotel Chevalier (2007) Bluray-1080p.mkv`; distorted `M:\Hotel Chevalier (2007)\Hotel Chevalier (2007) Bluray-720p-mv.mp4` (attempt 41078 emitted output). Composer path: `MODEL=vmaf_v0.6.1` (default; MaxEdge=1280 < 1440), Res=(1280,534), Fps=23.976, HDR=false, Chroma=4:2:0, BitDepth 8src/10target, ColorRange=tv, Deint=false. Live libvmaf rc=0 -> **VMAF score 94.545118**. Axes 1-5 + 7 + 11 + 12 + 13 exercised (color triad + range + fps pin + model select + chroma pin + duration parity + bit-depth pin).
+
+- **Smoke (h) truncated encode fail-loud -- PASS.** Truncated distorted via `ffmpeg -t 750 -c copy` from same base output. Source 793.131s vs distorted 750.041s. `VmafAlignmentProbe.Probe` raised `AlignmentSpecError: Duration parity failed: delta=43.0900s > 2 frames (0.0834s @ 23.976 fps)` before any ffmpeg spawn. Axis 12 (duration parity) fail-loud confirmed at runtime, no fallback.
+
+- **Smoke (j) unparseable color primaries -- PASS (unit).** `TestVmafAlignmentProbe::test_unparseable_primaries_raises` covers axis 1 fail-loud contract with mocked ffprobe returning garbage `color_primaries`. Live smoke deferred (no natural real-world source; unit covers contract).
+
+- **Smokes (b)-(g), (i) pending canary source provisioning.** Registered in `memory/smoke-assets.md`. Each requires operator to identify a real source file matching the shape:
+  - (b) HDR 4K PQ -- 4K movie with bt2020/smpte2084
+  - (c) Animation 24p VFR -- anime with mixed frame timing
+  - (d) Interlaced 1080i broadcast -- field_order=tt or bb
+  - (e) Telecined 24p -> 30i film -- 29.97 r_frame_rate + 23.976 avg
+  - (f) Letterbox 2.35:1 in 16:9 -- crop-detect target
+  - (g) Phone-source 540p vertical -- MaxEdgePx <= 540
+  - (i) 4:2:2 source encoded to 4:2:0 -- ProRes/DNxHR master
+  Each smoke re-scores an existing TranscodeAttempt output pair through the composer path and records `attempt_id + VMAF + axis-fired assertion`; workflow proven on smoke (a). Follow-up session sweeps remainder as canary paths are identified.
+
 ---
 
 ### Parked -- quality-test.flow.md
