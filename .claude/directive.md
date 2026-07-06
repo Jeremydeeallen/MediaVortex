@@ -834,6 +834,17 @@ Populated incrementally per step.
 
 - **Smoke (j) unparseable color primaries -- PASS (unit).** `TestVmafAlignmentProbe::test_unparseable_primaries_raises` covers axis 1 fail-loud contract with mocked ffprobe returning garbage `color_primaries`. Live smoke deferred (no natural real-world source; unit covers contract).
 
+- **Supplementary 4K sweep 2026-07-06** (opportunistic; not one of the 10 shape smokes but exercises composer path at 4K live). Source `X:\Videos\_uncategorized\C1BrazzersExxtra.26.07.04.Jewelz.Blu.This.Ass.Your.Phone.You.Choose.XXX.2160p.MP4-WRB.mp4` (h264 3840x2160 24fps 27.4 Mbps 31.7 min SDR bt709 8-bit yuv420p). Four av1_nvenc VBR p6 encodes vs source, VMAF via composer path:
+
+  | Target kbps | Actual kbps | Size MB | Shrink | VMAF (vmaf_4k_v0.6.1) |
+  |---|---|---|---|---|
+  | 1500 | 1917 | 456 | 93% | 91.84 |
+  | 3000 | 3444 | 819 | 88% | **96.08** |
+  | 6000 | 6481 | 1541 | 77% | 98.35 |
+  | 10000 | 10505 | 2499 | 62% | 99.31 |
+
+  Axis 7 (VMAF model select) live-verified: `MaxEdgePx=3840 >= 1440 -> vmaf_4k_v0.6.1` auto-selected in all four runs. Streaming take: 3000 kbps VBR = 88% shrink + VMAF 96 (above transparency); 6000 kbps = diminishing returns; 1500 kbps floor at VMAF 91.8.
+
 - **Smokes (b)-(g), (i) pending canary source provisioning.** Registered in `memory/smoke-assets.md`. Each requires operator to identify a real source file matching the shape:
   - (b) HDR 4K PQ -- 4K movie with bt2020/smpte2084
   - (c) Animation 24p VFR -- anime with mixed frame timing
