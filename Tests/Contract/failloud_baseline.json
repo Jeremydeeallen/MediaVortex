@@ -41,7 +41,7 @@
     "Features/AudioNormalization/Services/AudioStateService.py": 3,
     "Features/AudioNormalization/Services/AudioStreamProbe.py": 1,
     "Features/AudioNormalization/Services/LanguageEnrichmentService.py": 6,
-    "Features/AudioNormalization/Services/PostEncodeMeasurementService.py": 6,
+    "Features/AudioNormalization/Services/PostEncodeMeasurementService.py": 5,
     "Features/AudioNormalization/Services/PreEncodeAudioPipeline.py": 2,
     "Features/AudioNormalization/Workers/PostEncodeAudioHandler.py": 4,
     "Features/ClipBuilder/ClipBuilderBusinessService.py": 3,

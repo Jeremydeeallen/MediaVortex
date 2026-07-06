@@ -127,6 +127,8 @@ class ProcessQualityTestQueueService:
     def ProcessQueueLoop(self):
         """Main processing loop that continuously checks for quality testing jobs."""
         try:
+            from Core.WorkerContext import WorkerContext
+            WorkerContext.Bind()
             LoggingService.LogInfo("Quality testing queue processing loop started",
                                  "ProcessQualityTestQueueService", "ProcessQueueLoop")
 
@@ -188,7 +190,7 @@ class ProcessQualityTestQueueService:
         """
         try:
             from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
+            Ctx = WorkerContext.TryCurrent()
             WorkerName = Ctx.WorkerName if Ctx else None
             if not WorkerName:
                 LoggingService.LogWarning(
@@ -215,6 +217,8 @@ class ProcessQualityTestQueueService:
     def ProcessJob(self, job: Dict[str, Any]):
         """Process a single quality testing job."""
         try:
+            from Core.WorkerContext import WorkerContext
+            WorkerContext.Bind()
             LoggingService.LogInfo(f"Processing quality test job {job['Id']}",
                                  "ProcessQualityTestQueueService", "ProcessJob")
 

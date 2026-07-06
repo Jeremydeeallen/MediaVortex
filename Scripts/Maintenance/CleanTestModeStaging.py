@@ -53,7 +53,7 @@ def Main(DryRun=False):
     if not Rows:
         return
 
-    Ctx = WorkerContext.Current()
+    Ctx = WorkerContext.TryCurrent()
     Translate = Ctx.PathTranslation.ToLocalPath if (Ctx and Ctx.PathTranslation) else (lambda P: P)
 
     Deleted = 0

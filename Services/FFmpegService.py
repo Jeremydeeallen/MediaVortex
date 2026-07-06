@@ -24,7 +24,7 @@ class FFmpegService:
 
         # Resolve FFprobe path: explicit arg > WorkerContext > cached > SystemSettings
         from Core.WorkerContext import WorkerContext
-        Ctx = WorkerContext.Current()
+        Ctx = WorkerContext.TryCurrent()
         if FFprobePath:
             self.FFprobePath = FFprobePath
         elif Ctx and Ctx.FFprobePath:

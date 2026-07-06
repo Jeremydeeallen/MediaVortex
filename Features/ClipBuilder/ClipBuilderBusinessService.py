@@ -14,7 +14,7 @@ def LocalExists(Value):
 def _ResolveFFmpegPath():
     """Resolve FFmpeg from WorkerContext (set at worker startup from Workers.FFmpegPath).
     Raises if no context is available so misconfigurations fail loudly instead of using a stale hardcoded path."""
-    Ctx = WorkerContext.Current()
+    Ctx = WorkerContext.TryCurrent()
     if not Ctx or not Ctx.FFmpegPath:
         raise RuntimeError(
             "FFmpeg path not configured. ClipBuilder requires WorkerContext.FFmpegPath to be set "

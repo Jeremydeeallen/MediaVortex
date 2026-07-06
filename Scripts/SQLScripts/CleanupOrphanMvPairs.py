@@ -60,7 +60,7 @@ from Core.Database.DatabaseService import DatabaseService
 
 def _InitWorkerContext(WorkerName: str) -> None:
     from Core.WorkerContext import WorkerContext
-    if WorkerContext.Current() is not None:
+    if WorkerContext.TryCurrent() is not None:
         return
     Db = DatabaseService()
     Rows = Db.ExecuteQuery(
@@ -90,7 +90,7 @@ def _ResolveLocal(CanonicalPath: str) -> Optional[str]:
     from Core.Path.PathStorageRoots import GetStorageRoots
     from Core.Path.Worker import Worker
     from Core.WorkerContext import WorkerContext
-    Ctx = WorkerContext.Current()
+    Ctx = WorkerContext.TryCurrent()
     if Ctx is None:
         return None
     try:

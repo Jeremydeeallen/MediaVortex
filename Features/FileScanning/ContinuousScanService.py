@@ -277,7 +277,7 @@ class ContinuousScanService:
             ThisWorkerName = None
             try:
                 from Core.WorkerContext import WorkerContext
-                Ctx = WorkerContext.Current()
+                Ctx = WorkerContext.TryCurrent()
                 if Ctx is not None:
                     ThisWorkerName = Ctx.WorkerName
             except Exception:

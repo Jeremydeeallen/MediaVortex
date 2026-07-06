@@ -20,7 +20,7 @@ def _DefaultTestFFmpegPath() -> str:
 def _ResolveFFmpegPath() -> str:
     """ffmpeg binary path from WorkerContext, DB fallback, or raise; see pipeline-test-harness.feature.md S3."""
     from Core.WorkerContext import WorkerContext
-    Ctx = WorkerContext.Current()
+    Ctx = WorkerContext.TryCurrent()
     if Ctx and Ctx.FFmpegPath:
         return Ctx.FFmpegPath
     Fallback = _DefaultTestFFmpegPath()
@@ -34,7 +34,7 @@ def _ResolveFFprobePath() -> str:
     """ffprobe binary path -- WorkerContext, sibling of ffmpeg, or 'ffprobe' on PATH."""
     from Core.WorkerContext import WorkerContext
     from Core.Path.LocalPath import LocalExists
-    Ctx = WorkerContext.Current()
+    Ctx = WorkerContext.TryCurrent()
     if Ctx and Ctx.FFprobePath:
         return Ctx.FFprobePath
     FFmpeg = _ResolveFFmpegPath()

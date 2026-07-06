@@ -3,6 +3,7 @@ import threading
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker
+from Core.WorkerContext import WorkerContext
 from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalExists, LocalJoin, LocalSplitExt
 from Features.AudioNormalization.Services import AudioPreEncodeFacade
 from Features.TranscodeJob.Emit.OutputFilenameBuilder import OutputFilenameBuilder
@@ -25,6 +26,7 @@ class JobProcessor:
     # directive: transcode-worker-unification | # see worker-loop.C2
     def Process(self, Job, MediaFile=None) -> JobResult:
         # see worker-loop.C2
+        WorkerContext.Bind()
         Strategy = self.Registry.Get(Job.ProcessingMode, QueueService=self.QueueService)
         ActiveJobId = None
         TranscodeAttemptId = None

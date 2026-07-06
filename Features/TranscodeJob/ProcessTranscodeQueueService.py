@@ -62,7 +62,7 @@ class ProcessTranscodeQueueService:
         self.WorkerConfig = WorkerConfig or {}
 
         from Core.WorkerContext import WorkerContext
-        Ctx = WorkerContext.Current()
+        Ctx = WorkerContext.TryCurrent()
         if Ctx:
             self.FFmpegPath = Ctx.FFmpegPath
             self.FFprobePath = Ctx.FFprobePath

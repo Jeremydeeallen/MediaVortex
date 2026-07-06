@@ -74,7 +74,7 @@ def _CurrentWorkerName():
     """Resolve the active WorkerName from WorkerContext (None if not set)."""
     try:
         from Core.WorkerContext import WorkerContext
-        Ctx = WorkerContext.Current()
+        Ctx = WorkerContext.TryCurrent()
         return Ctx.WorkerName if Ctx and Ctx.WorkerName else None
     except Exception:
         return None
@@ -151,7 +151,7 @@ class FileScanningBusinessService:
             if WorkerName is None:
                 try:
                     from Core.WorkerContext import WorkerContext
-                    Ctx = WorkerContext.Current()
+                    Ctx = WorkerContext.TryCurrent()
                     if Ctx is not None:
                         WorkerName = Ctx.WorkerName
                 except Exception:
@@ -889,7 +889,7 @@ class FileScanningBusinessService:
         try:
             from Core.WorkerContext import WorkerContext
             # directive: path-perfect-implementation | # see path.S11
-            Ctx = WorkerContext.Current()
+            Ctx = WorkerContext.TryCurrent()
             UseFsCanonicalization = not (Ctx and (Ctx.Platform or '').lower() == 'linux')
 
             CanonicalPath = (self.GetCanonicalPathFromFilesystem(RootFolderPath)

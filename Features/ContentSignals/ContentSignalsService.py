@@ -19,7 +19,7 @@ _MOTION_THRESHOLD_YDIF = 8.0
 def _GetFfmpegPath() -> Optional[str]:
     try:
         from Core.WorkerContext import WorkerContext
-        Ctx = WorkerContext.Current()
+        Ctx = WorkerContext.TryCurrent()
         FfmpegCandidate = Ctx.FFmpegPath if Ctx else None
         if LocalExists(FfmpegCandidate):
             return FfmpegCandidate

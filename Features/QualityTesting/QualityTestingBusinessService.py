@@ -308,7 +308,7 @@ class QualityTestingBusinessService:
                 return {"Success": False, "Error": f"Transcoded file not found: {transcoded_file}"}
 
             from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
+            Ctx = WorkerContext.TryCurrent()
             ffmpeg_binary = Ctx.FFmpegPath if Ctx and Ctx.FFmpegPath else None
             if not ffmpeg_binary or not os.path.exists(ffmpeg_binary):
                 return {"Success": False, "Error": f"FFmpeg executable not found: {ffmpeg_binary or '<no WorkerContext.FFmpegPath registered>'}"}
@@ -455,7 +455,7 @@ class QualityTestingBusinessService:
             if not LocalExists(LocalOutputPath):
                 return {"Success": False, "Error": f"Mode A VMAF: local output missing: {LocalOutputPath}"}
             from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
+            Ctx = WorkerContext.TryCurrent()
             FFmpegBinary = Ctx.FFmpegPath if Ctx and Ctx.FFmpegPath else None
             if not FFmpegBinary or not LocalExists(FFmpegBinary):
                 return {"Success": False, "Error": f"FFmpeg executable not found: {FFmpegBinary or '<no WorkerContext.FFmpegPath registered>'}"}
@@ -1515,7 +1515,7 @@ class QualityTestingBusinessService:
         TranscodedStill = os.path.join(CacheDir, f"{CacheKey}_transcoded.png")
 
         from Core.WorkerContext import WorkerContext
-        _CtxSP = WorkerContext.Current()
+        _CtxSP = WorkerContext.TryCurrent()
         FFmpeg = _CtxSP.FFmpegPath if _CtxSP and _CtxSP.FFmpegPath else None
         if not FFmpeg or not LocalExists(FFmpeg):
             return {'Success': False, 'ErrorMessage': f'FFmpeg binary unresolved on WorkerContext.FFmpegPath (got {FFmpeg!r})'}
@@ -1780,7 +1780,7 @@ class QualityTestingBusinessService:
             import subprocess
             from Core.WorkerContext import WorkerContext
             Wk = self._GetWorker()
-            Ctx = WorkerContext.Current()
+            Ctx = WorkerContext.TryCurrent()
 
             local_path = None
             attempt_id = JobDetails.get('TranscodeAttemptId') if JobDetails else None

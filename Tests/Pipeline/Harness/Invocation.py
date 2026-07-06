@@ -35,7 +35,7 @@ def _EnsureWorkerContext(WorkerName: str = "I9-2024") -> None:
     then calls WorkerContext.Initialize. No-op if already initialized.
     """
     from Core.WorkerContext import WorkerContext
-    if WorkerContext.Current() is not None:
+    if WorkerContext.TryCurrent() is not None:
         return
     Db = DatabaseService()
     Rows = Db.ExecuteQuery(

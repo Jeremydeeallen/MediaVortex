@@ -101,7 +101,7 @@ class EbuR128MeasurementService:
             return self._FFmpegPathOverride
         try:
             from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
+            Ctx = WorkerContext.TryCurrent()
             if Ctx and Ctx.FFmpegPath:
                 return Ctx.FFmpegPath
         except Exception:

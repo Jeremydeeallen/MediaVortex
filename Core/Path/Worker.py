@@ -20,7 +20,7 @@ class Worker:
         """Build a Worker from the process-singleton WorkerContext; falls back to socket.gethostname() if uninitialized."""
         import socket
         from Core.WorkerContext import WorkerContext
-        Ctx = WorkerContext.Current()
+        Ctx = WorkerContext.TryCurrent()
         Name = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
         Platform = (Ctx.Platform if Ctx else None) or "linux"
         return cls(Name=Name, Platform=Platform, Db=Db)

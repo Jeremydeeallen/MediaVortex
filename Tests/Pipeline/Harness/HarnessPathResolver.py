@@ -22,7 +22,7 @@ def BuildHarnessWorker(Db: Optional[DatabaseService] = None) -> Worker:
     from Core.WorkerContext import WorkerContext
     if Db is None:
         Db = DatabaseService()
-    Ctx = WorkerContext.Current()
+    Ctx = WorkerContext.TryCurrent()
     if Ctx and Ctx.WorkerName:
         return Worker(Ctx.WorkerName, Ctx.Platform or 'windows', Db)
     WorkerName = DefaultTestWorkerName()

@@ -22,7 +22,7 @@ class FileReplacementBusinessService:
         if WorkerName is None:
             import socket
             from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
+            Ctx = WorkerContext.TryCurrent()
             WorkerName = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
         self.WorkerName = WorkerName
         self._Worker: Worker = worker if worker is not None else Worker.Current(Db=self.DatabaseManager.DatabaseService)

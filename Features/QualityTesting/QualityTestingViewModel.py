@@ -56,7 +56,7 @@ class QualityTestingViewModel:
         """
         try:
             from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
+            Ctx = WorkerContext.TryCurrent()
             WorkerName = Ctx.WorkerName if Ctx else None
             if not WorkerName:
                 LoggingService.LogWarning(

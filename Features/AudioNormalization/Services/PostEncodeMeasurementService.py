@@ -42,21 +42,22 @@ class PostEncodeMeasurementService:
         self._FFmpegOverride = FFmpegPath
         self._FFprobeOverride = FFprobePath
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C15
+    # directive: transcode-flow-canonical
     def _ResolveBinaries(self):
-        """Return (FFmpegPath, FFprobePath) using overrides or WorkerContext."""
+        """Return (FFmpegPath, FFprobePath) from overrides or WorkerContext; raises when unresolved."""
         Ffmpeg = self._FFmpegOverride
         Ffprobe = self._FFprobeOverride
         if Ffmpeg and Ffprobe:
             return Ffmpeg, Ffprobe
-        try:
-            from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
-            if Ctx:
-                Ffmpeg = Ffmpeg or Ctx.FFmpegPath
-                Ffprobe = Ffprobe or getattr(Ctx, 'FFprobePath', None)
-        except Exception:
-            pass
+        from Core.WorkerContext import WorkerContext
+        Ctx = WorkerContext.Current()
+        Ffmpeg = Ffmpeg or Ctx.FFmpegPath
+        Ffprobe = Ffprobe or getattr(Ctx, 'FFprobePath', None)
+        if not Ffmpeg or not Ffprobe:
+            raise RuntimeError(
+                f"PostEncodeMeasurement: binaries unresolved (ffmpeg={Ffmpeg}, ffprobe={Ffprobe}) "
+                f"from WorkerContext {Ctx.WorkerName}"
+            )
         return Ffmpeg, Ffprobe
 
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C15
@@ -109,18 +110,11 @@ class PostEncodeMeasurementService:
             )
             return None
 
-    # directive: transcode-flow-canonical | # see transcode.ST5 | # see audio-normalization.C5
+    # directive: transcode-flow-canonical
     def Probe(self, TranscodeAttemptId, OutputFilePath, QueueId=None):
-        """Measure every output audio stream; write AudioTracksEmittedJson + AudioPolicyResolved verdict + AudioPolicyJson snapshot in one UPDATE. BUG-0086: DB attestation lands regardless of binary availability so Requeue rows stay audit-complete."""
+        """Measure every output audio stream; write AudioTracksEmittedJson + AudioPolicyResolved verdict + AudioPolicyJson in one UPDATE. Strict-mode: raises when binaries unresolved (fail-loud per C20)."""
         Ffmpeg, Ffprobe = self._ResolveBinaries()
-        Streams = []
-        if not Ffmpeg or not Ffprobe:
-            LoggingService.LogWarning(
-                f"PostEncode.Probe: ffmpeg/ffprobe unresolved (ffmpeg={Ffmpeg}, ffprobe={Ffprobe}) for AttemptId={TranscodeAttemptId}; AudioPolicy* still attested from queue snapshot",
-                "PostEncodeMeasurementService", "Probe",
-            )
-        else:
-            Streams = self.ListAudioStreams(Ffprobe, OutputFilePath)
+        Streams = self.ListAudioStreams(Ffprobe, OutputFilePath)
         if not Streams:
             return self._PersistAttestation(TranscodeAttemptId, QueueId, [], 'unresolved')
 

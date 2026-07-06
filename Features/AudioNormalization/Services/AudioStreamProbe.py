@@ -61,7 +61,7 @@ class AudioStreamProbe:
             return self._FFprobePath
         try:
             from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
+            Ctx = WorkerContext.TryCurrent()
             if Ctx and getattr(Ctx, 'FFprobePath', None):
                 return Ctx.FFprobePath
         except Exception:

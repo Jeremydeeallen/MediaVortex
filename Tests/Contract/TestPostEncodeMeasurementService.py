@@ -52,18 +52,19 @@ class TestPostEncodeMeasurementService(unittest.TestCase):
             self.assertEqual(json.loads(Args[1][0]), [])
             self.assertEqual(Args[1][1], 'unresolved')
 
-    # directive: transcode-flow-canonical | # see transcode.ST5 -- BUG-0086 no silent skip on missing binaries
-    def test_probe_attests_unresolved_when_binaries_unresolvable(self):
-        Svc = PostEncodeMeasurementService()
-        with patch('Features.AudioNormalization.Services.PostEncodeMeasurementService.DatabaseService') as MockDb, \
-             patch('Core.WorkerContext.WorkerContext') as MockCtx:
-            MockCtx.Current.return_value = None
-            Instance = MagicMock()
-            MockDb.return_value = Instance
-            Svc.Probe(TranscodeAttemptId=42, OutputFilePath='/tmp/out.mp4', QueueId=99)
-            Args = Instance.ExecuteNonQuery.call_args.args
-            self.assertEqual(json.loads(Args[1][0]), [])
-            self.assertEqual(Args[1][1], 'unresolved')
+    # directive: transcode-flow-canonical -- C20 strict-mode: raise when binaries unresolvable
+    def test_probe_raises_when_binaries_unresolvable(self):
+        from Core.WorkerContext import WorkerContext, WorkerContextNotBoundError
+        WorkerContext.Reset()
+        try:
+            Svc = PostEncodeMeasurementService()
+            with self.assertRaises(WorkerContextNotBoundError):
+                Svc.Probe(TranscodeAttemptId=42, OutputFilePath='/tmp/out.mp4', QueueId=99)
+            WorkerContext.Initialize(WorkerName='test', Platform='linux', FFmpegPath=None, FFprobePath=None)
+            with self.assertRaises(RuntimeError):
+                Svc.Probe(TranscodeAttemptId=42, OutputFilePath='/tmp/out.mp4', QueueId=99)
+        finally:
+            WorkerContext.Reset()
 
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C15
     def test_probe_records_measurement_failure_per_stream(self):

@@ -64,7 +64,7 @@ class WhisperFfmpegBackend:
             return self._FFmpegPath
         try:
             from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
+            Ctx = WorkerContext.TryCurrent()
             if Ctx and Ctx.FFmpegPath:
                 return Ctx.FFmpegPath
         except Exception:
