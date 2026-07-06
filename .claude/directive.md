@@ -629,6 +629,11 @@ Populated incrementally per step.
 - Root venv suites: 126 PASS + 1 SKIP + 1 FAIL (TestSharedColumnsPopulated -> stranded row 41107 == BUG-0084).
 - WebService venv: TestTranscodingSettingsRoundTrip 11/11 PASS.
 
+**Full-tree contract regression (Reset 20 re-run 2026-07-06 after C18/C19/C20 land):**
+- Root venv `pytest Tests/Contract/` (Flask-requiring suites deselected): **856 pass / 15 skip / 43 fail / 9 error / 36 subtests pass in 125.98s**.
+- Reset 15+ new/edited suites: `TestJobPhaseTransitions` 8/8, `TestPhaseDetectors` 15/15, `TestStuckJobDetectionPhaseAware` 8/8, `TestDeployStalePycProbe` 3/3, `TestWorkerContextThreadLocal` PASS, `TestProbeStrictModeWhenContextBound` PASS, `TestAlignmentSpec` 14/14, `TestVmafAlignmentProbe` 12/12, `TestColorSpaceService` 17/17, `TestVmafFilterChainBuilder` 24/24, `TestVmafModelSelector` 8/8, `TestVmafCommandComposer` 14/14, `TestFailLoud` 4/4 (baseline ratcheted 178 files / 1330 hits post-VmafAlignmentProbe fail-loud fix). Every Reset 15+ suite green.
+- 43 fail + 9 error survey: pre-existing (ProfileLifecycle x3, ProfileCascadeResolution, PathDbRoundTripAllTables 8 fail + 9 err = ShowSettings sentinel residue, FailureAccounting MediaFileId NOT NULL constraint on legacy rows, NoParallelProfileCascade, VideoComplianceBar codec_mismatch, Mp4TitleResolution, InFlightCancellation, E2EPerBucket, SharedColumnsPopulated row 41107 == BUG-0084). Zero failures traced to Reset 15-19 code.
+
 **Follow-ups filed at VERIFYING (do not block close):**
 - **BUG-0085** Docker build-cache leaks pre-Reset-9 `.pyc` into worker containers -- filed in `memory/KNOWN-ISSUES.md`. Supersedes BUG-0084 (row 41107 root cause is stale-pyc, not StreamCopy checksum).
 - **BUG-0086 CLOSED at DELIVERING (Reset 14 fix):** root cause was `PostEncodeMeasurementService.Probe` silent-return-False when ffmpeg/ffprobe unresolved (not QSV-Requeue-branch-specific as first theorized). Fix: LogWarning + still invoke `_PersistAttestation` with empty results + 'unresolved' verdict, so AudioPolicy* snapshot from queue lands regardless of binary availability. Rows 41122/41123/41090 backfilled with sentinel apj. Live re-deploy of Wakko workers still needed to pick up the .py change (operator action; caution BUG-0085 stale-pyc mitigation).
