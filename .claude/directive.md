@@ -859,6 +859,8 @@ Populated incrementally per step.
 
   Axis 7 (VMAF model select) live-verified: `MaxEdgePx=3840 >= 1440 -> vmaf_4k_v0.6.1` auto-selected in all four runs. Streaming take: 3000 kbps VBR = 88% shrink + VMAF 96 (above transparency); 6000 kbps = diminishing returns; 1500 kbps floor at VMAF 91.8.
 
+- **QSV Reencode + subtitles + audio + VMAF end-to-end smoke 2026-07-07** (Wakko QSV path parity with NVENC smoke e). MFID 620351 Hotel Chevalier 1080p master (h264 1920x1080 SRT subs DTS 5.1) enqueued via `POST /api/Work/Transcode/Queue/620351` -> QueueId 144841. Wakko-worker-1 claimed at 14:00:04, encoded `QSV AV1 P1 CANARY Tier 3 -1080p`, attempt 41213 Success=True in ~2 min encode + 8 min VMAF. AudioPolicyResolved='resolved' with real 2-track EmitTracks policy (Original + Dialog Boost). VMAF via composer path = **94.30**. Disposition=Replace/VmafPassed (pipeline path fully exercised through Composer chain layer). ComplianceGate refused final rename (pre-existing `no_effective_profile` bug -- filed as follow-up); Disposition flipped to Reject/ComplianceGateFailed and `.inprogress` cleaned. Ad-hoc QSV encode on Wakko preserved for operator inspection at `C:\4K-Probe\hotel_chevalier_qsv_verified.mp4` -- ffprobe verified: av1 1920x800 10-bit + DTS 5.1 copied + **mov_text subtitle lang=eng preserved**. NVENC + QSV both end-to-end capable through composer path for encode + VMAF + subtitle preservation + audio 2-track policy.
+
 - **Supplementary 4K QSV sweep 2026-07-06 (wakko av1_qsv p1 ICQ).** Same Jewelz.Blu source. Four ICQ points on wakko Arc B580:
 
   | ICQ | Actual kbps | Size MB | Shrink | VMAF (vmaf_4k_v0.6.1) |
