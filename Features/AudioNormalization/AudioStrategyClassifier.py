@@ -77,7 +77,7 @@ class AudioStrategyClassifier:
             _GetField(Policy, 'TargetIntegratedLufs') or -23.0
         )
         TargetTp = float(_GetField(Policy, 'TargetTruePeakDbtp') or -2.0)
-        Tolerance = float(_GetField(Policy, 'LoudnessTolerance') or 4.0)
+        Tolerance = float(_GetField(Policy, 'LoudnessTolerance') or 3.0)
         TrackLra = Track.get('TargetLra')
         EffectiveLra = float(TrackLra) if TrackLra is not None else None
 

@@ -148,7 +148,7 @@ class AudioNormalizationController:
                     Body.get('ScopeKey'),
                     bool(Body.get('Enabled', True)),
                     Body.get('TargetLra'),
-                    float(Body.get('LoudnessTolerance', 4.0)),
+                    float(Body.get('LoudnessTolerance', 3.0)),
                     json.dumps(Body.get('EmitTracks') or []),
                     Body.get('UngainablePolicy', 'adaptive'),
                     bool(Body.get('EnableSpeechLanguageDetection', False)),

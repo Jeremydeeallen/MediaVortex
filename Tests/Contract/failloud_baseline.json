@@ -37,7 +37,7 @@
     "Features/AudioNormalization/SelfHealing/Remediations/EnqueueReProbe.py": 1,
     "Features/AudioNormalization/SelfHealing/Remediations/EnqueueRemeasurement.py": 1,
     "Features/AudioNormalization/SelfHealing/Remediations/EnqueueRetranscode.py": 2,
-    "Features/AudioNormalization/Services/AudioPreEncodeFacade.py": 3,
+    "Features/AudioNormalization/Services/AudioPreEncodeFacade.py": 5,
     "Features/AudioNormalization/Services/AudioStateService.py": 3,
     "Features/AudioNormalization/Services/AudioStreamProbe.py": 1,
     "Features/AudioNormalization/Services/LanguageEnrichmentService.py": 6,

@@ -133,6 +133,35 @@ class DemucsVocalIsolationService:
         IsolationResult.PremixWavPath = OutputWavPath
         return IsolationResult
 
+    # directive: transcode-flow-canonical
+    def MeasureSourceLoudnorm(self, SourcePath, TargetLufs, TargetLra, TargetTruePeakDbtp):
+        Filter = f"loudnorm=I={float(TargetLufs):.2f}:LRA={float(TargetLra):.2f}:TP={float(TargetTruePeakDbtp):.2f}:print_format=json"
+        Result = subprocess.run(
+            [self.FfmpegPath, "-hide_banner", "-nostats", "-i", SourcePath, "-map", "0:a:0", "-af", Filter, "-f", "null", "-"],
+            capture_output=True, text=True, timeout=1800,
+        )
+        Match = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", Result.stderr, re.DOTALL)
+        if not Match:
+            LoggingService.LogWarning(
+                f"Source loudnorm measurement returned no JSON block for {SourcePath}. stderr tail={Result.stderr[-400:]}",
+                "DemucsVocalIsolationService", "MeasureSourceLoudnorm",
+            )
+            return None, None, None, None
+        try:
+            Payload = json.loads(Match.group(0))
+            return (
+                float(Payload["input_i"]),
+                float(Payload["input_lra"]),
+                float(Payload["input_tp"]),
+                float(Payload["input_thresh"]),
+            )
+        except (ValueError, KeyError) as Ex:
+            LoggingService.LogWarning(
+                f"Source loudnorm JSON parse failed for {SourcePath} ({Ex}); block={Match.group(0)[:400]}",
+                "DemucsVocalIsolationService", "MeasureSourceLoudnorm",
+            )
+            return None, None, None, None
+
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
     def MeasurePremixLoudnorm(self, WavPath, TargetLufs, TargetLra, TargetTruePeakDbtp):
         """Measure premix loudness with ffmpeg's loudnorm analysis pass; return (I, LRA, TP, thresh) or all-None on parse failure."""

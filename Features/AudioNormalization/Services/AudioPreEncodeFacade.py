@@ -64,6 +64,37 @@ def PersistMeta(TranscodeAttemptId, PreAudio):
         )
 
 
+# directive: transcode-flow-canonical
+def PersistSourceLoudness(MediaFileId, MediaFile, PreAudio):
+    if not PreAudio:
+        return
+    SrcI = PreAudio.get('SourceMeasuredI')
+    SrcLra = PreAudio.get('SourceMeasuredLra')
+    SrcTp = PreAudio.get('SourceMeasuredTp')
+    SrcThresh = PreAudio.get('SourceMeasuredThresh')
+    if SrcI is None or SrcLra is None or SrcTp is None or SrcThresh is None:
+        return
+    try:
+        from Core.Database.DatabaseService import DatabaseService
+        DatabaseService().ExecuteNonQuery(
+            "UPDATE MediaFiles SET SourceIntegratedLufs=%s, SourceLoudnessRangeLU=%s, SourceTruePeakDbtp=%s, SourceIntegratedThresholdLufs=%s, LoudnessMeasuredAt=NOW() WHERE Id=%s",
+            (float(SrcI), float(SrcLra), float(SrcTp), float(SrcThresh), int(MediaFileId)),
+        )
+        if MediaFile is not None:
+            try:
+                MediaFile.SourceIntegratedLufs = float(SrcI)
+                MediaFile.SourceLoudnessRangeLU = float(SrcLra)
+                MediaFile.SourceTruePeakDbtp = float(SrcTp)
+                MediaFile.SourceIntegratedThresholdLufs = float(SrcThresh)
+            except Exception:
+                pass
+    except Exception as Ex:
+        LoggingService.LogException(
+            f"AudioPreEncodeFacade.PersistSourceLoudness failed for MediaFileId={MediaFileId}",
+            Ex, "AudioPreEncodeFacade", "PersistSourceLoudness",
+        )
+
+
 # directive: audio-dialog-boost-real | # see audio-normalization.C8
 def Cleanup(FfmpegPath, PreAudio):
     """Delete Demucs scratch dir; safe when PreAudio is None or ScratchDir missing."""

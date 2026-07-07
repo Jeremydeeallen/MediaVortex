@@ -21,6 +21,7 @@ class TestDemucsFailureSentinel(unittest.TestCase):
         MockDemucs = MagicMock()
         MockDemucs.ModelName = 'htdemucs'
         MockDemucs.Device = 'cpu'
+        MockDemucs.MeasureSourceLoudnorm.return_value = (None, None, None, None)
         Pipeline = PreEncodeAudioPipeline(FfmpegPath='/does/not/exist/ffmpeg', PythonExe='python', DemucsService=MockDemucs)
         with patch.object(Pipeline, '_ExtractStereoDownmix', side_effect=RuntimeError('stereo downmix failed (exit 1): boom')):
             Result = Pipeline.Run(SourceFilePath='/tmp/fake.mkv', JobId=99999)
@@ -36,6 +37,7 @@ class TestDemucsFailureSentinel(unittest.TestCase):
         MockDemucs = MagicMock()
         MockDemucs.ModelName = 'htdemucs'
         MockDemucs.Device = 'cuda'
+        MockDemucs.MeasureSourceLoudnorm.return_value = (None, None, None, None)
         MockDemucs.IsolateVocals.side_effect = FileNotFoundError('demucs binary not on PATH')
         Pipeline = PreEncodeAudioPipeline(FfmpegPath='/does/not/exist/ffmpeg', PythonExe='python', DemucsService=MockDemucs)
         with patch.object(Pipeline, '_ExtractStereoDownmix', return_value='/tmp/downmix.wav'):
@@ -48,6 +50,7 @@ class TestDemucsFailureSentinel(unittest.TestCase):
         MockDemucs = MagicMock()
         MockDemucs.ModelName = 'htdemucs'
         MockDemucs.Device = 'cpu'
+        MockDemucs.MeasureSourceLoudnorm.return_value = (None, None, None, None)
         LongMsg = 'X' * 5000
         Pipeline = PreEncodeAudioPipeline(FfmpegPath='/does/not/exist/ffmpeg', PythonExe='python', DemucsService=MockDemucs)
         with patch.object(Pipeline, '_ExtractStereoDownmix', side_effect=RuntimeError(LongMsg)):

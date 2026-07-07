@@ -34,9 +34,9 @@ C3. Original measures LRA within +/-0.5 LU of `SourceLoudnessRangeLU`; Dialog Bo
 
 C4. Source language streams preserved; per-scope `LanguageDefault` picks the default disposition.
 
-C5. Every shipped output has `AchievedIntegratedLufs` within +/-4 LU of effective `TargetIntegratedLufs`; classifier routes the rest to operator review.
+C5. Every shipped output has `AchievedIntegratedLufs` within +/-3 LU of effective `TargetIntegratedLufs`; classifier routes the rest to operator review. Tightened from 4 -> 3 LU 2026-07-07 (transcode-flow-canonical C22) after fresh source-loudness measurement + linear=true single-pass loudnorm proved convergence within +/-1 LU under lab conditions; 3 preserves adaptive UngainablePolicy clipping-avoidance headroom (documented reason 4 was originally set) while tightening the operator-perceptible loudness step. EBU R128 uniform band goal is +/-2 LU; streaming platform norm is +/-1 LU.
 
-C6. Files unable to satisfy +/-4 LU under any policy land on `MediaFiles.AdmissionDeferReason = 'operator_review_pending'` and surface in `/AudioNormalization` Review tab.
+C6. Files unable to satisfy +/-3 LU under any policy land on `MediaFiles.AdmissionDeferReason = 'operator_review_pending'` and surface in `/AudioNormalization` Review tab.
 
 C7. Source file + `MediaFilesArchive` row are bit-exact-unchanged at every pipeline stage. Non-destructive by construction.
 

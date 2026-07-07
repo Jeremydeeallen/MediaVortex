@@ -14,7 +14,7 @@ CREATE_TABLE_SQL = (
     "ScopeKey TEXT, "
     "Enabled BOOLEAN NOT NULL DEFAULT TRUE, "
     "TargetLra REAL, "
-    "LoudnessTolerance REAL NOT NULL DEFAULT 4.0, "
+    "LoudnessTolerance REAL NOT NULL DEFAULT 3.0, "
     "EmitTracks JSONB NOT NULL, "
     "UngainablePolicy TEXT NOT NULL DEFAULT 'adaptive', "
     "EnableSpeechLanguageDetection BOOLEAN NOT NULL DEFAULT FALSE, "

@@ -26,6 +26,14 @@ class PreEncodeAudioPipeline:
         ScratchDir = LocalJoin(self.ScratchRoot, f"mv_audio_{JobId}")
         try:
             R = self._RulesRepo.GetRules()
+            self._Report('source.measure', 0.0, 'Measuring source loudness for Track 0 linear loudnorm')
+            SrcTargetTp = float(R['TargetTruePeakDbtp']) - float(R['SampleLimitHeadroomDb'])
+            SourceI, SourceLra, SourceTp, SourceThresh = self.DemucsService.MeasureSourceLoudnorm(
+                SourceFilePath,
+                TargetLufs=R['TargetIntegratedLufs'],
+                TargetLra=R.get('SourceMeasureTargetLra', 7.0),
+                TargetTruePeakDbtp=SrcTargetTp,
+            )
             self._Report('demucs.downmix', 0.0, 'Extracting stereo downmix for Demucs')
             DownmixWavPath = self._ExtractStereoDownmix(SourceFilePath, ScratchDir)
             self._Report('demucs.isolate', 0.0, f'Isolating vocals ({self.DemucsService.ModelName} on {self.DemucsService.Device})')
@@ -57,6 +65,10 @@ class PreEncodeAudioPipeline:
                 'PremixMeasuredLra': PremixLra,
                 'PremixMeasuredTp': PremixTp,
                 'PremixMeasuredThresh': PremixThresh,
+                'SourceMeasuredI': SourceI,
+                'SourceMeasuredLra': SourceLra,
+                'SourceMeasuredTp': SourceTp,
+                'SourceMeasuredThresh': SourceThresh,
                 'ScratchDir': ScratchDir,
             }
         except Exception as Ex:

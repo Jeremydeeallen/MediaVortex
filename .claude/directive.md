@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-07-03
-**Status:** Active -- phase: DELIVERING
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** transcode-flow-canonical
 **Inherits:** 5 LIVE PENDING criteria from `transcode-worker-unification` (see .claude/directives/closed/2026-07-03-transcode-worker-unification.md close note)
 
@@ -237,6 +237,8 @@ Verification: `Tests/Deploy/TestDeployStalePycProbe.py` (post-deploy probe retur
 - **Fail-loud:** `Current()` raises `WorkerContextNotBoundError` when called on a thread without a Bind. NO silent None-return. `PostEncodeMeasurementService.Probe` reverts to strict-mode: raise if binaries None (BUG-0086 fix's defensive DB attestation remains as belt-and-suspenders but should never fire again).
 
 Verification: `Tests/Contract/TestWorkerContextThreadLocal.py` (bind + read on 2 threads returns different bindings; unbound Current() raises); `TestProbeStrictModeWhenContextBound.py` (fresh WorkerContext + Probe writes all three columns from ffprobe, not sentinel). Live smoke: Wakko QSV Requeue post-Reset-16 populates apr='resolved' + apj-from-queue + atej-from-ffprobe (real measurements), not 'unresolved' sentinel.
+
+**C22. Fresh source-loudness measurement + LoudnessTolerance tighten 4.0 -> 3.0.** `PreEncodeAudioPipeline.Run` gains a source-loudness measurement step (ffmpeg loudnorm summary pass on source Track 0), returns `SourceMeasuredI/Lra/Tp/Thresh` in Run dict. Caller (`JobProcessor._RunPreEncodeAudio`) UPDATEs `MediaFiles.SourceIntegratedLufs/SourceLoudnessRangeLU/SourceTruePeakDbtp/SourceIntegratedThresholdLufs, LoudnessMeasuredAt=NOW()` per MediaFileId so `_BuildTrack0Chain` sees fresh values. Track 0 becomes cache-independent -- like Track 1 already is. Motivating incident: MFID 620351 Hotel Chevalier attempt 41214 landed Track 0 at -26.9 LUFS vs target -23 (3.9 LU under) due to stale `SourceIntegratedLufs=-19.4` (real -23.3) cached from 2026-05-24. `LoudnessTolerance` DB DEFAULT tightened from 4.0 to 3.0 via migration `TightenLoudnessTolerance_2026_07_07.py`. Rationale sweep in `Features/AudioNormalization/audio-normalization.feature.md`: prior "worst-case 'reach for the remote' at +/-4 LU" wording documented reason 4.0 tolerance was set to absorb single-pass loudnorm drift; fresh measurement obviates that slack (proven convergence: single-pass with correct measured_I hits Output=-23.0 offset 0.0). 3.0 sits between EBU R128 uniform-band goal (2 LU) and streaming platform norm (1 LU), preserving `adaptive` UngainablePolicy clipping-avoidance. Contract test `Tests/Contract/TestPreEncodeSourceLoudness.py` CREATE: proves Run returns source measurements + JobProcessor persists to DB + Track 0 emits with fresh values. Live smoke re-run MFID 620351 -> Track 0 AchievedIntegratedLufs within +/-1 LU of target.
 
 **C21. Phase-aware stuck-job detection (retires Tier 2 / Tier 3 conflation).** `StuckJobDetectionService` today runs Tier 2 (frame-advance stale) + Tier 3 (FFmpegPid liveness) against every job whose `TranscodeQueue.Status='Running'`, but `Running` overloads four disjoint phases: Setup (path resolve + audio pre-pass demucs) / Encoding (main ffmpeg subprocess) / PostEncode (VMAF / Disposition / Replace / Reprobe) / Verifying (QT queue). Each phase has different valid signals (Setup: elapsed vs setup-timeout; Encoding: frame-advance vs threshold; PostEncode / Verifying: elapsed vs per-phase timeout). Result: false-positive kills (Reset 15 Wakko cycle: attempts 41147/41151 both killed by wrong-phase detector).
 

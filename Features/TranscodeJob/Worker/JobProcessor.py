@@ -82,6 +82,7 @@ class JobProcessor:
             TargetLocalPath = LocalJoin(LocalDirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
 
             PreAudio = self._RunPreEncodeAudio(Mode, EffectiveInputPath, Job, TranscodeAttemptId)
+            AudioPreEncodeFacade.PersistSourceLoudness(MediaFile.Id, MediaFile, PreAudio)
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, f"Building {Mode} command...")
             CommandResult = Strategy.BuildCommand(
                 Job, MediaFile,
