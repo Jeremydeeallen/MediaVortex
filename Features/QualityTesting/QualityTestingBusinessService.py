@@ -1059,8 +1059,6 @@ class QualityTestingBusinessService:
                                 EtaSeconds=EtaSec,
                             )
 
-                time.sleep(0.1)  # Small delay to prevent excessive CPU usage
-
             # Read any remaining output (only if process is still running)
             try:
                 if Process.poll() is None:
