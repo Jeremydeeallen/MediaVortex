@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-07-03
-**Status:** Active -- phase: VERIFYING
+**Status:** Active -- phase: DELIVERING
 **Slug:** transcode-flow-canonical
 **Inherits:** 5 LIVE PENDING criteria from `transcode-worker-unification` (see .claude/directives/closed/2026-07-03-transcode-worker-unification.md close note)
 
@@ -586,6 +586,12 @@ Populated incrementally per step.
 | AdequacyGate honors SystemSettings `AdequacyGateEnabled` + `AdequacyGateMarginPercent` (C13/C15) | `Features/TranscodeQueue/TranscodeQueue.feature.md` AdequacyGate seam | (Reset 11 commit) |
 | TierLadderRepository new home for (Family, ContentClass, Resolution) x Tier grid queries (C12/C15) | `Features/Profiles/Profiles.feature.md` Files table | (Reset 11 commit) |
 | VmafConfidenceStatsRepository.GetAllForReview surfaces review-panel rows (C14/C15) | `Features/QualityTesting/post-transcode-disposition.feature.md` C14 | (Reset 11 commit) |
+| C18 VMAF alignment chain layer SOT | `Features/QualityTesting/Vmaf/` module: `AlignmentSpec.py`, `VmafAlignmentProbe.py`, `VmafModelSelector.py`, `VmafFilterChainBuilder.py`, `VmafCommandComposer.py` (colocated; no separate feature.md yet since Vmaf/ is a submodule of QualityTesting.feature.md) | (Reset 17-19 commits: 78e0a3f, 7ad5ee4, 0c32469, 1b433bb) |
+| C19 deploy hardening + BUG-0085 retirement | `deploy/Dockerfile` `__pycache__` purge + `deploy/deploy-linux-worker.py` post-COPY stale-pyc probe; `Tests/Contract/TestDeployStalePycProbe.py`; live re-deploy log in `### Resume Marker` | (Reset 15 commit b31e12e) |
+| C20 WorkerContext thread-local binding | `Core/WorkerContext.py` `threading.local()` + `Bind()` at every processing-thread entry; `Features/AudioNormalization/Services/PostEncodeMeasurementService.py` strict-mode revert | (Reset 16 commit 5b43f34) |
+| C21 phase-aware stuck-job detection | `Features/ServiceControl/JobPhase.py` enum + `PhaseDetectors/*.py` strategy + `PhaseDetectorRegistry.py` + `StuckJobDetectionService` refactor | (Reset 15 commit e846f35) |
+| 4K streaming Profile rows (STREAMING NVENC + STREAMING QSV Default/HQ) | `Scripts/SQLScripts/Add4KStreamingProfiles_2026_07_07.py` executed; Profile ids 468-471 landed with ProfileThresholds at 2160p (NVENC 1500/2250 kbps VBR + QSV q34/q30 ICQ) sourced from `Docs/Codecs/4K-AV1-Streaming-Sweep-2026-07-06.md` | (Reset 21 commit) |
+| 4K AV1 sweep methodology + data | `Docs/Codecs/4K-AV1-Streaming-Sweep-2026-07-06.md` created; per-encoder VBR/ICQ matrix + VMAF distribution + industry cross-reference | (Reset 21 commit c8412cc) |
 
 ### Verification
 
@@ -1273,26 +1279,31 @@ Draft parked. Promotes at DELIVERING.
 
 **STATUS:** Done -- awaiting operator close.
 
-**WHAT SHIPPED (17 criteria):**
+**WHAT SHIPPED (21 criteria):**
 - C0a MAP-tier ARCHITECTURE.md (123 lines) + Job Types section.
 - C0b GLOSSARY.md (4 buckets, alphabetical, sourced).
-- C1 One pipeline shape per job type: `transcode.flow.md` (10-stage SOT) + `quality-test.flow.md` (created at DELIVERING) + FileScanning.flow.md; `audio-normalization.flow.md` retained as legit sub-flow carve-out; `remux.flow.md` deleted.
+- C1 One pipeline shape per job type: `transcode.flow.md` (10-stage SOT) + `quality-test.flow.md` + FileScanning.flow.md; `audio-normalization.flow.md` retained as legit sub-flow carve-out; `remux.flow.md` deleted.
 - C2 Enqueue routes converge through `AddJobToQueue` (BUG-0078 fix landed).
 - C3 Claim path single-source (`WorkerCapabilityPredicate.BuildClaimPredicate`).
-- C4 Orchestration mode-blind (9+ mode-branches deleted; grep audit clean; model-layer predicates whitelisted).
-- C5 Shared attestation columns populated by every strategy: **16/16 apr + 16/16 apj + 16/16 atej post-cutover** after BUG-0086 fix (Probe no longer silent-skips when binaries unresolved; DB attestation lands regardless via '/unresolved' verdict + queue-snapshot COALESCE). Six stranded rows backfilled at DELIVERING.
-- C6 Compliance gate non-bypassable; 27608 legacy BypassReplace migrated to Replace; NoReplace + Discard retired; BUG-0079 Requeue-inserts-new-queue-row shipped; RetainInprogressPolicy service governs artifact cleanup.
-- C7 Fail-loud rule created; `TestFailLoud` 4/4 PASS; baseline ratchet (178 files / 1335 hits) refuses growth; bare-except swept (4 sites); BUG-0075 remainder (freeze-marker refusal) landed.
+- C4 Orchestration mode-blind (9+ mode-branches deleted; grep audit clean).
+- C5 Shared attestation columns populated by every strategy after BUG-0086 fix (Probe strict-mode with belt-and-suspenders DB attestation).
+- C6 Compliance gate non-bypassable; 27608 legacy BypassReplace migrated to Replace; NoReplace + Discard retired; BUG-0079 Requeue-inserts-new-queue-row shipped.
+- C7 Fail-loud rule created; `TestFailLoud` 4/4 PASS; baseline ratchet refuses growth.
 - C8 Violated docs deleted (no annotations); R14 hook enforces at edit time.
 - C9 Four live smokes end-to-end recorded + three bonus subtitle-preservation smokes + six Reset 10 backend smokes.
-- C10 Directive size at DELIVERING = 994 -> ~1080 lines; ceiling 1093. Within envelope.
-- C11 Compliance-gate MaxAudioChannels dead-check deleted; MaxAudioChannels column retained (per directive note) for potential future per-track caps.
-- C12 Profile tier-ladder (Family, QualityTier, ContentClass) x TargetResolutionCategory; 40 CANARY profiles (20 NVENC + 20 QSV, 4 res x 5 tiers x live_action); 51,247 MediaFiles rows consolidated; non-CANARY AV1 profiles deleted; dead columns dropped.
-- C13 AdequacyGate refuses compact-source Reencode admission; SystemSettings toggle + margin observed fresh per call.
-- C14 SmartConfidenceSkip branch + `VmafConfidenceStats` rolling window (N=100); PostTranscodeGateConfig confidence knobs.
-- C15 `/settings` Transcoding card + composite `GET/PUT /api/SystemSettings/Transcoding` (6 sub-sections); QualityTestEnabled migrated to Transcoding card (one-editor invariant).
+- C10 Directive size at DELIVERING = 1322 -> ~1340 lines; ceiling 1454. Within envelope.
+- C11 Compliance-gate MaxAudioChannels dead-check deleted.
+- C12 Profile tier-ladder (Family/QualityTier/ContentClass x Resolution); 40 CANARY profiles; 51,247 MediaFiles consolidated.
+- C13 AdequacyGate refuses compact-source Reencode admission.
+- C14 SmartConfidenceSkip branch + `VmafConfidenceStats` rolling window (N=100).
+- C15 `/settings` Transcoding card + composite `GET/PUT /api/SystemSettings/Transcoding`.
 - C16 Global `QualityTestEnabled=false` -> `Replace/QualityTestingGloballyDisabled` restored.
-- C17 Emit-layer CommandComposer + 4-slot collapse (VideoSlot/AudioSlot/SubtitleSlot/ContainerSlot); 9 legacy classes deleted; SubtitleSlot always fires; BUG-0083 subtitle-drop CLOSED.
+- C17 Emit-layer CommandComposer + 4-slot collapse; BUG-0083 subtitle-drop CLOSED.
+- **C18 VMAF alignment canonical measurement pipeline.** Chain SOT under `Features/QualityTesting/Vmaf/`: AlignmentSpec VO + Probe + ModelSelector + FilterChainBuilder + CommandComposer + ColorSpaceService. `QualityTestingBusinessService.BuildVMAFCommand` + `RunLocalVmafForAttempt` rewired; retired `_BuildVmafFilterChain` + `GetVideoResolution` + `DetermineVMAFTargetResolution`. 89 contract tests green. Live smokes: (a) SDR 1080p Hotel Chevalier VMAF 94.545 via composer path; (h) truncated 43s -> AlignmentSpecError fail-loud; (j) unparseable primaries unit contract. Supplementary 4K sweep 9 encodes (5 NVENC VBR + 4 QSV ICQ) exercising Model4K auto-select at scale. 10-shape formal matrix PARTIAL (3/10; 7 canary shapes pending source provisioning).
+- **C19 deploy hardening.** Dockerfile `__pycache__` purge + `deploy/deploy-linux-worker.py` post-COPY stale-pyc probe + `TestDeployStalePycProbe` 3/3 PASS + live 12-worker re-deploy clean. BUG-0085 retired.
+- **C20 WorkerContext thread-local binding.** `Core/WorkerContext.py` `threading.local()` + `Bind()` at every processing-thread entry + fail-loud `Current()` + `PostEncodeMeasurementService.Probe` strict-mode revert. Wakko QSV Requeue attempt 41156 populates all three attestation columns live from fresh Probe. BUG-0086 deep cause retired.
+- **C21 phase-aware stuck-job detection.** `JobPhase` enum + `PhaseDetectorRegistry` + 4 `IPhaseDetector` impls (Setup/Encoding/PostEncode/Verifying); `_IsJobFrozen` + Tier 3 PID liveness folded; ActiveJobs.Phase column via migration. Wakko QSV 13-min demucs no longer false-positive killed.
+- **4K streaming Profile rows landed** (Reset 21): STREAMING NVENC Default (1500 kbps VBR / VMAF 91.84) + HQ (2250 kbps VBR / VMAF 94.67) + STREAMING QSV Default (q34 ICQ / VMAF 88.44) + HQ (q30 ICQ / VMAF 93.35); Profile ids 468-471; migration `Add4KStreamingProfiles_2026_07_07.py`; data-sourced from `Docs/Codecs/4K-AV1-Streaming-Sweep-2026-07-06.md`.
 
 **HOW TO USE IT:**
 - New profiles / tiers: SQL UPDATE on `Profiles + ProfileThresholds`. No code change.
@@ -1316,18 +1327,19 @@ Draft parked. Promotes at DELIVERING.
 - BUG-0086 absorbed + closed in Reset 14: post-VERIFYING investigation identified root cause as `Probe` silent-skip on missing ffmpeg/ffprobe binaries (not QSV-Requeue-branch-specific as first theorized). Fix landed same session -- 3-line change in Probe + 2 test updates + 3-row backfill.
 
 **KNOWN GAPS / DEFERRED (all filed):**
-- BUG-0085 stale-pyc deploy-hardening (in KNOWN-ISSUES; Dockerfile / deploy script fix).
-- BUG-0086 CLOSED (Reset 14) -- Probe silent-skip on missing binaries fixed; unit-tested + backfilled. Live re-deploy of Wakko/Dot/Larry workers still needed to pick up the .py change (operator action; caution on BUG-0085 stale-pyc mitigation during deploy).
+- BUG-0085 CLOSED (Reset 15) -- Dockerfile `__pycache__` purge + post-deploy stale-pyc probe live-verified across 12 workers.
+- BUG-0086 CLOSED (Reset 14 papered + Reset 16 root-cause fix) -- WorkerContext thread-local binding via `Bind()` at every processing-thread entry; strict-mode `Current()`; live-verified on Wakko QSV attempt 41156.
+- **Reset 19 10-shape smoke matrix PARTIAL** -- 3 formal (a Hotel Chevalier / h truncated fail-loud / j unparseable unit) + 9 supplementary 4K encodes (5 NVENC + 4 QSV) exercising Model4K auto-select. 7 canary shapes pending source provisioning: (b) HDR 4K PQ, (c) Animation 24p VFR, (d) Interlaced 1080i broadcast, (e) Telecined 24p->30i film, (f) Letterbox 2.35:1 in 16:9, (g) Phone 540p vertical, (i) 4:2:2 source. Follow-up session when sources identified.
 - LUFS tolerance `+/-1 LU` (directive C9) vs DB `LoudnessTolerance=4.0` (SOT) doc reconciliation.
 - `AudioPolicyAdmissionGate.AdmitOrDefer` DEFERRED_UNGAINABLE returning `PolicyJson=None`.
-- VMAF filter-chain gaps -> `vmaf-color-and-model-matching` follow-up directive.
 - `SaveTranscodeAttempt` `__UNRESOLVED__` ProfileName sentinel (pre-existing).
-- StuckJobDetectionService false-positives on active jobs (pre-existing).
+- StuckJobDetectionService false-positives on active jobs -- C21 phase-aware detection retired the Tier 2/3 conflation; residual false-positives if any pre-C21 code path remains, needs contract test extension.
 - StaleQualityTestJobs detector false-negatives while VMAF runs (pre-existing).
 - Row 41090 pre-existing residue (pre-fanout).
 - BUG-0082 `SaveTranscodeAttempt __UNRESOLVED__` phantom rows (pre-existing).
 - `adjustment-registry-wiring` follow-up directive (converge Requeue attempts to Replace via knob overrides).
-- `Workers.AllowedProfiles` per-worker rewrite to new Tier names (or removal) -- currently NULL (accept-all) to unblock smokes.
+- `Workers.AllowedProfiles` per-worker rewrite to new Tier names (or removal) -- currently NULL (accept-all).
 - Tree-wide C8 sweep of pre-existing supersession language across 45 unrelated features -- baseline-ratchet-shaped follow-up.
-- Reset 12 fail-loud baseline shrink (178 files / 1335 hits) -- reset-by-reset follow-ups.
+- Reset 12 fail-loud baseline shrink (178 files / ~1330 hits) -- reset-by-reset follow-ups.
+- 4K streaming Profile validation on additional content shapes (anime / high-motion / HDR) before promoting to CANARY tier ladder integration.
 
