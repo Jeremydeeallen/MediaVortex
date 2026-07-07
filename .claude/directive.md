@@ -853,6 +853,17 @@ Populated incrementally per step.
 
   Axis 7 (VMAF model select) live-verified: `MaxEdgePx=3840 >= 1440 -> vmaf_4k_v0.6.1` auto-selected in all four runs. Streaming take: 3000 kbps VBR = 88% shrink + VMAF 96 (above transparency); 6000 kbps = diminishing returns; 1500 kbps floor at VMAF 91.8.
 
+- **Supplementary 4K QSV sweep 2026-07-06 (wakko av1_qsv p1 ICQ).** Same Jewelz.Blu source. Four ICQ points on wakko Arc B580:
+
+  | ICQ | Actual kbps | Size MB | Shrink | VMAF (vmaf_4k_v0.6.1) |
+  |---|---|---|---|---|
+  | q30 | 2380 | 566 | 91% | 93.35 |
+  | q34 | 1438 | 342 | 95% | 88.44 |
+  | q36 | 1163 | 277 | 96% | 85.38 |
+  | q38 | 928 | 221 | 97% | 81.56 |
+
+  QSV path also auto-selected `vmaf_4k_v0.6.1` model (axis 7 confirmed on second encoder). Composer chain identical (same code path). Cross-encoder finding: **NVENC AV1 p6 beats QSV AV1 p1 by ~1-4 VMAF at similar bitrate on this content** -- NVENC 2250 (94.67) vs QSV q30 (93.35, 2380 kbps) = NVENC +1.3; NVENC 1500 (91.84) vs QSV q34 (88.44, 1438 kbps) = NVENC +3.4. QSV curve steeper (65% bitrate delta -> +5 VMAF) vs NVENC (50% bitrate delta -> +3 VMAF). Supplementary 4K sweep smoke count: 9 encodes (5 NVENC + 4 QSV) exercising Model4K auto-select + duration parity + chroma pin + fps pin + color triad pin across two hardware encoders + two rate-control modes (VBR + ICQ).
+
 - **Smokes (b)-(g), (i) pending canary source provisioning.** Registered in `memory/smoke-assets.md`. Each requires operator to identify a real source file matching the shape:
   - (b) HDR 4K PQ -- 4K movie with bt2020/smpte2084
   - (c) Animation 24p VFR -- anime with mixed frame timing
