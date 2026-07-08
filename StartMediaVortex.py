@@ -44,6 +44,36 @@ def GetPythonExe(ServiceDirectory):
     return os.path.join(ServiceDirectory, "venv", "Scripts", "python.exe")
 
 
+# directive: transcode-flow-canonical
+def _StampVersionFile(RepoRoot):
+    VersionPath = os.path.join(RepoRoot, "VERSION")
+    try:
+        R = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=RepoRoot, capture_output=True, text=True, timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as Ex:
+        print(f"  [WARN] VERSION stamp skipped: git not available ({type(Ex).__name__})")
+        return
+    if R.returncode != 0:
+        print(f"  [WARN] VERSION stamp skipped: git rev-parse failed rc={R.returncode}")
+        return
+    Sha = R.stdout.strip()
+    if not Sha:
+        print(f"  [WARN] VERSION stamp skipped: git returned empty SHA")
+        return
+    Existing = ""
+    if LocalExists(VersionPath):
+        with open(VersionPath, "r", encoding="utf-8") as Fh:
+            Existing = Fh.read().strip()
+    if Existing == Sha:
+        print(f"  [OK]   VERSION already stamped {Sha[:7]}")
+        return
+    with open(VersionPath, "w", encoding="utf-8") as Fh:
+        Fh.write(Sha + "\n")
+    print(f"  [OK]   VERSION stamped {Sha[:7]} (was {(Existing or 'unset')[:7]})")
+
+
 def _MountNfsDrives(Drives):
     """Mount NFS drives via mount.exe with mtype=hard. Hard mounts retry RPCs forever instead
     of returning EINVAL when the server is briefly slow -- net use without explicit options
@@ -72,6 +102,8 @@ def main():
     print("================================")
     print("Starting MediaVortex services...")
     print("================================")
+
+    _StampVersionFile(RootDirectory)
 
     # Check which drives need mounting
     DrivesNeeded = []
