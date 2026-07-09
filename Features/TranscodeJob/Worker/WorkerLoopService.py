@@ -29,10 +29,6 @@ class WorkerLoopService:
         self.StopRequested = False
         self.ProcessingThread = None
         self.StateReporter = StateReporter
-        # directive: transcode-flow-canonical
-        SlotCount = max(1, MaxConcurrentTranscodeJobs + MaxConcurrentRemuxJobs)
-        self.SlotSemaphore = threading.BoundedSemaphore(SlotCount)
-        self.SlotCount = SlotCount
 
     # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
     def Run(self) -> Dict[str, Any]:
@@ -78,22 +74,22 @@ class WorkerLoopService:
     def ProcessQueueLoop(self):
         """Main loop: polls ClaimNextPendingJob for all enabled modes; dispatches via JobProcessorRegistry."""
         try:
-            LoggingService.LogInfo(f"WorkerLoopService.ProcessQueueLoop entering (SlotCount={self.SlotCount})", "WorkerLoopService", "ProcessQueueLoop")
+            LoggingService.LogInfo("WorkerLoopService.ProcessQueueLoop entering", "WorkerLoopService", "ProcessQueueLoop")
             while not self.StopRequested:
-                # directive: transcode-flow-canonical
-                Acquired = self.SlotSemaphore.acquire(blocking=False)
-                if not Acquired:
+                ClaimedAny = False
+                ActiveCount = len([T for T in self.ActiveTranscodeJobs + self.ActiveRemuxJobs if T.is_alive()])
+                MaxSlots = self.MaxConcurrentTranscodeJobs + self.MaxConcurrentRemuxJobs
+                if ActiveCount < MaxSlots:
+                    Job = self._ClaimJob()
+                    if Job:
+                        Thread = threading.Thread(target=self._DispatchJob, args=(Job,), daemon=True)
+                        Thread.start()
+                        self.ActiveTranscodeJobs.append(Thread)
+                        ClaimedAny = True
+                if not ClaimedAny:
                     time.sleep(2)
-                    continue
-                Job = self._ClaimJob()
-                if not Job:
-                    self.SlotSemaphore.release()
-                    time.sleep(2)
-                    continue
-                Thread = threading.Thread(target=self._DispatchJobWithSlotRelease, args=(Job,), daemon=True)
-                Thread.start()
-                self.ActiveTranscodeJobs.append(Thread)
-                self.ActiveTranscodeJobs = [T for T in self.ActiveTranscodeJobs if T.is_alive()]
+                self.ActiveTranscodeJobs = [T for T in self.ActiveTranscodeJobs + self.ActiveRemuxJobs if T.is_alive()]
+                self.ActiveRemuxJobs = []
             for T in self.ActiveTranscodeJobs:
                 if T.is_alive():
                     T.join(timeout=300)
@@ -111,17 +107,6 @@ class WorkerLoopService:
         except Exception as Ex:
             LoggingService.LogException("Failed to claim job", Ex, "WorkerLoopService", "_ClaimJob")
             return None
-
-    # directive: transcode-flow-canonical
-    def _DispatchJobWithSlotRelease(self, Job):
-        """Wrap _DispatchJob to guarantee slot release even on exception (hard concurrency guard)."""
-        try:
-            self._DispatchJob(Job)
-        finally:
-            try:
-                self.SlotSemaphore.release()
-            except ValueError:
-                LoggingService.LogWarning("SlotSemaphore over-released; ignoring.", "WorkerLoopService", "_DispatchJobWithSlotRelease")
 
     # directive: worker-runtime-state | # see workerservice.S8
     def _DispatchJob(self, Job):
