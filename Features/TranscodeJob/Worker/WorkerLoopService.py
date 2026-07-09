@@ -5,34 +5,32 @@ from Core.Logging.LoggingService import LoggingService
 from Features.TranscodeJob.Worker.JobProcessorRegistry import JobProcessorRegistry
 
 
-# directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+# directive: transcode-flow-canonical
 class WorkerLoopService:
-    """Unified worker loop service; polls Transcode + Remux queues per worker capabilities and dispatches via JobProcessorRegistry. Replaces the dual ProcessTranscodeQueueService / ProcessRemuxQueueService poller pair."""
+    """Single per-worker poll loop. One slot semaphore capped at Workers.MaxConcurrentJobs. Handles every ProcessingMode the worker is capable of via unified ClaimNextPendingJob."""
 
-    # directive: worker-runtime-state | # see workerservice.S8
+    # directive: transcode-flow-canonical
     def __init__(self, DatabaseManager, JobProcessorRegistryInstance: JobProcessorRegistry, WorkerName: str,
                  TranscodeEnabled: bool, RemuxEnabled: bool, AcceptsInterlaced: bool = True,
-                 MaxConcurrentTranscodeJobs: int = 1, MaxConcurrentRemuxJobs: int = 2,
+                 MaxConcurrentJobs: int = 1,
                  StateReporter=None):
-        """Inject DB + registry + worker capability + concurrency knobs."""
+        """Inject DB + registry + worker capability flags + single MaxConcurrentJobs cap."""
         self.DatabaseManager = DatabaseManager
         self.JobProcessorRegistry = JobProcessorRegistryInstance
         self.WorkerName = WorkerName
         self.TranscodeEnabled = TranscodeEnabled
         self.RemuxEnabled = RemuxEnabled
         self.AcceptsInterlaced = AcceptsInterlaced
-        self.MaxConcurrentTranscodeJobs = MaxConcurrentTranscodeJobs
-        self.MaxConcurrentRemuxJobs = MaxConcurrentRemuxJobs
-        self.ActiveTranscodeJobs = []
-        self.ActiveRemuxJobs = []
+        self.MaxConcurrentJobs = max(1, int(MaxConcurrentJobs))
+        self.ActiveJobs = []
         self.IsProcessing = False
         self.StopRequested = False
         self.ProcessingThread = None
         self.StateReporter = StateReporter
+        self.SlotSemaphore = threading.BoundedSemaphore(self.MaxConcurrentJobs)
 
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    # directive: transcode-flow-canonical
     def Run(self) -> Dict[str, Any]:
-        """Start the unified processing loop on a daemon thread."""
         try:
             if self.IsProcessing:
                 return {"Success": False, "ErrorMessage": "WorkerLoopService is already running"}
@@ -40,16 +38,15 @@ class WorkerLoopService:
             self.IsProcessing = True
             self.ProcessingThread = threading.Thread(target=self.ProcessQueueLoop, daemon=True)
             self.ProcessingThread.start()
-            LoggingService.LogInfo(f"WorkerLoopService started (Transcode={self.TranscodeEnabled}, Remux={self.RemuxEnabled})", "WorkerLoopService", "Run")
+            LoggingService.LogInfo(f"WorkerLoopService started (MaxConcurrentJobs={self.MaxConcurrentJobs}, Transcode={self.TranscodeEnabled}, Remux={self.RemuxEnabled})", "WorkerLoopService", "Run")
             return {"Success": True, "Message": "WorkerLoopService running"}
         except Exception as Ex:
             self.IsProcessing = False
             LoggingService.LogException("Failed to start WorkerLoopService", Ex, "WorkerLoopService", "Run")
             return {"Success": False, "ErrorMessage": str(Ex)}
 
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    # directive: transcode-flow-canonical
     def Stop(self) -> Dict[str, Any]:
-        """Signal the loop to stop on the next tick; wait for in-flight jobs to drain."""
         try:
             self.StopRequested = True
             LoggingService.LogInfo("WorkerLoopService stop requested", "WorkerLoopService", "Stop")
@@ -58,39 +55,35 @@ class WorkerLoopService:
             LoggingService.LogException("Failed to stop WorkerLoopService", Ex, "WorkerLoopService", "Stop")
             return {"Success": False, "ErrorMessage": str(Ex)}
 
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C14
+    # directive: transcode-flow-canonical
     def GetStatus(self) -> Dict[str, Any]:
-        """Return current loop status + active job counts."""
         return {
             "Success": True,
             "IsProcessing": self.IsProcessing,
             "TranscodeEnabled": self.TranscodeEnabled,
             "RemuxEnabled": self.RemuxEnabled,
-            "ActiveTranscodeJobs": len([T for T in self.ActiveTranscodeJobs if T.is_alive()]),
-            "ActiveRemuxJobs": len([T for T in self.ActiveRemuxJobs if T.is_alive()]),
+            "MaxConcurrentJobs": self.MaxConcurrentJobs,
+            "ActiveJobs": len([T for T in self.ActiveJobs if T.is_alive()]),
         }
 
-    # directive: transcode-worker-unification | # see transcode.ST6
+    # directive: transcode-flow-canonical
     def ProcessQueueLoop(self):
-        """Main loop: polls ClaimNextPendingJob for all enabled modes; dispatches via JobProcessorRegistry."""
         try:
-            LoggingService.LogInfo("WorkerLoopService.ProcessQueueLoop entering", "WorkerLoopService", "ProcessQueueLoop")
+            LoggingService.LogInfo(f"WorkerLoopService.ProcessQueueLoop entering (MaxConcurrentJobs={self.MaxConcurrentJobs})", "WorkerLoopService", "ProcessQueueLoop")
             while not self.StopRequested:
-                ClaimedAny = False
-                ActiveCount = len([T for T in self.ActiveTranscodeJobs + self.ActiveRemuxJobs if T.is_alive()])
-                MaxSlots = self.MaxConcurrentTranscodeJobs + self.MaxConcurrentRemuxJobs
-                if ActiveCount < MaxSlots:
-                    Job = self._ClaimJob()
-                    if Job:
-                        Thread = threading.Thread(target=self._DispatchJob, args=(Job,), daemon=True)
-                        Thread.start()
-                        self.ActiveTranscodeJobs.append(Thread)
-                        ClaimedAny = True
-                if not ClaimedAny:
+                if not self.SlotSemaphore.acquire(blocking=False):
                     time.sleep(2)
-                self.ActiveTranscodeJobs = [T for T in self.ActiveTranscodeJobs + self.ActiveRemuxJobs if T.is_alive()]
-                self.ActiveRemuxJobs = []
-            for T in self.ActiveTranscodeJobs:
+                    continue
+                Job = self._ClaimJob()
+                if not Job:
+                    self.SlotSemaphore.release()
+                    time.sleep(2)
+                    continue
+                Thread = threading.Thread(target=self._DispatchJobWithSlotRelease, args=(Job,), daemon=True)
+                Thread.start()
+                self.ActiveJobs.append(Thread)
+                self.ActiveJobs = [T for T in self.ActiveJobs if T.is_alive()]
+            for T in self.ActiveJobs:
                 if T.is_alive():
                     T.join(timeout=300)
             LoggingService.LogInfo("WorkerLoopService.ProcessQueueLoop exiting", "WorkerLoopService", "ProcessQueueLoop")
@@ -99,18 +92,26 @@ class WorkerLoopService:
         finally:
             self.IsProcessing = False
 
-    # directive: transcode-worker-unification | # see transcode.ST6
+    # directive: transcode-flow-canonical
     def _ClaimJob(self):
-        """Claim the next pending job across all enabled modes via ClaimNextPendingJob."""
         try:
             return self.DatabaseManager.ClaimNextPendingJob(self.WorkerName, AcceptsInterlaced=self.AcceptsInterlaced)
         except Exception as Ex:
             LoggingService.LogException("Failed to claim job", Ex, "WorkerLoopService", "_ClaimJob")
             return None
 
-    # directive: worker-runtime-state | # see workerservice.S8
+    # directive: transcode-flow-canonical
+    def _DispatchJobWithSlotRelease(self, Job):
+        try:
+            self._DispatchJob(Job)
+        finally:
+            try:
+                self.SlotSemaphore.release()
+            except ValueError:
+                LoggingService.LogWarning("SlotSemaphore over-released; ignoring", "WorkerLoopService", "_DispatchJobWithSlotRelease")
+
+    # directive: transcode-flow-canonical
     def _DispatchJob(self, Job):
-        """Look up the JobProcessor for Job.ProcessingMode and run it."""
         Mode = None
         AttemptId = getattr(Job, 'Id', None)
         try:

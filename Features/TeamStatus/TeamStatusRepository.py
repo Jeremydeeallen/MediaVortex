@@ -21,7 +21,7 @@ class TeamStatusRepository(BaseRepository):
             "MaxConcurrentJobs, MaxCpuThreads, AcceptsInterlaced, "
             "TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, "
             "nvenccapable, "
-            "MaxConcurrentTranscodeJobs, MaxConcurrentQualityTestJobs, MaxConcurrentRemuxJobs, "
+            "MaxConcurrentQualityTestJobs, "
             "Enabled, Version, BuildInfo, MountValidationError, "
             "EXTRACT(EPOCH FROM (NOW() - LastHeartbeat)) AS HeartbeatAgeSec "
             "FROM Workers " + Where + " ORDER BY WorkerName"

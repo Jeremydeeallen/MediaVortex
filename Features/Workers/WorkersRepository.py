@@ -13,14 +13,13 @@ class WorkersRepository:
     def GetWorkerConfig(self, WorkerName: str) -> Optional[Dict[str, Any]]:
         """Get worker configuration from the Workers table, including share mappings."""
         try:
-            query = """
-                SELECT WorkerName, Platform, FFmpegPath, FFprobePath,
-                       ShareMountPrefix, ShareCanonicalPrefix, MaxConcurrentJobs, Status,
-                       MaxCpuThreads, AcceptsInterlaced, QualityTestEnabled,
-                       MaxConcurrentTranscodeJobs, MaxConcurrentQualityTestJobs,
-                       MaxConcurrentRemuxJobs, RemuxEnabled
-                FROM Workers WHERE WorkerName = %s
-            """
+            query = (
+                "SELECT WorkerName, Platform, FFmpegPath, FFprobePath, "
+                "ShareMountPrefix, ShareCanonicalPrefix, MaxConcurrentJobs, Status, "
+                "MaxCpuThreads, AcceptsInterlaced, QualityTestEnabled, "
+                "MaxConcurrentQualityTestJobs, RemuxEnabled "
+                "FROM Workers WHERE WorkerName = %s"
+            )
             rows = self.DatabaseService.ExecuteQuery(query, (WorkerName,))
             if rows:
                 Config = rows[0]

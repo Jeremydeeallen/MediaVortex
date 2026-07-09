@@ -116,7 +116,6 @@ class WorkerServiceApp:
         # Capability instances (created lazily based on DB config)
         self.TranscodeService = None
         self.QualityTestService = None
-        self.RemuxService = None
         self.ContinuousScanService = None
 
         # Current capabilities and status from DB
@@ -126,10 +125,9 @@ class WorkerServiceApp:
         self.ScanEnabled = False
         self.WorkerStatus = "Paused"
 
-        # Per-capability concurrency (data-driven, updated by capability poller)
+        # Concurrency slot cap read from Workers.MaxConcurrentJobs (single source of truth)
         self.CurrentTranscodeConcurrency = 1
         self.CurrentQualityTestConcurrency = 2
-        self.CurrentRemuxConcurrency = 2
 
         # Polling intervals (data-driven from SystemSettings)
         self.CapabilityPollingIntervalSec = self._LoadCapabilityPollingInterval()
@@ -334,15 +332,15 @@ class WorkerServiceApp:
 
         return ("unknown", None)
 
+    # directive: transcode-flow-canonical
     def _LoadCapabilitiesFromDB(self):
-        """Load capability flags, concurrency settings, and status from Workers table."""
+        """Read capability flags + MaxConcurrentJobs from Workers table. Single query, single source of truth."""
         try:
-            Query = """
-                SELECT TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, Status,
-                       MaxConcurrentTranscodeJobs, MaxConcurrentQualityTestJobs, MaxConcurrentRemuxJobs
-                FROM Workers
-                WHERE WorkerName = %s
-            """
+            Query = (
+                "SELECT TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, Status, "
+                "MaxConcurrentJobs, MaxConcurrentQualityTestJobs "
+                "FROM Workers WHERE WorkerName = %s"
+            )
             Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(Query, (self.WorkerName,))
             if Rows:
                 Row = Rows[0]
@@ -351,13 +349,10 @@ class WorkerServiceApp:
                 self.RemuxEnabled = bool(Row.get('RemuxEnabled', True))
                 self.ScanEnabled = bool(Row.get('ScanEnabled', False))
                 self.WorkerStatus = Row.get('Status', 'Paused') or 'Paused'
-                # Per-capability concurrency (floor of 1, no ceiling -- operator sets what fits their hardware)
-                RawTranscode = Row.get('MaxConcurrentTranscodeJobs')
+                RawMax = Row.get('MaxConcurrentJobs')
                 RawQualityTest = Row.get('MaxConcurrentQualityTestJobs')
-                RawRemux = Row.get('MaxConcurrentRemuxJobs')
-                self.CurrentTranscodeConcurrency = max(1, int(RawTranscode)) if RawTranscode else 1
+                self.CurrentTranscodeConcurrency = max(1, int(RawMax)) if RawMax else 1
                 self.CurrentQualityTestConcurrency = max(1, int(RawQualityTest)) if RawQualityTest else 2
-                self.CurrentRemuxConcurrency = max(1, int(RawRemux)) if RawRemux else 2
             else:
                 LoggingService.LogWarning(f"No Workers row found for '{self.WorkerName}', using defaults", "WorkerService", "_LoadCapabilitiesFromDB")
                 self.TranscodeEnabled = True
@@ -367,7 +362,6 @@ class WorkerServiceApp:
                 self.WorkerStatus = "Paused"
                 self.CurrentTranscodeConcurrency = 1
                 self.CurrentQualityTestConcurrency = 2
-                self.CurrentRemuxConcurrency = 2
         except Exception as e:
             LoggingService.LogException("Error loading capabilities from DB", e, "WorkerService", "_LoadCapabilitiesFromDB")
 
@@ -385,9 +379,9 @@ class WorkerServiceApp:
             return max(1, min(5, int(Legacy)))
         return Default
 
-    # directive: transcode-worker-unification | # see worker-loop.C4
+    # directive: transcode-flow-canonical
     def _StartTranscodeCapability(self):
-        """Initialize the transcode processing capability via WorkerLoopService + unified JobProcessor template."""
+        """Start the single unified WorkerLoopService per container; slot cap = Workers.MaxConcurrentJobs."""
         if self.TranscodeService is not None:
             return
         try:
@@ -427,22 +421,21 @@ class WorkerServiceApp:
                 DatabaseManager=self.DatabaseManager,
                 JobProcessorRegistryInstance=Registry,
                 WorkerName=self.WorkerName,
-                TranscodeEnabled=True,
-                RemuxEnabled=False,
+                TranscodeEnabled=self.TranscodeEnabled,
+                RemuxEnabled=self.RemuxEnabled,
                 AcceptsInterlaced=getattr(QueueService, 'AcceptsInterlaced', True),
-                MaxConcurrentTranscodeJobs=MaxJobs,
-                MaxConcurrentRemuxJobs=0,
+                MaxConcurrentJobs=MaxJobs,
                 StateReporter=self.StateReporter,
             )
             self.TranscodeCurrentStatus = "Running"
             self.TranscodeManuallyStopped = False
             Result = self.TranscodeService.Run()
             if Result.get("Success", False):
-                LoggingService.LogInfo(f"Transcode capability started via WorkerLoopService ({MaxJobs} concurrent jobs)", "WorkerService", "_StartTranscodeCapability")
+                LoggingService.LogInfo(f"Unified worker loop started ({MaxJobs} concurrent slot, Transcode={self.TranscodeEnabled}, Remux={self.RemuxEnabled})", "WorkerService", "_StartTranscodeCapability")
             else:
-                LoggingService.LogError(f"Failed to start transcode: {Result.get('ErrorMessage', 'Unknown')}", "WorkerService", "_StartTranscodeCapability")
+                LoggingService.LogError(f"Failed to start unified worker loop: {Result.get('ErrorMessage', 'Unknown')}", "WorkerService", "_StartTranscodeCapability")
         except Exception as e:
-            LoggingService.LogException("Error starting transcode capability", e, "WorkerService", "_StartTranscodeCapability")
+            LoggingService.LogException("Error starting unified worker loop", e, "WorkerService", "_StartTranscodeCapability")
 
     # directive: worker-loop-method-extraction | # see worker-loop.C5
     def _StopTranscodeCapability(self):
@@ -456,7 +449,7 @@ class WorkerServiceApp:
             if self.TranscodeService.ProcessingThread and self.TranscodeService.ProcessingThread.is_alive():
                 self.TranscodeService.ProcessingThread.join(timeout=7200)
             self.TranscodeService.IsProcessing = False
-            self.TranscodeService.ActiveTranscodeJobs.clear()
+            self.TranscodeService.ActiveJobs.clear()
             self.TranscodeService = None
             self.TranscodeCurrentStatus = "Stopped"
             LoggingService.LogInfo("Transcode capability stopped", "WorkerService", "_StopTranscodeCapability")
@@ -493,77 +486,6 @@ class WorkerServiceApp:
             self.QualityTestService = None
         except Exception as e:
             LoggingService.LogException("Error stopping quality test capability", e, "WorkerService", "_StopQualityTestCapability")
-
-    # directive: transcode-worker-unification | # see worker-loop.C4
-    def _StartRemuxCapability(self):
-        """Initialize the remux processing capability via WorkerLoopService + unified JobProcessor template."""
-        if self.RemuxService is not None:
-            return
-        try:
-            from Features.TranscodeJob.Worker.WorkerLoopService import WorkerLoopService
-            from Features.TranscodeJob.Worker.JobProcessorRegistry import JobProcessorRegistry
-            from Features.TranscodeJob.Worker.JobProcessor import JobProcessor
-            from Features.TranscodeJob.Worker.Strategies.JobProcessorRegistry import JobProcessorRegistry as StrategyRegistry
-            from Features.TranscodeJob.Worker.Strategies.TranscodeJobStrategy import TranscodeJobStrategy
-            from Features.TranscodeJob.Worker.Strategies.SubtitleFixJobStrategy import SubtitleFixJobStrategy
-            from Features.TranscodeJob.Worker.Strategies.RemuxJobStrategy import RemuxJobStrategy
-            from Features.TranscodeJob.Worker.Strategies.AudioFixJobStrategy import AudioFixJobStrategy
-            from Features.TranscodeJob.Worker.Strategies.QuickJobStrategy import QuickJobStrategy
-            from Features.TranscodeJob.ProcessTranscodeQueueService import ProcessTranscodeQueueService
-            QueueService = ProcessTranscodeQueueService(
-                DatabaseManagerInstance=self.DatabaseManager,
-                WorkerName=self.WorkerName,
-                WorkerConfig=self.WorkerConfig,
-            )
-            StratReg = StrategyRegistry(Db=self.DatabaseManager.DatabaseService)
-            StratReg.Register('Transcode', TranscodeJobStrategy)
-            StratReg.Register('SubtitleFix', SubtitleFixJobStrategy)
-            StratReg.Register('Remux', RemuxJobStrategy)
-            StratReg.Register('AudioFix', AudioFixJobStrategy)
-            StratReg.Register('Quick', QuickJobStrategy)
-            UnifiedJobProcessor = JobProcessor(QueueService=QueueService, Registry=StratReg)
-            Registry = JobProcessorRegistry({
-                'Transcode': UnifiedJobProcessor,
-                'SubtitleFix': UnifiedJobProcessor,
-                'Remux': UnifiedJobProcessor,
-                'AudioFix': UnifiedJobProcessor,
-                'Quick': UnifiedJobProcessor,
-            })
-            MaxJobs = self.CurrentRemuxConcurrency
-            self.RemuxService = WorkerLoopService(
-                DatabaseManager=self.DatabaseManager,
-                JobProcessorRegistryInstance=Registry,
-                WorkerName=self.WorkerName,
-                TranscodeEnabled=False,
-                RemuxEnabled=True,
-                MaxConcurrentTranscodeJobs=0,
-                MaxConcurrentRemuxJobs=MaxJobs,
-                StateReporter=self.StateReporter,
-            )
-            Result = self.RemuxService.Run()
-            if Result.get("Success", False):
-                LoggingService.LogInfo(f"Remux capability started via WorkerLoopService ({MaxJobs} concurrent jobs)", "WorkerService", "_StartRemuxCapability")
-            else:
-                LoggingService.LogError(f"Failed to start remux: {Result.get('ErrorMessage', 'Unknown')}", "WorkerService", "_StartRemuxCapability")
-        except Exception as e:
-            LoggingService.LogException("Error starting remux capability", e, "WorkerService", "_StartRemuxCapability")
-
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C16
-    def _StopRemuxCapability(self):
-        """Stop the remux processing capability gracefully (WorkerLoopService Stop API)."""
-        if self.RemuxService is None:
-            return
-        try:
-            LoggingService.LogInfo("Stopping remux capability (WorkerLoopService)...", "WorkerService", "_StopRemuxCapability")
-            self.RemuxService.Stop()
-            if self.RemuxService.ProcessingThread and self.RemuxService.ProcessingThread.is_alive():
-                self.RemuxService.ProcessingThread.join(timeout=300)
-            self.RemuxService.IsProcessing = False
-            self.RemuxService.ActiveRemuxJobs.clear()
-            self.RemuxService = None
-            LoggingService.LogInfo("Remux capability stopped", "WorkerService", "_StopRemuxCapability")
-        except Exception as e:
-            LoggingService.LogException("Error stopping remux capability", e, "WorkerService", "_StopRemuxCapability")
 
     def _StartScanCapability(self):
         """Initialize and start the continuous scanning capability."""
@@ -851,7 +773,6 @@ class WorkerServiceApp:
         if self.WorkerStatus != "Online":
             AnyRunning = (
                 self.TranscodeService is not None
-                or self.RemuxService is not None
                 or self.QualityTestService is not None
                 or self.ContinuousScanService is not None
             )
@@ -863,25 +784,17 @@ class WorkerServiceApp:
                 self._StopAllCapabilities()
             return
 
-        # Transcode
-        if self.TranscodeEnabled and self.TranscodeService is None:
+        WorkerLoopWanted = self.TranscodeEnabled or self.RemuxEnabled
+        if WorkerLoopWanted and self.TranscodeService is None:
             self._StartTranscodeCapability()
-        elif not self.TranscodeEnabled and self.TranscodeService is not None:
+        elif not WorkerLoopWanted and self.TranscodeService is not None:
             threading.Thread(target=self._StopTranscodeCapability, daemon=True, name="StopTranscode").start()
 
-        # Quality test
         if self.QualityTestEnabled and self.QualityTestService is None:
             self._StartQualityTestCapability()
         elif not self.QualityTestEnabled and self.QualityTestService is not None:
             threading.Thread(target=self._StopQualityTestCapability, daemon=True, name="StopQualityTest").start()
 
-        # Remux
-        if self.RemuxEnabled and self.RemuxService is None:
-            self._StartRemuxCapability()
-        elif not self.RemuxEnabled and self.RemuxService is not None:
-            threading.Thread(target=self._StopRemuxCapability, daemon=True, name="StopRemux").start()
-
-        # Scan
         if self.ScanEnabled and self.ContinuousScanService is None:
             self._StartScanCapability()
         elif not self.ScanEnabled and self.ContinuousScanService is not None:
@@ -1087,21 +1000,16 @@ class WorkerServiceApp:
         # loop claims another job in the meantime.
         if self.TranscodeService is not None:
             self.TranscodeService.StopRequested = True
-        if self.RemuxService is not None:
-            self.RemuxService.StopRequested = True
         if self.QualityTestService is not None:
             try:
                 self.QualityTestService.Stop()
             except Exception:
                 pass
 
-        # Now spawn background threads for graceful cleanup (thread joins, etc.)
         if self.TranscodeService is not None:
             threading.Thread(target=self._StopTranscodeCapability, daemon=True, name="StopTranscode").start()
         if self.QualityTestService is not None:
             threading.Thread(target=self._StopQualityTestCapability, daemon=True, name="StopQualityTest").start()
-        if self.RemuxService is not None:
-            threading.Thread(target=self._StopRemuxCapability, daemon=True, name="StopRemux").start()
         if self.ContinuousScanService is not None:
             self._StopScanCapability()
 
@@ -1145,9 +1053,8 @@ class WorkerServiceApp:
                 OldQualityTest = self.QualityTestEnabled
                 OldScan = self.ScanEnabled
                 OldRemux = self.RemuxEnabled
-                OldTranscodeConcurrency = self.CurrentTranscodeConcurrency
+                OldMaxConcurrent = self.CurrentTranscodeConcurrency
                 OldQualityTestConcurrency = self.CurrentQualityTestConcurrency
-                OldRemuxConcurrency = self.CurrentRemuxConcurrency
 
                 self._LoadCapabilitiesFromDB()
 
@@ -1164,21 +1071,19 @@ class WorkerServiceApp:
                     )
                     self._ApplyCapabilities()
 
-                # Apply concurrency changes to running services (no restart needed)
-                self._ApplyConcurrencyChanges(
-                    OldTranscodeConcurrency, OldQualityTestConcurrency, OldRemuxConcurrency
-                )
+                self._ApplyConcurrencyChanges(OldMaxConcurrent, OldQualityTestConcurrency)
 
             except Exception as e:
                 LoggingService.LogException("Error in capability polling loop", e, "WorkerService", "_CapabilityPollingLoop")
                 self.ShutdownEvent.wait(30)
 
-    def _ApplyConcurrencyChanges(self, OldTranscode: int, OldQualityTest: int, OldRemux: int):
-        """Update MaxConcurrentJobs on running service instances when DB values change."""
-        if self.CurrentTranscodeConcurrency != OldTranscode and self.TranscodeService is not None:
+    # directive: transcode-flow-canonical
+    def _ApplyConcurrencyChanges(self, OldMaxConcurrent: int, OldQualityTest: int):
+        """Update running services when Workers.MaxConcurrentJobs / MaxConcurrentQualityTestJobs change. Semaphore capacity is boot-fixed; restart worker to resize slot cap."""
+        if self.CurrentTranscodeConcurrency != OldMaxConcurrent and self.TranscodeService is not None:
             self.TranscodeService.MaxConcurrentJobs = self.CurrentTranscodeConcurrency
             LoggingService.LogInfo(
-                f"Transcode concurrency changed: {OldTranscode} -> {self.CurrentTranscodeConcurrency}",
+                f"MaxConcurrentJobs changed: {OldMaxConcurrent} -> {self.CurrentTranscodeConcurrency}. Restart worker to apply new slot cap.",
                 "WorkerService", "_ApplyConcurrencyChanges"
             )
 
@@ -1186,13 +1091,6 @@ class WorkerServiceApp:
             self.QualityTestService.MaxConcurrentJobs = self.CurrentQualityTestConcurrency
             LoggingService.LogInfo(
                 f"Quality test concurrency changed: {OldQualityTest} -> {self.CurrentQualityTestConcurrency}",
-                "WorkerService", "_ApplyConcurrencyChanges"
-            )
-
-        if self.CurrentRemuxConcurrency != OldRemux and self.RemuxService is not None:
-            self.RemuxService.MaxConcurrentJobs = self.CurrentRemuxConcurrency
-            LoggingService.LogInfo(
-                f"Remux concurrency changed: {OldRemux} -> {self.CurrentRemuxConcurrency}",
                 "WorkerService", "_ApplyConcurrencyChanges"
             )
 
@@ -1270,8 +1168,7 @@ def SignalHandler(signum, frame):
     Start = _time.time()
     while _time.time() - Start < _SIGNAL_BUDGET_SECONDS:
         Active = []
-        if getattr(App, 'TranscodeService', None) is not None: Active.append('transcode')
-        if getattr(App, 'RemuxService', None) is not None: Active.append('remux')
+        if getattr(App, 'TranscodeService', None) is not None: Active.append('worker-loop')
         if getattr(App, 'QualityTestService', None) is not None: Active.append('quality-test')
         if getattr(App, 'ContinuousScanService', None) is not None: Active.append('scan')
         if not Active:

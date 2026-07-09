@@ -14,7 +14,7 @@ class AdminWorkersRepository:
     def GetTiles(self) -> List[Dict[str, Any]]:
         Rows = self._Db.ExecuteQuery(
             "SELECT WorkerName, Platform, Status, LastHeartbeat, MaxConcurrentJobs, "
-            "MaxConcurrentTranscodeJobs, MaxConcurrentRemuxJobs, MaxConcurrentQualityTestJobs, "
+            "MaxConcurrentQualityTestJobs, "
             "TranscodeEnabled, RemuxEnabled, QualityTestEnabled, ScanEnabled, NvencCapable, "
             "Version, BuildInfo, MountValidationError, Enabled, "
             "RuntimeState, CurrentAttemptId, LastRuntimeStateUpdate, "

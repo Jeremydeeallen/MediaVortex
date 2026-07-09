@@ -53,8 +53,7 @@ class WorkerCompositionRoot:
             TranscodeEnabled=bool(Capabilities.get('TranscodeEnabled', False)),
             RemuxEnabled=bool(Capabilities.get('RemuxEnabled', False)),
             AcceptsInterlaced=bool(Capabilities.get('AcceptsInterlaced', True)),
-            MaxConcurrentTranscodeJobs=int(Capabilities.get('MaxConcurrentJobs') or 1),
-            MaxConcurrentRemuxJobs=2,
+            MaxConcurrentJobs=int(Capabilities.get('MaxConcurrentJobs') or 1),
         )
         self.StuckJobMonitor = StuckJobMonitor(DatabaseManager=self.DatabaseManager, WorkerName=self.WorkerName)
 

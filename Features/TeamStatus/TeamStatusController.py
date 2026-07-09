@@ -499,9 +499,7 @@ def GetWorkers():
                 "ScanEnabled": ScanEnabled,
                 "RemuxEnabled": bool(Row.get('RemuxEnabled', True)),
                 "NvencCapable": bool(Row.get('nvenccapable', False)),
-                "MaxConcurrentTranscodeJobs": Row.get('MaxConcurrentTranscodeJobs') or 1,
                 "MaxConcurrentQualityTestJobs": Row.get('MaxConcurrentQualityTestJobs') or 2,
-                "MaxConcurrentRemuxJobs": Row.get('MaxConcurrentRemuxJobs') or 2,
                 "Enabled": bool(Row.get('Enabled', True)),
                 "Version": Row.get('Version'),
                 "BuildInfo": Row.get('BuildInfo'),
@@ -712,20 +710,12 @@ def SetWorkerCapability(WorkerName):
 
 @TeamStatusBlueprint.route('/Workers/<WorkerName>/Concurrency', methods=['POST'])
 def SetWorkerConcurrency(WorkerName):
-    """Set per-capability concurrency limits for a worker.
-
-    Body: {"MaxConcurrentTranscodeJobs": 1, "MaxConcurrentQualityTestJobs": 3, ...}
-    Any subset of the three keys is accepted; unspecified columns are left untouched.
-    Values must be positive integers (floor of 1, no upper ceiling -- see
-    worker-lifecycle.feature.md criterion 18).
-    Takes effect within one CapabilityPollingIntervalSec on the running worker
-    (criterion 19) -- no restart required.
-    """
+    """Set concurrency limits: {MaxConcurrentJobs, MaxConcurrentQualityTestJobs}. Slot cap change requires worker restart to resize the boot-time semaphore."""
     try:
         LoggingService.LogFunctionEntry("SetWorkerConcurrency", "TeamStatusController")
 
         Data = request.get_json() or {}
-        AllowedColumns = {'MaxConcurrentTranscodeJobs', 'MaxConcurrentQualityTestJobs', 'MaxConcurrentRemuxJobs'}
+        AllowedColumns = {'MaxConcurrentJobs', 'MaxConcurrentQualityTestJobs'}
         UpdateColumns = {k: v for k, v in Data.items() if k in AllowedColumns}
         if not UpdateColumns:
             return jsonify({"Success": False, "Message": f"Provide at least one of: {', '.join(sorted(AllowedColumns))}"}), 400
