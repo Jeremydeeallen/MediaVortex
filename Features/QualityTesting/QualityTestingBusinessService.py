@@ -1685,6 +1685,14 @@ class QualityTestingBusinessService:
 
     # directive: qualitytesting-uses-path | # see path.S5
     def GetVideoDuration(self, JobDetails: dict) -> float:
+        if JobDetails and '_CachedVideoDuration' in JobDetails:
+            return JobDetails['_CachedVideoDuration']
+        Duration = self._ProbeVideoDuration(JobDetails)
+        if JobDetails is not None:
+            JobDetails['_CachedVideoDuration'] = Duration
+        return Duration
+
+    def _ProbeVideoDuration(self, JobDetails: dict) -> float:
         try:
             import subprocess
             from Core.WorkerContext import WorkerContext
@@ -1734,7 +1742,7 @@ class QualityTestingBusinessService:
             return 0.0
 
         except Exception as e:
-            LoggingService.LogException(f"Error getting video duration for attempt {JobDetails.get('TranscodeAttemptId') if JobDetails else None}", e, "QualityTestingBusinessService", "GetVideoDuration")
+            LoggingService.LogException(f"Error probing video duration for attempt {JobDetails.get('TranscodeAttemptId') if JobDetails else None}", e, "QualityTestingBusinessService", "_ProbeVideoDuration")
             return 0.0
 
     # directive: nvenc-rate-anchored-remediation
