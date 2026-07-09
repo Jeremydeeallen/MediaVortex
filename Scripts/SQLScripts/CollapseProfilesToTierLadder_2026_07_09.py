@@ -36,7 +36,7 @@ SNAPSHOT_SUFFIX = '_snapshot_20260709'
 
 
 def _NewProfileName(Tier: int) -> str:
-    return f"AV1 CANARY Tier {Tier} {TIER_LABELS[Tier]}"
+    return f"AV1 Tier {Tier} {TIER_LABELS[Tier]}"
 
 
 # directive: transcode-flow-canonical
