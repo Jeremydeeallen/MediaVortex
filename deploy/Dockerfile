@@ -61,6 +61,8 @@ RUN pip install --no-cache-dir --break-system-packages \
         soundfile \
  && if [ "$TORCH_VARIANT" = "xpu" ]; then \
         apt-get update -qq \
+        && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            libze1 libze-intel-gpu1 > /dev/null \
         && curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
             | gpg --dearmor > /usr/share/keyrings/oneapi-archive-keyring.gpg \
         && echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
