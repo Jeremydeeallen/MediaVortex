@@ -2239,7 +2239,7 @@ function SavePostTranscodeGateConfig() {
     }).fail(function(X) { alert('Save failed: ' + X.responseText); });
 }
 
-var _TranscodingSettings = { BitrateLadder: [], IcqLadder: [] };
+var _TranscodingSettings = { BitrateLadder: [], IcqLadder: [], TierLabels: {} };
 
 function LoadTranscodingSettings() {
     var Filter = ($('#ConfidenceStatsFilter').val() || '').trim();
@@ -2251,6 +2251,7 @@ function LoadTranscodingSettings() {
         }
         _TranscodingSettings.BitrateLadder = R.BitrateLadder || [];
         _TranscodingSettings.IcqLadder = R.IcqLadder || [];
+        _TranscodingSettings.TierLabels = R.TierLabels || {};
         $('#AdequacyGateEnabled').prop('checked', !!(R.Adequacy && R.Adequacy.Enabled));
         $('#AdequacyGateMarginPercent').val((R.Adequacy && R.Adequacy.MarginPercent) || 0);
         $('#MinConfidenceSampleCount').val((R.Confidence && R.Confidence.MinConfidenceSampleCount) || 10);
@@ -2262,22 +2263,26 @@ function LoadTranscodingSettings() {
     }).fail(function(X) { alert('Load failed: ' + X.responseText); });
 }
 
+function _TierHeader(T) {
+    var Label = (_TranscodingSettings.TierLabels || {})[T];
+    return Label ? ('Tier ' + T + '<br><small class="text-muted">' + Label + '</small>') : ('Tier ' + T);
+}
+
 function RenderTranscodingLadders() {
     var CC = $('#TranscodingContentClass').val() || 'live_action';
     var BR = (_TranscodingSettings.BitrateLadder || []).filter(function(R) { return R.ContentClass === CC; });
     var Icq = (_TranscodingSettings.IcqLadder || []).filter(function(R) { return R.ContentClass === CC; });
 
-    var Families = Array.from(new Set(BR.map(function(R) { return R.Family; }))).sort();
     var BC = $('#BitrateLadderContainer').empty();
-    if (Families.length === 0) {
-        BC.append('<em class="text-muted small">No bitrate ladder rows for ' + CC + '. Backfill via BackfillFullCanaryTierLadder migration.</em>');
-    }
-    Families.forEach(function(F) {
-        var Rows = BR.filter(function(R) { return R.Family === F; }).sort(function(A, B) { return (A.Resolution || '').localeCompare(B.Resolution || ''); });
-        var H = '<div class="mb-2"><strong>' + F + '</strong></div>';
-        H += '<table class="table table-sm table-bordered mb-3"><thead><tr><th>Resolution</th><th>Tier 1</th><th>Tier 2</th><th>Tier 3</th><th>Tier 4</th><th>Tier 5</th></tr></thead><tbody>';
+    if (BR.length === 0) {
+        BC.append('<em class="text-muted small">No bitrate ladder rows for ' + CC + '. Backfill via CollapseProfilesToTierLadder migration.</em>');
+    } else {
+        var Rows = BR.slice().sort(function(A, B) { return (A.Resolution || '').localeCompare(B.Resolution || ''); });
+        var H = '<table class="table table-sm table-bordered mb-3"><thead><tr><th>Resolution</th>';
+        for (var T = 1; T <= 5; T++) { H += '<th>' + _TierHeader(T) + '</th>'; }
+        H += '</tr></thead><tbody>';
         Rows.forEach(function(Row) {
-            H += '<tr data-family="' + F + '" data-contentclass="' + CC + '" data-resolution="' + Row.Resolution + '">';
+            H += '<tr data-family="' + (Row.Family || 'ANY') + '" data-contentclass="' + CC + '" data-resolution="' + Row.Resolution + '">';
             H += '<td class="fw-bold">' + Row.Resolution + '</td>';
             for (var T = 1; T <= 5; T++) {
                 var V = Row['Tier' + T];
@@ -2287,19 +2292,18 @@ function RenderTranscodingLadders() {
         });
         H += '</tbody></table>';
         BC.append(H);
-    });
-
-    var IcqFamilies = Array.from(new Set(Icq.map(function(R) { return R.Family; }))).sort();
-    var IC = $('#IcqLadderContainer').empty();
-    if (IcqFamilies.length === 0) {
-        IC.append('<em class="text-muted small">No ICQ ladder rows for ' + CC + '.</em>');
     }
-    IcqFamilies.forEach(function(F) {
-        var Row = Icq.filter(function(R) { return R.Family === F; })[0] || {};
-        var H = '<div class="mb-2"><strong>' + F + '</strong></div>';
-        H += '<table class="table table-sm table-bordered mb-3"><thead><tr><th>Family</th><th>Tier 1</th><th>Tier 2</th><th>Tier 3</th><th>Tier 4</th><th>Tier 5</th></tr></thead><tbody>';
-        H += '<tr data-family="' + F + '" data-contentclass="' + CC + '">';
-        H += '<td class="fw-bold">' + F + '</td>';
+
+    var IC = $('#IcqLadderContainer').empty();
+    if (Icq.length === 0) {
+        IC.append('<em class="text-muted small">No ICQ ladder rows for ' + CC + '.</em>');
+    } else {
+        var Row = Icq[0] || {};
+        var H = '<table class="table table-sm table-bordered mb-3"><thead><tr><th>ICQ</th>';
+        for (var T = 1; T <= 5; T++) { H += '<th>' + _TierHeader(T) + '</th>'; }
+        H += '</tr></thead><tbody>';
+        H += '<tr data-family="' + (Row.Family || 'ANY') + '" data-contentclass="' + CC + '">';
+        H += '<td class="fw-bold">q</td>';
         for (var T = 1; T <= 5; T++) {
             var V = Row['Tier' + T];
             H += '<td><input type="number" class="form-control form-control-sm icq-cell" data-tier="' + T + '" min="1" max="51" value="' + (V != null ? V : '') + '" style="max-width: 110px;"></td>';
@@ -2307,7 +2311,7 @@ function RenderTranscodingLadders() {
         H += '</tr>';
         H += '</tbody></table>';
         IC.append(H);
-    });
+    }
 }
 
 function RenderConfidenceStats(Rows) {

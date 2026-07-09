@@ -444,6 +444,7 @@ class SystemSettingsController:
                 LadderRepo = TierLadderRepository()
                 BitrateCells = LadderRepo.GetBitrateLadder()
                 IcqCells = LadderRepo.GetIcqLadder()
+                TierLabels = LadderRepo.GetTierLabelMap()
 
                 BitrateLadder = _CellsToGrid(BitrateCells, ValueKey='TargetKbps', PerResolution=True)
                 IcqLadder = _CellsToGrid(IcqCells, ValueKey='IcqQ', PerResolution=False)
@@ -466,6 +467,7 @@ class SystemSettingsController:
                     'Success': True,
                     'BitrateLadder': BitrateLadder,
                     'IcqLadder': IcqLadder,
+                    'TierLabels': TierLabels,
                     'Adequacy': {
                         'Enabled': AdequacyEnabled,
                         'MarginPercent': AdequacyMargin,

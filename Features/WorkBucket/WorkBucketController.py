@@ -145,13 +145,21 @@ class WorkBucketController:
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
 
         @self.Blueprint.route('/api/Work/<url_key>/Queue/<int:media_file_id>', methods=['POST'])
-        # directive: work-transcode-unified | # see work-bucket.C5
+        # directive: transcode-flow-canonical | # see transcode-flow-canonical.C25
         def queue_one(url_key, media_file_id):
             try:
                 Bucket = BucketKey.FromUrlKey(url_key)
                 if Bucket is None:
                     return jsonify({'Success': False, 'Message': f"Unknown bucket: {url_key}", 'Data': {}}), 404
-                R = self.QueueService.AdmitOne(media_file_id, Bucket)
+                QualityLabel = request.args.get('quality') or None
+                QualityTierRaw = request.args.get('tier')
+                QualityTier = None
+                if QualityTierRaw is not None and QualityTierRaw != '':
+                    try:
+                        QualityTier = int(QualityTierRaw)
+                    except (TypeError, ValueError):
+                        return jsonify({'Success': False, 'Message': f"tier query param must be an integer; got {QualityTierRaw!r}", 'Data': {}}), 400
+                R = self.QueueService.AdmitOne(media_file_id, Bucket, QualityLabel=QualityLabel, QualityTier=QualityTier)
                 MessageByStatus = {
                     'queued': 'Queued',
                     'already_queued': 'Already queued',

@@ -13,14 +13,15 @@ class QueueAdmissionAppService:
     def __init__(self, Db: DatabaseService = None):
         self.Db = Db or DatabaseService()
 
-    # directive: transcode-worker-unification | # see work-bucket.C5
-    def AdmitOne(self, MediaFileId: int, Bucket: BucketKey) -> AdmitOneResult:
-        # see work-bucket.C5
+    # directive: transcode-flow-canonical | # see transcode-flow-canonical.C25
+    def AdmitOne(self, MediaFileId: int, Bucket: BucketKey, QualityLabel: str = None, QualityTier: int = None) -> AdmitOneResult:
         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
         Result = QueueManagementBusinessService().AddJobToQueue(
             MediaFileId=MediaFileId,
             ProcessingMode=Bucket.ProcessingMode,
             ForceAdd=True,
+            QualityLabel=QualityLabel,
+            QualityTier=QualityTier,
         )
         if Result.get('AlreadyQueued'):
             Status = 'already_queued'

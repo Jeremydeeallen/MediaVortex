@@ -1958,14 +1958,29 @@ class QueueManagementBusinessService:
         return self.RecomputeForFiles(MediaFileIds)
 
     # directive: path-schema-migration | # see path.S8
-    def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None, ForceAdd: bool = False, ProcessingMode: str = None) -> Dict[str, Any]:
-        """Add a specific media file to the transcoding queue; dedupe via typed-pair identity. ProcessingMode overrides default 'Transcode'; non-Transcode modes skip profile/savings/VMAF gates."""
+    def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None, ForceAdd: bool = False, ProcessingMode: str = None, QualityLabel: str = None, QualityTier: int = None) -> Dict[str, Any]:
+        """Add a specific media file to the transcoding queue; dedupe via typed-pair identity. ProcessingMode overrides default 'Transcode'; non-Transcode modes skip profile/savings/VMAF gates. QualityLabel/QualityTier resolve to ProfileId via ProfileRepository lookup (family-agnostic tier ladder, C25)."""
         # directive: transcode-flow-canonical | # see transcode.ST2
         from Features.TranscodeJob import ProcessingModeMetadata
         EffectiveMode = ProcessingMode or 'Transcode'
         IsTranscodeMode = ProcessingModeMetadata.GetOrDefault(EffectiveMode)['RequiresProfileGates']
         try:
             LoggingService.LogFunctionEntry("AddJobToQueue", "QueueManagementBusinessService", MediaFileId, Priority)
+
+            # directive: transcode-flow-canonical | # see transcode-flow-canonical.C25
+            if ProfileId is None and (QualityLabel or QualityTier is not None):
+                if QualityLabel:
+                    ProfileId = self.ProfileRepository.GetProfileIdByQualityLabel(QualityLabel)
+                    if ProfileId is None:
+                        errorMsg = f"QualityLabel {QualityLabel!r} does not resolve to any Profile"
+                        LoggingService.LogError(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
+                        return {"Success": False, "ErrorMessage": errorMsg}
+                else:
+                    ProfileId = self.ProfileRepository.GetProfileIdByQualityTier(int(QualityTier))
+                    if ProfileId is None:
+                        errorMsg = f"QualityTier {QualityTier} does not resolve to any Profile"
+                        LoggingService.LogError(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
+                        return {"Success": False, "ErrorMessage": errorMsg}
 
             # Get media file
             mediaFile = self.DatabaseManager.GetMediaFileById(MediaFileId)

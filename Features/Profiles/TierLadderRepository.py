@@ -51,6 +51,15 @@ class TierLadderRepository:
             for R in Rows
         ]
 
+    # directive: transcode-flow-canonical | # see transcode-flow-canonical.C25
+    def GetTierLabelMap(self) -> dict:
+        Rows = self.Db.ExecuteQuery(
+            "SELECT QualityTier, QualityLabel FROM Profiles "
+            "WHERE Family = 'ANY' AND QualityLabel IS NOT NULL "
+            "ORDER BY QualityTier"
+        )
+        return {int(R['qualitytier']): R['qualitylabel'] for R in Rows if R.get('qualitytier') is not None}
+
     # directive: transcode-flow-canonical | # see profiles.C3
     def GetIcqLadder(self) -> List[IcqLadderCell]:
         Rows = self.Db.ExecuteQuery(

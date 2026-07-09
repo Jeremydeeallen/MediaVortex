@@ -86,6 +86,22 @@ class ProfileRepository(BaseRepository):
             UseNvidiaHardware=row['UseNvidiaHardware'] if row['UseNvidiaHardware'] is not None else 0
         )
 
+    # directive: transcode-flow-canonical | # see transcode-flow-canonical.C25
+    def GetProfileIdByQualityLabel(self, QualityLabel: str) -> Optional[int]:
+        Rows = self.ExecuteQuery(
+            "SELECT Id FROM Profiles WHERE QualityLabel = %s LIMIT 1",
+            (QualityLabel,),
+        )
+        return int(Rows[0]['Id']) if Rows else None
+
+    # directive: transcode-flow-canonical | # see transcode-flow-canonical.C25
+    def GetProfileIdByQualityTier(self, QualityTier: int) -> Optional[int]:
+        Rows = self.ExecuteQuery(
+            "SELECT Id FROM Profiles WHERE QualityTier = %s AND Family = 'ANY' AND QualityLabel IS NOT NULL LIMIT 1",
+            (int(QualityTier),),
+        )
+        return int(Rows[0]['Id']) if Rows else None
+
     # directive: worker-routing | # see worker-routing.C10
     def SaveProfile(self, Profile: TranscodeProfileModel) -> int:
         """Save a profile (insert or update); rename sweeps Workers.AllowedProfiles in the same tx."""

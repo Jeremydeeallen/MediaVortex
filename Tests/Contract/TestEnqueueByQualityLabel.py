@@ -58,25 +58,48 @@ class TestQualityLabelLookupPreconditions:
         assert R and R[0]['contype'] == 'u', "profiles_qualitylabel_unique must be a UNIQUE constraint (backs O(1) label lookup)"
 
 
-# directive: transcode-flow-canonical
-@pytest.mark.skip(reason="Enqueue-by-quality endpoint POST /Queue/<mfid>?quality=<label> deferred per Reset 25 evidence (directive.md line 269). Spec placeholder for follow-up reset.")
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+CONTROLLER = REPO_ROOT / 'Features' / 'WorkBucket' / 'WorkBucketController.py'
+ADMISSION_SERVICE = REPO_ROOT / 'Features' / 'WorkBucket' / 'Services' / 'QueueAdmissionAppService.py'
+QUEUE_SERVICE = REPO_ROOT / 'Features' / 'TranscodeQueue' / 'QueueManagementBusinessService.py'
+PROFILE_REPO = REPO_ROOT / 'Features' / 'Profiles' / 'ProfileRepository.py'
+
+
 # directive: transcode-flow-canonical
 def test_enqueue_endpoint_accepts_quality_label_query_param():
-    pass
+    Text = CONTROLLER.read_text(encoding='utf-8')
+    assert "request.args.get('quality')" in Text, "queue_one route must read ?quality= query param"
+    assert "QualityLabel=QualityLabel" in Text, "queue_one must plumb QualityLabel through to AdmitOne"
 
 
 # directive: transcode-flow-canonical
-@pytest.mark.skip(reason="AddJobToQueue label -> ProfileId resolver deferred per Reset 25 evidence. Spec placeholder.")
-# directive: transcode-flow-canonical
-def test_add_job_to_queue_resolves_label_to_profile_id():
-    pass
+def test_add_job_to_queue_signature_accepts_quality_label_and_tier():
+    Text = QUEUE_SERVICE.read_text(encoding='utf-8')
+    assert "QualityLabel: str = None" in Text, "AddJobToQueue must accept QualityLabel kwarg"
+    assert "QualityTier: int = None" in Text, "AddJobToQueue must accept QualityTier kwarg"
+    assert "GetProfileIdByQualityLabel" in Text, "AddJobToQueue must resolve via ProfileRepository.GetProfileIdByQualityLabel"
+    assert "GetProfileIdByQualityTier" in Text, "AddJobToQueue must resolve via ProfileRepository.GetProfileIdByQualityTier"
 
 
-# directive: transcode-flow-canonical
-@pytest.mark.skip(reason="Enqueue-by-tier POST /Queue/<mfid>?tier=<n> deferred per Reset 25 evidence. Spec placeholder.")
 # directive: transcode-flow-canonical
 def test_enqueue_endpoint_accepts_tier_query_param():
-    pass
+    Text = CONTROLLER.read_text(encoding='utf-8')
+    assert "request.args.get('tier')" in Text, "queue_one route must read ?tier= query param"
+    assert "QualityTier=QualityTier" in Text, "queue_one must plumb QualityTier through to AdmitOne"
+
+
+# directive: transcode-flow-canonical
+def test_admission_service_admit_one_accepts_quality_kwargs():
+    Text = ADMISSION_SERVICE.read_text(encoding='utf-8')
+    assert "QualityLabel: str = None" in Text, "AdmitOne must accept QualityLabel kwarg"
+    assert "QualityTier: int = None" in Text, "AdmitOne must accept QualityTier kwarg"
+
+
+# directive: transcode-flow-canonical
+def test_profile_repository_exposes_label_and_tier_lookup():
+    Text = PROFILE_REPO.read_text(encoding='utf-8')
+    assert "def GetProfileIdByQualityLabel" in Text, "ProfileRepository must expose GetProfileIdByQualityLabel"
+    assert "def GetProfileIdByQualityTier" in Text, "ProfileRepository must expose GetProfileIdByQualityTier"
 
 
 if __name__ == '__main__':
