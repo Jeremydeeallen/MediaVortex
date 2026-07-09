@@ -284,12 +284,15 @@ def _LoadFfmpegPin() -> tuple[str, str]:
     return Tag, Asset
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
+# directive: transcode-flow-canonical | # see transcode-flow-canonical.C25
 def _DetectTorchVariant(Target: str) -> str:
     R = _RunSsh(Target, "nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1", Timeout=10)
     Out = (R.stdout or '').strip()
     if Out:
         return "cu124"
+    Rxpu = _RunSsh(Target, "lspci -nn 2>/dev/null | grep -iE 'VGA|Display|3D' | grep -iE 'Intel|8086'", Timeout=10)
+    if (Rxpu.stdout or '').strip():
+        return "xpu"
     return "cpu"
 
 
