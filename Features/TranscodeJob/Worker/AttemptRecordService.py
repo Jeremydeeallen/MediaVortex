@@ -21,6 +21,16 @@ class AttemptRecordService:
         try:
             if TranscodingSettings is None:
                 TranscodingSettings = {}
+            if MediaFile is None and getattr(Job, 'MediaFileId', None):
+                try:
+                    Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                        "SELECT AssignedProfile FROM mediafiles WHERE id = %s LIMIT 1",
+                        (Job.MediaFileId,),
+                    )
+                    if Rows:
+                        MediaFile = type('MediaFileLite', (), {'AssignedProfile': Rows[0].get('AssignedProfile') or Rows[0].get('assignedprofile')})()
+                except Exception:
+                    MediaFile = None
             if MediaFile is None:
                 MediaFile = type('MockMediaFile', (), {'AssignedProfile': None})()
 

@@ -53,6 +53,7 @@ class CpuAffinityService:
         self.TemperatureCacheTime = None
         self.TemperatureCacheValidSeconds = 5
 
+        self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
         self._LoadConfiguration()
 
         LoggingService.LogInfo(
@@ -60,7 +61,6 @@ class CpuAffinityService:
             f"Detection={self.Topology.DetectionMethod}, "
             f"P-cores={self.Topology.PCoreLogicalIds}, E-cores={self.Topology.ECoreLogicalIds}",
             "CpuAffinityService", "__init__")
-        self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
     
     @classmethod
     def GetInstance(cls, DatabaseManagerInstance: DatabaseManager = None,

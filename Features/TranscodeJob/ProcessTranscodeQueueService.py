@@ -947,16 +947,16 @@ class ProcessTranscodeQueueService:
                               TranscodingSettings: Dict[str, Any] = None, TranscodeCommand: str = None) -> Optional[int]:
         """Create a transcode attempt record for progress tracking."""
         try:
-            # Handle None parameters for early creation
             if TranscodingSettings is None:
                 TranscodingSettings = {}
+            if MediaFile is None and getattr(Job, 'MediaFileId', None):
+                MediaFile = self.GetMediaFileData(Job)
             if MediaFile is None:
                 MediaFile = type('MockMediaFile', (), {'AssignedProfile': None})()
 
             ProfileSettings = TranscodingSettings.get('ProfileSettings', {})
             CodecFlags = TranscodingSettings.get('CodecFlags', {})
 
-            # see post-transcode-disposition.C30 | see post-transcode-disposition.S1
             ProfileName = MediaFile.AssignedProfile if hasattr(MediaFile, 'AssignedProfile') else None
             QualityTestRequiredForProfile = True
             if ProfileName:
