@@ -20,13 +20,14 @@ class VmafAlignmentProbeError(RuntimeError):
 class VmafAlignmentProbe:
     PIX_FMT_BIT_DEPTH = {
         "yuv420p": 8, "yuv422p": 8, "yuv444p": 8, "nv12": 8,
+        "yuvj420p": 8, "yuvj422p": 8, "yuvj444p": 8,
         "yuv420p10le": 10, "yuv422p10le": 10, "yuv444p10le": 10, "p010le": 10,
         "yuv420p12le": 12, "yuv422p12le": 12, "yuv444p12le": 12,
     }
     PIX_FMT_CHROMA = {
-        "yuv420p": "4:2:0", "yuv420p10le": "4:2:0", "yuv420p12le": "4:2:0", "nv12": "4:2:0", "p010le": "4:2:0",
-        "yuv422p": "4:2:2", "yuv422p10le": "4:2:2", "yuv422p12le": "4:2:2",
-        "yuv444p": "4:4:4", "yuv444p10le": "4:4:4", "yuv444p12le": "4:4:4",
+        "yuv420p": "4:2:0", "yuvj420p": "4:2:0", "yuv420p10le": "4:2:0", "yuv420p12le": "4:2:0", "nv12": "4:2:0", "p010le": "4:2:0",
+        "yuv422p": "4:2:2", "yuvj422p": "4:2:2", "yuv422p10le": "4:2:2", "yuv422p12le": "4:2:2",
+        "yuv444p": "4:4:4", "yuvj444p": "4:4:4", "yuv444p10le": "4:4:4", "yuv444p12le": "4:4:4",
     }
 
     # directive: transcode-flow-canonical
