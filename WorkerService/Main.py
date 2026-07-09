@@ -1176,9 +1176,9 @@ class WorkerServiceApp:
     def _ApplyConcurrencyChanges(self, OldTranscode: int, OldQualityTest: int, OldRemux: int):
         """Update MaxConcurrentJobs on running service instances when DB values change."""
         if self.CurrentTranscodeConcurrency != OldTranscode and self.TranscodeService is not None:
-            self.TranscodeService.MaxConcurrentJobs = self.CurrentTranscodeConcurrency
+            self.TranscodeService.MaxConcurrentTranscodeJobs = self.CurrentTranscodeConcurrency
             LoggingService.LogInfo(
-                f"Transcode concurrency changed: {OldTranscode} -> {self.CurrentTranscodeConcurrency}",
+                f"Transcode concurrency changed: {OldTranscode} -> {self.CurrentTranscodeConcurrency}. Semaphore capacity is fixed at boot; restart to resize.",
                 "WorkerService", "_ApplyConcurrencyChanges"
             )
 
