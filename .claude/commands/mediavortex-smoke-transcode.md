@@ -3,7 +3,7 @@ description: Enqueue smoke-test transcodes with deterministic worker pinning. Us
 argument-hint: <MediaFileId1:ProfileId1:WorkerName1> [MediaFileId2:ProfileId2:WorkerName2 ...]
 ---
 
-Enqueue one or more smoke-test transcodes so each lands on the exact worker the operator wants. Do NOT skip the pause dance -- the TranscodeQueue claim query ignores `MaxConcurrentTranscodeJobs`, so an unpinned enqueue pile-ups on whichever worker polls first.
+Enqueue one or more smoke-test transcodes so each lands on the exact worker the operator wants. Do NOT skip the pause dance -- the TranscodeQueue claim query ignores `MaxConcurrentJobs`, so an unpinned enqueue pile-ups on whichever worker polls first.
 
 ## When to use this skill
 
@@ -15,7 +15,7 @@ Enqueue one or more smoke-test transcodes so each lands on the exact worker the 
 ## Do NOT use this skill
 
 - For real production transcodes (the queue's normal claim path handles those)
-- If MaxConcurrentTranscodeJobs is honored correctly in the future -- retire this skill
+- MaxConcurrentJobs is now boot-fixed via BoundedSemaphore; container-per-worker is honored. This skill retires once fleet-wide pinning becomes unnecessary.
 
 ## Pre-flight (always run these first)
 
@@ -59,7 +59,7 @@ Repeat for the next triple. Each triple's target worker stays free while the oth
 ## Never do this
 
 - **NEVER `systemctl restart` a worker while its ffmpeg child is encoding.** The restart sends SIGTERM to the child, wasting all encode work done so far (exit code -15 or 234). Restart workers only when they are idle.
-- **NEVER enqueue multiple heavy transcodes at the same priority to the same host without pinning.** The claim query ignores MaxConcurrentTranscodeJobs and you will get two Demucs jobs on the same 8GB GPU -> VRAM OOM -> SIGKILL -> Track 1 silently dropped.
+- **NEVER enqueue multiple heavy transcodes at the same priority to the same host without pinning.** The claim query ignores MaxConcurrentJobs and you will get two Demucs jobs on the same 8GB GPU -> VRAM OOM -> SIGKILL -> Track 1 silently dropped.
 - **NEVER pause every worker at once and forget to unpause.** Leaves the queue frozen until manual recovery.
 
 ## Post-completion
@@ -79,4 +79,4 @@ Present as a side-by-side table -- each column a worker/host, each row a metric.
 
 - Audio pipeline: `Features/AudioNormalization/audio-normalization.feature.md`
 - VMAF chain: `Features/QualityTesting/QualityTesting.feature.md`
-- Queue claim (contains the MaxConcurrentTranscodeJobs bug): `Features/TranscodeQueue/TranscodeQueueRepository.py:ClaimNextPendingJob`
+- Queue claim (contains the MaxConcurrentJobs bug): `Features/TranscodeQueue/TranscodeQueueRepository.py:ClaimNextPendingJob`

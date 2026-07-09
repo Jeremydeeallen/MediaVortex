@@ -92,30 +92,23 @@ On shutdown, `Workers.Status` is NOT changed -- the heartbeat going stale tells 
 
 ## Capability Lifecycle
 
-Each capability (Transcode, QualityTest, Remux, Scan) has Start/Stop methods:
+Three services own the container's active work:
 
 | Capability | Start | Stop | Service Class |
 |------------|-------|------|---------------|
-| Transcode | `_StartTranscodeCapability()` | `_StopTranscodeCapability()` | `ProcessTranscodeQueueService` |
+| Transcode + Remux + AudioFix + SubtitleFix + Quick | `_StartTranscodeCapability()` | `_StopTranscodeCapability()` | single `WorkerLoopService` |
 | QualityTest | `_StartQualityTestCapability()` | `_StopQualityTestCapability()` | `ProcessQualityTestQueueService` |
-| Remux | `_StartRemuxCapability()` | `_StopRemuxCapability()` | `ProcessRemuxQueueService` |
 | Scan | `_StartScanCapability()` | `_StopScanCapability()` | `ContinuousScanService` |
 
-### Per-Capability Concurrency
+### Concurrency
 
-Each capability reads its own concurrency column from the Workers table at start time, and the capability polling loop updates it dynamically every 60 seconds:
+`Workers.MaxConcurrentJobs` is the single authoritative slot cap for the transcode-family `WorkerLoopService`. `Workers.MaxConcurrentQualityTestJobs` sizes the separate QT pipeline. GUI edits both columns via `POST /api/TeamStatus/Workers/<name>/Concurrency`.
 
-| Capability | Column | Default | Rationale |
-|------------|--------|---------|-----------|
-| Transcode | `MaxConcurrentTranscodeJobs` | 1 | CPU-bound (FFmpeg saturates cores) |
-| QualityTest | `MaxConcurrentQualityTestJobs` | 2 | I/O-bound (VMAF reads two files) |
-| Remux | `MaxConcurrentRemuxJobs` | 2 | I/O-bound (container copy, no re-encode) |
+`_LoadCapabilitiesFromDB()` reads both columns fresh per poll cycle. Semaphore capacity is boot-fixed on `WorkerLoopService`; changing `MaxConcurrentJobs` mid-flight requires worker restart to resize the semaphore. QT concurrency updates mid-flight via the existing `MaxConcurrentJobs` attribute on `ProcessQualityTestQueueService`.
 
-`_LoadCapabilitiesFromDB()` reads all three columns alongside the enabled flags. `_ApplyConcurrencyChanges()` compares old vs new values and directly updates `service.MaxConcurrentJobs` on running service instances. The queue loop checks `len(ActiveJobs) < MaxConcurrentJobs` on every iteration, so the new value takes effect immediately without stopping the service. Range-clamped to 1-5.
+### Unified claim
 
-### Remux Queue Separation
-
-`ProcessRemuxQueueService` claims only `ProcessingMode='Remux'` rows via `ClaimNextPendingRemuxJob`. `ProcessTranscodeQueueService.ClaimNextPendingTranscodeJob` excludes remux rows (`ProcessingMode IS NULL OR ProcessingMode != 'Remux'`). This allows remux to run at higher concurrency without competing for transcode slots.
+The single `WorkerLoopService` calls `ClaimNextPendingJob(WorkerName)`. That query returns any `ProcessingMode` the worker is capable of (Transcode, Remux, AudioFix, SubtitleFix, Quick). Slot cap is authoritative -- the container never exceeds `MaxConcurrentJobs` concurrent claims regardless of mode mix.
 
 Capabilities are created lazily -- only initialized when enabled for the first time. Stop methods wait for the current job to finish (transcode: up to 2 hour timeout).
 

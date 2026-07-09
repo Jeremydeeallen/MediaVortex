@@ -1008,17 +1008,6 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG-0025] Per-capability concurrency is not data-driven -- requires worker restart to take effect
-**Date:** 2026-05-13
-
-**What breaks:** Changing `MaxConcurrentTranscodeJobs`, `MaxConcurrentQualityTestJobs`, or `MaxConcurrentRemuxJobs` in the Workers table does not take effect until the worker process is restarted. The concurrency value is read once during `_StartXxxCapability()` and passed to `Run(MaxConcurrentJobs=N)`. The capability polling loop (60s) checks enabled/disabled flags but never re-reads the concurrency columns. This violates the "data-driven" contract: if the max is raised from 1 to 2, the worker should spin up an additional thread on its next poll without restart.
-
-**Violates:** `WorkerService/WorkerService.feature.md` criterion 18 (added with this entry).
-
-**Look first:** `WorkerService/Main.py` `_CapabilityPollingLoop` and `_GetPerCapabilityConcurrency()`. The queue service `Run()` method needs to support dynamic thread-pool resizing, or the capability must be stopped and restarted with the new concurrency value.
-
----
-
 ### [BUG-0030] Status page "Possibly Corrupt" count has no drill-down to see which files are affected
 **Date:** 2026-05-13
 

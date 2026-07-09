@@ -719,9 +719,8 @@ function RenderWorkerConcurrencyTable(Workers) {
     var Html = '<table class="table table-sm table-hover mb-0">' +
         '<thead class="table-light"><tr>' +
             '<th>Worker</th>' +
-            '<th style="width:130px;">Transcode</th>' +
-            '<th style="width:130px;">VMAF</th>' +
-            '<th style="width:160px;">Quick (audio + remux)</th>' +
+            '<th style="width:180px;">Max Concurrent Jobs</th>' +
+            '<th style="width:160px;">VMAF Concurrency</th>' +
             '<th style="width:80px;"></th>' +
         '</tr></thead><tbody>';
     Workers.forEach(function(W) {
@@ -729,12 +728,10 @@ function RenderWorkerConcurrencyTable(Workers) {
         var NameEsc = Name.replace(/"/g, '&quot;');
         Html += '<tr data-worker="' + NameEsc + '">' +
             '<td class="align-middle fw-bold">' + Name + '</td>' +
-            '<td><input type="number" class="form-control form-control-sm" min="1" max="5" ' +
-                'value="' + (W.MaxConcurrentTranscodeJobs || 1) + '" data-field="MaxConcurrentTranscodeJobs"></td>' +
+            '<td><input type="number" class="form-control form-control-sm" min="1" max="16" ' +
+                'value="' + (W.MaxConcurrentJobs || 1) + '" data-field="MaxConcurrentJobs"></td>' +
             '<td><input type="number" class="form-control form-control-sm" min="1" max="5" ' +
                 'value="' + (W.MaxConcurrentQualityTestJobs || 2) + '" data-field="MaxConcurrentQualityTestJobs"></td>' +
-            '<td><input type="number" class="form-control form-control-sm" min="1" max="5" ' +
-                'value="' + (W.MaxConcurrentRemuxJobs || 2) + '" data-field="MaxConcurrentRemuxJobs"></td>' +
             '<td><button class="btn btn-sm btn-outline-primary" onclick="SaveWorkerConcurrency(\'' + Name.replace(/'/g, "\\'") + '\')"><i class="fas fa-save"></i></button></td>' +
         '</tr>';
     });

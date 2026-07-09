@@ -10,9 +10,9 @@ Provides the SOLID-clean structural seam for the worker tier: a `WorkerLoopServi
 
 | #  | User action | Surface element | Handler | Backing class.method |
 |----|-------------|-----------------|---------|----------------------|
-| W1 | Worker boots with Remux capability enabled | (internal -- `WorkerService.Main._StartRemuxCapability`) | Composes WorkerLoopService(RemuxEnabled=True) + JobProcessorRegistry with RemuxJobProcessor | `Features/TranscodeJob/Worker/WorkerLoopService.Run` |
-| W2 | Worker polling loop claims next pending Transcode job | (internal -- WorkerLoopService.ProcessQueueLoop) | Routes to JobProcessorRegistry.Get('Transcode').Process | `Features/TranscodeJob/Worker/TranscodeJobProcessor.Process` |
-| W3 | Worker polling loop claims next pending Remux/Quick/AudioFix job | (internal) | Routes to RemuxJobProcessor.Process | `Features/TranscodeJob/Worker/RemuxJobProcessor.Process` |
+| W1 | Worker boots with any transcode-family capability enabled | (internal -- `WorkerService.Main._StartTranscodeCapability`) | Composes single WorkerLoopService(MaxConcurrentJobs) + JobProcessorRegistry covering every mode | `Features/TranscodeJob/Worker/WorkerLoopService.Run` |
+| W2 | Worker polling loop claims next pending job of any capable mode | (internal -- WorkerLoopService.ProcessQueueLoop) | Routes to JobProcessorRegistry.Get(Job.ProcessingMode).Process | `Features/TranscodeJob/Worker/JobProcessor.Process` |
+| W3 | Slot cap prevents over-claim | (internal) | BoundedSemaphore acquired before claim; released in finally after dispatch | `Features/TranscodeJob/Worker/WorkerLoopService._DispatchJobWithSlotRelease` |
 | W4 | Stuck-job sweep runs before worker accepts jobs | (internal -- WorkerCompositionRoot.Run) | StuckJobMonitor.DetectAndCleanBeforeStart | `Features/TranscodeJob/Worker/StuckJobMonitor.DetectAndCleanBeforeStart` |
 | W5 | Operator stops the worker | (internal -- WorkerService stop) | WorkerLoopService.Stop signals StopRequested; loop drains | `Features/TranscodeJob/Worker/WorkerLoopService.Stop` |
 
@@ -24,7 +24,7 @@ C2. **JobProcessor is an ABC with one abstract `Process` method.** `Features/Tra
 
 C3. **JobProcessorRegistry maps ProcessingMode to strategy via constructor injection.** `.Get('Transcode')` returns TranscodeJobProcessor; `.Get('Remux')` / `.Get('Quick')` / `.Get('AudioFix')` returns RemuxJobProcessor; `.Get('SubtitleFix')` returns SubtitleFixJobProcessor; `.Get('TestVariant')` returns VariantJobProcessor; unknown raises KeyError. Verifiable: `Tests/Contract/TestJobProcessorRegistry.py`.
 
-C4. **WorkerLoopService unifies Transcode + Remux polling.** Ctor accepts `(DatabaseManager, JobProcessorRegistry, WorkerName, TranscodeEnabled, RemuxEnabled, AcceptsInterlaced, MaxConcurrentTranscodeJobs, MaxConcurrentRemuxJobs)`. The polling loop alternates between `ClaimNextPendingTranscodeJob` (when TranscodeEnabled) and `ClaimNextPendingRemuxJob` (when RemuxEnabled), dispatching each claim via `JobProcessorRegistry.Get(Job.ProcessingMode).Process`. `StopRequested=True` exits the loop within one tick. Verifiable: `Tests/Contract/TestInFlightCancellation.py::TestRemuxLoopStopsOnStopRequested`.
+C4. **One `WorkerLoopService` instance per container drives every claim.** Ctor accepts `(DatabaseManager, JobProcessorRegistry, WorkerName, TranscodeEnabled, RemuxEnabled, AcceptsInterlaced, MaxConcurrentJobs)`. Slot cap is a `threading.BoundedSemaphore(MaxConcurrentJobs)` seeded at construction from `Workers.MaxConcurrentJobs`. `ProcessQueueLoop` acquires non-blocking before every claim; `_DispatchJobWithSlotRelease` releases in a finally block so exceptions cannot leak capacity. `ClaimNextPendingJob(WorkerName)` returns any-mode job the worker is capable of; dispatch routes via `JobProcessorRegistry.Get(Job.ProcessingMode).Process`. `StopRequested=True` exits the loop within one tick. Mid-flight resize of `MaxConcurrentJobs` requires worker restart -- semaphore capacity is boot-fixed. Verifiable: `Tests/Contract/TestWorkerLoopSlotCap.py`.
 
 C5. **The four JobProcessor strategies are thin delegation facades.** Each `Process` method invokes the corresponding `ProcessTranscodeQueueService.Process*Job` method via injected QueueService. Returns `JobResult(Success=True)` on success; `JobResult(Success=False, ErrorMessage=...)` on exception. This is the strangler-fig structural seam; the `worker-loop-method-extraction` follow-up directive moves the actual method bodies. Verifiable: code review of each `*JobProcessor.py` file; tests for the delegation pattern in the QueueService's existing test suite.
 
@@ -48,11 +48,11 @@ C13. **ProcessRemuxQueueService deleted (closes BUG-0051 structurally).** `grep 
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
 |---|---|---|---|---|---|
-| S1 | `WorkerService.Main._StartRemuxCapability -> WorkerLoopService` | WorkerService startup | `(DatabaseManager, JobProcessorRegistry, capability flags)` | `WorkerLoopService.Run() -> {Success: bool}` | Code review + post-deploy log inspection |
+| S1 | `WorkerService.Main._StartTranscodeCapability -> WorkerLoopService` | WorkerService startup (single lifecycle) | `(DatabaseManager, JobProcessorRegistry, TranscodeEnabled, RemuxEnabled, MaxConcurrentJobs)` | `WorkerLoopService.Run() -> {Success: bool}` | Code review + post-deploy log inspection |
 | S2 | `WorkerLoopService -> JobProcessorRegistry.Get` | WorkerLoopService polling | `(Job.ProcessingMode: str)` | `JobProcessor` (raises KeyError on unknown) | `Tests/Contract/TestJobProcessorRegistry.py` |
-| S3 | `JobProcessor.Process -> ProcessTranscodeQueueService.Process*Job (delegation)` | Each *JobProcessor | `(Job, MediaFile=None)` | side-effect: legacy method runs to terminal state; return: `JobResult` | Strangler-fig delegation -- verified by absence of error logs from `*JobProcessor` component name |
-| S4 | `WorkerLoopService._ClaimTranscodeJob -> TranscodeQueueRepository.ClaimNextPendingTranscodeJob` | WorkerLoopService | `(WorkerName, AcceptsInterlaced)` | next TranscodeQueueModel or None | `Tests/Contract/TestClaimAuthority.py` (existing) |
-| S5 | `WorkerLoopService._ClaimRemuxJob -> TranscodeQueueRepository.ClaimNextPendingRemuxJob` | WorkerLoopService | `(WorkerName)` | next TranscodeQueueModel or None | `Tests/Contract/TestClaimAuthority.py` (existing) |
+| S3 | `JobProcessor.Process` executes the orchestration body | Each *JobProcessor | `(Job, MediaFile)` | return: `JobResult`; ffmpeg + disposition run to terminal state | code review + smoke |
+| S4 | `WorkerLoopService._ClaimJob -> TranscodeQueueRepository.ClaimNextPendingJob` | WorkerLoopService | `(WorkerName, AcceptsInterlaced)` | next TranscodeQueueModel or None; unified across all modes the worker is capable of | `Tests/Contract/TestClaimAuthority.py` |
+| S5 | `WorkerLoopService.SlotSemaphore` capacity contract | ctor | `threading.BoundedSemaphore(MaxConcurrentJobs)` | acquire in ProcessQueueLoop; release in `_DispatchJobWithSlotRelease` finally block | `Tests/Contract/TestWorkerLoopSlotCap.py` |
 | S6 | `WorkerCompositionRoot._LoadCapabilities -> Workers DB row` | WorkerCompositionRoot init | `SELECT TranscodeEnabled, RemuxEnabled, AcceptsInterlaced, MaxConcurrentJobs FROM Workers WHERE WorkerName=?` | dict; fallback `{}` on exception | Code review |
 
 ## Status
