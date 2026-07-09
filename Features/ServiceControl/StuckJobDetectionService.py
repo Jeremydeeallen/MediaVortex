@@ -568,7 +568,7 @@ class StuckJobDetectionService:
             # For quality test jobs, we need to get them differently since there's no status filter method
             qualityTestQueue = self.DatabaseManager.GetQualityTestQueue()
             from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
-            activeQualityJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTest"))
+            activeQualityJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTestService"))
 
             # Filter quality test jobs that are actually running (have active jobs)
             runningJobs = []
@@ -664,7 +664,7 @@ class StuckJobDetectionService:
         """Check if a specific quality test job is stuck by verifying if the FFmpeg process is still alive."""
         try:
             from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
-            activeJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTest"))
+            activeJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTestService"))
 
             # Find the active job for this queue item
             relevantActiveJob = None
@@ -749,11 +749,11 @@ class StuckJobDetectionService:
                     progressAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(progressDeleteQuery, (transcodeAttemptId,))
 
                 # 4. Complete ActiveJobs records for this service
-                activeJobUpdateQuery = """
-                UPDATE ActiveJobs
-                SET Status = 'Failed', UpdatedAt = NOW()
-                WHERE ServiceName = 'QualityTest' AND QueueId = %s
-                """
+                activeJobUpdateQuery = (
+                    "UPDATE ActiveJobs "
+                    "SET Status = 'Failed', UpdatedAt = NOW() "
+                    "WHERE ServiceName = 'QualityTestService' AND QueueId = %s"
+                )
                 activeJobAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                     activeJobUpdateQuery,
                     (QueueId,)
@@ -1156,7 +1156,7 @@ class StuckJobDetectionService:
             # For quality test jobs, we need to get them differently since there's no status filter method
             qualityTestQueue = self.DatabaseManager.GetQualityTestQueue()
             from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
-            activeQualityJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTest"))
+            activeQualityJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTestService"))
 
             # Filter quality test jobs that are actually running (have active jobs)
             runningQualityJobs = []

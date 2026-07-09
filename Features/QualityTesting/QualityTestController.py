@@ -84,7 +84,7 @@ class QualityTestController:
         """Get overall quality test service status"""
         try:
             from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
-            Query = ActiveJobRepository.BuildActiveJobsQuery("QualityTest")
+            Query = ActiveJobRepository.BuildActiveJobsQuery("QualityTestService")
             ActiveJobs = self.ActiveJobRepository.GetActiveJobsByService(Query)
             IsRunning = len(ActiveJobs) > 0
 

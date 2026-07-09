@@ -355,6 +355,27 @@ STALE_PYC_PROBE_SCRIPT = (
 
 
 # directive: transcode-flow-canonical
+def StepReconcileCapabilities(Target: str, Friendly: str) -> tuple[bool, str]:
+    """Probe each running container for av1_nvenc + av1_qsv; reconcile Workers.{nvenccapable,qsvcapable} (BUG-0087 durable fix)."""
+    ScriptsDir = Path(__file__).resolve().parent.parent / "Scripts"
+    NvR = subprocess.run(
+        [sys.executable, str(ScriptsDir / "ReconcileNvencCapability.py"), Target],
+        capture_output=True, text=True, timeout=180,
+    )
+    if NvR.returncode != 0:
+        return False, f"nvenc reconcile failed: {(NvR.stderr or NvR.stdout).strip()[:300]}"
+    QsvR = subprocess.run(
+        [sys.executable, str(ScriptsDir / "ReconcileQsvCapability.py"), Target],
+        capture_output=True, text=True, timeout=180,
+    )
+    if QsvR.returncode != 0:
+        return False, f"qsv reconcile failed: {(QsvR.stderr or QsvR.stdout).strip()[:300]}"
+    NvTail = (NvR.stdout or '').strip().splitlines()[-1] if NvR.stdout else ''
+    QsvTail = (QsvR.stdout or '').strip().splitlines()[-1] if QsvR.stdout else ''
+    return True, f"nvenc: {NvTail} | qsv: {QsvTail}"
+
+
+# directive: transcode-flow-canonical
 def StepStalePycProbe(Target: str, Friendly: str) -> tuple[bool, str]:
     """Assert no .pyc predates its source .py inside any running worker container (BUG-0085)."""
     R = _RunSsh(Target, "docker ps --filter 'name=mediavortex-worker-' --format '{{.Names}}'", Timeout=15)
@@ -574,7 +595,7 @@ def Main(Argv: Optional[list] = None) -> int:
               "Deploy refuses to stamp an unknown version.", file=sys.stderr)
         return 2
 
-    Total = 1 if Args.check else 9
+    Total = 1 if Args.check else 10
     print("Pre-flight:")
     Ok, Diag = StepPreflight(Friendly, Target)
     if not Ok:
@@ -633,18 +654,25 @@ def Main(Argv: Optional[list] = None) -> int:
         _Status(7, Total, "stale-pyc probe", "FAILED", StaleDetail)
         return 2
 
+    CapOk, CapDetail = StepReconcileCapabilities(Target, Friendly)
+    if CapOk:
+        _Status(8, Total, "capability reconcile", "OK", CapDetail)
+    else:
+        _Status(8, Total, "capability reconcile", "FAILED", CapDetail)
+        return 2
+
     if not StepCleanupBuild(Target):
-        _Status(8, Total, "cleanup build", "FAILED",
+        _Status(9, Total, "cleanup build", "FAILED",
                 "non-fatal; /tmp/mediavortex-build may persist")
     else:
-        _Status(8, Total, "cleanup build", "OK")
+        _Status(9, Total, "cleanup build", "OK")
 
     print("\nVerify:")
     Ok, Summary = StepVerifyWorkers(Friendly, Sha)
     if Ok:
-        _Status(9, Total, "workers online", "OK", Summary)
+        _Status(10, Total, "workers online", "OK", Summary)
         return 0
-    _Status(9, Total, "workers online", "FAILED", Summary)
+    _Status(10, Total, "workers online", "FAILED", Summary)
     return 3
 
 

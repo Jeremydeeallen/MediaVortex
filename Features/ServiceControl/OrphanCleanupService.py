@@ -34,7 +34,7 @@ class OrphanCleanupService:
             QueueTable='TranscodeQueue',
         )
         QtAjSwept = self._SweepActiveJobs(
-            ServiceName='QualityTestingService',
+            ServiceName='QualityTestService',
             QueueTable='QualityTestingQueue',
         )
         QtQueueSwept = self._SweepStaleQualityTestingQueue()

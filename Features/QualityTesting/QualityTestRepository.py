@@ -430,6 +430,7 @@ class QualityTestRepository(BaseRepository):
                 "ON qtp.TranscodeAttemptId = qtq.TranscodeAttemptId AND qtp.Status = 'Processing' "
                 "LEFT JOIN TranscodeAttempts ta ON ta.Id = qtq.TranscodeAttemptId "
                 "WHERE aj.ServiceName = 'QualityTestService' "
+                "AND aj.Status IN ('Running','Claimed') "
                 "ORDER BY aj.StartedAt DESC"
             )
             Rows = self.ExecuteQuery(Query)

@@ -318,6 +318,8 @@ class TranscodeQueueRepository(BaseRepository):
                     "            (pm.ClaimCapabilityFlag = 'TranscodeEnabled' AND w.TranscodeEnabled = TRUE) "
                     "            OR (pm.ClaimCapabilityFlag = 'RemuxEnabled' AND w.RemuxEnabled = TRUE) "
                     "          ) "
+                    "          AND (COALESCE(p.codec,'') <> 'av1' "
+                    "               OR w.nvenccapable = TRUE OR w.qsvcapable = TRUE) "
                     "      ) "
                     "      AND (NOT pm.RequiresInterlacedFilter OR mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0' OR %s::boolean) "
                     f"      AND (NOT pm.RequiresProfileGates OR ({NvencFragment})) "

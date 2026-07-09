@@ -810,8 +810,11 @@ class ProcessTranscodeQueueService:
 
             ProfileSettings['SourceVideoBitrateKbps'] = MediaFile.VideoBitrateKbps
 
+            # directive: transcode-flow-canonical | # see transcode-flow-canonical.C25
+            if (ProfileSettings.get('Codec') or '').lower() == 'av1':
+                from Features.TranscodeJob.Worker.WorkerEncoderResolver import WorkerEncoderResolver
+                WorkerEncoderResolver(DatabaseService()).ApplyOverrides(self.WorkerName, ProfileSettings)
 
-            # Get codec flags
             CodecFlags = self.CodecFlagsRepository.GetCodecFlagsByCodecName(ProfileSettings.get('Codec'))
             if not CodecFlags:
                 return None
