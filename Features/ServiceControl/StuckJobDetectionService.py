@@ -679,10 +679,13 @@ class StuckJobDetectionService:
 
             processId = relevantActiveJob.get('ProcessId')
             if not processId:
-                # No process ID recorded yet - might be stuck
                 return True, "No ProcessId recorded in ActiveJob"
 
-            # Check if the process is still alive
+            ActiveWorkerName = relevantActiveJob.get('WorkerName') or relevantActiveJob.get('workername')
+            LocalWorkerName = getattr(self, 'WorkerName', None) or ''
+            if ActiveWorkerName and LocalWorkerName and ActiveWorkerName != LocalWorkerName:
+                return False, f"Remote worker {ActiveWorkerName} owns PID {processId}; local PID-liveness check skipped"
+
             isAlive = self.IsProcessAlive(processId)
 
             if not isAlive:
@@ -708,9 +711,6 @@ class StuckJobDetectionService:
                     "Success": False,
                     "ErrorMessage": f"QualityTestingQueue job {QueueId} not found"
                 }
-
-            # Start database transaction for atomic cleanup
-            self.DatabaseManager.DatabaseService.BeginTransaction()
 
             try:
                 # 1. Delete the stuck job from QualityTestingQueue (no Status column exists)
@@ -759,10 +759,6 @@ class StuckJobDetectionService:
                     (QueueId,)
                 )
 
-                # Commit transaction
-                self.DatabaseManager.DatabaseService.CommitTransaction()
-
-                # Log cleanup details
                 LoggingService.LogInfo(f"Cleaned up stuck quality test job {QueueId}: Queue={queueAffected}, Results={resultsAffected}, Progress={progressAffected}, ActiveJobs={activeJobAffected}",
                                      "StuckJobDetectionService", "CleanupStuckQualityTestJob")
 
@@ -776,8 +772,6 @@ class StuckJobDetectionService:
                 }
 
             except Exception as e:
-                # Rollback transaction on error
-                self.DatabaseManager.DatabaseService.RollbackTransaction()
                 raise e
 
         except Exception as e:
