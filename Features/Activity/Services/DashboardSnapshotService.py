@@ -155,8 +155,9 @@ class DashboardSnapshotService:
             "tp.ProgressPercent, tp.CurrentFrame, tp.TotalFrames, tp.CurrentSpeed, tp.LastProgressUpdate, tp.CurrentPhase, "
             "mf.ResolutionCategory AS SourceResolutionCategory, mf.Codec AS SourceCodec, "
             "mf.VideoBitrateKbps AS SourceVideoKbps, "
-            "p.TargetResolutionCategory AS TargetResolutionCategory, p.Codec AS TargetCodec, "
-            "p.TargetVideoKbps "
+            "COALESCE(NULLIF(pt.TranscodeDownTo,''), p.TargetResolutionCategory) AS TargetResolutionCategory, "
+            "p.Codec AS TargetCodec, "
+            "COALESCE(pt.TargetKbps, p.TargetVideoKbps) AS TargetVideoKbps "
             "FROM ActiveJobs aj "
             "LEFT JOIN TranscodeQueue tq ON tq.Id = aj.QueueId "
             "LEFT JOIN LATERAL ("
@@ -167,6 +168,7 @@ class DashboardSnapshotService:
             "LEFT JOIN TranscodeProgress tp ON tp.TranscodeAttemptId = lta.Id "
             "LEFT JOIN MediaFiles mf ON mf.Id = tq.MediaFileId "
             "LEFT JOIN Profiles p ON p.ProfileName = lta.ProfileName "
+            "LEFT JOIN ProfileThresholds pt ON pt.ProfileId = p.Id AND pt.Resolution = mf.ResolutionCategory "
             "ORDER BY aj.StartedAt ASC"
         )
         Out: List[ActiveJobRow] = []
