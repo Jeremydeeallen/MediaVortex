@@ -39,7 +39,7 @@ C4. `ProcessTranscodeQueueService.SetupFilePreparation` delegates the staging de
 
 C5. `ShouldStage` returns TRUE iff all three: `Workers.LocalStagingEnabled=TRUE`, `Workers.LocalScratchDir IS NOT NULL AND <> ''`, source `SizeMB >= LocalStagingConfig.MinSizeMB`. Size threshold read via `LocalStagingConfigRepository.Get()` per call.
 
-C6. Backplane / NFS workers untouched by default. Linux container workers (wakko, dot) keep `LocalStagingEnabled=FALSE` post-migration. Job-claim and encode paths byte-identical to today.
+C6. Backplane / NFS workers untouched by default. Docker-on-Linux workers (dot) and bare-metal Linux workers (wakko) keep `LocalStagingEnabled=FALSE` post-migration. Job-claim and encode paths byte-identical to today.
 
 C7. When staging is active, `CommandBuilder` emits ffmpeg `-i <local_source>` and `<local_output>.inprogress` in place of the canonical paths. `TemporaryFilePaths.LocalSourcePath` / `LocalOutputPath` columns populated.
 

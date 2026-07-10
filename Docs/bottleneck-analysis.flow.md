@@ -188,5 +188,5 @@ After remediation, re-run the Stage 1 baseline query and compare to pre-change n
 |--------|----------|-----|-------------|-------------------|
 | I9-2024 | i9, 32 threads | Intel X540-T2 2x1Gbps | \\10.0.0.43\srv\nfs-media-_tv (porky NFS) | Network I/O -- 2Gbps aggregate, shared read+write |
 | larry-worker-1..4 | Docker on 10.0.0.42 (LXC 218) | Host NIC (1Gbps presumed) | NFS mount via Docker volume | Network I/O -- 4 containers share 1 NIC |
-| wakko-worker-1..4 | Docker on 10.0.0.230 (bare-metal) | Host NIC | NFS mount via Docker volume | TBD -- not yet profiled |
+| wakko-worker-1..4 | Bare-metal Linux on 10.0.0.230 (Ryzen 7 3700X + Intel Arc B580) | Host NIC | NFS mount native | Intel Arc XPU demucs |
 | dot-worker-1..4 | Docker on 10.0.0.193 (bare-metal) | Host NIC | NFS mount via Docker volume | TBD -- not yet profiled |

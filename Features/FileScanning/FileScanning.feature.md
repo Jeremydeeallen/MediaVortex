@@ -170,8 +170,8 @@ Triggering context (2026-05-15):
       repaired 84,510 rows. 3-way smoke test (I9-2024 Windows MST,
       larry-worker-1 Linux UTC, wakko-worker-1 Linux UTC) produced
       byte-identical canonical_filepath / size_bytes / filename / mtime
-      via `Scripts/smoke_cross_worker.py`. Larry + Wakko containers
-      redeployed with both fixes.
+      via `Scripts/smoke_cross_worker.py`. Larry containers + Wakko
+      systemd units redeployed with both fixes.
       **PICKUP (when resuming FileScanning):** I9 WorkerService is
       currently Paused, ScanEnabled=false; needs to be restarted by
       operator so PID 19224 picks up the new FileManagerService code

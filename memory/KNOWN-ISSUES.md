@@ -123,7 +123,7 @@ INFO    Auto-captured 0/4 stills for attempt 40985 (policy=All)
 ### [BUG-0081] StuckJobDetectionService is phase-blind; kills legitimate Demucs pre-encode + leaves child unreaped + re-claim stacks
 **Date:** 2026-07-03 | **Area:** stuck-detection / transcode-lifecycle
 
-**What breaks:** `StuckJobDetectionService._IsJobFrozen` (`Features/ServiceControl/StuckJobDetectionService.py:255-296`) reads `TranscodeProgress.LastProgressUpdate` and fires "frozen -- no frame advance for N minutes" once staleness exceeds threshold (default 5 min). But `JobProcessor.Process` calls `_RunPreEncodeAudio` (Demucs source separation) BEFORE ffmpeg starts. On a wakko-worker-N container (Ryzen 7 3700X, 4-thread cpuset), Demucs `htdemucs -d cpu` for a 20-25 min episode takes 15+ min. During Demucs the Reporter callback does not tick TranscodeProgress -- Demucs stdout progress is not parsed -- so `LastProgressUpdate` stays at the pre-Demucs "Preparing Files" tick and goes stale.
+**What breaks:** `StuckJobDetectionService._IsJobFrozen` (`Features/ServiceControl/StuckJobDetectionService.py:255-296`) reads `TranscodeProgress.LastProgressUpdate` and fires "frozen -- no frame advance for N minutes" once staleness exceeds threshold (default 5 min). But `JobProcessor.Process` calls `_RunPreEncodeAudio` (Demucs source separation) BEFORE ffmpeg starts. On a wakko-worker-N slot (Ryzen 7 3700X, 4-thread cpuset), the CPU-fallback demucs pass for a 20-25 min episode takes 15+ min. During Demucs the Reporter callback does not tick TranscodeProgress -- Demucs stdout progress is not parsed -- so `LastProgressUpdate` stays at the pre-Demucs "Preparing Files" tick and goes stale.
 
 Detector fires -> HandleJobFailure marks attempt failed -> re-set queue row to Pending. But the Demucs subprocess is a child of the Python worker, NOT tracked in the kill path. Re-claim spawns a new JobProcessor.Process for the same MediaFileId -> new Demucs -> stacks on top of the old one that's still running.
 
@@ -372,7 +372,7 @@ The principle: each pick decision must either (a) be a single explicit rule with
 - `deploy/bringup.md` -- the runbook should route I9 to a local start command, not a deploy
 - `deploy/deploy-linux-worker.py` + `deploy/deploy-fleet.py` (if it exists) -- audit for inter-worker dependencies
 - `StartMediaVortex.py` -- already exists as the local lifecycle entry point; the I9-local "deploy" probably collapses into this
-- The four host-shape strategies that need to exist: LXC-Docker, bare-metal-Docker (wakko/dot), Windows-SMB, and the I9-local NO-OP
+- The four host-shape strategies that need to exist: LXC-Docker (larry), bare-metal-Docker (dot), bare-metal Linux (wakko), Windows-SMB (I9), and the I9-local NO-OP
 
 **Fix with:** `/t BUG-0064`.
 

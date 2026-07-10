@@ -75,7 +75,7 @@ against live fleet state. Implementation in commit `89c8ab2`.
 - [x] D8-D9: `/api/TeamStatus/Workers` payload includes `Version` + `BuildInfo`. New `GET /api/TeamStatus/Workers/VersionStatus` endpoint returns `{AllAgree, Versions, MismatchCount}`. Commit `89c8ab2`.
 - [x] `deploy/worker-deploy-linux.flow.md` step 2 already updated with `--build-arg COMMIT_SHA=$(git rev-parse HEAD)` by the operator's deploy refactor (verified pre-existing).
 - [x] `WorkerService/WorkerService.flow.md` new Version subsection describing the resolver order, the columns written, and the Activity page surface. Commit `89c8ab2`.
-- [x] Larry + Wakko + Dot redeployed with `--build-arg COMMIT_SHA=<sha>`; all 16 docker workers report VERSION + BuildInfo. Verified `SELECT version, buildinfo FROM workers` -- all rows populated with `19fc6328...` + three-line BuildInfo.
+- [x] Larry (LXC-Docker) + Dot (bare-metal Docker) + Wakko (bare-metal Linux) redeployed with COMMIT_SHA propagated; all 16 remote workers report VERSION + BuildInfo. Verified `SELECT version, buildinfo FROM workers` -- all rows populated with `19fc6328...` + three-line BuildInfo.
 - [x] I9 WorkerService restarted by operator; tier-2 resolver (`git rev-parse HEAD`) fired -- I9-2024 row shows Version=`19fc6328...` and BuildInfo=NULL (expected; tier-2 produces no BuildInfo).
 - [x] Smoke test passed: all 17 workers report SHA `19fc63286596eedd9ab3f84679cdd361d1866c20`. AllAgree=true across fleet.
 

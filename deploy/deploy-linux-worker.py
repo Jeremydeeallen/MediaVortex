@@ -1,49 +1,4 @@
-"""End-to-end deploy automation for a Linux MediaVortex worker fleet.
-
-Wraps the four-step sequence in deploy/worker-deploy-linux.flow.md
-"Build and Deploy" into one idempotent invocation. Run from the dev
-workstation against any Linux host (LXC or bare-metal) that has Docker
-installed and the required NFS mounts.
-
-WHEN TO USE THIS SCRIPT:
-  - Fresh host bring-up.
-  - Code-only redeploys (FFmpeg build layer is cached, ~30-60s).
-  - Compose-template changes (new cpuset, hostname tweaks).
-  - After a host rebuild.
-
-For mid-job avoidance: workers receive SIGTERM during `docker compose up -d`
-and the SignalHandler resets in-flight TranscodeQueue rows to Pending. If
-you want zero re-transcoding, drain workers first:
-  py Scripts/SQLScripts/QueryDatabase.py sql \\
-    "UPDATE Workers SET Status='Paused' WHERE WorkerName LIKE '<friendly>-worker-%'"
-
-Steps:
-  1. Resolve target via infrastructure/terraform/inventory.toml (or IP literal)
-  2. Pre-flight checks (SSH, Docker, DB reachable, mounts non-empty, compose template exists)
-  3. Sync source tree via deploy/SyncSource.py (tar-over-ssh + .deployignore)
-  4. docker build on the target (with --build-arg COMMIT_SHA)
-  5. Push deploy/compose-templates/<friendly>.yml -> /opt/mediavortex/docker-compose.yml
-  6. docker compose up -d
-  7. Clean up build source
-  8. Poll Workers rows until Status='Online' with fresh heartbeat (or fail at 90s)
-
-Idempotent: re-running completes only what changed and reports each step
-as OK / SKIPPED accordingly.
-
-Usage:
-  py deploy/deploy-linux-worker.py wakko
-  py deploy/deploy-linux-worker.py dot
-  py deploy/deploy-linux-worker.py 10.0.0.193           # IP literal
-  py deploy/deploy-linux-worker.py wakko --check        # pre-flight only
-  py deploy/deploy-linux-worker.py wakko --skip-build   # source already on host
-  py deploy/deploy-linux-worker.py wakko --user root    # override ssh_user
-
-Exit codes:
-  0  success (verified Online with fresh heartbeat)
-  1  pre-flight check failed (host unreachable, missing prereqs)
-  2  deploy step failed (sync / build / compose up)
-  3  verification failed (workers not Online within 90s, or stale heartbeat)
-"""
+# see worker-deploy-linux.flow.md -- Docker on Linux (LXC, bare-metal server). Bare-metal Linux hosts (Intel Arc / Xe) use deploy-baremetal-worker.py.
 
 from __future__ import annotations
 
@@ -99,24 +54,7 @@ def _RunSsh(Target: str, RemoteCmd: str, *, Timeout: int = 30,
 
 
 def _ResolveTarget(TargetArg: str, InventoryToml: Path, UserOverride: Optional[str]) -> tuple[str, str, str]:
-    """Return (Friendly, Ip, SshUser).
-
-    TargetArg may be:
-      - A friendly compose-template basename (e.g. 'larry', 'wakko') -- mapped
-        first against the optional `compose_template` field, then against `name`.
-        The returned Friendly is always TargetArg so the caller picks
-        `compose-templates/<TargetArg>.yml` deterministically.
-      - An inventory entry `name` (e.g. 'mediavortex-workers'). Friendly is
-        that name unless the entry declares `compose_template`, in which case
-        Friendly becomes the compose_template value.
-      - An IPv4 literal. The script reverse-looks-up the inventory by primary
-        IP. If no entry matches, Friendly = the IP (caller still needs a
-        matching compose template).
-
-    The script honors the inventory schema's backward-compat clause: if an
-    entry has no `nics` array, the top-level `ip` field is used as the
-    primary IP (see infrastructure/terraform/inventory-schema.md line 186).
-    """
+    # see worker-deploy.C1 -- resolve friendly-name / inventory-name / IP to (Friendly, Ip, SshUser).
     UseIp = bool(IpRegex.match(TargetArg))
 
     if not InventoryToml.exists():
@@ -196,7 +134,7 @@ def StepPreflight(Friendly: str, Target: str) -> tuple[bool, dict]:
     if not Out["compose_template"]:
         Out["_error"] = (
             f"Compose template missing: {ComposeTemplate}. "
-            f"Copy from a sibling (larry.yml/wakko.yml) and adjust "
+            f"Copy from a sibling (larry.yml/dot.yml) and adjust "
             f"hostnames and cpuset."
         )
         return False, Out
@@ -284,15 +222,12 @@ def _LoadFfmpegPin() -> tuple[str, str]:
     return Tag, Asset
 
 
-# directive: transcode-flow-canonical | # see transcode-flow-canonical.C25
+# directive: transcode-flow-canonical | # see worker-deploy.C1
 def _DetectTorchVariant(Target: str) -> str:
     R = _RunSsh(Target, "nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1", Timeout=10)
     Out = (R.stdout or '').strip()
     if Out:
         return "cu124"
-    Rxpu = _RunSsh(Target, "lspci -nn 2>/dev/null | grep -iE 'VGA|Display|3D' | grep -iE 'Intel|8086'", Timeout=10)
-    if (Rxpu.stdout or '').strip():
-        return "xpu"
     return "cpu"
 
 

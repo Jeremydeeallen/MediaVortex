@@ -1,8 +1,8 @@
-﻿# Flow: Linux Worker Deploy (Docker)
+# Flow: Linux Worker Deploy (Docker)
 
 **Slug:** worker-deploy-linux
 
-Deploys a MediaVortex `WorkerService` container fleet to any Linux host -- LXC (Larry) or bare-metal (Wakko, dot). Same pipeline; per-host differences (hostnames, cpuset) live in `deploy/compose-templates/<name>.yml`. Counterpart to `worker-deploy-windows.flow.md` (Task Scheduler + SMB on Windows).
+Deploys a MediaVortex `WorkerService` container fleet to Docker-on-Linux hosts -- LXC (Larry) and bare-metal servers (dot). Same pipeline; per-host differences (hostnames, cpuset) live in `deploy/compose-templates/<name>.yml`. Counterpart flows: `worker-deploy-baremetal.flow.md` (bare-metal Linux, no containers, e.g. Wakko / Intel Arc) and `worker-deploy-windows.flow.md` (I9-2024).
 
 ## Entry Point
 
@@ -10,24 +10,25 @@ Deploys a MediaVortex `WorkerService` container fleet to any Linux host -- LXC (
 py deploy/deploy-linux-worker.py <target>
 ```
 
-`<target>` is the host's friendly name from `infrastructure/terraform/inventory.toml` (e.g. `larry`, `wakko`, `dot`) or its IP. The script reads SSH user, IP, and the matching compose template, then runs the four-step pipeline. Idempotent.
+`<target>` is the host's friendly name from `infrastructure/terraform/inventory.toml` (e.g. `larry`, `dot`) or its IP. The script reads SSH user, IP, and the matching compose template, then runs the four-step pipeline. Idempotent.
 
 ## Host Inventory
 
 | Friendly | Hostname | IP | Host Type | CPU | Workers | Compose template |
 |---|---|---|---|---|---|---|
 | larry | mediavortex-workers (CT 218) | 10.0.0.42 | LXC on Proxmox larry | 2x Xeon, 64 threads | `larry-worker-1..4` (16 threads each) | `compose-templates/larry.yml` |
-| wakko | client-b450m-01 | 10.0.0.230 | bare-metal (Linux Mint 22.3) | Ryzen 7 3700X, 8C/16T | `wakko-worker-1..4` (4 threads each) | `compose-templates/wakko.yml` |
-| dot | client-z490v-01 | 10.0.0.193 | bare-metal | i9-10850K, 10C/20T | `dot-worker-1..4` (5 threads each) | `compose-templates/dot.yml` |
+| dot | client-z490v-01 | 10.0.0.193 | bare-metal server | i9-10850K, 10C/20T, RTX 4060 | `dot-worker-1..4` (5 threads each) | `compose-templates/dot.yml` |
 
-When adding a new Linux worker host:
+When adding a new Docker-on-Linux worker host:
 1. Add the host to `infrastructure/terraform/inventory.toml` (friendly name, hostname, primary IP, ssh_user). Mount specifications live in the same entry: `bind_mounts` for LXC, `fstab_mounts` for bare-metal. **`inventory.toml` is the single source of truth -- never hardcode mount paths in compose templates or scripts.**
 2. Create `deploy/compose-templates/<friendly>.yml` -- copy a similar host's template, adjust hostnames (`<friendly>-worker-N`) and cpuset.
 3. Add a row to the table above.
 4. Provision the host:
    - **LXC**: `terraform -chdir=infrastructure/terraform/mediavortex-workers apply` (reads `bind_mounts` via `inventory-query.py`).
-   - **Bare-metal**: `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` (idempotent: installs `nfs-common` + Docker CE, reconciles `/etc/fstab` managed block from `fstab_mounts`, creates `/opt/mediavortex` + mountpoints, runs `mount -a`).
+   - **Bare-metal server**: `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` (idempotent: installs `nfs-common` + Docker CE, reconciles `/etc/fstab` managed block from `fstab_mounts`, creates `/opt/mediavortex` + mountpoints, runs `mount -a`).
 5. Run `py deploy/deploy-linux-worker.py <friendly>`.
+
+For Intel Arc / Xe workstations, use `worker-deploy-baremetal.flow.md` instead -- no containers.
 
 ## Pipeline Overview
 
@@ -48,7 +49,7 @@ The script runs these in order and exits non-zero on the first failure. Each che
 | SSH reachable | `ssh -o ConnectTimeout=5 root@<ip> hostname` | Hostname matches inventory | Check `_netdev`, firewall, host is up. |
 | Docker installed | `ssh ... 'docker --version'` | Version string | LXC: `terraform apply` in `infrastructure/terraform/mediavortex-workers/`. Bare-metal: `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>`. |
 | DB reachable from target | `ssh ... 'nc -zw2 10.0.0.15 5432 && echo OK'` | `OK` | Verify postgres on `10.0.0.15`; check pg_hba.conf allows the target IP. |
-| Required mounts non-empty | `ssh ... 'ls /mnt/media_tv \| head -1 && ls /mnt/movies \| head -1 && ls /mnt/xxx \| head -1'` | Each returns at least one filename | LXC: `terraform apply` re-renders the `pct set --mp<N>` lines from `inventory.toml`. Bare-metal: re-run `mediavortex-bare-metal-bootstrap.py --host <friendly>`. If `inventory.toml` is correct but the host hasn't picked it up, that's the script to run. Per `memory/KNOWN-ISSUES.md` mount-validation entry: an empty mount is treated as a failure to avoid silent corruption. |
+| Required mounts non-empty | `ssh ... 'ls /mnt/media_tv \| head -1 && ls /mnt/movies \| head -1 && ls /mnt/xxx \| head -1'` | Each returns at least one filename | LXC: `terraform apply` re-renders the `pct set --mp<N>` lines from `inventory.toml`. Bare-metal: re-run `mediavortex-bare-metal-bootstrap.py --host <friendly>`. |
 | Compose template exists | `ls deploy/compose-templates/<friendly>.yml` | File present | Create the template from a sibling. |
 
 ## Build and Deploy (`ST2`)
@@ -80,38 +81,34 @@ ssh root@<ip> 'docker exec mediavortex-worker-1-1 ffmpeg -hide_banner -loglevel 
 ssh root@<ip> 'rm -rf /tmp/mediavortex-build'
 ```
 
-For LXC hosts (Larry): `/opt/mediavortex/` already exists -- Terraform created it during host provisioning. For bare-metal: the script creates it on first run.
+For LXC hosts (Larry): `/opt/mediavortex/` already exists -- Terraform created it during host provisioning. For bare-metal server (dot): the script creates it on first run.
 
-For code-only redeploys: same five steps. The FFmpeg static download is cached in a Docker build layer keyed on `FFMPEG_TAG` + `FFMPEG_ASSET`; only the `COPY . /app` layer rebuilds. Total time on a warm host: ~30-60 seconds.
+Code-only redeploys use the same five steps. The FFmpeg static download is cached in a Docker build layer keyed on `FFMPEG_TAG` + `FFMPEG_ASSET`; only the `COPY . /app` layer rebuilds. Total time on a warm host: ~30-60 seconds.
 
 ### NVENC + ffmpeg pinning (host-driver coupling)
 
-The Dockerfile no longer pulls BtbN's floating `latest` tag. `deploy/ffmpeg-release.txt` pins both the release tag AND the asset filename, e.g.:
+`deploy/ffmpeg-release.txt` pins both the release tag AND the asset filename:
 
 ```
 TAG=autobuild-2026-06-23-13-52
 ASSET=ffmpeg-n8.1.2-linux64-gpl-8.1.tar.xz
 ```
 
-(The `n7.1` line is too old to include `av1_nvenc`; use `n8.1` or later for AV1 NVENC encoders.)
-
-Why pinned: BtbN's master builds occasionally bump the required NVENC API version (e.g. 13.1 needs Nvidia driver >= 610.00). A routine code redeploy that picks up an ffmpeg that needs a newer driver than the host has silently breaks every `av1_nvenc` transcode with exit 218. Pinning both the tag and the asset filename makes builds reproducible; bumping ffmpeg is a deliberate two-step.
+Why pinned: BtbN's master builds occasionally bump the required NVENC API version. Pinning makes builds reproducible.
 
 Bumping ffmpeg:
 
 1. Pick a new BtbN tag + asset: `curl https://api.github.com/repos/BtbN/FFmpeg-Builds/releases?per_page=8`.
 2. Edit `deploy/ffmpeg-release.txt` to the new TAG= and ASSET= pair.
-3. `py deploy/deploy-linux-worker.py <host>`. The Step 4 NVENC probe encodes a synthetic frame with `av1_nvenc` inside the first container; if it fails (exit != 0), the deploy aborts with the real ffmpeg stderr (the "Driver does not support the required nvenc API version. Required: X.Y Found: A.B" line). Fix path: roll the pin back OR upgrade the host's Nvidia driver to the required version. Hosts without an Nvidia GPU (Larry) skip the probe and pass automatically.
+3. `py deploy/deploy-linux-worker.py <host>`. Step 4 NVENC probe encodes a synthetic frame with `av1_nvenc` inside the first container; if it fails, the deploy aborts with the real ffmpeg stderr. Hosts without an Nvidia GPU (Larry) skip the probe and pass automatically.
 
-Driver / API matrix observed at deploy time (extend as new BtbN tags land):
+Driver / API matrix observed at deploy time:
 
 | BtbN tag | ffmpeg asset | NVENC API required | Min Nvidia driver | av1_nvenc? | Smoke-tested on dot |
 |---|---|---|---|---|---|
 | `autobuild-2026-06-23-13-52` | `ffmpeg-n8.1.2-linux64-gpl-8.1.tar.xz` | works on 13.0 | works on 595.71 | yes | 2026-06-25 PASS |
-| `autobuild-2026-06-23-13-52` | `ffmpeg-n7.1.5-linux64-gpl-7.1.tar.xz` | -- | -- | **no** -- "Unknown encoder 'av1_nvenc'" | rejected |
-| `latest` (master, any current) | `ffmpeg-master-latest-linux64-gpl.tar.xz` | 13.1 | 610.00+ | yes | 2026-06-25 FAIL on dot (driver 595.71) |
 
-Source-of-truth for required driver: the actual ffmpeg stderr at probe time, NOT this table. Update the row only when probe results are recorded against a new tag.
+Source-of-truth for required driver: the actual ffmpeg stderr at probe time, NOT this table.
 
 ## Post-Deploy Verification (`ST3`)
 
@@ -134,12 +131,12 @@ py Scripts/SQLScripts/QueryDatabase.py sql \
 ```
 
 Expected per worker:
-- `Status IN ('Online','Paused')` (Paused preserved by UPSERT if the row was previously paused)
+- `Status IN ('Online','Paused')`
 - `FFmpegPath` is NOT NULL and ends in `/usr/local/bin/ffmpeg`
 - `Ver` equals the first 7 chars of `git rev-parse HEAD` on the dev workstation at deploy time
 - `HeartbeatAge < 60s`
 
-The deploy script asserts the Ver match automatically; mismatch fails the deploy with exit code 3. The post-deploy line `version=<sha7>` reports the value alongside heartbeat age.
+The deploy script asserts the Ver match automatically; mismatch fails the deploy with exit code 3.
 
 ### 3. Share mappings registered
 
@@ -169,7 +166,7 @@ If the queue has eligible Pending work, expect a job claimed within 30-90 s of c
 
 ### Worker registers but FFmpegPath is NULL
 
-The Dockerfile's FFmpeg download stage failed or the binary was not copied to the final stage. Reproduce inside the container:
+The Dockerfile's FFmpeg download stage failed or the binary was not copied. Reproduce inside the container:
 
 ```bash
 ssh root@<ip> 'docker exec <friendly>-worker-1 ls -la /usr/local/bin/ffmpeg /usr/local/bin/ffprobe'
@@ -219,8 +216,8 @@ ssh root@<ip> 'docker exec <friendly>-worker-1 ls -la "/mnt/media_tv/<relative-p
 
 Common causes:
 - Bind mount missing in compose
-- NFS export not mounted on the host (`ls /mnt/media_tv` returns empty from the host itself)
-- File deleted between queue population and transcode claim (handled by source-file pre-check; queue row deleted, MediaFile bumped)
+- NFS export not mounted on the host
+- File deleted between queue population and transcode claim (handled by source-file pre-check)
 
 ## Failure Modes
 
@@ -230,7 +227,6 @@ Common causes:
 | BtbN download fails during build | Dockerfile stage 1 exits non-zero | Retry; the URL occasionally rotates. Check the current `latest` tag at `github.com/BtbN/FFmpeg-Builds/releases`. |
 | DB unreachable at container start | `psycopg2.OperationalError` in logs, container restarts | Verify `10.0.0.15:5432` is reachable from the target; check `pg_hba.conf` for the target's IP. |
 | Bind mount missing on host | FFmpeg writes fail with ENOENT or EACCES | Verify mount points exist and contain data: `ls /mnt/media_tv /mnt/movies /mnt/xxx` on the target. |
-| Stale worker rows from prior naming | Old `client-XXX-NN` rows linger after a rename to friendly naming | Delete the stale rows: `DELETE FROM Workers WHERE WorkerName IN (...) AND LastHeartbeat < NOW() - INTERVAL '1 hour'`. |
 | Empty mount silently corrupts state | Worker claims jobs, hits per-file source-missing, deletes queue rows | Fixed by mount validation (worker-lifecycle criteria 20, 21). A worker now stays Paused and reports the offending mount. |
 
 ## Seams

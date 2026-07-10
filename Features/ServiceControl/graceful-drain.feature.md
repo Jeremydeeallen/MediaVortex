@@ -35,7 +35,7 @@ PHASE 1 COMPLETE 2026-05-30 (commit `d57bdb6`). Live verification pending the ne
 WorkerService/Main.py                              -- SignalHandler graceful drain
 deploy/compose-templates/larry.yml                 -- stop_grace_period: 30m
 deploy/compose-templates/dot.yml                   -- stop_grace_period: 30m
-deploy/compose-templates/wakko.yml                 -- stop_grace_period: 30m
+deploy/baremetal/mediavortex-worker@.service       -- TimeoutStopSec=30m (wakko / bare-metal Linux)
 deploy/deploy-fleet.py                             -- DrainWorkers / RestoreWorkerStatus
 Features/ServiceControl/graceful-drain.feature.md  -- this file
 ```

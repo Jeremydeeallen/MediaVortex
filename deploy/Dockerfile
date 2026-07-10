@@ -12,10 +12,7 @@ RUN curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG
     | tar xJ --strip-components=1 -C /usr/local
 
 # --- Stage 2: Application ---
-# Ubuntu noble base required: Intel kobuk PPA (libmfx-gen1.2 for Arc B580 AV1 QSV)
-# targets Ubuntu noble only. Debian trixie has the dispatcher (libvpl2) but not
-# the 2.x backend that exposes Battlemage encoders. See deploy-linux-worker
-# pipeline + wakko-arc-b580-onboarding directive.
+# Ubuntu noble base required by libmfx-gen1.2 baseline used by Docker-on-Linux hosts.
 FROM ubuntu:24.04
 
 # Copy FFmpeg/FFprobe from build stage
@@ -52,26 +49,16 @@ ENV LIBVA_DRIVER_NAME=iHD
 # Python dependencies (WorkerService). PEP 668 on Ubuntu noble needs --break-system-packages
 # for global pip install in a single-purpose container.
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
-# TORCH_VARIANT picks the wheel: cpu, cu124 (CUDA 12.4), xpu (Intel oneAPI / Arc).
+# TORCH_VARIANT picks the wheel: cpu, cu124 (CUDA 12.4). Intel Arc / Xe hosts run bare-metal via deploy-baremetal-worker.py, not Docker.
 ARG TORCH_VARIANT=cpu
 RUN pip install --no-cache-dir --break-system-packages \
         psycopg2-binary \
         psutil \
         setproctitle \
         soundfile \
- && if [ "$TORCH_VARIANT" = "xpu" ]; then \
-        apt-get update -qq \
-        && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            libze1 libze-intel-gpu1 > /dev/null \
-        && rm -rf /var/lib/apt/lists/* \
-        && pip install --no-cache-dir --break-system-packages \
-            --index-url https://download.pytorch.org/whl/xpu \
-            torch==2.8.0+xpu torchaudio==2.8.0+xpu; \
-    else \
-        pip install --no-cache-dir --break-system-packages \
-            --index-url https://download.pytorch.org/whl/${TORCH_VARIANT} \
-            torch==2.6.0 torchaudio==2.6.0; \
-    fi \
+ && pip install --no-cache-dir --break-system-packages \
+        --index-url https://download.pytorch.org/whl/${TORCH_VARIANT} \
+        torch==2.6.0 torchaudio==2.6.0 \
  && pip install --no-cache-dir --break-system-packages demucs==4.0.1
 
 # Copy application code

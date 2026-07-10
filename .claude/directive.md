@@ -405,6 +405,17 @@ Every item tagged (a) or (b) per `call-graph-audit.md` Signal 4. Default (a) = b
 - [x] REOPENED IMPLEMENTING: Reset 25 contract test suite (4 test files, 32 pass / 3 skipped for deferred endpoint)
 - [x] REOPENED IMPLEMENTING: Reset 25 remainder (endpoint + GUI + classifier remap + animation rows + Linux redeploy + fanout smoke) -- 37 pass, 0 skip
 
+### R18 overrides
+
+- deploy/worker-deploy.feature.md
+- deploy/worker-deploy-linux.flow.md
+- Features/TeamStatus/worker-versioning.feature.md
+- Features/ServiceControl/graceful-drain.feature.md
+- Features/TranscodeJob/local-staging.feature.md
+- Features/TranscodeQueue/worker-routing.feature.md
+- Features/FileScanning/FileScanning.feature.md
+- Features/TeamStatus/worker-status-model.feature.md
+
 ### Files
 
 Scoped per Reset Plan step. Deep file list (line-level) populated during NEEDS_DOC_PREREAD after reading colocated docs.
