@@ -63,20 +63,10 @@ RUN pip install --no-cache-dir --break-system-packages \
         apt-get update -qq \
         && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
             libze1 libze-intel-gpu1 > /dev/null \
-        && curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
-            | gpg --dearmor > /usr/share/keyrings/oneapi-archive-keyring.gpg \
-        && echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
-            > /etc/apt/sources.list.d/oneAPI.list \
-        && apt-get update -qq \
-        && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            intel-oneapi-runtime-libs intel-oneapi-runtime-dpcpp-cpp intel-oneapi-runtime-mkl > /dev/null \
         && rm -rf /var/lib/apt/lists/* \
         && pip install --no-cache-dir --break-system-packages \
             --index-url https://download.pytorch.org/whl/xpu \
-            torch==2.8.0+xpu torchaudio==2.8.0+xpu \
-        && pip install --no-cache-dir --break-system-packages \
-            --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/ \
-            intel-extension-for-pytorch==2.8.10+xpu; \
+            torch==2.8.0+xpu torchaudio==2.8.0+xpu; \
     else \
         pip install --no-cache-dir --break-system-packages \
             --index-url https://download.pytorch.org/whl/${TORCH_VARIANT} \
