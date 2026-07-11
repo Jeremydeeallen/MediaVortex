@@ -238,7 +238,24 @@ class TranscodeJobRepository(BaseRepository):
                         Attempt.WorkerName, MediaFileId
                     )
                     LoggingService.LogInfo(f"Insert attempt parameters: {parameters}", "TranscodeJobRepository", "SaveTranscodeAttempt")
-                    cursor.execute(query, parameters)
+                    # directive: transcode-flow-canonical -- ta_one_inflight_per_mfid enforces one Success-NULL row per MediaFileId; UniqueViolation = race lost, release queue row
+                    try:
+                        cursor.execute(query, parameters)
+                    except Exception as insertEx:
+                        import psycopg2
+                        if isinstance(insertEx, psycopg2.errors.UniqueViolation):
+                            connection.rollback()
+                            LoggingService.LogWarning(
+                                f"Attempt INSERT refused by ta_one_inflight_per_mfid (MediaFileId={MediaFileId}); another in-flight attempt already exists. Releasing queue row for MediaFileId back to Pending.",
+                                "TranscodeJobRepository", "SaveTranscodeAttempt",
+                            )
+                            self.DatabaseService.ExecuteNonQuery(
+                                "UPDATE TranscodeQueue SET Status='Pending', ClaimedBy=NULL, ClaimedAt=NULL, DateStarted=NULL "
+                                "WHERE MediaFileId=%s AND Status='Running' AND ClaimedBy = %s",
+                                (MediaFileId, Attempt.WorkerName),
+                            )
+                            return None
+                        raise
                     attemptId = cursor.fetchone()[0]
                     connection.commit()
                     LoggingService.LogInfo(f"Attempt inserted with ID: {attemptId}", "TranscodeJobRepository", "SaveTranscodeAttempt")
@@ -322,8 +339,26 @@ class TranscodeJobRepository(BaseRepository):
                 LoggingService.LogWarning("No valid fields to update", "TranscodeJobRepository", "UpdateTranscodeAttempt")
                 return False
 
-            query = f"UPDATE TranscodeAttempts SET {', '.join(set_clauses)} WHERE Id = %s"
+            # directive: transcode-flow-canonical -- owner-only writes at repo layer; VMAF finalization + owner-transfer path exempt
+            VmafFinalizationKeys = {'VMAF', 'QualityTestCompleted', 'StorageRootId', 'RelativePath', 'WorkerName'}
+            UpdatingFieldSet = set(Updates.keys())
+            IsVmafFinalizationOnly = UpdatingFieldSet.issubset(VmafFinalizationKeys) and 'VMAF' in UpdatingFieldSet
+            OwnerGate = ""
+            OwnerParams = ()
+            if not IsVmafFinalizationOnly:
+                try:
+                    from Core.WorkerContext import WorkerContext
+                    LocalWorkerName = WorkerContext.Current().WorkerName
+                    OwnerGate = " AND WorkerName = %s"
+                    OwnerParams = (LocalWorkerName,)
+                except Exception:
+                    OwnerGate = ""
+                    OwnerParams = ()
+
+            query = f"UPDATE TranscodeAttempts SET {', '.join(set_clauses)} WHERE Id = %s{OwnerGate}"
             parameters.append(AttemptId)
+            if OwnerParams:
+                parameters.extend(OwnerParams)
 
             connection = self.DatabaseService.GetConnection()
             try:
@@ -331,6 +366,11 @@ class TranscodeJobRepository(BaseRepository):
                 cursor.execute(query, parameters)
                 connection.commit()
                 affected_rows = cursor.rowcount
+                if affected_rows == 0 and OwnerGate:
+                    LoggingService.LogWarning(
+                        f"UpdateTranscodeAttempt refused: attempt {AttemptId} not owned by this worker (OwnerParams={OwnerParams}); fields={list(Updates.keys())}",
+                        "TranscodeJobRepository", "UpdateTranscodeAttempt",
+                    )
                 LoggingService.LogInfo(f"Updated {affected_rows} rows for attempt {AttemptId} with fields: {list(Updates.keys())}",
                                      "TranscodeJobRepository", "UpdateTranscodeAttempt")
                 return affected_rows > 0
