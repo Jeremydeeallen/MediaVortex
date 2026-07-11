@@ -136,15 +136,14 @@ def test_from_worker_context_uses_singleton():
         WorkerContext.Reset()
 
 
-# directive: path-worker-class | # see path.S3
-def test_from_worker_context_falls_back_to_hostname_when_uninitialized():
-    """C7: Worker.Current falls back to socket.gethostname() when WorkerContext is uninitialized."""
-    import socket
-    from Core.WorkerContext import WorkerContext
+# directive: transcode-flow-canonical | # see path.C21
+def test_from_worker_context_raises_when_uninitialized():
+    """Worker.Current fails loud on unbound thread; no socket.gethostname fallback."""
+    import pytest
+    from Core.WorkerContext import WorkerContext, WorkerContextNotBoundError
     WorkerContext.Reset()
-    W = Worker.Current(Db=_MockDbReturning([]))
-    assert W.Name == socket.gethostname()
-    assert W.Platform == "linux"
+    with pytest.raises(WorkerContextNotBoundError):
+        Worker.Current(Db=_MockDbReturning([]))
 
 
 # directive: path-worker-class | # see path.S3

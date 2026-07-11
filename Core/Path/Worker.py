@@ -15,15 +15,12 @@ class Worker:
         self._Cache: dict = {}
 
     @classmethod
-    # directive: path-class-perfection | # see path.C21
+    # directive: transcode-flow-canonical | # see path.C21
     def Current(cls, Db=None) -> "Worker":
-        """Build a Worker from the process-singleton WorkerContext; falls back to socket.gethostname() if uninitialized."""
-        import socket
+        """Build a Worker from the process-singleton WorkerContext; raises WorkerContextNotBoundError on unbound thread."""
         from Core.WorkerContext import WorkerContext
-        Ctx = WorkerContext.TryCurrent()
-        Name = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
-        Platform = (Ctx.Platform if Ctx else None) or "linux"
-        return cls(Name=Name, Platform=Platform, Db=Db)
+        Ctx = WorkerContext.Current()
+        return cls(Name=Ctx.WorkerName, Platform=Ctx.Platform, Db=Db)
 
     # directive: path-worker-class | # see path.S3
     def ResolveStorageRoot(self, StorageRootId: int) -> Optional[str]:

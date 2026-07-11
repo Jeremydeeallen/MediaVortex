@@ -15,7 +15,7 @@ from Features.FileReplacement.PostFlightProcessors.PostFlightRegistry import Bui
 class TranscodedOutputPlacement:
     """Owns .inprogress rename, MediaFiles refresh, original delete; see transcoded-output-placement.feature.md."""
 
-    # directive: path-class-perfection | # see path.C26
+    # directive: transcode-flow-canonical | # see path.C21
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  FileManagerInstance: FileManagerService = None,
                  FFprobePath: str = None, WorkerName: str = None,
@@ -23,18 +23,20 @@ class TranscodedOutputPlacement:
                  PostFlightRegistryInstance=None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or FileManagerService(FFprobePath=FFprobePath)
-        if WorkerName is None:
-            import socket
-            from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.TryCurrent()
-            WorkerName = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
-        self.WorkerName = WorkerName
-        self._Worker: Worker = worker if worker is not None else Worker.Current(Db=self.DatabaseManager.DatabaseService)
+        self._WorkerName = WorkerName
+        self._Worker: Optional[Worker] = worker
         self._PostFlightRegistry = PostFlightRegistryInstance if PostFlightRegistryInstance is not None else BuildDefaultRegistry()
 
-    # directive: path-class-perfection | # see path.C26
+    # directive: transcode-flow-canonical | # see path.C21
     def _GetWorker(self) -> Worker:
+        if self._Worker is None:
+            self._Worker = Worker.Current(Db=self.DatabaseManager.DatabaseService)
         return self._Worker
+
+    @property
+    # directive: transcode-flow-canonical | # see path.C21
+    def WorkerName(self) -> str:
+        return self._WorkerName if self._WorkerName is not None else self._GetWorker().Name
 
     # directive: path-class-perfection | # see path.C18
     def _GetStorageRoots(self) -> List[dict]:

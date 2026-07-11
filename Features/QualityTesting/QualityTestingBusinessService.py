@@ -32,15 +32,15 @@ def SynthesizeFilePathInRows(Rows):
 class QualityTestingBusinessService:
     """Quality Testing Business Service - Business logic layer."""
 
-    # directive: qualitytesting-uses-path | # see path.S5
+    # directive: transcode-flow-canonical | # see path.C21
     def __init__(self, DatabaseManagerInstance=None, worker: Optional[Worker] = None, ActiveJobRepositoryInstance: Optional[ActiveJobRepository] = None, SystemSettingsRepositoryInstance: Optional[SystemSettingsRepository] = None):
-        """Initialize the business service with dependencies; lazy Worker + StorageRoots for path resolution."""
+        """Initialize the business service with dependencies; Worker lazy-loaded in _GetWorker on first call from bound thread."""
         self.DatabaseManager = DatabaseManagerInstance
         self.ActiveJobRepository = ActiveJobRepositoryInstance or ActiveJobRepository()
         self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
         self.ActiveFFmpegProcess = None
         self.ActiveFFmpegThread = None
-        self._Worker: Worker = worker if worker is not None else Worker.Current()
+        self._Worker: Optional[Worker] = worker
 
     # directive: transcode-flow-canonical | # see transcode.ST7 -- C14 VmafConfidenceStats write-back
     def _RecordVmafConfidenceStats(self, TranscodeAttemptId: int, VmafScore: float) -> None:
@@ -100,8 +100,10 @@ class QualityTestingBusinessService:
             RetryBudgetService=RetryBudgetService(AttemptRepository=self.DatabaseManager, GateConfigRepository=GateRepo),
         )
 
-    # directive: path-class-perfection | # see path.C26
+    # directive: transcode-flow-canonical | # see path.C21
     def _GetWorker(self) -> Worker:
+        if self._Worker is None:
+            self._Worker = Worker.Current()
         return self._Worker
 
     # directive: path-class-perfection | # see path.C18

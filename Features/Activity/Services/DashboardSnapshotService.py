@@ -168,7 +168,11 @@ class DashboardSnapshotService:
             "LEFT JOIN TranscodeProgress tp ON tp.TranscodeAttemptId = lta.Id "
             "LEFT JOIN MediaFiles mf ON mf.Id = tq.MediaFileId "
             "LEFT JOIN Profiles p ON p.ProfileName = lta.ProfileName "
-            "LEFT JOIN ProfileThresholds pt ON pt.ProfileId = p.Id AND pt.Resolution = mf.ResolutionCategory "
+            "LEFT JOIN LATERAL ("
+            "  SELECT TranscodeDownTo, TargetKbps FROM ProfileThresholds "
+            "  WHERE ProfileId = p.Id AND Resolution = mf.ResolutionCategory "
+            "  ORDER BY (ContentClass = p.ContentClass) DESC, Id ASC LIMIT 1"
+            ") pt ON TRUE "
             "ORDER BY aj.StartedAt ASC"
         )
         Out: List[ActiveJobRow] = []

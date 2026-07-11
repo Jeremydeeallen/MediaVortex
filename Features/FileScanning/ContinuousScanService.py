@@ -167,9 +167,12 @@ class ContinuousScanService:
                 'ErrorMessage': str(e)
             }
 
+    # directive: transcode-flow-canonical
     def _ScanLoop(self):
         """Background thread loop for periodic scanning."""
         try:
+            from Core.WorkerContext import WorkerContext
+            WorkerContext.Bind()
             LoggingService.LogInfo("Continuous scan loop started", 'ContinuousScanService', '_ScanLoop')
 
             # Execute first scan immediately upon starting
@@ -272,19 +275,9 @@ class ContinuousScanService:
                 'ContinuousScanService', '_ExecuteScan'
             )
 
-            # Resolve this worker's identity for affinity filtering and ScanJobs attribution.
-            # WorkerContext is set at WorkerService startup; absence falls back to hostname.
-            ThisWorkerName = None
-            try:
-                from Core.WorkerContext import WorkerContext
-                Ctx = WorkerContext.TryCurrent()
-                if Ctx is not None:
-                    ThisWorkerName = Ctx.WorkerName
-            except Exception:
-                pass
-            if not ThisWorkerName:
-                import socket
-                ThisWorkerName = socket.gethostname()
+            # directive: transcode-flow-canonical
+            from Core.WorkerContext import WorkerContext
+            ThisWorkerName = WorkerContext.Current().WorkerName
 
             # Apply per-rootfolder host affinity. RootFolders.PreferredWorkerName=NULL means
             # any ScanEnabled worker may pick it up; a non-null value pins the rootfolder to

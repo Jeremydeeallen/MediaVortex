@@ -404,6 +404,34 @@ Every item tagged (a) or (b) per `call-graph-audit.md` Signal 4. Default (a) = b
 - [x] REOPENED IMPLEMENTING: Reset 25 core (migration LIVE + WorkerEncoderResolver + ClaimNext guard + ProcessTranscodeQueueService override wired)
 - [x] REOPENED IMPLEMENTING: Reset 25 contract test suite (4 test files, 32 pass / 3 skipped for deferred endpoint)
 - [x] REOPENED IMPLEMENTING: Reset 25 remainder (endpoint + GUI + classifier remap + animation rows + Linux redeploy + fanout smoke) -- 37 pass, 0 skip
+- [x] REOPENED IMPLEMENTING: Reset 26 (C27 fail-loud Worker.Current + capability-thread Bind + defer QT/FileReplacement Worker capture -- BUG-0088)
+- [x] VERIFYING: Reset 26 live smoke -- Wakko bare-metal VMAF end-to-end -- attempt 41322 Success=True Disposition=Replace VMAF=89.94 QTR 1406 Status=Success on wakko-worker-1 (av1_qsv + Demucs on Arc XPU + libopus 2-track + VMAF ffmpeg self-hosted). Pre-fix state (attempt 41316, QT queue row 2189) failed at `Resolve: no active StorageRoot for Id=1 on worker='client-b450m-01'`. Post-fix same file lands VMAF cleanly from wakko-worker-1.
+- [x] DELIVERING: Reset 26 Promotions row landed (fail-loud Worker.Current + capability-poller Bind + naive-UTC advisory-claim TZ fix)
+
+### Reset 26 -- C27 fail-loud Worker.Current + capability-thread Bind
+
+**Root cause (Wakko VMAF live-smoke 2026-07-11):** `Core/Path/Worker.py:Current()` fell back to `socket.gethostname()` on unbound-thread evaluation. On docker workers container hostname == WorkerName (compose sets it); on Windows I9 OS hostname == WorkerName by coincidence. On bare-metal Wakko OS hostname `client-b450m-01` != WorkerName `wakko-worker-1`, so `StorageRootResolutions` lookup missed -> `no active StorageRoot for Id=1 on worker='client-b450m-01'`. Fleet-wide latent bug; wakko is the first host to expose it.
+
+**Files:**
+
+```
+Core/Path/Worker.py                                                            -- EDIT (Current() raises when TryCurrent is None; drop socket import + fallback)
+Features/QualityTesting/QualityTestingBusinessService.py                      -- EDIT (defer Worker.Current from __init__:43 to lazy accessor per-Resolve)
+Services/QualityTestQueueService.py                                            -- EDIT (same treatment as above)
+Features/FileReplacement/FileReplacementBusinessService.py                    -- EDIT (delete hand-rolled fallback lines 25-27; use Worker.Current(Db=...) directly)
+Features/FileReplacement/TranscodedOutputPlacement.py                          -- EDIT (same treatment as above)
+WorkerService/Main.py                                                          -- EDIT (WorkerContext.Bind() at _CapabilityPollingLoop entry; audit socket.gethostname sites)
+Features/FileScanning/FileScanningBusinessService.py                          -- EDIT (audit 4 TryCurrent sites; raise vs log-only per callsite)
+Features/FileScanning/ContinuousScanService.py                                 -- EDIT (delete socket.gethostname fallback at :287)
+Services/FFmpegService.py                                                      -- EDIT (audit TryCurrent site :27)
+Features/AudioNormalization/Services/AudioStreamProbe.py                      -- EDIT (audit TryCurrent site :64)
+Features/AudioNormalization/Services/LanguageEnrichmentService.py             -- EDIT (audit TryCurrent site :67)
+Features/ClipBuilder/ClipBuilderBusinessService.py                             -- EDIT (audit TryCurrent site :17)
+Features/ContentSignals/ContentSignalsService.py                               -- EDIT (audit TryCurrent site :22)
+Tests/Unit/test_path_worker.py                                                 -- EDIT (delete hostname-fallback test at :141-146; add fail-loud test)
+```
+
+**Exit gate:** every `(Ctx.WorkerName if Ctx else None) or socket.gethostname()` occurrence in production code = 0 (contract test extension); grep of `Worker.Current(` in `__init__` bodies of Services/Features = 0 (deferred to per-call); Wakko VMAF live smoke lands with real VmafScore in QualityTestResults; capability-poller-restart smoke on wakko verifies QT service instantiation on capability thread sees correct WorkerName.
 
 ### R18 overrides
 
@@ -699,6 +727,13 @@ Populated incrementally per step.
 | C25 enqueue-by-quality endpoint | `POST /api/Work/Transcode/Queue/<mfid>?quality=<label>|?tier=<n>` reads query params in `WorkBucketController.queue_one`; `QueueAdmissionAppService.AdmitOne` + `QueueManagementBusinessService.AddJobToQueue` accept `QualityLabel` + `QualityTier` kwargs; `ProfileRepository.GetProfileIdByQualityLabel` / `GetProfileIdByQualityTier` resolve to `ProfileId` | (Reset 25 remainder commit `ceabc8a`) |
 | C25 /settings Transcoding card refresh | `TierLadderRepository.GetTierLabelMap` surfaces `{tier -> label}` map; `SystemSettingsController.GetTranscodingSettings` returns `TierLabels`; `Templates/Settings.html` drops Family blocks, renders one row per resolution with `Efficient / Good / Better / Best / Reference` column headers under the tier number | (Reset 25 remainder commit `ceabc8a`) |
 | C25 Family retirement + animation rows | `Scripts/SQLScripts/RemapClassifierRulesToFamilyAgnosticTiers_2026_07_09.py` rewrites 5 `ContentClassificationRules` rows from legacy NVENC-CANARY names to `AV1 Tier N Label`; `Scripts/SQLScripts/AddAnimationContentClassThresholds_2026_07_09.py` seeds 20 animation-class threshold rows (5 tiers x 4 resolutions) with own kbps ladder; `SystemSettings.feature.md` C10 rewritten to describe family-agnostic Transcoding card | (Reset 25 remainder commit `ceabc8a`) |
+| C27 fail-loud Worker.Current (no hostname fallback) | `Core/Path/Worker.py` `Current()` raises `WorkerContextNotBoundError` when TryCurrent is None; no `socket.gethostname()` fallback. Callers on unbound threads fail loudly instead of masquerading as OS hostname. Wakko bare-metal (hostname `client-b450m-01` != WorkerName `wakko-worker-1`) exposed the fleet-wide latent defect masked by docker `hostname: <workername>` + I9 OS hostname coincidence | (Reset 26 commit) |
+| C27 capability-poller thread Bind | `WorkerService/Main.py:_CapabilityPollingLoop` calls `WorkerContext.Bind()` at loop entry so services lazy-instantiated on this thread (ProcessQualityTestQueueService -> QualityTestingBusinessService) inherit the process WorkerContext template instead of an unbound thread-local | (Reset 26 commit) |
+| C27 defer Worker.Current to per-call in QT + FileReplacement | `Features/QualityTesting/QualityTestingBusinessService.py`, `Services/QualityTestQueueService.py`, `Features/FileReplacement/FileReplacementBusinessService.py`, `Features/FileReplacement/TranscodedOutputPlacement.py` -- `__init__` no longer captures `Worker.Current()` eagerly; `_GetWorker()` lazy-loads on first call from the bound processing thread (matches path.C21). Frozen-Worker-at-construction pattern retired | (Reset 26 commit) |
+| C27 ContinuousScanService fail-loud + thread Bind | `Features/FileScanning/ContinuousScanService.py:_ScanLoop` calls `WorkerContext.Bind()` at loop entry; `_ExecuteScan` `ThisWorkerName` reads `WorkerContext.Current().WorkerName` (was silent `socket.gethostname()` fallback) | (Reset 26 commit) |
+| C27 advisory-claim TZ fix | `WorkerService/Main.py:_ClaimPrefixedWorkerName` computes `StaleThreshold` as naive-UTC (`datetime.now(tz=timezone.utc).replace(tzinfo=None)`) to match DB `timestamp_without_timezone` semantics. Prior TZ-naive local comparison saw UTC-stored heartbeats 6 hours in the future on MDT wakko and never reclaimed the stale slot -- reboot loops climbed `-1` -> `-2` -> ... -> `-N` forever | (Reset 26 commit) |
+| C27 hostname-fallback test replaced with fail-loud test | `Tests/Unit/test_path_worker.py::test_from_worker_context_falls_back_to_hostname_when_uninitialized` deleted; `test_from_worker_context_raises_when_uninitialized` added -- asserts `Worker.Current()` on Reset context raises `WorkerContextNotBoundError` | (Reset 26 commit) |
+| C27 live smoke evidence | Wakko bare-metal VMAF end-to-end -- attempt 41322 Success=True Disposition=Replace VMAF=89.94 (Min=58.56 P5=82.00 P25=88.42 HarmonicMean=89.71) via wakko-worker-1 (av1_qsv encode + Demucs pre-pass on Arc XPU + libopus 2-track + VMAF ffmpeg self-hosted). QTR row 1406 Status=Success | (Reset 26 verification) |
 
 ### Verification
 

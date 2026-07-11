@@ -12,24 +12,26 @@ from Core.Path import Path, Worker, PathError
 class FileReplacementBusinessService:
     """Orchestration + read-only queries for FileReplacement; see FileReplacement.feature.md."""
 
-    # directive: path-class-perfection | # see path.C26
+    # directive: transcode-flow-canonical | # see path.C21
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  FileManagerInstance: FileManagerService = None,
                  FFprobePath: str = None, WorkerName: str = None,
                  worker: Optional[Worker] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or FileManagerService(FFprobePath=FFprobePath)
-        if WorkerName is None:
-            import socket
-            from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.TryCurrent()
-            WorkerName = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
-        self.WorkerName = WorkerName
-        self._Worker: Worker = worker if worker is not None else Worker.Current(Db=self.DatabaseManager.DatabaseService)
+        self._WorkerName = WorkerName
+        self._Worker: Optional[Worker] = worker
 
-    # directive: path-class-perfection | # see path.C26
+    # directive: transcode-flow-canonical | # see path.C21
     def _GetWorker(self) -> Worker:
+        if self._Worker is None:
+            self._Worker = Worker.Current(Db=self.DatabaseManager.DatabaseService)
         return self._Worker
+
+    @property
+    # directive: transcode-flow-canonical | # see path.C21
+    def WorkerName(self) -> str:
+        return self._WorkerName if self._WorkerName is not None else self._GetWorker().Name
 
     # directive: path-class-perfection | # see path.C18
     def _GetStorageRoots(self) -> List[dict]:

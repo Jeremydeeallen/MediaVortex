@@ -186,9 +186,9 @@ class WorkerServiceApp:
                 )
                 Existing = {Row[0]: Row[1] for Row in Cur.fetchall()}
 
-                # Find the lowest available slot
-                from datetime import timedelta
-                StaleThreshold = datetime.now() - timedelta(minutes=2)
+                # directive: transcode-flow-canonical -- naive-UTC threshold matches DB timestamp_without_timezone semantics
+                from datetime import timedelta, timezone
+                StaleThreshold = datetime.now(tz=timezone.utc).replace(tzinfo=None) - timedelta(minutes=2)
                 Slot = 1
                 while True:
                     CandidateName = f"{Prefix}-{Slot}"
@@ -1037,8 +1037,11 @@ class WorkerServiceApp:
         except Exception as e:
             LoggingService.LogException("Error starting capability polling", e, "WorkerService", "_StartCapabilityPolling")
 
+    # directive: transcode-flow-canonical
     def _CapabilityPollingLoop(self):
         """Poll Workers table for capability flag and concurrency changes."""
+        from Core.WorkerContext import WorkerContext
+        WorkerContext.Bind()
         while not self.ShutdownEvent.is_set():
             try:
                 self.ShutdownEvent.wait(self.CapabilityPollingIntervalSec)
