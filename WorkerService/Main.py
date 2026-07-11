@@ -898,10 +898,12 @@ class WorkerServiceApp:
         # Initial wait so the first sweep doesn't race startup-time recovery.
         self.ShutdownEvent.wait(_ReadInterval())
 
+        # directive: transcode-flow-canonical
+        from Features.ServiceControl.AttemptAbandonmentSweeper import AttemptAbandonmentSweeper
         while not self.ShutdownEvent.is_set():
             try:
-                Service = OrphanCleanupService(self.DatabaseManager.DatabaseService)
-                Service.SweepOrphans()
+                OrphanCleanupService(self.DatabaseManager.DatabaseService).SweepOrphans()
+                AttemptAbandonmentSweeper(self.DatabaseManager.DatabaseService).SweepStaleOwners()
             except Exception as e:
                 LoggingService.LogException("Error in orphan cleanup cycle", e, "WorkerService", "_OrphanCleanupLoop")
             self.ShutdownEvent.wait(_ReadInterval())

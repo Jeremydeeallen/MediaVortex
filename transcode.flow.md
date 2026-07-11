@@ -234,13 +234,14 @@ Queue admission (whether a file enters the queue at all) is owned by `Features/T
 **Tables written:** TranscodeAttempt (new), TranscodeFiles (aggregated), TranscodeProgress (real-time), ActiveJobs (with WorkerName), MediaFilesArchive, TranscodeQueue (status -> Running, ClaimedBy -> WorkerName), TemporaryFilePaths (canonical paths)
 
 **Safety guards:**
-- Atomic job claiming: `SELECT FOR UPDATE SKIP LOCKED` prevents two workers claiming the same job
-- Crash recovery: stuck jobs (>12h) reset to Pending on service start
-- ActiveJob tracking prevents duplicate processing (includes WorkerName for distributed identification). `ActiveJobs.ProcessId` is the worker's Python PID; `ActiveJobs.FFmpegPid` (added by stuck-job-detection.feature.md) is the FFmpeg subprocess PID -- the only legitimate kill target for stuck-job cleanup
-- Worker heartbeat: 30-second interval, stale >5 min = worker offline, its jobs marked stuck
-- Recurring stuck-job detection: each worker self-monitors its own jobs every `SystemSettings.StuckJobDetectionIntervalSec` (default 120s). Tier 1 catches dead workers via heartbeat, Tier 2 catches frame-stagnation hangs (default 5 min via `FrozenProgressThresholdMin`), Tier 3 catches dead-FFmpeg cases via `FFmpegPid` liveness + name check. Cleanup kills only `FFmpegPid` (never the worker), gated by host-locality. See `Features/ServiceControl/stuck-job-detection.flow.md`.
-- CPU thermal management: waits for cool-down between jobs
-- FFmpeg errors captured in TranscodeAttempt.ErrorMessage
+- **DB partial UNIQUE index** `ta_one_inflight_per_mfid` on `TranscodeAttempts (MediaFileId) WHERE Success IS NULL` -- the invariant "one in-flight attempt per MediaFileId" is enforced by the DB. Duplicate INSERT fails IntegrityError; worker rolls back + moves on.
+- **Atomic queue-row claim** via `UPDATE ... WHERE Id = (SELECT ... FOR UPDATE OF tq SKIP LOCKED LIMIT 1) RETURNING ...` -- two workers cannot claim the same queue row.
+- **Owner-only writes.** Every worker's stuck-detect + hung-encode-detect + QT stuck-detect filters at the SELECT layer to jobs where `WorkerName = WorkerContext.Current().WorkerName`. Remote-owned jobs are never inspected + never written.
+- **AttemptAbandonmentSweeper** is the single sanctioned cross-worker terminal write: `Success=FALSE / ErrorMessage='owner_abandoned'` on attempts whose owning Worker is heartbeat-stale + Status != 'Online'. Runs on every worker's OrphanCleanup tick; idempotent.
+- Worker heartbeat: 30-second interval; `Workers.LastHeartbeat` stored naive-UTC; `AttemptAbandonmentSweeper.AbandonmentMinutes` default 5.
+- `ActiveJobs.ProcessId` = worker Python PID; `ActiveJobs.FFmpegPid` = ffmpeg subprocess PID -- owner's own stuck-detect uses this for local kill only.
+- CPU thermal management: waits for cool-down between jobs.
+- FFmpeg errors captured in TranscodeAttempt.ErrorMessage.
 
 ### ST6 Strategy variants -- per-ProcessingMode `BuildCommand` + `HandleResult`
 
@@ -491,22 +492,36 @@ WorkerService/Main.py
       -> MainLoop()                        -- blocks on ShutdownEvent
 ```
 
-### Job Claiming Mechanism
+### Job Claiming Mechanism (canonical)
 
-Distributed claim flow (current):
-1. `ProcessQueueLoop()` calls `GetNextJob()` every ~2 seconds when a slot is available
-2. `GetNextJob()` delegates to `Features/TranscodeQueue/TranscodeQueueRepository.ClaimNextPendingTranscodeJob(WorkerName, AcceptsInterlaced)`
-3. Repository executes a single atomic `UPDATE ... WHERE Id = (SELECT ... FOR UPDATE OF tq SKIP LOCKED) RETURNING ...` that:
-   - Filters `tq.Status = 'Pending'` and `tq.ProcessingMode` matches Transcode
-   - Joins MediaFiles (`mf`) + Profiles (`p`) for routing context
-   - Applies `BuildClaimPredicate(WorkerName, 'TranscodeEnabled')` -- worker is Online and TranscodeEnabled
-   - Applies the NVENC EXISTS gate -- `p.usenvidiahardware=0` OR worker has `nvenccapable=TRUE`
-   - Applies `BuildAllowedProfilesPredicate(WorkerName)` -- `w.AllowedProfiles IS NULL` (accept all) OR `mf.AssignedProfile = ANY(string_to_array(w.AllowedProfiles, ','))` (explicit allowlist match). Operator sets per-worker via `POST /api/TeamStatus/Workers/<name>/AllowedProfiles`; takes effect on the next claim tick (db-is-authority single-emitter pattern)
-   - Orders per the claim contract in `queue-priority.feature.md`: `(CASE WHEN tq.Priority >= 195 THEN tq.Priority ELSE 0 END) DESC, tq.SizeMB DESC NULLS LAST, tq.DateAdded ASC`
-   - Locks via `FOR UPDATE OF tq SKIP LOCKED` -- two workers racing the same row is impossible
-4. On successful claim, logs `WorkerName`, `JobId`, `ProfileName`, `WorkerAllowedProfiles` (`<all>` / `<none>` / CSV) for routing observability
+**One invariant, one claim, one sweeper.** See `.claude/rules/claim-authority.md`.
 
-Legacy (single-worker, non-atomic) flow `GetNextPendingTranscodeJob` is retained for the local dev path but is not used by distributed workers.
+**Invariant (DB-enforced):**
+```
+CREATE UNIQUE INDEX ta_one_inflight_per_mfid ON TranscodeAttempts (MediaFileId) WHERE Success IS NULL;
+```
+Physically impossible for two workers to hold in-flight attempts on the same MediaFileId. Any code path that tries to insert a second Success-NULL attempt for the same MediaFileId fails at the DB. The invariant lives in the DB, not in code.
+
+**Claim (atomic, single TX):**
+`Features/TranscodeQueue/TranscodeQueueRepository.ClaimNextPendingJob(WorkerName, AcceptsInterlaced)` runs one statement: `UPDATE TranscodeQueue tq_outer SET Status='Running', ClaimedBy=$worker, ClaimedAt=NOW() WHERE tq_outer.Id = (SELECT tq.Id ... ORDER BY <priority contract> FOR UPDATE OF tq SKIP LOCKED LIMIT 1) RETURNING ...`. Applies `BuildClaimPredicate(WorkerName, ClaimCapabilityFlag)` (capability + Online gate), the NVENC/QSV EXISTS gates, `BuildAllowedProfilesPredicate`, and the failure-budget cap predicate. `FOR UPDATE SKIP LOCKED` = two workers racing the same row is impossible.
+
+The follow-up `INSERT INTO TranscodeAttempts (MediaFileId, WorkerName, Success=NULL, ...)` fires from the WORKER after claim; the DB partial UNIQUE index catches any residual duplicate at insertion time (returns `IntegrityError`, worker rolls the claim back and picks the next row).
+
+**Owner authority (only owner writes to its own attempts):**
+- The owning worker (WorkerName on the attempt row) is the sole authority to write terminal state on that attempt (`Success`, `Disposition`, `Vmaf`, progress rows).
+- No other worker may write to another worker's in-flight attempt row.
+- Owner-side stuck-detect (`StuckJobDetectionService.DetectAndCleanStuckTranscodeJobs`, `DetectAndCleanHungEncodes`, `DetectAndCleanStuckQualityTestJobs`) filters at the SELECT layer -- each detector only surfaces jobs where `ClaimedBy = WorkerContext.Current().WorkerName` (or `Workers.WorkerName` = local). Remote-owned jobs are never inspected + never written.
+
+**Terminal cross-worker path -- the single sanctioned exception:**
+`Features/ServiceControl/AttemptAbandonmentSweeper.SweepStaleOwners(AbandonmentMinutes=5)` runs on every worker's OrphanCleanup tick. Its idempotent statement:
+```
+UPDATE TranscodeAttempts SET Success = FALSE, ErrorMessage = 'owner_abandoned'
+WHERE Success IS NULL
+  AND WorkerName IN ( SELECT WorkerName FROM Workers WHERE Status <> 'Online' AND LastHeartbeat < NOW() - INTERVAL '5 min' );
+```
+Owner dies -> heartbeat ages -> next tick releases the `ta_one_inflight_per_mfid` slot -> next claim on that MediaFileId proceeds. This is the ONLY cross-worker terminal write in the system; every other worker-owned attempt is written by its owner.
+
+**Consequence for TranscodeQueue rows:** the queue row is admission-side only. Delete it when work terminates naturally. If a queue row got reset back to Pending while an attempt is still in flight (any historical bug or future migration), a second worker's claim would insert a duplicate TranscodeAttempts row with Success=NULL -- and the DB refuses. The system self-heals to "one owner, one attempt, one output" by DB invariant, not by code convention.
 
 ### ActiveJobs Tracking
 
@@ -515,16 +530,15 @@ Table: `ActiveJobs`
 - Columns: Id, ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName, Status, CreatedAt, UpdatedAt
 - ProcessId stores `os.getpid()` (Python worker PID, NOT FFmpeg PID)
 - WorkerName identifies which worker owns the job -- all queries/cleanup are scoped by this
-- Used by StuckJobDetectionService to correlate running jobs with worker heartbeats
+- Consumed by `/Activity` snapshot + owner-side stuck-detect
 
-### Stuck Job Detection
+### Owner-side Stuck Detection
 
-Three-tier detection (all scoped by WorkerName):
-1. **Worker heartbeat** (Tier 1): `_IsWorkerOffline(WorkerName)` -- if LastHeartbeat > 5 min stale, worker is offline and all its jobs are stuck. Works across machines.
-2. **Progress stagnation** (Tier 2): `_IsJobFrozen()` checks `TranscodeProgress.LastFrameAdvance` -- if no frame advance for 15 minutes, job is frozen. Works across machines.
-3. **Local PID check** (Tier 3): `IsProcessAlive(ProcessId)` -- only runs for local jobs (WorkerName == hostname). Checks if the Python worker process is still alive. PID reuse is guarded by Tier 1 (heartbeat staleness).
+Every worker's `StuckJobDetectionService` runs only over jobs it owns (SELECT-layer filter `WorkerName = WorkerContext.Current().WorkerName`). Two detectors run:
+1. **Progress stagnation** -- `TranscodeProgress.LastFrameAdvance` older than `FrozenProgressThresholdMin` (SystemSettings, default 5 min) -> owner kills its own ffmpeg + writes Success=FALSE on its own attempt. Local psutil, local PID.
+2. **Hung-encode via RuntimeState** -- `Workers.RuntimeState='Encoding'` with stale `LastRuntimeStateUpdate` -> owner kills its own ffmpeg + writes Success=FALSE on its own attempt.
 
-Cleanup: resets TranscodeQueue to Pending (clears ClaimedBy/ClaimedAt), marks TranscodeAttempt as failed, deletes TranscodeProgress, updates ActiveJobs to Failed.
+**No cross-worker progress polling. No cross-worker DB writes.** A worker whose owner is heartbeat-stale + Offline gets its attempts released by `AttemptAbandonmentSweeper`; that is the entire cross-worker cleanup surface.
 
 ### Crash Recovery
 

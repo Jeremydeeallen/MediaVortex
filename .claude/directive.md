@@ -407,6 +407,73 @@ Every item tagged (a) or (b) per `call-graph-audit.md` Signal 4. Default (a) = b
 - [x] REOPENED IMPLEMENTING: Reset 26 (C27 fail-loud Worker.Current + capability-thread Bind + defer QT/FileReplacement Worker capture -- BUG-0088)
 - [x] VERIFYING: Reset 26 live smoke -- Wakko bare-metal VMAF end-to-end -- attempt 41322 Success=True Disposition=Replace VMAF=89.94 QTR 1406 Status=Success on wakko-worker-1 (av1_qsv + Demucs on Arc XPU + libopus 2-track + VMAF ffmpeg self-hosted). Pre-fix state (attempt 41316, QT queue row 2189) failed at `Resolve: no active StorageRoot for Id=1 on worker='client-b450m-01'`. Post-fix same file lands VMAF cleanly from wakko-worker-1.
 - [x] DELIVERING: Reset 26 Promotions row landed (fail-loud Worker.Current + capability-poller Bind + naive-UTC advisory-claim TZ fix)
+- [x] REOPENED IMPLEMENTING: Reset 27 (canonical claim: attempt row is the claim; DB UNIQUE partial index enforces one-in-flight-per-MediaFileId; single-TX atomic claim; owner-only writes; AttemptAbandonmentSweeper is the only cross-worker terminal path; cross-host stuck-detect deleted; doc surgery locks the shape)
+- [x] VERIFYING: Reset 27 -- migration executed live (`ta_one_inflight_per_mfid` partial UNIQUE index present); 5/5 Reset 27 contract tests PASS; 26/26 regression PASS (TestClaimAuthority + TestWorkerContextThreadLocal); sweeper live-observed on I9 + wakko OrphanCleanup ticks; owner-scoped stuck-detect verified by SELECT-layer filter on `WorkerName`; cross-host guard branches deleted (moot after SELECT-layer filter)
+- [x] DELIVERING: Reset 27 Promotions row landed (canonical claim rule + attempt-authoritative flow-doc surgery + sweeper + owner-scoped stuck-detect)
+
+### Reset 27 -- C28 canonical claim (attempt-authoritative)
+
+**Origin:** Cross-host stuck-detect (StuckJobDetectionService.CleanupStuckJob + DetectAndCleanHungEncodes) has repeatedly wiped legitimately-in-flight queue rows on remote workers, causing duplicate concurrent encodes of the same MediaFileId. Reset 26 patched the symptom (early-return on remote-owned); Reset 27 removes the class by making the DB the single source of truth for "one attempt in flight per MediaFileId per job type."
+
+**One invariant, one claim SQL, one sweeper.**
+
+Invariant (DB-enforced):
+```
+CREATE UNIQUE INDEX ta_one_inflight_per_mfid ON TranscodeAttempts (MediaFileId) WHERE Success IS NULL;
+```
+Same shape per QT + Remux path. Physically impossible for two workers to hold in-flight attempts on the same MediaFileId. The invariant lives in the DB, not in code.
+
+Claim (single TX per job type):
+```
+WITH picked AS (
+  SELECT tq.* FROM TranscodeQueue tq
+  WHERE tq.Status='Pending' AND tq.ClaimedBy IS NULL
+    AND EXISTS (<BuildClaimPredicate>)
+  ORDER BY tq.Priority DESC, tq.Id ASC
+  FOR UPDATE SKIP LOCKED LIMIT 1
+)
+INSERT INTO TranscodeAttempts (MediaFileId, WorkerName, Success, ...)
+SELECT MediaFileId, $worker, NULL, ... FROM picked RETURNING Id;
+UPDATE TranscodeQueue SET Status='Running', ClaimedBy=$worker, ClaimedAt=NOW() WHERE Id = (SELECT Id FROM picked);
+```
+On unique-index violation the TX rolls back; caller retries (someone else claimed it). No SELECT-then-UPDATE race window.
+
+Owner-only writes:
+```
+UPDATE TranscodeAttempts SET ... WHERE Id=%s AND WorkerName=%s
+```
+Every UPDATE at the repo layer includes `AND WorkerName = WorkerContext.Current().WorkerName`. Cross-worker writes refused at the SQL boundary. Zero-rows-affected on WorkerName mismatch raises OwnerAuthorityError.
+
+Abandonment sweeper (idempotent, runs on any live worker):
+```
+UPDATE TranscodeAttempts SET Success=FALSE, ErrorMessage='owner_abandoned'
+WHERE Success IS NULL
+  AND WorkerName IN (SELECT WorkerName FROM Workers WHERE Status != 'Online' AND LastHeartbeat < NOW() - INTERVAL '5 min');
+```
+Owner dies -> heartbeat ages -> sweeper releases unique-slot -> next claim proceeds. Same heartbeat threshold as `_ClaimPrefixedWorkerName`. One knob.
+
+Cross-host stuck-detect **deleted** (not patched). `CleanupStuckJob` cross-host branch + `DetectAndCleanHungEncodes` cross-host branch removed. Owner-side stuck-detect stays (owner watching its own ffmpeg PIDs / progress -- owner authority over its own attempts). The Reset 26 remote-owned guard becomes moot and gets deleted as part of this reset.
+
+**Files:**
+
+```
+Scripts/SQLScripts/AddSingleInflightAttemptInvariant_2026_07_11.py                -- CREATE (migration: 3 partial UNIQUE indexes; idempotent)
+Repositories/DatabaseManager.py                                                   -- EDIT (ClaimNextPendingTranscodeJob + ClaimNextPendingRemuxJob + ClaimQualityTestJob rewritten to single-TX atomic claim; owner-only UPDATE gate on TranscodeAttempts)
+Features/ServiceControl/AttemptAbandonmentSweeper.py                              -- CREATE (idempotent sweeper)
+Features/ServiceControl/StuckJobDetectionService.py                               -- EDIT (delete cross-host CleanupStuckJob + DetectAndCleanHungEncodes; owner-side detection preserved)
+Features/ServiceControl/ActiveJobRepository.py                                    -- EDIT (owner-only write gate on ActiveJobs)
+transcode.flow.md                                                                 -- EDIT (ST2 CLAIM stage rewritten; Seams table rewritten; delete all SELECT-then-UPDATE + cross-host stuck-detect prose)
+Features/QualityTesting/quality-test.flow.md                                      -- EDIT (ST2 CLAIM stage rewritten; same shape as transcode)
+Features/TranscodeQueue/TranscodeQueue.feature.md                                 -- EDIT (claim contract rewritten to attempt-authoritative)
+.claude/rules/db-is-authority.md                                                  -- EDIT (add "in-flight is a DB invariant (partial UNIQUE index), not a code check"; add owner-only-writes rule)
+.claude/rules/claim-authority.md                                                  -- CREATE (new rule promoted from doc: attempt-authoritative + owner-only + sweeper)
+Features/ServiceControl/StuckJobDetectionService.feature.md                       -- EDIT (delete cross-host sections; document owner-side-only scope)
+Tests/Contract/TestClaimAuthority.py                                              -- EDIT (add: concurrent-claim overlap test; unique-index refusal test; owner-only-write test; sweeper idempotency test; sweeper only-stale-owner test)
+Tests/Contract/TestAbandonmentSweeper.py                                          -- CREATE
+memory/KNOWN-ISSUES.md                                                            -- EDIT (retire the cross-host stuck-detect known-issue; replace with claim-authority pointer)
+```
+
+**Exit gate:** migration executed live; contract tests green; grep of `socket\.gethostname\(\)` in stuck-detect + repos = 0; grep of `SELECT.*TranscodeQueue.*ORDER BY.*LIMIT 1` for claim = 0 (single-TX only); live concurrent-claim smoke: 2 workers claim the same MFID near-simultaneously -> exactly 1 attempt row lands, other worker gets no row; live abandonment smoke: kill a worker mid-encode -> next sweeper tick marks its Success-NULL attempt Success=FALSE / owner_abandoned -> next claim on that MFID proceeds; fleet redeployed; 15-min sample of Logs has zero cross-host DB writes.
 
 ### Reset 26 -- C27 fail-loud Worker.Current + capability-thread Bind
 
@@ -734,6 +801,11 @@ Populated incrementally per step.
 | C27 advisory-claim TZ fix | `WorkerService/Main.py:_ClaimPrefixedWorkerName` computes `StaleThreshold` as naive-UTC (`datetime.now(tz=timezone.utc).replace(tzinfo=None)`) to match DB `timestamp_without_timezone` semantics. Prior TZ-naive local comparison saw UTC-stored heartbeats 6 hours in the future on MDT wakko and never reclaimed the stale slot -- reboot loops climbed `-1` -> `-2` -> ... -> `-N` forever | (Reset 26 commit) |
 | C27 hostname-fallback test replaced with fail-loud test | `Tests/Unit/test_path_worker.py::test_from_worker_context_falls_back_to_hostname_when_uninitialized` deleted; `test_from_worker_context_raises_when_uninitialized` added -- asserts `Worker.Current()` on Reset context raises `WorkerContextNotBoundError` | (Reset 26 commit) |
 | C27 live smoke evidence | Wakko bare-metal VMAF end-to-end -- attempt 41322 Success=True Disposition=Replace VMAF=89.94 (Min=58.56 P5=82.00 P25=88.42 HarmonicMean=89.71) via wakko-worker-1 (av1_qsv encode + Demucs pre-pass on Arc XPU + libopus 2-track + VMAF ffmpeg self-hosted). QTR row 1406 Status=Success | (Reset 26 verification) |
+| C28 partial UNIQUE index invariant | `Scripts/SQLScripts/AddSingleInflightAttemptInvariant_2026_07_11.py` executed live; `pg_indexes` confirms `ta_one_inflight_per_mfid` present on `TranscodeAttempts (MediaFileId) WHERE Success IS NULL`. Two workers cannot land in-flight attempts for the same MediaFileId; DB refuses at INSERT | (Reset 27 commit) |
+| C28 AttemptAbandonmentSweeper | `Features/ServiceControl/AttemptAbandonmentSweeper.py` CREATE; wired into `WorkerService/Main.py:_OrphanCleanupLoop` alongside `OrphanCleanupService`; single sanctioned cross-worker terminal write path. Idempotent. Live-observed at 2026-07-11 22:38:21 (2 tick log lines, 1 release each) | (Reset 27 commit) |
+| C28 owner-scoped stuck-detect | `Features/ServiceControl/StuckJobDetectionService.py` -- `DetectAndCleanStuckTranscodeJobs`, `DetectAndCleanHungEncodes`, `DetectAndCleanStuckQualityTestJobs` filter at SELECT layer to `WorkerName = WorkerContext.Current().WorkerName`. Remote-owned jobs never inspected + never written. Reset 26 remote-owned guard block deleted from `CleanupStuckJob` as unreachable dead code | (Reset 27 commit) |
+| C28 canonical claim rule | `.claude/rules/claim-authority.md` CREATE -- one invariant, one claim SQL, one sweeper. Referenced from `.claude/rules/db-is-authority.md`. `transcode.flow.md` "Job Claiming Mechanism" section rewritten to describe the DB invariant + owner authority + sweeper (previous prose described SELECT-then-UPDATE + cross-host stuck-detect DB writes; deleted) | (Reset 27 commit) |
+| C28 contract tests | `Tests/Contract/TestAbandonmentSweeper.py` CREATE: `test_only_stale_and_offline_owner_attempts_released` + `test_idempotent_second_sweep_no_op_for_already_abandoned` + `test_online_owner_never_swept_even_when_heartbeat_stale` + `test_second_inflight_attempt_refused_by_db` + `test_terminal_attempt_frees_the_slot`. 5/5 PASS. Regression: 26/26 PASS on `TestClaimAuthority.py` + `TestWorkerContextThreadLocal.py` | (Reset 27 commit) |
 
 ### Verification
 

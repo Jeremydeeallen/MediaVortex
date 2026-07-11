@@ -27,25 +27,27 @@ class StuckJobDetectionService:
         self.ProcessManagementService = ProcessManagementService()
         self.PhaseDetectorRegistry = PhaseDetectorRegistryInstance or PhaseDetectorRegistry(self.DatabaseManager)
 
+    # directive: transcode-flow-canonical
     def DetectAndCleanStuckTranscodeJobs(self) -> Dict[str, Any]:
-        """Main entry point for detecting and cleaning up stuck transcode jobs."""
+        """Owner-scoped stuck-detect: this worker only inspects and cleans jobs it owns. Cross-worker stale-owner cleanup routes through AttemptAbandonmentSweeper (heartbeat-driven, sole sanctioned cross-worker terminal write)."""
         try:
             LoggingService.LogFunctionEntry("DetectAndCleanStuckTranscodeJobs", "StuckJobDetectionService")
-
-            # Get all running transcode jobs
-            runningJobs = self.DatabaseManager.GetTranscodeQueueItemsByStatus("Running")
+            from Core.WorkerContext import WorkerContext
+            LocalWorkerName = WorkerContext.Current().WorkerName
+            AllRunning = self.DatabaseManager.GetTranscodeQueueItemsByStatus("Running") or []
+            runningJobs = [j for j in AllRunning if (getattr(j, 'ClaimedBy', None) or '') == LocalWorkerName]
 
             if not runningJobs:
-                LoggingService.LogInfo("Stuck job detection: No running transcode jobs found",
+                LoggingService.LogInfo(f"Stuck job detection: no running transcode jobs owned by '{LocalWorkerName}' (fleet has {len(AllRunning)})",
                                      "StuckJobDetectionService", "DetectAndCleanStuckTranscodeJobs")
                 return {
                     "Success": True,
-                    "Message": "No running jobs to check",
+                    "Message": "No owned running jobs to check",
                     "StuckJobsFound": 0,
                     "JobsCleaned": 0
                 }
 
-            LoggingService.LogInfo(f"Stuck job detection started - checking {len(runningJobs)} running jobs",
+            LoggingService.LogInfo(f"Stuck job detection started - checking {len(runningJobs)} owned running jobs",
                                  "StuckJobDetectionService", "DetectAndCleanStuckTranscodeJobs")
 
             stuckJobs = []
@@ -285,8 +287,6 @@ class StuckJobDetectionService:
                 }
 
             # directive: transcode-flow-canonical | # see worker-lifecycle.feature.md C6 for kill-target guards (FFmpegPid vs ProcessId, name check)
-            from Core.WorkerContext import WorkerContext
-            LocalWorkerName = WorkerContext.Current().WorkerName
             try:
                 from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
                 activeJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("TranscodeService"))
@@ -294,17 +294,7 @@ class StuckJobDetectionService:
                     if activeJob.get('QueueId') != QueueId:
                         continue
 
-                    jobWorkerName = activeJob.get('WorkerName')
                     ffmpegPid = activeJob.get('FFmpegPid')
-
-                    # directive: transcode-flow-canonical -- owning worker is authoritative for stuck-cleanup; remote-owned jobs return without DB writes
-                    if jobWorkerName and jobWorkerName != LocalWorkerName:
-                        LoggingService.LogInfo(
-                            f"Refusing cleanup of stuck job {QueueId}: owned by '{jobWorkerName}', "
-                            f"this worker is '{LocalWorkerName}'. Owning worker is authoritative.",
-                            "StuckJobDetectionService", "CleanupStuckJob"
-                        )
-                        return {"Success": True, "Skipped": True, "Reason": "remote-owned"}
 
                     # FFmpegPid path: target the recorded subprocess PID.
                     killTarget = None
@@ -550,26 +540,25 @@ class StuckJobDetectionService:
                 "StaleJobs": []
             }
 
+    # directive: transcode-flow-canonical
     def DetectAndCleanStuckQualityTestJobs(self) -> Dict[str, Any]:
-        """Detect and clean up stuck quality test jobs where FFmpeg VMAF processes have died."""
+        """Owner-scoped QT stuck-detect: only jobs owned by this worker are inspected. Cross-worker stale-owner cleanup routes through AttemptAbandonmentSweeper."""
         try:
             LoggingService.LogFunctionEntry("DetectAndCleanStuckQualityTestJobs", "StuckJobDetectionService")
+            from Core.WorkerContext import WorkerContext
+            LocalWorkerName = WorkerContext.Current().WorkerName
 
-            # First, detect and clean stale pending jobs (never started)
             staleResult = self.DetectAndCleanStaleQualityTestJobs()
 
-            # Get all running quality test jobs
-            # For quality test jobs, we need to get them differently since there's no status filter method
             qualityTestQueue = self.DatabaseManager.GetQualityTestQueue()
             from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
             activeQualityJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTestService"))
+            activeQualityJobs = [aj for aj in activeQualityJobs if (aj.get('WorkerName') or '') == LocalWorkerName]
 
-            # Filter quality test jobs that are actually running (have active jobs)
             runningJobs = []
             for activeJob in activeQualityJobs:
                 queueId = activeJob.get('QueueId')
                 if queueId:
-                    # Find the corresponding queue item
                     for queueItem in qualityTestQueue:
                         if queueItem['Id'] == queueId:
                             runningJobs.append(queueItem)
@@ -906,6 +895,9 @@ class StuckJobDetectionService:
                 ('HungEncodeThresholdSec',),
             )
             Threshold = int(ThresholdRows[0]['settingvalue']) if ThresholdRows else 600
+            # directive: transcode-flow-canonical
+            from Core.WorkerContext import WorkerContext
+            LocalWorkerName = WorkerContext.Current().WorkerName
             Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(
                 "SELECT w.WorkerName, w.RuntimeState, w.CurrentAttemptId, "
                 "EXTRACT(EPOCH FROM (NOW() - w.LastRuntimeStateUpdate))::int AS rs_age, "
@@ -914,7 +906,9 @@ class StuckJobDetectionService:
                 "FROM Workers w "
                 "LEFT JOIN TranscodeProgress tp ON tp.TranscodeAttemptId = w.CurrentAttemptId "
                 "LEFT JOIN ActiveJobs aj ON aj.QueueId = w.CurrentAttemptId AND aj.WorkerName = w.WorkerName "
-                "WHERE w.Enabled = TRUE AND w.RuntimeState = 'Encoding' AND w.CurrentAttemptId IS NOT NULL"
+                "WHERE w.Enabled = TRUE AND w.RuntimeState = 'Encoding' AND w.CurrentAttemptId IS NOT NULL "
+                "  AND w.WorkerName = %s",
+                (LocalWorkerName,),
             )
             Hung = []
             Cleaned = []
@@ -926,16 +920,6 @@ class StuckJobDetectionService:
                 FFmpegPid = R.get('ffmpegpid')
                 Hung.append({'AttemptId': AttemptId, 'WorkerName': WorkerName, 'FFmpegPid': FFmpegPid})
                 try:
-                    # directive: transcode-flow-canonical -- owning worker cleans; remote-owned jobs skipped entirely (no DB writes)
-                    from Core.WorkerContext import WorkerContext
-                    LocalWorkerName = WorkerContext.Current().WorkerName
-                    if WorkerName and WorkerName != LocalWorkerName:
-                        LoggingService.LogInfo(
-                            f"Skipping hung-encode cleanup for AttemptId={AttemptId}: owned by '{WorkerName}', "
-                            f"this worker is '{LocalWorkerName}'",
-                            "StuckJobDetectionService", "DetectAndCleanHungEncodes",
-                        )
-                        continue
                     if FFmpegPid:
                         self.ProcessManagementService.KillProcess(int(FFmpegPid))
                     self.DatabaseManager.DatabaseService.ExecuteNonQuery(
