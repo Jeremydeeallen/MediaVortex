@@ -284,16 +284,10 @@ class StuckJobDetectionService:
                     "ErrorMessage": f"TranscodeQueue job {QueueId} not found"
                 }
 
-            # Kill the hung FFmpeg process before resetting DB records.
-            # Three guards to prevent killing the wrong target:
-            #   1. FFmpegPid (NEW column, criterion 6) -- not ProcessId, which
-            #      is the Python worker PID and must never be killed.
-            #   2. Host-locality (criterion 9) -- only kill PIDs on this host.
-            #   3. Process name (D1) -- target must be an FFmpeg-or-shell, not
-            #      python/python.exe.
+            # directive: transcode-flow-canonical | # see worker-lifecycle.feature.md C6 for kill-target guards (FFmpegPid vs ProcessId, name check)
+            from Core.WorkerContext import WorkerContext
+            LocalWorkerName = WorkerContext.Current().WorkerName
             try:
-                import socket as _socket
-                LocalHostname = _socket.gethostname()
                 from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository as _AJR
                 activeJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("TranscodeService"))
                 for activeJob in activeJobs:
@@ -303,14 +297,14 @@ class StuckJobDetectionService:
                     jobWorkerName = activeJob.get('WorkerName')
                     ffmpegPid = activeJob.get('FFmpegPid')
 
-                    # Host-locality guard: cross-host jobs get DB-only cleanup.
-                    if jobWorkerName and jobWorkerName != LocalHostname:
+                    # directive: transcode-flow-canonical -- owning worker is authoritative for stuck-cleanup; remote-owned jobs return without DB writes
+                    if jobWorkerName and jobWorkerName != LocalWorkerName:
                         LoggingService.LogInfo(
-                            f"Skipping kill for stuck job {QueueId}: owned by '{jobWorkerName}', "
-                            f"this host is '{LocalHostname}'. DB cleanup will still run.",
+                            f"Refusing cleanup of stuck job {QueueId}: owned by '{jobWorkerName}', "
+                            f"this worker is '{LocalWorkerName}'. Owning worker is authoritative.",
                             "StuckJobDetectionService", "CleanupStuckJob"
                         )
-                        break
+                        return {"Success": True, "Skipped": True, "Reason": "remote-owned"}
 
                     # FFmpegPid path: target the recorded subprocess PID.
                     killTarget = None
@@ -932,10 +926,17 @@ class StuckJobDetectionService:
                 FFmpegPid = R.get('ffmpegpid')
                 Hung.append({'AttemptId': AttemptId, 'WorkerName': WorkerName, 'FFmpegPid': FFmpegPid})
                 try:
-                    import socket as _socket
-                    LocalHost = _socket.gethostname()
-                    IsLocal = bool(WorkerName) and (WorkerName == LocalHost or WorkerName.startswith(LocalHost + '-') or WorkerName.split('-worker-')[0] == LocalHost)
-                    if FFmpegPid and IsLocal:
+                    # directive: transcode-flow-canonical -- owning worker cleans; remote-owned jobs skipped entirely (no DB writes)
+                    from Core.WorkerContext import WorkerContext
+                    LocalWorkerName = WorkerContext.Current().WorkerName
+                    if WorkerName and WorkerName != LocalWorkerName:
+                        LoggingService.LogInfo(
+                            f"Skipping hung-encode cleanup for AttemptId={AttemptId}: owned by '{WorkerName}', "
+                            f"this worker is '{LocalWorkerName}'",
+                            "StuckJobDetectionService", "DetectAndCleanHungEncodes",
+                        )
+                        continue
+                    if FFmpegPid:
                         self.ProcessManagementService.KillProcess(int(FFmpegPid))
                     self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                         "UPDATE TranscodeAttempts SET Success = FALSE, ErrorMessage = %s "
