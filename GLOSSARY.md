@@ -77,11 +77,11 @@
 - **LoggingService** -- `Core/Logging/LoggingService`. `LogInfo(msg, ClassName, MethodName)` / `LogException(msg, exception, ClassName, MethodName)`. Source: `CLAUDE.md#key-patterns`.
 - **MEDIAVORTEX_DB_HOST** -- env var for DB host override (defaults to localhost on user level). Source: `CLAUDE.md#database`.
 - **NFS** -- protocol for Linux worker containers reading media storage. Microsoft NFS client against Linux nfsd is unreliable -- I9 uses SMB instead. Source: memory `feedback_ms_nfs_client_unreliable`, `project_worker_mount_split`.
-- **PathStorage** -- `Core/PathStorage` module. Canonical (DB-stored) vs local (host-specific) path decision. Source: `CLAUDE.md#key-patterns`; `.claude/rules/data-integrity.md`.
+- **PathStorage** -- `Core/Path` module. Canonical (DB-stored) vs local (host-specific) path decision. Source: `CLAUDE.md#key-patterns`; `.claude/rules/data-integrity.md`.
 - **PostgreSQL 16** -- authoritative data store on CT 203. Encoding UTF-8 mandatory (`LC_COLLATE='en_US.UTF-8'`, `LC_CTYPE='en_US.UTF-8'`, `TEMPLATE=template0`). Source: `CLAUDE.md#database`.
 - **ScheduleWakeup / ServiceLifecycleManager** -- `ServiceLifecycleManager` in `StartMediaVortex.py` orchestrates service start/stop. Source: `CLAUDE.md#two-microservices`.
 - **SMB** -- protocol I9 uses for media storage. Stable on Windows against the media share. Source: memory `project_worker_mount_split`.
-- **StorageRoot** -- named media root path stored in DB; `MediaFiles.RelativePath` is relative to a `StorageRootId`. Source: `Core/PathStorage`.
+- **StorageRoot** -- named media root path stored in DB; `MediaFiles.RelativePath` is relative to a `StorageRootId`. Source: `Core/Path`.
 - **StuckJobDetection** -- watchdog service that freezes stuck jobs. Freeze marks attempt `Success=FALSE` per BUG-0075 fix. Source: `Features/ServiceControl/StuckJobDetectionService.py`.
 - **venv** -- Python virtual env at `venv/` repo root. `WebService/venv/` is a separate env with its own installed set. Source: `.claude/rules/python-environment.md`; memory `feedback_webservice_venv_drift`.
 - **WebService** -- Flask on port 5000. UI + admission API. No transcoding work. Source: `ARCHITECTURE.md#topology`.

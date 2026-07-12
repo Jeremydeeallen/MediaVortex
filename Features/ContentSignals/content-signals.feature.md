@@ -63,7 +63,7 @@ Observable effects:
 
 12. The backfill is idempotent (already-signaled rows are skipped by the WHERE clause; re-running produces zero work). Verifiable: run twice on the same state, second run reports 0 processed.
 
-13. The backfill is shape-agnostic per `feedback_paths_must_be_shape_agnostic.md`: routes through `Core.PathStorage.Resolve(StorageRootId, RelativePath, WorkerName)` when the row has canonical pair; falls back to `FilePath` only if the canonical pair is NULL.
+13. The backfill is shape-agnostic per `feedback_paths_must_be_shape_agnostic.md`: routes through `Core.Path.LocalPath / Core.Path.Path.Resolve(StorageRootId, RelativePath, WorkerName)` when the row has canonical pair; falls back to `FilePath` only if the canonical pair is NULL.
 
 ## Data sources (what each tool gives us)
 

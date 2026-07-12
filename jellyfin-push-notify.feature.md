@@ -68,7 +68,7 @@ decision.
    host, e.g. `/mnt/SynologyMovies/...`), not the worker's local path
    (`M:\...` on Windows, `/mnt/movies/...` on a Linux worker). The
    translation goes through the same path-storage layer
-   (`Core/PathStorage.Resolve`) but resolves against a synthetic
+   (`Core/Path.Resolve`) but resolves against a synthetic
    `__jellyfin__` worker entry in `StorageRootResolutions`. Verifiable:
    `StorageRootResolutions` contains rows for `WorkerName='__jellyfin__'`
    covering every StorageRoot Jellyfin indexes; the notify payload for a
@@ -189,7 +189,7 @@ referencing the old `.mkv`. Documented as expected behavior; not a bug.
       # Updates: [{"Path": "/mnt/movies/x.mkv", "UpdateType": "Modified"}, ...]
   ```
 - Path translation: resolve `(StorageRootId, RelativePath)` against the
-  synthetic `__jellyfin__` worker via `Core.PathStorage.Resolve`. If no
+  synthetic `__jellyfin__` worker via `Core.Path.LocalPath / Core.Path.Path.Resolve`. If no
   resolution exists for a given root, log WARNING and skip that entry
   (don't fail the whole batch).
 - HTTP: `requests.post(f"http://{JellyfinHost}:{JellyfinApiPort}/Library/Media/Updated",
@@ -313,7 +313,7 @@ under `Features/` and `Services/` (2026-05-22):
 - `Features/FileScanning/*` (optional, criterion 1)
 - Any future `shutil.move|os.replace|os.rename|os.remove` site under
   `Features/` or `Services/`
-- `Core/PathStorage.py` — read-only consumer; no changes expected
+- `Core/Path/LocalPath.py + Core/Path/Path.py` — read-only consumer; no changes expected
 - `StorageRootResolutions` table — one new logical "worker" added (data,
   not schema)
 - `SystemSettings` table — reuses the existing `JellyfinHost`,

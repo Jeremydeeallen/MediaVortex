@@ -120,18 +120,23 @@ def StepEnsureFfmpeg(Target: str) -> bool:
     return True
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
-def StepSyncSource(Target: str) -> bool:
+# directive: transcode-flow-canonical -- stop systemd units before SyncSource; SyncSource preserves the dir inode, but systemd stop is the operator-visible drain that also guarantees no ffmpeg subprocesses are mid-flight during the file swap
+def StepStopSystemdUnits(Target: str, Count: int) -> bool:
+    Units = " ".join(f"mediavortex-worker@{I}.service" for I in range(1, Count + 1))
+    _Ssh(Target, f"systemctl stop {Units} 2>&1 || true", Timeout=120)
     _Ssh(Target, "mkdir -p /opt/mediavortex/src /etc/mediavortex", Timeout=10)
+    _Status(4, 10, "stop systemd units + prep dirs", "OK", f"{Count} unit(s) stopped")
+    return True
+
+
+# directive: transcode-flow-canonical | # see worker-deploy.C14
+def StepSyncSource(Target: str) -> bool:
     Sync = MediaVortexRoot / "deploy" / "SyncSource.py"
-    R = subprocess.run([sys.executable, str(Sync), "--target", Target, "--dest", "/opt/mediavortex/src"], capture_output=True, text=True, timeout=600)
+    R = subprocess.run([sys.executable, str(Sync), Target, "/opt/mediavortex/src", "--prune"], capture_output=True, text=True, timeout=600)
     if R.returncode != 0:
-        _Ssh(Target, "rm -rf /opt/mediavortex/src && mkdir -p /opt/mediavortex/src", Timeout=10)
-        for Sub in ("Features", "Core", "WorkerService", "Services", "Repositories", "Models", "Utilities", "Scripts"):
-            LocalSub = MediaVortexRoot / Sub
-            if LocalSub.exists():
-                _Scp(LocalSub, Target, "/opt/mediavortex/src/", Timeout=180)
-    _Status(4, 8, "sync source", "OK", "source at /opt/mediavortex/src")
+        _Status(5, 10, "sync source", "FAILED", (R.stderr or R.stdout or "")[-200:])
+        return False
+    _Status(5, 10, "sync source", "OK", "source at /opt/mediavortex/src (in-place; stale files pruned)")
     return True
 
 
@@ -146,7 +151,7 @@ def StepInstallSystemdUnit(Target: str, Friendly: str) -> bool:
     Prefix = f"{Friendly}-worker"
     _Ssh(Target, f"echo 'MEDIAVORTEX_WORKER_PREFIX={Prefix}' > /etc/mediavortex/worker-prefix.env", Timeout=10)
     _Ssh(Target, "systemctl daemon-reload", Timeout=10)
-    _Status(5, 8, "install systemd unit", "OK", f"mediavortex-worker@.service loaded, prefix={Prefix}")
+    _Status(6, 10, "install systemd unit", "OK", f"mediavortex-worker@.service loaded, prefix={Prefix}")
     return True
 
 
@@ -162,20 +167,34 @@ def StepStopContainersAndClearDb(Target: str, Friendly: str) -> bool:
         capture_output=True, text=True, timeout=30,
     )
     Detail = f"stopped {len(Names)} container(s); DB clear: {(Del.stdout or '').strip().splitlines()[-1][:60] if Del.stdout else 'err'}"
-    _Status(6, 8, "stop containers + clear DB", "OK", Detail)
+    _Status(7, 10, "stop containers + clear DB", "OK", Detail)
     return True
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
+# directive: transcode-flow-canonical -- age -1..-N slot heartbeats past 2min so prefix advisory-claim reclaims them cleanly on restart
+def StepAgeSlotHeartbeats(Friendly: str, Count: int) -> bool:
+    Prefix = f"{Friendly}-worker"
+    Names = ",".join(f"'{Prefix}-{I}'" for I in range(1, Count + 1))
+    QueryScript = MediaVortexRoot / "Scripts" / "SQLScripts" / "QueryDatabase.py"
+    subprocess.run(
+        [sys.executable, str(QueryScript), "sql", f"UPDATE Workers SET LastHeartbeat = NOW() - INTERVAL '5 min' WHERE WorkerName IN ({Names})", "--commit"],
+        capture_output=True, text=True, timeout=30,
+    )
+    _Status(8, 10, "age slot heartbeats", "OK", f"{Count} slot row(s) aged for clean reclaim")
+    return True
+
+
+# directive: transcode-flow-canonical -- serialized start avoids advisory-claim race where 2 boots see the same stale slot in the same window
 def StepStartInstances(Target: str, Friendly: str, Count: int) -> bool:
     for I in range(1, Count + 1):
         _Ssh(Target, f"systemctl enable --now mediavortex-worker@{I}.service", Timeout=30)
+        _Ssh(Target, "sleep 3", Timeout=10)
     R = _Ssh(Target, f"systemctl list-units 'mediavortex-worker@*' --no-legend --state=active | wc -l", Timeout=10)
     Active = int((R.stdout or "0").strip() or 0)
     if Active < Count:
-        _Status(7, 8, "start instances", "FAILED", f"expected {Count} active, got {Active}")
+        _Status(9, 10, "start instances", "FAILED", f"expected {Count} active, got {Active}")
         return False
-    _Status(7, 8, "start instances", "OK", f"{Active}/{Count} instances active")
+    _Status(9, 10, "start instances", "OK", f"{Active}/{Count} instances active")
     return True
 
 
@@ -183,7 +202,7 @@ def StepStartInstances(Target: str, Friendly: str, Count: int) -> bool:
 def StepVerify(Target: str, Friendly: str, Count: int) -> bool:
     R = _Ssh(Target, "systemctl list-units 'mediavortex-worker@*' --no-legend --state=active | awk '{print $1}' | head -8", Timeout=10)
     Lines = [L.strip() for L in (R.stdout or "").splitlines() if L.strip()]
-    _Status(8, 8, "verify", "OK" if len(Lines) >= Count else "FAILED", f"{len(Lines)}/{Count} systemd units active on {Friendly}")
+    _Status(10, 10, "verify", "OK" if len(Lines) >= Count else "FAILED", f"{len(Lines)}/{Count} systemd units active on {Friendly}")
     return len(Lines) >= Count
 
 
@@ -213,11 +232,15 @@ def main():
         return 2
     if not StepEnsureFfmpeg(Target):
         return 2
+    if not StepStopSystemdUnits(Target, Count):
+        return 2
     if not StepSyncSource(Target):
         return 2
     if not StepInstallSystemdUnit(Target, Friendly):
         return 2
     if not StepStopContainersAndClearDb(Target, Friendly):
+        return 2
+    if not StepAgeSlotHeartbeats(Friendly, Count):
         return 2
     if not StepStartInstances(Target, Friendly, Count):
         return 3

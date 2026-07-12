@@ -1,5 +1,5 @@
 ---
-description: Use when touching a file or directory path in MediaVortex Python code -- about to call `os.path.*`, compare two paths with `==`, or do filesystem I/O on a path variable. Surfaces the `Core.PathStorage` public API and the canonical-vs-local decision before the R6 hook refuses.
+description: Use when touching a file or directory path in MediaVortex Python code -- about to call `os.path.*`, compare two paths with `==`, or do filesystem I/O on a path variable. Surfaces the `Core.Path.LocalPath / Core.Path.Path` public API and the canonical-vs-local decision before the R6 hook refuses.
 argument-hint: <none>
 ---
 
@@ -7,7 +7,7 @@ argument-hint: <none>
 
 ## Overview
 
-MediaVortex paths mix UNC (`\\server\share\...`), Windows-drive (`T:\...`), and POSIX (`/mnt/...`) shapes. `os.path.*` is platform-dependent and silently wrong on the wrong worker. `Core.PathStorage` is the only correct surface. The R6 hook (`.claude/hooks/pre-edit-standards.ps1:768`) catches violations after they're typed; this skill is the proactive companion.
+MediaVortex paths mix UNC (`\\server\share\...`), Windows-drive (`T:\...`), and POSIX (`/mnt/...`) shapes. `os.path.*` is platform-dependent and silently wrong on the wrong worker. `Core.Path.LocalPath / Core.Path.Path` is the only correct surface. The R6 hook (`.claude/hooks/pre-edit-standards.ps1:768`) catches violations after they're typed; this skill is the proactive companion.
 
 ## Quick Reference
 
@@ -38,7 +38,7 @@ The most common wrong call. Always know which kind of path is in hand.
 
 ## Public Surface Boundary
 
-**STOP. Names with a leading underscore in `Core.PathStorage` are MODULE-PRIVATE. Importing `_PickPathFlavor`, `_WIN_DRIVE_RX`, `_STORAGE_ROOTS_CACHE`, or `_PREFIX_BY_ID_CACHE` from outside `Core/PathStorage.py` is a refusal -- not a tradeoff to flag. Do not import them. Do not "note the tradeoff" and import them anyway. Do not write a wrapper around them.**
+**STOP. Names with a leading underscore in `Core.Path.LocalPath / Core.Path.Path` are MODULE-PRIVATE. Importing `_PickPathFlavor`, `_WIN_DRIVE_RX`, `_STORAGE_ROOTS_CACHE`, or `_PREFIX_BY_ID_CACHE` from outside `Core/Path/LocalPath.py + Core/Path/Path.py` is a refusal -- not a tradeoff to flag. Do not import them. Do not "note the tradeoff" and import them anyway. Do not write a wrapper around them.**
 
 The leading underscore is the contract: the maintainer reserves the right to rename, remove, or change the signature of these symbols without warning. External callers who depended on them break silently. That is exactly the kind of cross-shape latent bug the canonical layer exists to prevent.
 
@@ -57,15 +57,15 @@ This is the exact thought that causes the wrong answer. Read it before you write
 | Situation | Do this |
 |---|---|
 | Small list (< ~50 paths: excluded-dirs, output-collision candidates, per-job sets) | Pairwise `PathsEqual(a, b)` in an O(n^2) loop. Concrete cost: 2,500 string compares for n=50. Fine. |
-| Larger list with a real O(n) requirement | Open a directive (`/n compare-key-on-pathstorage` or similar) to add a public `CompareKey(path)` to `Core/PathStorage.py`. Land it in one commit. Then dedup with `seen.add(CompareKey(p))`. |
+| Larger list with a real O(n) requirement | Open a directive (`/n compare-key-on-pathstorage` or similar) to add a public `CompareKey(path)` to `Core/Path/LocalPath.py + Core/Path/Path.py`. Land it in one commit. Then dedup with `seen.add(CompareKey(p))`. |
 | In a hurry, just ship | Use the O(n^2) loop. n=50 is fine; n=500 still completes in microseconds. The instinct that "O(n^2) is wrong" is theoretical for the path sizes this code base sees. |
 
-The forbidden answer is "import `_PickPathFlavor` to build my own key." That ships the same case-rule logic in two files. The whole point of `Core.PathStorage` is that the rule lives in exactly one place.
+The forbidden answer is "import `_PickPathFlavor` to build my own key." That ships the same case-rule logic in two files. The whole point of `Core.Path.LocalPath / Core.Path.Path` is that the rule lives in exactly one place.
 
 ### Concrete dedup pattern (use this verbatim)
 
 ```python
-from Core.PathStorage import PathsEqual
+from Core.Path.LocalPath / Core.Path.Path import PathsEqual
 
 def DeduplicatePaths(Paths):
     """Return Paths with duplicates removed, preserving order of first occurrence."""
@@ -91,14 +91,14 @@ O(n^2). Public-API only. Correct on every shape. Ship it.
 | `os.path.join(canonical, child)` | `Join(canonical, child)` | Host-separator on a Windows-shaped string. |
 | `LocalExists(canonical_from_db)` | `Exists(canonical, worker)` | Canonical needs `Resolve` first. |
 | `Exists(local_path, worker)` | `LocalExists(local_path)` | Local paths are already worker-side; `Exists` would re-translate. |
-| `from Core.PathStorage import _PickPathFlavor` | `from Core.PathStorage import Normalize, PathsEqual` | Module-private. Use the public API; surface a gap if it doesn't fit. |
+| `from Core.Path.LocalPath / Core.Path.Path import _PickPathFlavor` | `from Core.Path.LocalPath / Core.Path.Path import Normalize, PathsEqual` | Module-private. Use the public API; surface a gap if it doesn't fit. |
 | Building a set key with `Normalize(p).lower()` | pairwise `PathsEqual` (or open directive for `CompareKey`) | Unconditional `.lower()` is wrong for POSIX paths. |
 
 ## Resources
 
-- `path-storage.feature.md` -- the contract (criteria, public surface, migration phases).
-- `path-storage.flow.md` -- `Resolve` stages (ST1-ST4) + cross-stage seams.
-- `Core/PathStorage.py` -- the implementation.
+- `Core/Path/path.feature.md` -- the contract (criteria, public surface, migration phases).
+- `Core/Path/path.feature.md` -- `Resolve` stages (ST1-ST4) + cross-stage seams.
+- `Core/Path/LocalPath.py + Core/Path/Path.py` -- the implementation.
 - R6 hook at `.claude/hooks/pre-edit-standards.ps1:768` -- reactive enforcement; refuses `os.path.{dirname|basename|join|split|splitext|exists|isfile|isdir|getsize|getmtime|abspath|realpath|normpath|normcase}(pathvar)` with the per-op canonical answer.
 - `memory/feedback_paths_must_be_shape_agnostic.md` -- why this rule exists.
 - `memory/feedback_hook_path_forward_is_the_answer.md` -- when R6 fires, do exactly what the refusal says; do not invent a clever variant.

@@ -814,36 +814,35 @@ function Test-R5-ExecuteQueryMisuse {
 function Test-R6-PathShape {
     param($PostContent, $FilePath, $AllContent)
     if ($FilePath -notmatch '\.py$') { return $null }
-    # directive: paths-canonical-completion -- Core/PathStorage.py IS the canonical home; its own os.path uses are correct and exempt.
+    # directive: paths-canonical-completion -- Core/Path/LocalPath.py + Core/Path/Path.py IS the canonical home; its own os.path uses are correct and exempt.
     $NormR6 = $FilePath -replace '\\', '/'
-    if ($NormR6 -match '/Core/PathStorage\.py$') { return $null }
     $Lines = $PostContent -split "`n"
     for ($I = 0; $I -lt $Lines.Length; $I++) {
         if ($Lines[$I] -match '(?i)\b(\w*(?:path|filepath)\w*)\s*\.\s*replace\s*\([^)]*\)\s*\.\s*split\s*\(') {
             if (Test-AllowOverride $PostContent $I 'R6' $FilePath) { continue }
-            return "R6 Path shape: $FilePath line $($I+1) does .replace().split() on a path-named variable. FilePath is a mix of UNC, drive-letter, and POSIX shapes. Path forward: use Core.PathStorage.LastSegment(path) for filename, Core.PathStorage.ParentDir(path) for directory -- both shape-preserving for UNC/drive/POSIX. Run ``/mediavortex-paths`` for the full lookup + canonical-vs-local decision before retrying. See path-storage.feature.md."
+            return "R6 Path shape: $FilePath line $($I+1) does .replace().split() on a path-named variable. FilePath is a mix of UNC, drive-letter, and POSIX shapes. Path forward: use Core.Path.LocalPath.LocalBasename(path) for filename, Core.Path.LocalPath.LocalDirname(path) for directory (local strings after Path.Resolve(worker)); for canonical DB paths use Core.Path.Path. Run ``/mediavortex-paths`` for the full lookup + canonical-vs-local decision before retrying. See Core/Path/path.feature.md."
         }
         if ($Lines[$I] -match '(?i)os\.path\.(dirname|basename|join|split|splitext|exists|isfile|isdir|getsize|getmtime|abspath|realpath|normpath|normcase)\s*\(\s*\w*(?:path|filepath)\w*') {
             if (Test-AllowOverride $PostContent $I 'R6' $FilePath) { continue }
             $Op = $Matches[1]
             $Map = @{
-                'dirname'  = 'Core.PathStorage.ParentDir(path)  -- shape-preserving'
-                'basename' = 'Core.PathStorage.LastSegment(path)  -- shape-preserving'
-                'join'     = 'Core.PathStorage.Join(base, child)  -- preserves base shape'
-                'split'    = 'Core.PathStorage.SplitExt(path) or LastSegment+ParentDir'
-                'splitext' = 'Core.PathStorage.SplitExt(path)'
-                'exists'   = 'Core.PathStorage.Exists(canonical, worker)  OR  Core.PathStorage.LocalExists(local_path)'
-                'isfile'   = 'Core.PathStorage.IsFile(canonical, worker)  OR  Core.PathStorage.LocalIsFile(local_path)'
-                'isdir'    = 'Core.PathStorage.IsDir(canonical, worker)  OR  Core.PathStorage.LocalIsDir(local_path)'
-                'getsize'  = 'Core.PathStorage.GetSize(canonical, worker)  OR  Core.PathStorage.LocalGetSize(local_path)'
-                'getmtime' = 'Core.PathStorage.GetMTime(canonical, worker)  OR  Core.PathStorage.LocalGetMTime(local_path)'
-                'abspath'  = 'Core.PathStorage.ToLocal(canonical, worker) if you need a local-absolute path'
-                'realpath' = 'Core.PathStorage.ToLocal(canonical, worker) if you need a local-absolute path'
-                'normpath' = 'Core.PathStorage.Normalize(path)  -- shape-preserving (picks ntpath/posixpath by input shape)'
-                'normcase' = 'Core.PathStorage.PathsEqual(a, b)  -- equality after Normalize; auto-detects case sensitivity from shape'
+                'dirname'  = 'Core.Path.LocalPath.LocalDirname(path)  -- local wrapper; use Core.Path.Path for canonical DB paths'
+                'basename' = 'Core.Path.LocalPath.LocalBasename(path)  -- local wrapper; use Core.Path.Path for canonical DB paths'
+                'join'     = 'Core.Path.LocalPath.LocalJoin(base, child)  -- local wrapper; use Core.Path.Path for canonical DB paths'
+                'split'    = 'Core.Path.LocalPath.LocalSplitExt(path) or LocalBasename+LocalDirname'
+                'splitext' = 'Core.Path.LocalPath.LocalSplitExt(path)'
+                'exists'   = 'Core.Path.Path(sid, rel).Resolve(worker) then Core.Path.LocalPath.LocalExists(local)'
+                'isfile'   = 'Core.Path.Path(sid, rel).Resolve(worker) then Core.Path.LocalPath.LocalIsFile(local)'
+                'isdir'    = 'Core.Path.Path(sid, rel).Resolve(worker) then Core.Path.LocalPath.LocalIsDir(local)'
+                'getsize'  = 'Core.Path.Path(sid, rel).Resolve(worker) then Core.Path.LocalPath.LocalGetSize(local)'
+                'getmtime' = 'Core.Path.Path(sid, rel).Resolve(worker) then Core.Path.LocalPath.LocalGetMTime(local)'
+                'abspath'  = 'Core.Path.Path(sid, rel).Resolve(worker) returns a worker-local absolute path'
+                'realpath' = 'Core.Path.Path(sid, rel).Resolve(worker) returns a worker-local absolute path'
+                'normpath' = 'Core.Path.Path constructor normalizes; for local strings use Core.Path.LocalPath'
+                'normcase' = 'Core.Path.LocalPath.LocalSamePath(a, b) for local strings; Core.Path.Path equality by tuple for canonical'
             }
             $Suggest = $Map[$Op.ToLower()]
-            return "R6 Path shape: $FilePath line $($I+1) uses os.path.$Op on a path-named variable. os.path is platform-relative; MediaFiles.FilePath shapes are mixed (UNC / Windows-drive / POSIX). Path forward: $Suggest. For canonical vs local FS-op decision: canonical = path from DB column (needs worker translation); local = path already worker-resolved (ffmpeg binary, temp file, post-Resolve path). Run ``/mediavortex-paths`` for the full lookup + canonical-vs-local decision before retrying. See path-storage.feature.md and Core/PathStorage.py."
+            return "R6 Path shape: $FilePath line $($I+1) uses os.path.$Op on a path-named variable. os.path is platform-relative; MediaFiles.FilePath shapes are mixed (UNC / Windows-drive / POSIX). Path forward: $Suggest. For canonical vs local FS-op decision: canonical = path from DB column (needs worker translation); local = path already worker-resolved (ffmpeg binary, temp file, post-Resolve path). Run ``/mediavortex-paths`` for the full lookup + canonical-vs-local decision before retrying. See Core/Path/path.feature.md and Core/Path/LocalPath.py + Core/Path/Path.py."
         }
     }
     return $null

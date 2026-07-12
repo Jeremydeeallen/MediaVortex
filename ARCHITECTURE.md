@@ -57,7 +57,7 @@ Column-level ownership per vertical lives in each vertical's `*.feature.md`.
 | FFmpeg composition | `Features/CommandBuilder/` + emitter slots |
 | DB session | `Core/Database/DatabaseService` |
 | Logging | `Core/Logging/LoggingService` |
-| Path translation | `Core/PathStorage`, `Core/Path/LocalPath` (R6) |
+| Path translation | `Core/Path`, `Core/Path/LocalPath` (R6) |
 | Worker capability gate | `Core/Database/WorkerCapabilityPredicate` |
 | Failure budget gate | `Core/Database/FailureBudgetPredicate` |
 | LIKE escaping | `DatabaseService.EscapeLikePattern` with `ESCAPE '!'` |
@@ -84,7 +84,7 @@ Cross-vertical reads asymmetric; per-vertical Cross-Vertical Contract lists legi
 - Polymorphic FK columns never `CASCADE` (R7).
 - Each `*Compliant` column written only by its owning vertical.
 - `WorkBucket` GENERATED; Postgres refuses direct writes.
-- Canonical paths in `MediaFiles.FilePath` regardless of writing host (`Core/PathStorage` + R6).
+- Canonical paths in `MediaFiles.FilePath` regardless of writing host (`Core/Path` + R6).
 - No boot-cached config (`db-is-authority`).
 - Postgres `ENCODING 'UTF8' LC_COLLATE='en_US.UTF-8'`.
 - Every vertical has a `*.feature.md` with a Cross-Vertical Contract.

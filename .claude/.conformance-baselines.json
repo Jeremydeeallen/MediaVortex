@@ -19,9 +19,9 @@
       "metric": "os_path_on_pathvar_count",
       "regex": "(?i)os\\.path\\.(basename|dirname|join|split|splitext|exists|isfile|isdir|getsize|getmtime|abspath|realpath|normpath|normcase)\\s*\\(\\s*\\w*(?:path|filepath)\\w*",
       "paths": ["Features/", "Services/", "Repositories/", "Core/", "Models/", "WebService/", "WorkerService/", "StartMediaVortex.py", "StartWorker.py"],
-      "exclude_files": ["Core/PathStorage.py"],
+      "exclude_files": ["Core/Path/LocalPath.py + Core/Path/Path.py"],
       "baseline": 0,
-      "feature_doc": "path-storage.feature.md",
+      "feature_doc": "Core/Path/path.feature.md",
       "directive": "paths-canonical-completion + paths-normalize-completion"
     },
     {
@@ -30,7 +30,7 @@
       "regex": "(?i)\\b\\w*(?:path|filepath)\\w*\\s*\\.\\s*replace\\s*\\([^)]*\\)\\s*\\.\\s*split\\s*\\(",
       "paths": ["Features/", "Services/", "Repositories/", "Core/", "Models/", "WebService/", "WorkerService/", "StartMediaVortex.py", "StartWorker.py"],
       "baseline": 0,
-      "feature_doc": "path-storage.feature.md",
+      "feature_doc": "Core/Path/path.feature.md",
       "directive": "paths-canonical-completion"
     },
     {
@@ -39,7 +39,7 @@
       "regex": "# allow:.*R6",
       "paths": ["Features/", "Services/", "Repositories/", "Core/", "Models/", "WebService/", "WorkerService/", "StartMediaVortex.py", "StartWorker.py"],
       "baseline": 0,
-      "feature_doc": "path-storage.feature.md",
+      "feature_doc": "Core/Path/path.feature.md",
       "directive": "paths-canonical-completion"
     },
     {
@@ -47,9 +47,9 @@
       "metric": "pathstorage_private_import_count",
       "regex": "from Core\\.PathStorage import\\s+_",
       "paths": ["Features/", "Services/", "Repositories/", "Core/", "Models/", "WebService/", "WorkerService/", "Scripts/", "Tests/", "StartMediaVortex.py", "StartWorker.py"],
-      "exclude_files": ["Core/PathStorage.py"],
+      "exclude_files": ["Core/Path/LocalPath.py + Core/Path/Path.py"],
       "baseline": 0,
-      "feature_doc": "path-storage.feature.md",
+      "feature_doc": "Core/Path/path.feature.md",
       "directive": "paths-canonical-completion -- skill's public-surface boundary; the leading underscore is the contract"
     }
   ]

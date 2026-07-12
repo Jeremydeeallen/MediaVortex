@@ -1,7 +1,7 @@
 """Dry-run probe for ReconcileWithDisk's set-membership logic.
 
 Walks the disk for one RootFolder, computes (StorageRootId, RelativePath)
-for every disk path via Core.PathStorage, then reports how many DB rows
+for every disk path via Core.Path.LocalPath / Core.Path.Path, then reports how many DB rows
 would be classified as KEEP / MISSING / PRESERVE_NULL_STORAGE_ROOT
 WITHOUT touching the DB. Run this BEFORE flipping ScanEnabled on a
 worker the first time on a new platform.

@@ -922,13 +922,13 @@ BuildAudioFilters: ungainable peak for MediaFileId=13508
 
 ---
 
-### [BUG-0052] `Core.PathStorage` module deleted but 6 importers still import from it -- ModuleNotFoundError on invocation | resolved: 2026-06-12
+### [BUG-0052] `Core.Path.LocalPath / Core.Path.Path` module deleted but 6 importers still import from it -- ModuleNotFoundError on invocation | resolved: 2026-06-12
 **Date:** 2026-06-09 | **Area:** path-storage | **Severity:** production-importer broken (StartWorker.py)
 **Closed by:** Prereq hotfix commit 42ed437 (shipped before perfect-solid-transcode-pipeline Phase 1). Six importers migrated to `Core.Path.LocalPath` / `Core.Path.PathFs`; CLAUDE.md docs swept.
 
-**What happened:** Discovered 2026-06-09 during Phase 7 cleanup of the compliance directive. `Core/PathStorage.py` source file had been deleted but `Core/__pycache__/PathStorage.cpython-313.pyc` remained. Six callers still imported from the dead module: `StartWorker.py:34`, `_check_path.py`, `Tests/Unit/TestPathStorageShapeOps.py`, plus three Tests/Pipeline files already fixed in Phase 7.
+**What happened:** Discovered 2026-06-09 during Phase 7 cleanup of the compliance directive. `Core/Path/LocalPath.py + Core/Path/Path.py` source file had been deleted but `Core/__pycache__/PathStorage.cpython-313.pyc` remained. Six callers still imported from the dead module: `StartWorker.py:34`, `_check_path.py`, `Tests/Unit/TestPathStorageShapeOps.py`, plus three Tests/Pipeline files already fixed in Phase 7.
 
-**Fix:** Migrated each importer to the canonical `from Core.Path.LocalPath import ...` (or the `Path` + `Worker` resolver pattern for path-resolution use cases). Swept `CLAUDE.md` paths section to remove the stale `from Core.PathStorage import ...` documentation. Deleted the stranded `.pyc` cache. Pre-Phase-1 ship so fresh container bootstrap on larry succeeded.
+**Fix:** Migrated each importer to the canonical `from Core.Path.LocalPath import ...` (or the `Path` + `Worker` resolver pattern for path-resolution use cases). Swept `CLAUDE.md` paths section to remove the stale `from Core.Path.LocalPath / Core.Path.Path import ...` documentation. Deleted the stranded `.pyc` cache. Pre-Phase-1 ship so fresh container bootstrap on larry succeeded.
 
 ---
 

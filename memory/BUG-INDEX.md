@@ -56,5 +56,5 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0059 | superseded | activity-page | Active Jobs hidden during drain; folded into BUG-0063 at filing time | 2026-06-12 -> 2026-06-12
 - BUG-0060 | superseded | transcode-job | 1455 orphan TranscodeAttempts; folded into BUG-0061 at filing time | 2026-06-12 -> 2026-06-12
 - BUG-0053 | resolved | tests | Tests/Contract/TestMediaProbeUsesPath.py SELECTs non-column m.FilePath; closed by prereq hotfix 42ed437 (SELECT rewritten to typed pair) | 2026-06-09 -> 2026-06-12
-- BUG-0052 | resolved | path-storage | Core/PathStorage.py importers migrated to Core.Path.LocalPath/PathFs; CLAUDE.md docs swept; closed by prereq hotfix 42ed437 | 2026-06-09 -> 2026-06-12
+- BUG-0052 | resolved | path-storage | Core/Path/LocalPath.py + Core/Path/Path.py importers migrated to Core.Path.LocalPath/PathFs; CLAUDE.md docs swept; closed by prereq hotfix 42ed437 | 2026-06-09 -> 2026-06-12
 - BUG-0051 | resolved | transcode-queue | ProcessRemuxQueueService AttributeError; closed structurally by perfect-solid-transcode-pipeline-phase3 commit 39d04a1 (file deleted, surface gone) | 2026-06-09 -> 2026-06-12

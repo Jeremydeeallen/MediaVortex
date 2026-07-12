@@ -31,9 +31,9 @@ Each row = one directive. Estimated days of operator wall-clock.
 | 4 | `path-performance-budget` | 0.5 | Microbenchmark suite + mock-DB sentinel that raises if `__eq__`/`__hash__`/`__repr__`/`__str__`/`ToJsonDict` hit the DB. `Resolve` p99 < 1ms when worker.ResolveStorageRoot cached. |
 | 5 | `path-db-roundtrip-live` | 0.5 | Contract test exercised against live 10.0.0.15:5432 PostgreSQL + per-table audit on every path-bearing table (MediaFiles, MediaFilesArchive, TranscodeQueue, TranscodeAttempts, TemporaryFilePaths, ShowSettings). Zero round-trip loss. |
 | 6 | `path-migration-rehearsal` | 1 | Read-only audit script walking every `MediaFiles.FilePath` row, attempting `Path.FromLegacyString`. Report parse-failure rate. < 0.1% target; every failure has logged root cause. |
-| 7 | `<feature>-uses-path` x N | 4 | Per v1 feature: swap callers from `Core/PathStorage.<func>` to `Core/Path/Path.<method>`. One directive per feature vertical (FileScanning, MediaProbe, FileReplacement, TranscodeJob, QualityTesting, TranscodeQueue, Activity). |
+| 7 | `<feature>-uses-path` x N | 4 | Per v1 feature: swap callers from `Core/Path.<func>` to `Core/Path/Path.<method>`. One directive per feature vertical (FileScanning, MediaProbe, FileReplacement, TranscodeJob, QualityTesting, TranscodeQueue, Activity). |
 | 8 | `path-schema-migration` | 1 | Drop legacy `FilePath` columns. Idempotent migration. Rollback documented. |
-| 9 | `path-v1-deprecation` | 0.5 | Delete `Core/PathStorage.py`. Remove `/mediavortex-paths` command. Re-evaluate R6 hook necessity. |
+| 9 | `path-v1-deprecation` | 0.5 | Delete `Core/Path/LocalPath.py + Core/Path/Path.py`. Remove `/mediavortex-paths` command. Re-evaluate R6 hook necessity. |
 | 10 | `path-flawless-attestation` | 0.5 | Coverage >= 95%, mutmut < 5% survivors, 1M Hypothesis examples green, live-DB audit clean, 7-day production logs zero unexplained PathError. |
 
 **Total:** ~10 operator-days elapsed (across multiple sessions).
@@ -73,7 +73,7 @@ Reference list. Specific picks happen at each directive's NEEDS_PLAN.
 
 ### Agents
 
-- `Explore` -- finding callers (Phase 7), confirming zero `Core.PathStorage` imports (Phase 9).
+- `Explore` -- finding callers (Phase 7), confirming zero `Core.Path.LocalPath / Core.Path.Path` imports (Phase 9).
 - `Plan` -- per-phase implementation plan.
 - `qa-tester` -- per-directive: walk numbered criteria against actual code, report per-criterion status.
 - `general-purpose` -- multi-step audits (Phase 6 migration rehearsal script, Phase 10 evidence gathering).
