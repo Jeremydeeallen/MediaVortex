@@ -154,18 +154,7 @@ class FileScanningBusinessService:
                 except Exception:
                     pass
 
-            # Per-rootfolder claim guard (criterion 11): refuse a duplicate scan
-            # when another worker (or this one) already has a Pending/Running
-            # ScanJobs row for this path. Prevents two ScanEnabled workers from
-            # racing when their continuous-scan ticks land in the same window.
-            # Global concurrency cap removed with criterion 18c -- it
-            # contradicted the per-rootfolder claim semantics.
-            if self.Repository.GetRunningScans(RootFolderPath):
-                return {
-                    'Success': False,
-                    'Message': f'Scan already running for {RootFolderPath}',
-                    'Error': 'ScanAlreadyRunning'
-                }
+            # directive: transcode-flow-canonical -- per-rootfolder claim enforced by DB partial UNIQUE index sj_one_active_per_root; INSERT ... ON CONFLICT DO NOTHING is the atomic claim
 
             # Validate the root folder path with detailed debugging
             LoggingService.LogInfo(f"Starting path validation for: '{RootFolderPath}'", 'FileScanningBusinessService', 'StartScanning')
@@ -198,12 +187,17 @@ class FileScanningBusinessService:
                     'Error': 'NotDirectory'
                 }
 
-            # Generate unique job ID
             JobId = str(uuid.uuid4())
             self.CurrentJobId = JobId
 
-            # Create scan job record
-            self.CreateScanJob(JobId, RootFolderPath, Recursive, WorkerName=WorkerName)
+            # directive: transcode-flow-canonical -- atomic claim; loser returns cleanly
+            if not self.CreateScanJob(JobId, RootFolderPath, Recursive, WorkerName=WorkerName):
+                self.CurrentJobId = None
+                return {
+                    'Success': False,
+                    'Message': f'Scan already running for {RootFolderPath}',
+                    'Error': 'ScanAlreadyRunning'
+                }
 
             # Set scanning state
             self.IsScanning = True
@@ -252,8 +246,8 @@ class FileScanningBusinessService:
                 'Error': 'ScanError'
             }
 
-    # directive: path-perfect-implementation | # see filescanning.S1
-    def CreateScanJob(self, JobId: str, RootFolderPath: str, Recursive: bool, WorkerName: Optional[str] = None):
+    # directive: transcode-flow-canonical -- atomic per-rootfolder claim via ON CONFLICT DO NOTHING; returns True on win, False if another worker already has an active scan for this StorageRootId+RelativePath
+    def CreateScanJob(self, JobId: str, RootFolderPath: str, Recursive: bool, WorkerName: Optional[str] = None) -> bool:
         try:
             from Core.Path.Path import Path, PathError
             from Core.Path.PathStorageRoots import GetStorageRoots
@@ -264,11 +258,17 @@ class FileScanningBusinessService:
                 Sid, Rel = None, None
             Query = (
                 "INSERT INTO ScanJobs (JobId, StorageRootId, RelativePath, Recursive, Status, StartTime, LastUpdated, ScanType, WorkerName) "
-                "VALUES (%s, %s, %s, %s, 'Running', %s, %s, 'File', %s)"
+                "SELECT %s, %s, %s, %s, 'Running', %s, %s, 'File', %s "
+                "WHERE NOT EXISTS ( "
+                "  SELECT 1 FROM ScanJobs sj_dup "
+                "  WHERE sj_dup.StorageRootId = %s "
+                "    AND COALESCE(sj_dup.RelativePath, '') = COALESCE(%s, '') "
+                "    AND sj_dup.Status IN ('Pending', 'Running') "
+                ")"
             )
             Now = datetime.now(timezone.utc)
-            self.Repository.DatabaseService.ExecuteNonQuery(Query, (JobId, Sid, Rel, Recursive, Now, Now, WorkerName))
-
+            Affected = self.Repository.DatabaseService.ExecuteNonQuery(Query, (JobId, Sid, Rel, Recursive, Now, Now, WorkerName, Sid, Rel))
+            return int(Affected or 0) > 0
         except Exception as e:
             LoggingService.LogException(f"Error creating scan job {JobId}", e, 'FileScanningBusinessService', 'CreateScanJob')
             raise
