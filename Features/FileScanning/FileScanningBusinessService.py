@@ -119,15 +119,12 @@ class FileScanningBusinessService:
         except Exception as Ex:
             LoggingService.LogException("Error checking existing scans on init", Ex, 'FileScanningBusinessService', '__init__')
 
-    # directive: path-perfect-implementation | # see path.S11
+    # directive: transcode-flow-canonical -- fail loud; caller must distinguish resolve-failure from disk-missing
     def _ToLocalPath(self, CanonicalPath: str) -> str:
-        try:
-            from Core.Path.Path import Path as _Path, PathError as _PE
-            from Core.Path.PathStorageRoots import GetStorageRoots as _GSR
-            from Core.Path.Worker import Worker as _W
-            return _Path.FromLegacyString(CanonicalPath, _GSR()).Resolve(_W.Current(Db=self.Repository.DatabaseService))
-        except Exception:
-            return CanonicalPath
+        from Core.Path.Path import Path as _Path
+        from Core.Path.PathStorageRoots import GetStorageRoots as _GSR
+        from Core.Path.Worker import Worker as _W
+        return _Path.FromLegacyString(CanonicalPath, _GSR()).Resolve(_W.Current(Db=self.Repository.DatabaseService))
 
     # directive: path-perfect-implementation | # see path.S11
     def _ToCanonicalPath(self, LocalPath: str) -> str:
@@ -1184,25 +1181,28 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error in fuzzy file matching", e)
             return None
 
-    # directive: path-schema-migration | # see path.S8
+    # directive: transcode-flow-canonical -- resolve-failure is a WorkerContext / StorageRoot bug, NOT a missing file; MUST NOT delete the row
     def ProcessSingleMediaFile(self, FilePath: str, RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
         """Process a single media file with fuzzy matching and optional metadata extraction; FilePath param is the canonical path string."""
         try:
-            # Canonicalize path string for DB consistency (lookups vs inserts).
             FilePath = ntpath.normpath(FilePath or "")
-            LocalPath = self._ToLocalPath(FilePath)
+            try:
+                LocalPath = self._ToLocalPath(FilePath)
+            except Exception as ResolveEx:
+                LoggingService.LogError(
+                    f"Path resolve failed (WorkerContext / StorageRoot); SKIPPING (not deleting) {FilePath}: {ResolveEx!r}",
+                    'ProcessSingleMediaFile', 'FileScanningBusinessService',
+                )
+                return
 
-            # Existence check uses the translated local path.
             if not LocalExists(LocalPath):
                 LoggingService.LogWarning(f"File does not exist on disk: {FilePath} (local: {LocalPath})", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
-
                 ExistingFile = self.MediaFilesRepository.GetMediaFileByPath(FilePath)
                 if ExistingFile:
                     LoggingService.LogInfo(f"Deleting database entry for missing file: {FilePath} (ID: {ExistingFile.Id})", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
                     self.MediaFilesRepository.DeleteMediaFile(ExistingFile.Id)
                 else:
                     LoggingService.LogDebug(f"No database entry found for missing file: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
-
                 return
 
             # Filesystem reads use LocalPath; DB writes use canonical FilePath.
@@ -2215,11 +2215,14 @@ class FileScanningBusinessService:
                         self.ScanErrors.append(ErrorMessage)
                     return {'Success': False, 'FilePath': FilePath, 'Error': str(e)}
 
-            # Process files in parallel with 5 workers
+            # directive: transcode-flow-canonical -- pool workers must Bind WorkerContext for _ToLocalPath resolution
+            from Core.WorkerContext import WorkerContext as _WC
+            def _BindAndProcess(Fp):
+                _WC.Bind()
+                return ProcessSingleFile(Fp)
             MaxWorkers = 5
             with ThreadPoolExecutor(max_workers=MaxWorkers) as Executor:
-                # Submit all files for processing
-                FutureToFile = {Executor.submit(ProcessSingleFile, FilePath): FilePath for FilePath in MediaFiles}
+                FutureToFile = {Executor.submit(_BindAndProcess, FilePath): FilePath for FilePath in MediaFiles}
 
                 # Wait for all tasks to complete
                 for Future in as_completed(FutureToFile):
