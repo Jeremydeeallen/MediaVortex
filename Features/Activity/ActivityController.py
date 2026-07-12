@@ -89,7 +89,7 @@ def NavBadges():
         Db = DatabaseService()
         QueueRow = Db.ExecuteQuery("SELECT COUNT(*)::int AS n FROM TranscodeQueue WHERE Status='Pending'")
         QueueCount = int((QueueRow or [{}])[0].get('n') or 0)
-        ActiveRow = Db.ExecuteQuery("SELECT COUNT(*)::int AS n FROM ActiveJobs")
+        ActiveRow = Db.ExecuteQuery("SELECT COUNT(*)::int AS n FROM ActiveJobs WHERE Status = 'Running'")
         ActiveJobsCount = int((ActiveRow or [{}])[0].get('n') or 0)
         from Features.FailureAccounting.Repositories.FailedJobsRepository import FailedJobsRepository
         FailedJobsCount = int(FailedJobsRepository(Db).CountCapped())

@@ -389,15 +389,10 @@ class StuckJobDetectionService:
             """
             progressAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(progressDeleteQuery, (jobDetails.MediaFileId,))
 
-            # 4. Complete ActiveJobs records for this service
-            activeJobUpdateQuery = """
-            UPDATE ActiveJobs
-            SET Status = 'Failed', UpdatedAt = NOW()
-            WHERE ServiceName = 'TranscodeService' AND QueueId = %s
-            """
+            # directive: transcode-flow-canonical -- terminal path DELETEs (no zombie Status='Failed' rows)
             activeJobAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                activeJobUpdateQuery,
-                (QueueId,)
+                "DELETE FROM ActiveJobs WHERE ServiceName = 'TranscodeService' AND QueueId = %s",
+                (QueueId,),
             )
 
             # Log cleanup details
@@ -731,15 +726,10 @@ class StuckJobDetectionService:
                     """
                     progressAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(progressDeleteQuery, (transcodeAttemptId,))
 
-                # 4. Complete ActiveJobs records for this service
-                activeJobUpdateQuery = (
-                    "UPDATE ActiveJobs "
-                    "SET Status = 'Failed', UpdatedAt = NOW() "
-                    "WHERE ServiceName = 'QualityTestService' AND QueueId = %s"
-                )
+                # directive: transcode-flow-canonical -- terminal path DELETEs (no zombie Status='Failed' rows)
                 activeJobAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                    activeJobUpdateQuery,
-                    (QueueId,)
+                    "DELETE FROM ActiveJobs WHERE ServiceName = 'QualityTestService' AND QueueId = %s",
+                    (QueueId,),
                 )
 
                 LoggingService.LogInfo(f"Cleaned up stuck quality test job {QueueId}: Queue={queueAffected}, Results={resultsAffected}, Progress={progressAffected}, ActiveJobs={activeJobAffected}",
