@@ -819,10 +819,11 @@ class WorkerServiceApp:
         except Exception as e:
             LoggingService.LogException("Error starting stuck job detection loop", e, "WorkerService", "_StartStuckJobDetection")
 
+    # directive: transcode-flow-canonical
     def _StuckJobDetectionLoop(self):
         """Run stuck-job detection on a configurable interval until shutdown."""
-        # Avoid double-firing immediately after the startup-time call in
-        # _DetectAndCleanStuckJobs by sleeping the interval first.
+        from Core.WorkerContext import WorkerContext
+        WorkerContext.Bind()
         from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
         SettingsRepo = SystemSettingsRepository()
 

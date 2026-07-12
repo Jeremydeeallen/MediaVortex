@@ -331,9 +331,12 @@ class ProcessQualityTestQueueService:
             LoggingService.LogException("Error stopping stuck quality test job monitoring", e,
                                       "ProcessQualityTestQueueService", "StopStuckJobMonitoring")
 
+    # directive: transcode-flow-canonical
     def StuckJobMonitoringLoop(self):
         """Background monitoring loop for stuck quality test jobs - runs every 5 minutes."""
         try:
+            from Core.WorkerContext import WorkerContext
+            WorkerContext.Bind()
             LoggingService.LogInfo("Stuck quality test job monitoring loop started",
                                  "ProcessQualityTestQueueService", "StuckJobMonitoringLoop")
 
