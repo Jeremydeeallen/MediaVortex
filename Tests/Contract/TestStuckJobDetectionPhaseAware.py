@@ -90,6 +90,13 @@ class StuckJobDetectionPhaseAwareTest(unittest.TestCase):
         self.assertIn('offline', Reason)
         Registry.GetDetector.assert_not_called()
 
+    # directive: transcode-flow-canonical -- Reset 28 item 6: pre-C21 RuntimeState-based kill path retired
+    def test_no_pre_c21_hung_encode_kill_path(self):
+        self.assertFalse(
+            hasattr(StuckJobDetectionService, 'DetectAndCleanHungEncodes'),
+            'DetectAndCleanHungEncodes retired (Reset 28); EncodingPhaseDetector is sole source of truth for Encoding-phase stuck detection.',
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

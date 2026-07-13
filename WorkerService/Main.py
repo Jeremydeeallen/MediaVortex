@@ -859,12 +859,6 @@ class WorkerServiceApp:
                     DetectionService.DetectAndCleanStuckScanJobs()
                 except Exception as scanEx:
                     LoggingService.LogException("Error in stuck scan detection cycle", scanEx, "WorkerService", "_StuckJobDetectionLoop")
-
-                # directive: worker-runtime-state | # see admin-workers.C9
-                try:
-                    DetectionService.DetectAndCleanHungEncodes()
-                except Exception as hungEx:
-                    LoggingService.LogException("Error in hung-encode detection cycle", hungEx, "WorkerService", "_StuckJobDetectionLoop")
             except Exception as e:
                 LoggingService.LogException("Error in stuck job detection cycle", e, "WorkerService", "_StuckJobDetectionLoop")
             self.ShutdownEvent.wait(_ReadInterval())
