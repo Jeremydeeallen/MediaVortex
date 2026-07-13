@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from Core.Database.DatabaseService import DatabaseService
+from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
 
 PROBE_ARGS = ['ffmpeg', '-hide_banner', '-h', 'encoder=av1_qsv']
@@ -56,21 +56,31 @@ def Main():
     print(f'Target: {SshTarget}')
 
     Containers = _ListMediaVortexContainers(SshTarget)
-    if not Containers:
-        print('No mediavortex-worker containers running on this host. Nothing to reconcile.')
-        return 0
-
     Db = DatabaseService()
     Changes = 0
-    for Container in Containers:
-        WorkerName = _ContainerHostname(SshTarget, Container)
+    if Containers:
+        Probes = [(_ContainerHostname(SshTarget, C), _ProbeQsvInContainer(SshTarget, C)) for C in Containers]
+    else:
+        # directive: transcode-flow-canonical -- bare-metal (wakko): SSH+probe directly, apply to <hostprefix>-worker-*
+        Probe = subprocess.run(['ssh', SshTarget] + PROBE_ARGS, capture_output=True, text=True, timeout=PROBE_TIMEOUT_SEC)
+        Output = (Probe.stdout or '') + (Probe.stderr or '')
+        Capable = Probe.returncode == 0 and 'av1_qsv' in Output
+        HostPrefix = Args.host.split('@')[-1].split('.')[0]
+        Rows = Db.ExecuteQuery(
+            "SELECT WorkerName FROM Workers WHERE WorkerName LIKE %s ESCAPE '!'",
+            (EscapeLikePattern(f'{HostPrefix}-worker-') + '%',),
+        ) or []
+        if not Rows:
+            print(f'No containers and no bare-metal workers matching {HostPrefix}-worker-* found. Nothing to reconcile.')
+            return 0
+        Probes = [(R.get('WorkerName') or R.get('workername'), Capable) for R in Rows]
+        print(f'  bare-metal probe on {SshTarget}: av1_qsv={Capable}')
+
+    for WorkerName, Capable in Probes:
         if not WorkerName:
-            print(f'  {Container}: could not read hostname; skipping.')
+            print('  <no worker name>: skipped.')
             continue
-        Capable = _ProbeQsvInContainer(SshTarget, Container)
-        StoredRows = Db.ExecuteQuery(
-            'SELECT qsvcapable FROM Workers WHERE WorkerName = %s', (WorkerName,)
-        )
+        StoredRows = Db.ExecuteQuery('SELECT qsvcapable FROM Workers WHERE WorkerName = %s', (WorkerName,))
         Stored = bool(StoredRows[0].get('qsvcapable')) if StoredRows else False
         if Stored == Capable:
             print(f'  {WorkerName}: probe={Capable}, stored={Stored} -- no change')
@@ -79,9 +89,7 @@ def Main():
             print(f'  {WorkerName}: probe={Capable}, stored={Stored} -- would UPDATE (dry-run)')
             Changes += 1
             continue
-        Db.ExecuteNonQuery(
-            'UPDATE Workers SET qsvcapable = %s WHERE WorkerName = %s', (Capable, WorkerName)
-        )
+        Db.ExecuteNonQuery('UPDATE Workers SET qsvcapable = %s WHERE WorkerName = %s', (Capable, WorkerName))
         print(f'  {WorkerName}: probe={Capable}, stored={Stored} -- UPDATED to {Capable}')
         Changes += 1
 

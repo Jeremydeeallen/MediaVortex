@@ -73,9 +73,9 @@ def _DetectTorchVariant(Target: str) -> str:
 def StepPreflight(Target: str, Friendly: str) -> bool:
     R = _Ssh(Target, "which python3.12 && which docker || which podman; test -d /mnt/media_tv && echo mounts_ok", Timeout=10)
     if "mounts_ok" not in (R.stdout or ""):
-        _Status(1, 8, "preflight", "FAILED", f"missing /mnt/media_tv on {Friendly}")
+        _Status(1, 13, "preflight", "FAILED", f"missing /mnt/media_tv on {Friendly}")
         return False
-    _Status(1, 8, "preflight", "OK", f"python3.12 + docker + mounts present on {Friendly}")
+    _Status(1, 13, "preflight", "OK", f"python3.12 + docker + mounts present on {Friendly}")
     return True
 
 
@@ -97,9 +97,9 @@ def StepEnsureVenv(Target: str, TorchVariant: str) -> bool:
     )
     R = _Ssh(Target, Script, Timeout=1800)
     if "VENV_READY" not in (R.stdout or ""):
-        _Status(2, 8, "ensure venv", "FAILED", (R.stderr or "")[-200:])
+        _Status(2, 13, "ensure venv", "FAILED", (R.stderr or "")[-200:])
         return False
-    _Status(2, 8, "ensure venv", "OK", f"torch variant={TorchVariant}")
+    _Status(2, 13, "ensure venv", "OK", f"torch variant={TorchVariant}")
     return True
 
 
@@ -107,16 +107,16 @@ def StepEnsureVenv(Target: str, TorchVariant: str) -> bool:
 def StepEnsureFfmpeg(Target: str) -> bool:
     R = _Ssh(Target, "test -x /usr/local/bin/ffmpeg && echo FFMPEG_OK", Timeout=10)
     if "FFMPEG_OK" in (R.stdout or ""):
-        _Status(3, 8, "ensure ffmpeg", "SKIPPED", "already at /usr/local/bin/ffmpeg")
+        _Status(3, 13, "ensure ffmpeg", "SKIPPED", "already at /usr/local/bin/ffmpeg")
         return True
     R = _Ssh(Target, "docker ps --filter 'ancestor=mediavortex-worker:latest' --format '{{.Names}}' | head -1", Timeout=10)
     Ctr = (R.stdout or "").strip()
     if Ctr:
         _Ssh(Target, f"docker cp {Ctr}:/usr/local/bin/ffmpeg /usr/local/bin/ffmpeg && docker cp {Ctr}:/usr/local/bin/ffprobe /usr/local/bin/ffprobe && chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe", Timeout=30)
-        _Status(3, 8, "ensure ffmpeg", "OK", f"copied from container {Ctr}")
+        _Status(3, 13, "ensure ffmpeg", "OK", f"copied from container {Ctr}")
         return True
     _Ssh(Target, "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg > /dev/null && ln -sf $(which ffmpeg) /usr/local/bin/ffmpeg && ln -sf $(which ffprobe) /usr/local/bin/ffprobe", Timeout=300)
-    _Status(3, 8, "ensure ffmpeg", "OK", "apt install ffmpeg")
+    _Status(3, 13, "ensure ffmpeg", "OK", "apt install ffmpeg")
     return True
 
 
@@ -125,7 +125,7 @@ def StepStopSystemdUnits(Target: str, Count: int) -> bool:
     Units = " ".join(f"mediavortex-worker@{I}.service" for I in range(1, Count + 1))
     _Ssh(Target, f"systemctl stop {Units} 2>&1 || true", Timeout=120)
     _Ssh(Target, "mkdir -p /opt/mediavortex/src /etc/mediavortex", Timeout=10)
-    _Status(4, 10, "stop systemd units + prep dirs", "OK", f"{Count} unit(s) stopped")
+    _Status(4, 13, "stop systemd units + prep dirs", "OK", f"{Count} unit(s) stopped")
     return True
 
 
@@ -134,9 +134,38 @@ def StepSyncSource(Target: str) -> bool:
     Sync = MediaVortexRoot / "deploy" / "SyncSource.py"
     R = subprocess.run([sys.executable, str(Sync), Target, "/opt/mediavortex/src", "--prune"], capture_output=True, text=True, timeout=600)
     if R.returncode != 0:
-        _Status(5, 10, "sync source", "FAILED", (R.stderr or R.stdout or "")[-200:])
+        _Status(5, 13, "sync source", "FAILED", (R.stderr or R.stdout or "")[-200:])
         return False
-    _Status(5, 10, "sync source", "OK", "source at /opt/mediavortex/src (in-place; stale files pruned)")
+    _Status(5, 13, "sync source", "OK", "source at /opt/mediavortex/src (in-place; stale files pruned)")
+    return True
+
+
+# directive: transcode-flow-canonical -- Reset 28: stamp VERSION with actual HEAD sha, not stale disk copy
+def StepStampVersion(Target: str) -> bool:
+    Head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(MediaVortexRoot), capture_output=True, text=True, timeout=10)
+    if Head.returncode != 0:
+        _Status(6, 13, "stamp VERSION", "FAILED", (Head.stderr or Head.stdout or '')[-200:])
+        return False
+    Sha = Head.stdout.strip()
+    R = _Ssh(Target, f"echo -n {Sha} > /opt/mediavortex/src/VERSION", Timeout=15)
+    if R.returncode != 0:
+        _Status(6, 13, "stamp VERSION", "FAILED", (R.stderr or R.stdout or '')[-200:])
+        return False
+    _Status(6, 13, "stamp VERSION", "OK", f"stamped {Sha[:7]}")
+    return True
+
+
+# directive: transcode-flow-canonical -- Reset 28: .claude excluded from SyncSource so schema snapshot never lands; ship explicitly
+def StepShipSchemaSnapshot(Target: str) -> bool:
+    Snapshot = MediaVortexRoot / ".claude" / "schema" / "snapshot.json"
+    if not Snapshot.exists():
+        _Status(7, 13, "ship schema snapshot", "SKIP", "no local snapshot")
+        return True
+    _Ssh(Target, "mkdir -p /opt/mediavortex/src/.claude/schema", Timeout=10)
+    if not _Scp(Snapshot, Target, "/opt/mediavortex/src/.claude/schema/snapshot.json", Timeout=30):
+        _Status(7, 13, "ship schema snapshot", "FAILED")
+        return False
+    _Status(7, 13, "ship schema snapshot", "OK")
     return True
 
 
@@ -151,7 +180,7 @@ def StepInstallSystemdUnit(Target: str, Friendly: str) -> bool:
     Prefix = f"{Friendly}-worker"
     _Ssh(Target, f"echo 'MEDIAVORTEX_WORKER_PREFIX={Prefix}' > /etc/mediavortex/worker-prefix.env", Timeout=10)
     _Ssh(Target, "systemctl daemon-reload", Timeout=10)
-    _Status(6, 10, "install systemd unit", "OK", f"mediavortex-worker@.service loaded, prefix={Prefix}")
+    _Status(8, 13, "install systemd unit", "OK", f"mediavortex-worker@.service loaded, prefix={Prefix}")
     return True
 
 
@@ -167,7 +196,7 @@ def StepStopContainersAndClearDb(Target: str, Friendly: str) -> bool:
         capture_output=True, text=True, timeout=30,
     )
     Detail = f"stopped {len(Names)} container(s); DB clear: {(Del.stdout or '').strip().splitlines()[-1][:60] if Del.stdout else 'err'}"
-    _Status(7, 10, "stop containers + clear DB", "OK", Detail)
+    _Status(9, 13, "stop containers + clear DB", "OK", Detail)
     return True
 
 
@@ -180,7 +209,7 @@ def StepAgeSlotHeartbeats(Friendly: str, Count: int) -> bool:
         [sys.executable, str(QueryScript), "sql", f"UPDATE Workers SET LastHeartbeat = NOW() - INTERVAL '5 min' WHERE WorkerName IN ({Names})", "--commit"],
         capture_output=True, text=True, timeout=30,
     )
-    _Status(8, 10, "age slot heartbeats", "OK", f"{Count} slot row(s) aged for clean reclaim")
+    _Status(10, 13, "age slot heartbeats", "OK", f"{Count} slot row(s) aged for clean reclaim")
     return True
 
 
@@ -192,9 +221,9 @@ def StepStartInstances(Target: str, Friendly: str, Count: int) -> bool:
     R = _Ssh(Target, f"systemctl list-units 'mediavortex-worker@*' --no-legend --state=active | wc -l", Timeout=10)
     Active = int((R.stdout or "0").strip() or 0)
     if Active < Count:
-        _Status(9, 10, "start instances", "FAILED", f"expected {Count} active, got {Active}")
+        _Status(11, 13, "start instances", "FAILED", f"expected {Count} active, got {Active}")
         return False
-    _Status(9, 10, "start instances", "OK", f"{Active}/{Count} instances active")
+    _Status(11, 13, "start instances", "OK", f"{Active}/{Count} instances active")
     return True
 
 
@@ -202,8 +231,25 @@ def StepStartInstances(Target: str, Friendly: str, Count: int) -> bool:
 def StepVerify(Target: str, Friendly: str, Count: int) -> bool:
     R = _Ssh(Target, "systemctl list-units 'mediavortex-worker@*' --no-legend --state=active | awk '{print $1}' | head -8", Timeout=10)
     Lines = [L.strip() for L in (R.stdout or "").splitlines() if L.strip()]
-    _Status(10, 10, "verify", "OK" if len(Lines) >= Count else "FAILED", f"{len(Lines)}/{Count} systemd units active on {Friendly}")
+    _Status(13, 13, "verify", "OK" if len(Lines) >= Count else "FAILED", f"{len(Lines)}/{Count} systemd units active on {Friendly}")
     return len(Lines) >= Count
+
+
+# directive: transcode-flow-canonical -- Reset 28: bare-metal deploy must reconcile Workers.{nvenccapable,qsvcapable} same as docker path
+def StepReconcileCapabilities(Target: str) -> bool:
+    ScriptsDir = MediaVortexRoot / "Scripts"
+    NvR = subprocess.run([sys.executable, str(ScriptsDir / "ReconcileNvencCapability.py"), Target], capture_output=True, text=True, timeout=180)
+    if NvR.returncode != 0:
+        _Status(12, 13, "capability reconcile", "FAILED", f"nvenc: {(NvR.stderr or NvR.stdout)[-200:]}")
+        return False
+    QsvR = subprocess.run([sys.executable, str(ScriptsDir / "ReconcileQsvCapability.py"), Target], capture_output=True, text=True, timeout=180)
+    if QsvR.returncode != 0:
+        _Status(12, 13, "capability reconcile", "FAILED", f"qsv: {(QsvR.stderr or QsvR.stdout)[-200:]}")
+        return False
+    NvTail = (NvR.stdout or '').strip().splitlines()[-1] if NvR.stdout else ''
+    QsvTail = (QsvR.stdout or '').strip().splitlines()[-1] if QsvR.stdout else ''
+    _Status(12, 13, "capability reconcile", "OK", f"nvenc: {NvTail} | qsv: {QsvTail}")
+    return True
 
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
@@ -236,6 +282,10 @@ def main():
         return 2
     if not StepSyncSource(Target):
         return 2
+    if not StepStampVersion(Target):
+        return 2
+    if not StepShipSchemaSnapshot(Target):
+        return 2
     if not StepInstallSystemdUnit(Target, Friendly):
         return 2
     if not StepStopContainersAndClearDb(Target, Friendly):
@@ -243,6 +293,8 @@ def main():
     if not StepAgeSlotHeartbeats(Friendly, Count):
         return 2
     if not StepStartInstances(Target, Friendly, Count):
+        return 3
+    if not StepReconcileCapabilities(Target):
         return 3
     if not StepVerify(Target, Friendly, Count):
         return 3
