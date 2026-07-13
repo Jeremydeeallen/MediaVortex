@@ -4651,7 +4651,7 @@
     "mediafileid": {
       "data_type": "bigint",
       "is_generated": "NEVER",
-      "is_nullable": "YES"
+      "is_nullable": "NO"
     },
     "newsizebytes": {
       "data_type": "bigint",
@@ -5499,11 +5499,6 @@
   "workers": {
     "acceptsinterlaced": {
       "data_type": "boolean",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
-    "allowedprofiles": {
-      "data_type": "text",
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
