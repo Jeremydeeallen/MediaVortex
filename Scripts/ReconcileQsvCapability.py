@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
 
-PROBE_ARGS = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=black:s=64x64:d=0.1', '-c:v', 'av1_qsv', '-f', 'null', '-']
+PROBE_ARGS = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=black:s=320x240:d=0.2', '-c:v', 'av1_qsv', '-f', 'null', '-']
 PROBE_TIMEOUT_SEC = 20
 
 
