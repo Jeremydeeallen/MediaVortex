@@ -9,8 +9,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
 
-PROBE_ARGS = ['ffmpeg', '-hide_banner', '-h', 'encoder=av1_qsv']
-PROBE_TIMEOUT_SEC = 15
+PROBE_ARGS = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=black:s=64x64:d=0.1', '-c:v', 'av1_qsv', '-f', 'null', '-']
+PROBE_TIMEOUT_SEC = 20
 
 
 def _ListMediaVortexContainers(SshTarget):
@@ -64,8 +64,8 @@ def Main():
     else:
         # directive: transcode-flow-canonical -- bare-metal (wakko): SSH+probe directly, apply to <hostprefix>-worker-*
         Probe = subprocess.run(['ssh', SshTarget] + PROBE_ARGS, capture_output=True, text=True, timeout=PROBE_TIMEOUT_SEC)
-        Output = (Probe.stdout or '') + (Probe.stderr or '')
-        Capable = Probe.returncode == 0 and 'av1_qsv' in Output
+        Stderr = Probe.stderr or ''
+        Capable = Probe.returncode == 0 and 'error' not in Stderr.lower() and 'Nothing was written' not in Stderr
         if Args.worker_prefix:
             Prefix = Args.worker_prefix
         else:
