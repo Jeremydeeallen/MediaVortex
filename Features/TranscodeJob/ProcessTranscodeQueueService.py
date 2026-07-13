@@ -968,11 +968,9 @@ class ProcessTranscodeQueueService:
                 if ProfileRow:
                     QualityTestRequiredForProfile = bool(ProfileRow[0].get('QualityTestRequired'))
 
-            # directive: failure-accounting | # see failure-accounting.C5
+            # directive: transcode-flow-canonical -- universal JobMode fallback retires __UNRESOLVED__ sentinel
             JobMode = (getattr(Job, 'ProcessingMode', None) or 'Transcode').strip()
-            # directive: transcode-worker-unification | # see transcode.ST6
-            RemuxModes = frozenset(R['Name'] for R in self.DatabaseManager.ExecuteQuery("SELECT Name FROM ProcessingModes WHERE ClaimCapabilityFlag = 'RemuxEnabled'"))
-            if JobMode in RemuxModes and not ProfileName:
+            if not ProfileName:
                 ProfileName = JobMode
 
             Attempt = TranscodeAttemptModel(
@@ -1182,14 +1180,9 @@ class ProcessTranscodeQueueService:
                 # Update TranscodeFiles record for overall file status (failure)
                 self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, False, MediaFileId=Job.MediaFileId)
             else:
-                # directive: failure-accounting | # see failure-accounting.C5
+                # directive: transcode-flow-canonical -- universal JobMode fallback retires __UNRESOLVED__ sentinel
                 JobMode = (getattr(Job, 'ProcessingMode', None) or 'Transcode').strip()
-                # directive: transcode-worker-unification | # see transcode.ST6
-                RemuxModes = frozenset(R['Name'] for R in self.DatabaseManager.ExecuteQuery("SELECT Name FROM ProcessingModes WHERE ClaimCapabilityFlag = 'RemuxEnabled'"))
-                if JobMode in RemuxModes:
-                    ResolvedProfileName = JobMode
-                else:
-                    ResolvedProfileName = getattr(Job, 'AssignedProfile', None) or None
+                ResolvedProfileName = getattr(Job, 'AssignedProfile', None) or JobMode
 
                 Attempt = TranscodeAttemptModel(
                     StorageRootId=Job.StorageRootId,

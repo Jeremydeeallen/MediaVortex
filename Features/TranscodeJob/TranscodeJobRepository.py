@@ -208,11 +208,9 @@ class TranscodeJobRepository(BaseRepository):
                         MediaFileId = 0
                     ProfileNameForInsert = Attempt.ProfileName
                     if not ProfileNameForInsert:
-                        LoggingService.LogWarning(
-                            "TranscodeAttempts INSERT could not resolve ProfileName; using sentinel __UNRESOLVED__. MediaFileId=" + str(MediaFileId) + " StorageRootId=" + str(Attempt.StorageRootId) + " RelativePath=" + repr(Attempt.RelativePath) + ". see failure-accounting.C5",
-                            "TranscodeJobRepository", "SaveTranscodeAttempt"
+                        raise ValueError(
+                            f"SaveTranscodeAttempt: ProfileName unresolved (MediaFileId={MediaFileId}, StorageRootId={Attempt.StorageRootId}, RelativePath={Attempt.RelativePath!r}). Caller must populate ProfileName -- JobMode is the mandatory fallback."
                         )
-                        ProfileNameForInsert = '__UNRESOLVED__'
                     Sid = Attempt.StorageRootId
                     Rel = Attempt.RelativePath
                     query = (

@@ -42,6 +42,35 @@ class TestProfileNameOnFailureRows(unittest.TestCase):
         )[0]['n'])
         self.assertEqual(n, 0)
 
+    # directive: transcode-flow-canonical | # see failure-accounting.C5 -- sentinel retired, fail-loud instead
+    def test_no_unresolved_sentinel_rows_remain(self):
+        n = int(DatabaseService().ExecuteQuery(
+            "SELECT COUNT(*) AS n FROM TranscodeAttempts WHERE ProfileName = '__UNRESOLVED__'"
+        )[0]['n'])
+        self.assertEqual(n, 0)
+
+    # directive: transcode-flow-canonical | # see failure-accounting.C5 -- SaveTranscodeAttempt raises on missing ProfileName
+    def test_save_attempt_raises_on_missing_profilename(self):
+        from Features.TranscodeJob.TranscodeJobRepository import TranscodeJobRepository
+        from Core.Models.TranscodeAttemptModel import TranscodeAttemptModel
+        from datetime import datetime, timezone
+        Repo = TranscodeJobRepository()
+        Attempt = TranscodeAttemptModel(
+            StorageRootId=1,
+            RelativePath='__test_missing_profile__.mkv',
+            AttemptDate=datetime.now(timezone.utc),
+            Quality=0, OldSizeBytes=0, NewSizeBytes=0,
+            Success=False,
+            SizeReductionBytes=0, SizeReductionPercent=0.0,
+            ErrorMessage='test', TranscodeDurationSeconds=0.0,
+            FfpmpegCommand=None,
+            AudioBitrateKbps=None, VideoBitrateKbps=None,
+            ProfileName=None,
+            VMAF=None, WorkerName='test-worker', MediaFileId=0,
+        )
+        with self.assertRaises(ValueError):
+            Repo.SaveTranscodeAttempt(Attempt)
+
 
 # directive: failure-accounting | # see failure-accounting.C1
 class TestFailureBudgetService(unittest.TestCase):

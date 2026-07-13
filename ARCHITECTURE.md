@@ -120,4 +120,3 @@ Re-audited 2026-07-03 during `transcode-flow-canonical` post-Reset-9.
 | `quality-test.flow.md` does not exist | -- | C1 (parked for DELIVERING promotion) |
 | `.claude/rules/fail-loud.md` grep-audit not run | -- | C7 (Reset 10) |
 | AdjustmentRegistry knob-override on requeued attempts | Requeued rows re-use original profile; no CRF adjustment | Follow-up: `adjustment-registry-wiring` |
-| `SaveTranscodeAttempt __UNRESOLVED__` phantom rows | Sporadic Success=False/ProfileName='__UNRESOLVED__' TranscodeAttempts inserts + Success=True double-write pattern (attempts 41061 + 41048 observed 2026-07-03) | Follow-up: `BUG-0082` |
