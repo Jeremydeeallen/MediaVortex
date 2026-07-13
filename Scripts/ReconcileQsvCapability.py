@@ -50,6 +50,7 @@ def Main():
     Parser.add_argument('host', help='Friendly host (passed to ssh) e.g. root@wakko or 10.0.0.230')
     Parser.add_argument('--ssh-user', default='root', help='Override ssh user when host is bare hostname/IP')
     Parser.add_argument('--dry-run', action='store_true', help='Print planned UPDATEs without executing')
+    Parser.add_argument('--worker-prefix', default=None, help='Bare-metal fallback: WorkerName prefix (e.g. wakko-worker); required when no containers found and hostname does not match friendly name')
     Args = Parser.parse_args()
 
     SshTarget = Args.host if '@' in Args.host else f'{Args.ssh_user}@{Args.host}'
@@ -65,13 +66,20 @@ def Main():
         Probe = subprocess.run(['ssh', SshTarget] + PROBE_ARGS, capture_output=True, text=True, timeout=PROBE_TIMEOUT_SEC)
         Output = (Probe.stdout or '') + (Probe.stderr or '')
         Capable = Probe.returncode == 0 and 'av1_qsv' in Output
-        HostPrefix = Args.host.split('@')[-1].split('.')[0]
+        if Args.worker_prefix:
+            Prefix = Args.worker_prefix
+        else:
+            HostR = subprocess.run(['ssh', SshTarget, 'hostname -s'], capture_output=True, text=True, timeout=10)
+            Prefix = (HostR.stdout.strip().split('-')[0] + '-worker') if HostR.returncode == 0 and HostR.stdout.strip() else ''
+            if not Prefix:
+                print(f'Could not resolve hostname on {SshTarget}; nothing to reconcile.')
+                return 0
         Rows = Db.ExecuteQuery(
             "SELECT WorkerName FROM Workers WHERE WorkerName LIKE %s ESCAPE '!'",
-            (EscapeLikePattern(f'{HostPrefix}-worker-') + '%',),
+            (EscapeLikePattern(f'{Prefix}-') + '%',),
         ) or []
         if not Rows:
-            print(f'No containers and no bare-metal workers matching {HostPrefix}-worker-* found. Nothing to reconcile.')
+            print(f'No containers and no bare-metal workers matching {Prefix}-* found. Nothing to reconcile.')
             return 0
         Probes = [(R.get('WorkerName') or R.get('workername'), Capable) for R in Rows]
         print(f'  bare-metal probe on {SshTarget}: av1_qsv={Capable}')

@@ -236,13 +236,14 @@ def StepVerify(Target: str, Friendly: str, Count: int) -> bool:
 
 
 # directive: transcode-flow-canonical -- Reset 28: bare-metal deploy must reconcile Workers.{nvenccapable,qsvcapable} same as docker path
-def StepReconcileCapabilities(Target: str) -> bool:
+def StepReconcileCapabilities(Target: str, Friendly: str) -> bool:
     ScriptsDir = MediaVortexRoot / "Scripts"
-    NvR = subprocess.run([sys.executable, str(ScriptsDir / "ReconcileNvencCapability.py"), Target], capture_output=True, text=True, timeout=180)
+    Prefix = f"{Friendly}-worker"
+    NvR = subprocess.run([sys.executable, str(ScriptsDir / "ReconcileNvencCapability.py"), Target, "--worker-prefix", Prefix], capture_output=True, text=True, timeout=180)
     if NvR.returncode != 0:
         _Status(12, 13, "capability reconcile", "FAILED", f"nvenc: {(NvR.stderr or NvR.stdout)[-200:]}")
         return False
-    QsvR = subprocess.run([sys.executable, str(ScriptsDir / "ReconcileQsvCapability.py"), Target], capture_output=True, text=True, timeout=180)
+    QsvR = subprocess.run([sys.executable, str(ScriptsDir / "ReconcileQsvCapability.py"), Target, "--worker-prefix", Prefix], capture_output=True, text=True, timeout=180)
     if QsvR.returncode != 0:
         _Status(12, 13, "capability reconcile", "FAILED", f"qsv: {(QsvR.stderr or QsvR.stdout)[-200:]}")
         return False
@@ -294,7 +295,7 @@ def main():
         return 2
     if not StepStartInstances(Target, Friendly, Count):
         return 3
-    if not StepReconcileCapabilities(Target):
+    if not StepReconcileCapabilities(Target, Friendly):
         return 3
     if not StepVerify(Target, Friendly, Count):
         return 3
