@@ -34,14 +34,14 @@ def _ContainerHostname(SshTarget, Container):
 
 
 def _ProbeQsvInContainer(SshTarget, Container):
-    """Return True iff ffmpeg in the container exposes av1_qsv encoder."""
+    """Return True iff ffmpeg in the container can actually encode av1_qsv (encoder init succeeds; stderr silent)."""
     Cmd = ['ssh', SshTarget, 'docker', 'exec', Container] + PROBE_ARGS
     try:
         Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=PROBE_TIMEOUT_SEC)
     except subprocess.TimeoutExpired:
         return False
-    Output = (Result.stdout or '') + (Result.stderr or '')
-    return Result.returncode == 0 and 'av1_qsv' in Output
+    Stderr = Result.stderr or ''
+    return Result.returncode == 0 and 'error' not in Stderr.lower() and 'Nothing was written' not in Stderr
 
 
 def Main():
