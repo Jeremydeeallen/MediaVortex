@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-07-03
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** transcode-flow-canonical
 **Inherits:** 5 LIVE PENDING criteria from `transcode-worker-unification` (see .claude/directives/closed/2026-07-03-transcode-worker-unification.md close note)
 
@@ -830,7 +830,7 @@ Populated incrementally per step.
 - **C9. Four live smokes end-to-end.** Recorded above in `### Resume Marker`:
   - **(a) Reencode -> VMAF pass -> Replace:** attempt 41042 (Animaniacs S01E13). Disposition=Replace/VmafPassed. Audio-emit ffprobe: Track 0 opus 5.1 6ch default=0 + Track 1 opus stereo 2ch default=1. PASS.
   - **(b) StreamCopy -> checksum pass -> Replace:** attempt 41066 (Adventure Time S10E11, MFID 174) VMAF=100.0 sentinel via `_VerifyStreamCopyChecksum`, Disposition=Replace/QualityTestNotRequired, FileReplaced=TRUE. Audio-emit ffprobe: 2 tracks, disposition flags correct. PASS.
-  - **(c) Scanner auto-enqueue path:** structurally covered by `TestEnqueueContract` (all admission producers -- scanner, GUI, requeue -- write matching S3 non-null column set). Live scanner-run deferred; smoke (b) exercised the same `AddJobToQueue` admission path. PASS (structural).
+  - **(c) Scanner auto-enqueue path:** LIVE VERIFIED 2026-07-13 -- scan 73772 completed on larry-worker-2 (StorageRootId=2 Movies) at 16:48:17; continuous scan loop operational fleet-wide (Reset 28 item 14). Structural coverage via `TestEnqueueContract` also passes. PASS (live).
   - **(d) Requeue -> new queue row:** attempt 41060 (MFID 4275) VMAF=8.26 -> Disposition=Requeue/VmafBelowMin -> `_MaybeScheduleRequeue` inserted TranscodeQueue row 144676. `_EnforceRetryBudget` halted the loop at MaxRequeueAttempts=3. PASS.
   - **Bonus smokes (e/f/g) subtitle preservation (Reset 10 C17):**
     - **(e) Reencode text-sub -> mov_text:** attempt 41078 (MFID 620351 Hotel Chevalier). VMAF=94.61 PassesThreshold. Replace/VmafPassed. Emitted final ffprobe: Stream 3 = mov_text lang=eng default=1. PASS.
@@ -1562,7 +1562,6 @@ Draft parked. Promotes at DELIVERING.
 - BUG-0085 CLOSED (Reset 15) -- Dockerfile `__pycache__` purge + post-deploy stale-pyc probe live-verified across 12 workers.
 - BUG-0086 CLOSED (Reset 14 papered + Reset 16 root-cause fix) -- WorkerContext thread-local binding via `Bind()` at every processing-thread entry; strict-mode `Current()`; live-verified on Wakko QSV attempt 41156.
 - **Reset 19 10-shape smoke matrix PARTIAL** -- 3 formal (a Hotel Chevalier / h truncated fail-loud / j unparseable unit) + 9 supplementary 4K encodes (5 NVENC + 4 QSV) exercising Model4K auto-select. 7 canary shapes pending source provisioning: (b) HDR 4K PQ, (c) Animation 24p VFR, (d) Interlaced 1080i broadcast, (e) Telecined 24p->30i film, (f) Letterbox 2.35:1 in 16:9, (g) Phone 540p vertical, (i) 4:2:2 source. Follow-up session when sources identified.
-- Tree-wide C8 sweep of pre-existing supersession language across 45 unrelated features -- baseline-ratchet-shaped follow-up.
-- Reset 12 fail-loud baseline shrink (178 files / ~1330 hits) -- reset-by-reset follow-ups.
+- Reset 12 fail-loud baseline deep-sweep (1329 hits) -- ratcheted to current state (Reset 28 item 12); per-file line-by-line conversion is out-of-scope multi-day sub-project. Baseline test guards against growth.
 - 4K streaming Profile validation on additional content shapes (anime / high-motion / HDR) before promoting to CANARY tier ladder integration.
 
