@@ -76,6 +76,9 @@ class WorkerServiceApp:
         LoggingService.LogInfo(f"WorkerServiceApp __init__ started. PID: {CurrentPid}", "WorkerService", "__init__")
 
         self.DatabaseManager = DatabaseManager()
+        # directive: transcode-flow-canonical -- fail-loud on schema drift before we start any write path
+        from Core.Database.SchemaChecker import SchemaChecker
+        SchemaChecker(self.DatabaseManager.DatabaseService).AssertMatches()
         self.ServiceControlRepository = ServiceControlRepositoryInstance or ServiceControlRepository()
         self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
         self.WorkersRepository = WorkersRepositoryInstance or WorkersRepository()

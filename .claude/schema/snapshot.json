@@ -1,0 +1,5678 @@
+{
+  "activejobs": {
+    "createdat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "ffmpegpid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "jobtype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "phase": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "phasetransitionedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "processid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "queueid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "servicename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "startedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "threadid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "updatedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "workername": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "audiocompliancerules": {
+    "acceptableaudiocodecscsv": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "dialogboosttargetlra": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "dialogboosttargetlufs": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "instrumentalattendb": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp with time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "premixcompressormakeupdb": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "premixcompressorratio": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "premixcompressorthreshold": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "premixdynaudnormframelen": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "premixdynaudnormgausssize": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "samplelimitheadroomdb": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "targetintegratedlufs": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "targettruepeakdbtp": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "track0bitrateperchannelkbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "track0codec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "track0minperchannelkbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "track1codec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "track1stereobitratekbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "track1vocalsrmsfallbackdbfs": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "vocalsboostdb": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "audiofixpriorityhints": {
+    "boostedpriority": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "createdat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "description": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "folderpattern": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "audiofixrules_old_2026_06_21": {
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "requirelufsmeasured": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "targetloudnesslufs": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "tolerancelufs": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "audionormalizationconfig": {
+    "emittracks": {
+      "data_type": "jsonb",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "enabled": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "enablespeechlanguagedetection": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "languagedefault": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "loudnesstolerance": {
+      "data_type": "real",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "maxaudiochannels": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "preverticalrenormalizepolicy": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "scope": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "scopekey": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "targetlra": {
+      "data_type": "real",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "ungainablepolicy": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "audioverticalhealthruns": {
+    "detectedcount": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "durationms": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "invariantname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "notes": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "remediatedcount": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "timestamp": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "clipbuilderexports": {
+    "clipduration": {
+      "data_type": "real",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "exporteddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "outputpath120": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "outputpath30": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "outputpath60": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "outputpathhalf": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "outputpathprimary": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourcepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "starttimes": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "targetlength": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "clipbuilderpresets": {
+    "clipduration": {
+      "data_type": "real",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "createddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "fileid": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "includehalf": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "outputfolder120": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "outputfolder30": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "outputfolder60": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "outputfolderhalf": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "outputfolderprimary": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "presetname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "starttimes": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "targetlength": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "codeccompatibility": {
+    "description": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "isacceptable": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "kind": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "name": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "source": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "codecflags": {
+    "codecname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "createddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "displayname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "filmgraindefault": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filmgrainmax": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filmgrainmin": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filmgraintype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastmodified": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "presetdefault": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "presetmax": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "presetmin": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "presetoptions": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "presettype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "tuneoptions": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "codecparameters": {
+    "codecflagsid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "createddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "defaultvalue": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "description": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "ffmpegflag": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "maxvalue": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "minvalue": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "parametername": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "parametertype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "compliancegates_old_2026_06_21": {
+    "blockonaudiocorruptsuspect": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "blockonaudiopolicydeferred": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "requireaudiostream": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "requireeffectiveprofile": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "requireexplicitenglishaudio": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "requireloudnessmeasurements": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "requireprobemetadata": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "requireprofilethresholds": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "requireresolutioncategory": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "compressionlearningmodels": {
+    "accuracy": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "createddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "isactive": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lasttrained": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "modeldata": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "modelname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "modeltype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "modelversion": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "trainingsamples": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "compressionlearningsamples": {
+    "analysisfactors": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocodec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "compressedsizebytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "contenttype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "currentbitrate": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "dateadded": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "directory": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "errormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "filepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "originalsizebytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "quality": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "resolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sizebytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "sizemb": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "sizereductionbytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "sizereductionpercent": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "success": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "transcodedurationseconds": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videocodec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "compressionlearningstats": {
+    "averagereductionpercent": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "confidencescore": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "contenttype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxreductionpercent": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "minreductionpercent": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "quality": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "resolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "samplecount": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "standarddeviation": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videocodec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "configuration": {
+    "description": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "key": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "updatedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "value": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "containercompliancerules": {
+    "acceptableaudiocodecscsv": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "acceptablecontainerscsv": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "contentclassificationrules": {
+    "assignprofilename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "bitratekbpsmax": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "bitratekbpsmin": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "codecin": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "description": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "folderpathpattern": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "isactive": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lumavariancemax": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lumavariancemin": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "motionfractionmax": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "motionfractionmin": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "priority": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "resolutioncategory": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "rulename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "scenechangeratemax": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "scenechangeratemin": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "source": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "crfbitrateestimates": {
+    "codec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "crf": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "estimatedkbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "resolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "source": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "failurebudgetconfig": {
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxencodefailures": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "resetwindowdays": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "failurebudgetresets": {
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "mediafileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "operatorname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "priorfailurecount": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "resetat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "jellyfinoperations": {
+    "audiocodec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "container": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "destformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "destlevel": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "destpixelformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "destprofile": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "destresolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "importedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "logdate": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "logfilename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "operationtype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "reason": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "resolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "subtitlecodecs": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodeactions": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videocodec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "localstagingconfig": {
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "minsizemb": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "logs": {
+    "additionaldata": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "component": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "createdat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "durationms": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "exceptionmessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "exceptiontype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "functionname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "loglevel": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "message": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "operation": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "requestid": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sessionid": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourcefile": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourcefunction": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourceline": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "stacktrace": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "timestamp": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "userid": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "mediafiles": {
+    "adequacydecision": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "adequacydecisionat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "admissiondeferreason": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "assignedprofile": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "assignedprofilesource": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiochannellayout": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiochannels": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocodec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocomplete": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocompletedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocompliant": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocompliantreason": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocorruptreason": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocorruptsuspect": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "audiolanguages": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audionormalizationmode": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiosampleformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiosamplerate": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiostreamlanguagedetectionsjson": {
+      "data_type": "jsonb",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "codec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "codecprofile": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "colorrange": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "compressionpotential": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "containercompliant": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "containercompliantreason": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "containerformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "durationminutes": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "ffprobefailurecount": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "fieldorder": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filemodificationtime": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filesize": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "framerate": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "hasbframes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "hasexplicitenglishaudio": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "hasforcedsubtitles": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "iscompliant": {
+      "data_type": "boolean",
+      "is_generated": "ALWAYS",
+      "is_nullable": "YES"
+    },
+    "isinterlaced": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "keepsource": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastfailureresetat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastffprobeattemptdate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastffprobeerror": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastmodifieddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastprobedfilemtime": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastprobedfilesize": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastscanneddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "level": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "loudnessmeasuredat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "loudnessmeasurementfailurereason": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lumavariance": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "motionfraction": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "needsreprobe": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "overallbitrate": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "pixelformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "priorityscore": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "refframes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "relativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "remuxedbymediavortex": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "remuxedbymediavortexdate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "resolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "resolutioncategory": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "scenechangeratepermin": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "seasonid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sizemb": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourceintegratedlufs": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourceintegratedthresholdlufs": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourceloudnessrangelu": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourcetruepeakdbtp": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "subtitleformats": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "totalframes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodedbymediavortex": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videocompliant": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videocompliantreason": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "workbucket": {
+      "data_type": "text",
+      "is_generated": "ALWAYS",
+      "is_nullable": "YES"
+    }
+  },
+  "mediafiles_snapshot_20260709": {
+    "adequacydecision": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "adequacydecisionat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "admissiondeferreason": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "assignedprofile": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "assignedprofilesource": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiochannellayout": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiochannels": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocodec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocomplete": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocompletedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocompliant": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocompliantreason": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocorruptreason": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocorruptsuspect": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiolanguages": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audionormalizationmode": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiosampleformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiosamplerate": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiostreamlanguagedetectionsjson": {
+      "data_type": "jsonb",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "codec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "codecprofile": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "colorrange": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "compressionpotential": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "containercompliant": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "containercompliantreason": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "containerformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "durationminutes": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "ffprobefailurecount": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "fieldorder": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filemodificationtime": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filesize": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "framerate": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "hasbframes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "hasexplicitenglishaudio": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "hasforcedsubtitles": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "iscompliant": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "isinterlaced": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "keepsource": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastfailureresetat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastffprobeattemptdate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastffprobeerror": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastmodifieddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastprobedfilemtime": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastprobedfilesize": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastscanneddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "level": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "loudnessmeasuredat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "loudnessmeasurementfailurereason": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lumavariance": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "motionfraction": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "needsreprobe": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "overallbitrate": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "pixelformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "priorityscore": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "refframes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "relativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "remuxedbymediavortex": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "remuxedbymediavortexdate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "resolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "resolutioncategory": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "scenechangeratepermin": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "seasonid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sizemb": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourceintegratedlufs": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourceintegratedthresholdlufs": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourceloudnessrangelu": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourcetruepeakdbtp": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "subtitleformats": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "totalframes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodedbymediavortex": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videocompliant": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videocompliantreason": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "workbucket": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "mediafilesarchive": {
+    "archivedate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "assignedprofile": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiochannellayout": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiochannels": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiosampleformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiosamplerate": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "codec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "codecprofile": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "colorrange": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "compressionpotential": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "containerformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "durationminutes": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "fieldorder": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filemodificationtime": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "framerate": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "hasbframes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "isinterlaced": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "keepsource": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastscanneddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "level": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "overallbitrate": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "pixelformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "refframes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "relativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "resolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "resolutioncategory": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "seasonid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sizemb": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "totalframes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodeattemptid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodedbymediavortex": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "posttranscodegateconfig": {
+    "filereplacementcanreplacethreshold": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxrequeueattempts": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "minconfidencepassrate": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "minconfidencesamplecount": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "qualitytestenabled": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "retranscodevmafthreshold": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "sigmamargin": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "vmafautoreplacemaxthreshold": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "vmafautoreplaceminthreshold": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "whenvmafunavailable": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "workerheartbeatwindowsec": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "presetoptions": {
+    "codecflagsid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "createddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "description": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "presetname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "presetvalue": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "sortorder": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "problemfiles": {
+    "dateencountered": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "directory": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "errormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "errortype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "filename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "filepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastretry": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "mediafileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "retrycount": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sizebytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "sizemb": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "processingmodes": {
+    "bucketname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "claimcapabilityflag": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "name": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "requiresinterlacedfilter": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "requiresnvencgate": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "requiresprofilegates": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "requiresvmaf": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "profiles": {
+    "active": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "allowupscale": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "aqstrength": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiobitratekbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiochannels": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocodec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiofilter": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "codec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "codecflagsid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "container": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "contentclass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "createddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "description": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "draft": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "family": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "faststart": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filmgrain": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastmodified": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lowpower": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "multipass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "pixelformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "preset": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "profilename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "qualitylabel": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qualitytestrequired": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "qualitytier": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "ratecontrolmode": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "sortorder": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "spatialaq": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "streamcodecname": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "targetaudiokbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "targetresolutioncategory": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "targetvideokbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "temporalaq": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "tune": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "useintelhardware": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "usenvidiahardware": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "weightedpred": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "yadifdeint": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "yadifmode": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "yadifparity": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "profiles_snapshot_20260709": {
+    "active": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "allowupscale": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "aqstrength": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiobitratekbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiochannels": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiocodec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiofilter": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "codec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "codecflagsid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "container": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "contentclass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "createddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "description": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "draft": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "family": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "faststart": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filmgrain": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastmodified": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lowpower": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "multipass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "pixelformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "preset": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "profilename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qualitytestrequired": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qualitytier": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "ratecontrolmode": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sortorder": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "spatialaq": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "streamcodecname": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "targetaudiokbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "targetresolutioncategory": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "targetvideokbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "temporalaq": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "tune": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "useintelhardware": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "usenvidiahardware": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "weightedpred": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "yadifdeint": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "yadifmode": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "yadifparity": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "profilethresholds": {
+    "audiobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "bframes": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "brefmode": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "containertype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "contentclass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "fallbackaudiobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "fallbackvideobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "gop": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "icqq": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "keepsource": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "maxbitratekbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxbitratemultiplier": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "minbitratekbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "over65minmb": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "profileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "qsvadaptiveb": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvadaptivei": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvbstrategy": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvextbrc": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvlookaheaddepth": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvtilecols": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvtilerows": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "quality": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "rclookahead": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "resolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "scaleheight": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourcebitratepercent": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "targetkbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodedownto": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "under30minmb": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "under65minmb": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "videobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "profilethresholds_snapshot_20260709": {
+    "audiobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "bframes": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "brefmode": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "containertype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "fallbackaudiobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "fallbackvideobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "gop": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "icqq": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "keepsource": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxbitratekbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxbitratemultiplier": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "minbitratekbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "over65minmb": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "profileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvadaptiveb": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvadaptivei": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvbstrategy": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvextbrc": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvlookaheaddepth": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvtilecols": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvtilerows": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "quality": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "rclookahead": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "resolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "scaleheight": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourcebitratepercent": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "targetkbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodedownto": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "under30minmb": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "under65minmb": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "qualitytestingqueue": {
+    "claimedby": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "dateadded": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "datecompleted": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "datestarted": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "forcedisposition": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "localsourcepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "originalfilepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "overridesetat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "transcodeattemptid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodedfilepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "qualitytestingqueuebackup": {
+    "alternativeprofileids": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "completeddate": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "createddate": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "customsettings": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "dateadded": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "datecompleted": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "datestarted": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "errormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxretries": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "originalfilepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "priority": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "retrycount": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "strategyid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "strategytype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodeattemptid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodedfilepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafscore": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "qualitytestingqueuetest": {
+    "alternativeprofileids": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "completeddate": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "createddate": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "customsettings": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "dateadded": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "datecompleted": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "datestarted": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "errormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "localsourcepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxretries": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "originalfilepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "priority": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "retrycount": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "strategyid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "strategytype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodeattemptid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodedfilepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafscore": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "qualitytestingstrategies": {
+    "alternativeprofileids": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "createddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "customsettings": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "isenabled": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxattempts": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "profileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "strategytype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "updateddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafthreshold": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "qualitytestprogress": {
+    "averagefps": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "createdat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "currentfps": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "currentframe": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "currentstep": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "currenttime": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "eta": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "etaseconds": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "processingspeed": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "progresspercentage": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "starttime": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "transcodeattemptid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "updatedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "qualitytestresults": {
+    "datetested": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "errormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "ffmpegcommand": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "passesthreshold": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "rank": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "testduration": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodeattemptid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "vmafharmonicmean": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafmax": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafmin": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafp1": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafp10": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafp25": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafp5": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafscore": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafstddev": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "queueadmissionconfig": {
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "minaudiobitratekbpsmono": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "minaudiobitratekbpsstereo": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "minaudiobitratekbpssurround": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "mintranscodesavingsmb": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "missingestimatepolicy": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "remuxrules_old_2026_06_21": {
+    "acceptableaudiocodecsmp4csv": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "acceptablecontainerscsv": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "requireaudionormalized": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "resolutiontiers": {
+    "canonicalheight": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "canonicalwidth": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "minlongedge": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "name": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "rank": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "rootfolders": {
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastscanneddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "preferredworkername": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "relativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "totalsizegb": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "scanjobs": {
+    "currentdirectory": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "deletedfiles": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "encodingerrors": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "endtime": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "errormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filesneedingprobe": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "jobid": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "newfiles": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "phase": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "probedfiles": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "processedfiles": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "processid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "progress": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "recursive": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "relativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "scantype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "skippedfiles": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "starttime": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "topfiles": {
+      "data_type": "jsonb",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "totalfiles": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "updatedfiles": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "workername": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "scanners": {
+    "batchsize": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "dryrun": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "enabled": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "intervalsec": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastrunat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "scannername": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "seasons": {
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "rootfolderid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "seasonname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "seriesprofiles": {
+    "assignedprofile": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "createddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastmodifieddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "relativepath": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "storagerootid": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "targetresolution": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "servicecommands": {
+    "commandtype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "createdat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "createdby": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "errormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "maxretries": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "parameters": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "priority": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "processedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "result": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "retrycount": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourceservice": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "targetservice": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "updatedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "servicestatus": {
+    "activejobscount": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "cpuusage": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "createdat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "databaseconnection": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "diskspace": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "errorcount": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "healthstatus": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "isprocessing": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lasterrormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lasthealthcheck": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxconcurrentjobs": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxerrors": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "memoryusage": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "microservicestatus": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "processid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "servicename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "servicetype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "starttime": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "updatedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "uptimeseconds": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "version": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "showsettings_deprecated_2026_06_28": {
+    "assignedprofile": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "createddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastmodifieddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "relativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "targetresolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "showsettings_legacy_showfolder_deprecated_2026_06_28": {
+    "createddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastmodifieddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "showfolder": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "targetresolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "storagerootresolutions": {
+    "absolutepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "createdat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "isactive": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "platform": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "workername": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "storageroots": {
+    "canonicalprefix": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "createdat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "description": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "name": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "subtitlefixrules_old_2026_06_21": {
+    "enabled": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "movtextrequiredformp4": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "nonnativesubtitleformatscsv": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "requireforcedsubtitlespresent": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "systemsettings": {
+    "datatype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "description": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastmodified": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "settingkey": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "settingvalue": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "temporaryfilepaths": {
+    "createddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "localoutputpath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "localsourcepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "outputrelativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "outputstoragerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourcerelativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourcestoragerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodeattemptid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "testvariantsets": {
+    "createdat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "description": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "name": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "variantsjson": {
+      "data_type": "jsonb",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "transcodeattempts": {
+    "attemptdate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiopolicyjson": {
+      "data_type": "jsonb",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiopolicyresolved": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiotracksemittedjson": {
+      "data_type": "jsonb",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "completeddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "disposition": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "dispositiondecidedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "dispositionreason": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "errormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "ffpmpegcommand": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filereplaced": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filereplaceddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "mediafileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "newsizebytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "oldsizebytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "preferredattempt": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "profilename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "quality": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qualitytestcompleted": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qualitytestrequired": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qualitytestskipped": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "relativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "replacementtype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sizereductionbytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sizereductionpercent": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "starttime": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "success": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "testvariantname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "testvariantsetid": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodedurationseconds": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmaf": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "workername": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "transcodeattempts_snapshot_20260709": {
+    "attemptdate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiopolicyjson": {
+      "data_type": "jsonb",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiopolicyresolved": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiotracksemittedjson": {
+      "data_type": "jsonb",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "completeddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "disposition": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "dispositiondecidedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "dispositionreason": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "errormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "ffpmpegcommand": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filereplaced": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filereplaceddate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "mediafileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "newsizebytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "oldsizebytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "preferredattempt": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "profilename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "quality": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qualitytestcompleted": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qualitytestrequired": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qualitytestskipped": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "relativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "replacementtype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sizereductionbytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sizereductionpercent": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "starttime": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "success": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "testvariantname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "testvariantsetid": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodedurationseconds": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videobitratekbps": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmaf": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "workername": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "transcodeaudiopolicyverdicts": {
+    "createdat": {
+      "data_type": "timestamp with time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "plantext": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "policyname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "policyreason": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "trackindex": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "transcodeattemptid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "transcodefiles": {
+    "allqualitiesfailed": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "filepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "finalfilepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "finalquality": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "finalsizebytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "firstattemptdate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastattemptdate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "mediafileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "originalfilepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "successdate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "successfullytranscoded": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "totalattempts": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "transcodeprogress": {
+    "averagefps": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "currentbitrate": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "currentfps": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "currentframe": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "currentphase": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "currentspeed": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "currenttime": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "eta": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "handbrakeoutput": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastframeadvance": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastprogressupdate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "passduration": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "passnumber": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "passtype": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "progresspercent": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "totalframes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodeattemptid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "transcodequeue": {
+    "audiopolicyjson": {
+      "data_type": "jsonb",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "claimedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "claimedby": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "dateadded": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "datestarted": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "directory": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "filename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "mediafileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "priority": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "processingmode": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "relativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sizebytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "sizemb": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "testvariantsetid": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "transcodequeue_snapshot_20260709": {
+    "audiopolicyjson": {
+      "data_type": "jsonb",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "claimedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "claimedby": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "dateadded": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "datestarted": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "directory": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "mediafileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "priority": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "processingmode": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "relativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sizebytes": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sizemb": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "testvariantsetid": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "transcodequeuetestvariant": {
+    "queueid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "testvariantsetid": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "transcoderules_old_2026_06_21": {
+    "acceptablevideocodecscsv": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "estimatedsavingsmbthreshold": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "preventupscale": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "resolutionexceedsprofiletarget": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "v_audio_consistency_summary": {
+    "acceptablecount": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "deviantcount": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "libraryid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "totalcount": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "uniformcount": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "videocompliancerules": {
+    "acceptablevideocodecscsv": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "bpptranscodethreshold": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "estimatedsavingsmbthreshold": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxsourcebpp_deprecated_2026_06_29": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "minsourcebpp_deprecated_2026_06_29": {
+      "data_type": "double precision",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "preventupscale": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "resolutionexceedsprofiletarget": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "vmafconfidencestats": {
+    "bitrateperpixelbucket": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "contentclass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "passrate": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "profileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "samplecount": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "samplesjson": {
+      "data_type": "jsonb",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "sourcecodec": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "sourceresolutiontier": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "vmafmean": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafstddev": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
+  "workers": {
+    "acceptsinterlaced": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "allowedprofiles": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "buildinfo": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "currentattemptid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "enabled": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "ffmpegpath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "ffprobepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastheartbeat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "lastruntimestateupdate": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "localscratchdir": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "localstagingenabled": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "localvmaffirst": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "maxconcurrentjobs": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxconcurrentqualitytestjobs": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "maxcputhreads": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "mountvalidationerror": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "nvenccapable": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "platform": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvcapable": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qualitytestenabled": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "registeredat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "remuxenabled": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "runtimestate": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "scanenabled": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sharecanonicalprefix": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sharemountprefix": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "transcodeenabled": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "version": {
+      "data_type": "character varying",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "workername": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "workersharemappings": {
+    "driveletter": {
+      "data_type": "character",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "localmountprefix": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "workername": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  }
+}

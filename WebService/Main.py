@@ -126,6 +126,9 @@ class WebServiceApp:
         try:
             from Repositories.DatabaseManager import DatabaseManager
             from Core.WorkerContext import WorkerContext
+            # directive: transcode-flow-canonical -- fail-loud on schema drift before we start serving
+            from Core.Database.SchemaChecker import SchemaChecker
+            SchemaChecker().AssertMatches()
             WorkerName = socket.gethostname()
             WorkerPlatform = platform_mod.system().lower()
             db_init = DatabaseManager()
