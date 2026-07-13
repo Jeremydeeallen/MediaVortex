@@ -1,4 +1,18 @@
 import os
+import platform
+import re
+
+
+_IS_WINDOWS = platform.system().lower() == 'windows'
+_CANONICAL_DRIVE_RE = re.compile(r'^[A-Za-z]:[\\/]')
+
+
+# directive: transcode-flow-canonical -- fail loud when a canonical drive-letter path lands in a local FS op on a non-Windows worker
+def _AssertLocalShape(Value):
+    if not Value or _IS_WINDOWS:
+        return
+    if _CANONICAL_DRIVE_RE.match(Value):
+        raise ValueError(f"LocalPath op refused canonical drive-letter path on non-Windows worker: {Value!r}. Route through Path.FromLegacyString(...).Resolve(worker) first, or use the canonical-namespace helper (_CanonicalExists / _CanonicalGetSize).")
 
 
 # directive: path-schema-migration | # see path.S3
@@ -22,28 +36,33 @@ def LocalJoin(Base, *Children):
     return os.path.join(Base or "", *Cleaned)
 
 
-# directive: path-schema-migration | # see path.S3
+# directive: transcode-flow-canonical
 def LocalExists(Value):
+    _AssertLocalShape(Value)
     return bool(Value) and os.path.exists(Value)
 
 
-# directive: path-schema-migration | # see path.S3
+# directive: transcode-flow-canonical
 def LocalIsFile(Value):
+    _AssertLocalShape(Value)
     return bool(Value) and os.path.isfile(Value)
 
 
-# directive: path-schema-migration | # see path.S3
+# directive: transcode-flow-canonical
 def LocalIsDir(Value):
+    _AssertLocalShape(Value)
     return bool(Value) and os.path.isdir(Value)
 
 
-# directive: path-schema-migration | # see path.S3
+# directive: transcode-flow-canonical
 def LocalGetSize(Value):
+    _AssertLocalShape(Value)
     return os.path.getsize(Value)
 
 
-# directive: path-schema-migration | # see path.S3
+# directive: transcode-flow-canonical
 def LocalGetMTime(Value):
+    _AssertLocalShape(Value)
     return os.path.getmtime(Value)
 
 

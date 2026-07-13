@@ -1588,7 +1588,8 @@ class FileScanningBusinessService:
                 if _CanonicalExists(MediaFile.FilePath):
                     CurrentSizeMB = _CanonicalGetSize(MediaFile.FilePath) / (1024 * 1024)
                     CurrentFileName = ntpath.basename(MediaFile.FilePath)  # canonical display
-                    CurrentModificationTime = self.GetFileModificationTime(MediaFile.FilePath)
+                    # directive: transcode-flow-canonical -- route canonical -> local before FS op
+                    CurrentModificationTime = self.GetFileModificationTime(self._ToLocalPath(MediaFile.FilePath))
 
                     if self.HasFileChanged(MediaFile, CurrentSizeMB, CurrentFileName, CurrentModificationTime):
                         return True
@@ -2291,8 +2292,8 @@ class FileScanningBusinessService:
 
                 for File in Batch:
                     try:
-                        # Extract metadata and update file
-                        self.ExtractAndUpdateMetadata(File, File.FilePath)
+                        # directive: transcode-flow-canonical -- route canonical -> local before FS op
+                        self.ExtractAndUpdateMetadata(File, self._ToLocalPath(File.FilePath))
                         self.MediaFilesRepository.SaveMediaFile(File)
                         ProcessedCount += 1
 
