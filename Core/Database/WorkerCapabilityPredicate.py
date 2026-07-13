@@ -71,18 +71,6 @@ def BuildClaimPredicate(WorkerName: str, Capability: str) -> Tuple[str, tuple]:
     return Fragment, (WorkerName,)
 
 
-# directive: worker-routing | # see worker-routing.C2
-def BuildAllowedProfilesPredicate(WorkerName: str) -> Tuple[str, tuple]:
-    """Emit correlated EXISTS gating the claim on Workers.AllowedProfiles (NULL=accept-all; outer query must alias MediaFiles as `mf`)."""
-    Fragment = (
-        "EXISTS (SELECT 1 FROM Workers w3 "
-        "WHERE w3.WorkerName = %s "
-        "AND (w3.AllowedProfiles IS NULL "
-        "OR mf.AssignedProfile = ANY(string_to_array(w3.AllowedProfiles, ','))))"
-    )
-    return Fragment, (WorkerName,)
-
-
 # directive: transcode-worker-unification | # see transcode.ST6
 def BuildNvencPredicate(WorkerName: str) -> Tuple[str, tuple]:
     """Single source for the NVENC hardware gate; outer query joins Profiles p on profilename = mf.AssignedProfile."""

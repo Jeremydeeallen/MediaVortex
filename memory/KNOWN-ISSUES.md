@@ -665,7 +665,7 @@ Breakdown of the 5703 contradictory rows:
 
 **What breaks:** A job that fails to encode (FFmpeg crash, FFprobe failure, FileReplacement failure, source unreachable) writes `TranscodeAttempts(Success=FALSE)` and the queue row is DELETEd. The next `QueueManagementBusinessService.RecomputeForFiles` re-evaluates compliance and INSERTs a fresh queue row -- the file is still non-compliant, the compliance engine doesn't consult prior failure history. Loop: fail -> delete -> recompute -> re-insert -> fail again.
 
-**Asymmetric retry policy:** VMAF-failed encodes are capped at `PostTranscodeGateConfig.MaxRequeueAttempts=3` via `Features/QualityTesting/Disposition/RetryBudgetService.HasBudgetRemaining`, which counts `TranscodeAttempts WHERE Success=TRUE AND VMAF<MinThreshold`. Encode-failed attempts (`Success=FALSE`) have NO analogous cap. The claim path filters only on `Status='Pending'` + capability + NVENC + AllowedProfiles -- no failure-count predicate. `grep -rn "FailureCount\|PriorFailures\|HasFailedAttempts" Features/Compliance/` returns zero matches.
+**Asymmetric retry policy:** VMAF-failed encodes are capped at `PostTranscodeGateConfig.MaxRequeueAttempts=3` via `Features/QualityTesting/Disposition/RetryBudgetService.HasBudgetRemaining`, which counts `TranscodeAttempts WHERE Success=TRUE AND VMAF<MinThreshold`. Encode-failed attempts (`Success=FALSE`) have NO analogous cap. The claim path filters only on `Status='Pending'` + capability + NVENC -- no failure-count predicate. `grep -rn "FailureCount\|PriorFailures\|HasFailedAttempts" Features/Compliance/` returns zero matches.
 
 **Live-DB evidence (2026-06-12):**
 

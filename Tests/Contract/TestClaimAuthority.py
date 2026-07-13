@@ -72,10 +72,19 @@ class TestQualityTestClaimAuthority(unittest.TestCase):
         self.Db.ExecuteNonQuery(
             "DELETE FROM TranscodeAttempts WHERE ProfileName = %s", ("_test-qt-claim-authority",),
         )
-        # Sentinel TranscodeAttempt satisfies the QT-claim INNER JOIN + FailureBudget predicate.
+        # directive: transcode-flow-canonical -- Reset 28: TranscodeAttempts.MediaFileId now NOT NULL, needs sentinel MediaFile
+        self.Db.ExecuteNonQuery("DELETE FROM MediaFiles WHERE RelativePath = %s", ("_test-qt-claim-authority.mkv",))
         self.Db.ExecuteNonQuery(
-            "INSERT INTO TranscodeAttempts (ProfileName, AttemptDate, Success) VALUES (%s, NOW(), TRUE)",
-            ("_test-qt-claim-authority",),
+            "INSERT INTO MediaFiles (StorageRootId, RelativePath, FileName, SizeMB) VALUES (NULL, %s, 'test.mkv', 1.0)",
+            ("_test-qt-claim-authority.mkv",),
+        )
+        MfRow = self.Db.ExecuteQuery(
+            "SELECT Id FROM MediaFiles WHERE RelativePath = %s", ("_test-qt-claim-authority.mkv",),
+        )
+        self.SentinelMediaFileId = int(MfRow[0]["Id"])
+        self.Db.ExecuteNonQuery(
+            "INSERT INTO TranscodeAttempts (ProfileName, AttemptDate, Success, MediaFileId) VALUES (%s, NOW(), TRUE, %s)",
+            ("_test-qt-claim-authority", self.SentinelMediaFileId),
         )
         Rows = self.Db.ExecuteQuery(
             "SELECT Id FROM TranscodeAttempts WHERE ProfileName = %s ORDER BY Id DESC LIMIT 1",
@@ -97,6 +106,7 @@ class TestQualityTestClaimAuthority(unittest.TestCase):
     def tearDown(self):
         self.Db.ExecuteNonQuery("DELETE FROM QualityTestingQueue WHERE Id = %s", (self.QueueId,))
         self.Db.ExecuteNonQuery("DELETE FROM TranscodeAttempts WHERE Id = %s", (self.SentinelAttemptId,))
+        self.Db.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id = %s", (self.SentinelMediaFileId,))
 
     def test_eligible_worker_claims(self):
         Job = self.Dm.ClaimQualityTestJob(SENTINEL_WORKER)

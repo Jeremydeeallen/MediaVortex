@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-07-03
-**Status:** Active -- phase: DELIVERING
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** transcode-flow-canonical
 **Inherits:** 5 LIVE PENDING criteria from `transcode-worker-unification` (see .claude/directives/closed/2026-07-03-transcode-worker-unification.md close note)
 
@@ -1562,13 +1562,6 @@ Draft parked. Promotes at DELIVERING.
 - BUG-0085 CLOSED (Reset 15) -- Dockerfile `__pycache__` purge + post-deploy stale-pyc probe live-verified across 12 workers.
 - BUG-0086 CLOSED (Reset 14 papered + Reset 16 root-cause fix) -- WorkerContext thread-local binding via `Bind()` at every processing-thread entry; strict-mode `Current()`; live-verified on Wakko QSV attempt 41156.
 - **Reset 19 10-shape smoke matrix PARTIAL** -- 3 formal (a Hotel Chevalier / h truncated fail-loud / j unparseable unit) + 9 supplementary 4K encodes (5 NVENC + 4 QSV) exercising Model4K auto-select. 7 canary shapes pending source provisioning: (b) HDR 4K PQ, (c) Animation 24p VFR, (d) Interlaced 1080i broadcast, (e) Telecined 24p->30i film, (f) Letterbox 2.35:1 in 16:9, (g) Phone 540p vertical, (i) 4:2:2 source. Follow-up session when sources identified.
-- LUFS tolerance `+/-1 LU` (directive C9) vs DB `LoudnessTolerance=4.0` (SOT) doc reconciliation.
-- `AudioPolicyAdmissionGate.AdmitOrDefer` DEFERRED_UNGAINABLE returning `PolicyJson=None`.
-- `SaveTranscodeAttempt` `__UNRESOLVED__` ProfileName sentinel (pre-existing).
-- StuckJobDetectionService false-positives on active jobs -- C21 phase-aware detection retired the Tier 2/3 conflation; residual false-positives if any pre-C21 code path remains, needs contract test extension.
-- StaleQualityTestJobs detector false-negatives while VMAF runs (pre-existing).
-- Row 41090 pre-existing residue (pre-fanout).
-- BUG-0082 `SaveTranscodeAttempt __UNRESOLVED__` phantom rows (pre-existing).
 - `adjustment-registry-wiring` follow-up directive (converge Requeue attempts to Replace via knob overrides).
 - `Workers.AllowedProfiles` per-worker rewrite to new Tier names (or removal) -- currently NULL (accept-all).
 - Tree-wide C8 sweep of pre-existing supersession language across 45 unrelated features -- baseline-ratchet-shaped follow-up.
