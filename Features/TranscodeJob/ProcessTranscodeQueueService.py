@@ -664,24 +664,41 @@ class ProcessTranscodeQueueService:
             )
             return {'Success': False, 'Vmaf': None, 'ErrorMessage': f'StreamCopy verify raised: {str(Ex)[:200]}'}
 
-    # directive: transcode-flow-canonical | # see transcode.ST8
+    # directive: transcode-flow-canonical | # see transcode.ST8 -- ffprobe per-packet data_hash chain (muxer-independent, BUG-0084 fix)
     def _ComputeVideoStreamMd5(self, LocalPath: str) -> Optional[str]:
-        """Return hex MD5 of the video stream via `ffmpeg -i <path> -map 0:v -c copy -f md5 -`."""
+        """Return hex MD5 of concatenated per-packet data_hash for first video stream."""
         import subprocess
+        import hashlib
         try:
-            Command = [self.FFmpegPath, '-nostdin', '-hide_banner', '-loglevel', 'error', '-i', LocalPath, '-map', '0:v', '-c', 'copy', '-f', 'md5', '-']
+            Command = [self.FFprobePath, '-hide_banner', '-loglevel', 'error',
+                       '-show_data_hash', 'md5',
+                       '-show_packets',
+                       '-select_streams', 'v:0',
+                       '-show_entries', 'packet=data_hash',
+                       '-of', 'default=nokey=1:noprint_wrappers=1',
+                       LocalPath]
             Result = subprocess.run(Command, capture_output=True, text=True, timeout=600)
             if Result.returncode != 0:
                 LoggingService.LogError(
-                    f"ffmpeg MD5 probe returned {Result.returncode} for {LocalPath!r}: {Result.stderr.strip()[:200]}",
+                    f"ffprobe packet-hash probe returned {Result.returncode} for {LocalPath!r}: {Result.stderr.strip()[:200]}",
                     "ProcessTranscodeQueueService", "_ComputeVideoStreamMd5",
                 )
                 return None
+            Digest = hashlib.md5()
+            PacketCount = 0
             for Line in Result.stdout.splitlines():
                 Line = Line.strip()
-                if Line.startswith('MD5='):
-                    return Line[len('MD5='):].lower()
-            return None
+                if not Line:
+                    continue
+                Digest.update(Line.encode('ascii'))
+                PacketCount += 1
+            if PacketCount == 0:
+                LoggingService.LogError(
+                    f"ffprobe packet-hash returned zero packets for {LocalPath!r}",
+                    "ProcessTranscodeQueueService", "_ComputeVideoStreamMd5",
+                )
+                return None
+            return Digest.hexdigest()
         except Exception as Ex:
             LoggingService.LogException(
                 f"MD5 probe raised for {LocalPath!r}",
