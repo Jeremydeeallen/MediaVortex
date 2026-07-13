@@ -550,14 +550,23 @@ class StuckJobDetectionService:
             activeQualityJobs = self.ActiveJobRepository.GetActiveJobsByService(_AJR.BuildActiveJobsQuery("QualityTestService"))
             activeQualityJobs = [aj for aj in activeQualityJobs if (aj.get('WorkerName') or '') == LocalWorkerName]
 
-            runningJobs = []
+            # directive: transcode-flow-canonical -- Reset 28 item 7: QualityTestResults.Status='Running' is the aliveness signal for VMAF; ActiveJobs is a tracking-only mirror. Union of both prevents false-negatives when ActiveJobs row is missing but VMAF is actively running.
+            runningQueueIds = set()
             for activeJob in activeQualityJobs:
-                queueId = activeJob.get('QueueId')
-                if queueId:
-                    for queueItem in qualityTestQueue:
-                        if queueItem['Id'] == queueId:
-                            runningJobs.append(queueItem)
-                            break
+                qid = activeJob.get('QueueId')
+                if qid:
+                    runningQueueIds.add(qid)
+            RunningQtrRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT qtq.Id FROM QualityTestingQueue qtq "
+                "INNER JOIN QualityTestResults qtr ON qtr.TranscodeAttemptId = qtq.TranscodeAttemptId "
+                "WHERE qtr.Status = 'Running' AND (qtq.ClaimedBy = %s OR qtq.ClaimedBy IS NULL)",
+                (LocalWorkerName,)
+            ) or []
+            for row in RunningQtrRows:
+                qid = row.get('Id') or row.get('id')
+                if qid:
+                    runningQueueIds.add(qid)
+            runningJobs = [q for q in qualityTestQueue if q['Id'] in runningQueueIds]
 
             if not runningJobs:
                 LoggingService.LogInfo("Stuck quality test job detection: No running quality test jobs found",
