@@ -65,7 +65,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - [x] Fix: worker isolation -- SignalHandler, CrashRecovery, StuckJobDetector, QueueManagement scoped by WorkerName
 - [x] Interlaced routing: AcceptsInterlaced flag on Workers, claim query filters by IsInterlaced
 - [x] Conditional deinterlacing: CommandBuilder applies yadif based on MediaFile.IsInterlaced, not profile
-- [x] True in-place output: CommandBuilder writes the `.inprogress` output next to the source. The legacy `TranscodeOutputMode` / `TranscodeFileMode` settings + `Workers.StagingDirectory` column were removed 2026-05-21 once LocalStaging was retired.
+- [x] True in-place output: CommandBuilder writes the `.inprogress` output next to the source.
 - [x] VMAF toggle: add QualityTestEnabled global setting (default OFF) and per-worker column
 - [x] Per-worker FFprobe: WorkerContext singleton provides FFprobePath to FFmpegService automatically, no explicit threading needed
 - [ ] Fix: concurrent job progress isolation (see memory/KNOWN-ISSUES.md)

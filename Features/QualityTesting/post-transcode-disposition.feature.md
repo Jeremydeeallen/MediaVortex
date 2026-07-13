@@ -87,7 +87,7 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
     - `Workers.WorkerQualityTestEnabled` cached attribute on the long-lived service instance
    Verifiable: `grep -rn "ShouldQualityTestService\|_ReplaceFileDirectly\|BypassVMAFCheck\|ProcessFileReplacementWithVMAF\|CheckAndTriggerAutoReplace" --include="*.py"` returns zero hits in `Features/`, `Services/`, `Repositories/`, `WorkerService/` (the feature doc and KNOWN-ISSUES are exempt).
 
-15. The legacy `Features/FileReplacement/post-transcode-pipeline.feature.md` is updated: criteria 1-3 (the `ShouldQualityTestService` bridge decisions) are marked **superseded by `post-transcode-disposition.feature.md`**. The mechanical criteria (path translation, atomic rename, archive-before-delete) remain in force and are referenced by Stage 8 of the flow doc.
+15. `Features/FileReplacement/post-transcode-pipeline.feature.md` owns only the mechanical criteria (path translation, atomic rename, archive-before-delete) which are referenced by Stage 8 of the flow doc. Disposition-bridge criteria live here.
 
 ### G. GUI (single source of truth)
 
@@ -165,7 +165,7 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
 24. **Extended reason vocabulary** (closed list, additive to criterion 10). New values:
     `VmafLiveActionPassed`, `VmafLiveActionP10BelowMin`,
     `VmafHeldFramePassed`, `VmafHeldFrameP25BelowMin`, `VmafHeldFrameMeanBelowMin`.
-    Existing `VmafBelowMin` and `VmafPassed` reasons are deprecated for new attempts (the new vocabulary is more precise about which floor failed and which path the attempt took). The closed-list check (criterion 10) is updated; `SELECT DISTINCT DispositionReason` still returns only the union of allowed values. Verifiable: integration test asserts each new reason fires on synthetic inputs at the relevant threshold boundary.
+    Reason vocabulary is precise about which floor failed and which path the attempt took. The closed-list check (criterion 10) is updated; `SELECT DISTINCT DispositionReason` still returns only the union of allowed values. Verifiable: integration test asserts each new reason fires on synthetic inputs at the relevant threshold boundary.
 
 25. **Flow-doc and integration-test conformance.** Per criterion 4, the decision table in `transcode.flow.md` Stage 6 is amended with the two new rows (held-frame and live-action branches) and the legacy "VMAF Mean vs MinThreshold" row is removed. `Tests/Contract/TestPostTranscodeDisposition.py` adds at least one assertion per new row (held-frame pass, held-frame Mean-floor fail, held-frame P25-floor fail, live-action pass, live-action P10-floor fail), run twice each per the determinism rule (criterion 5). Verifiable: the test count rises from 14 to >=19; CI is green.
 

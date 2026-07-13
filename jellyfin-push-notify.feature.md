@@ -216,8 +216,7 @@ referencing the old `.mkv`. Documented as expected behavior; not a bug.
 
 ## Status
 
-**COMPLETE -- verified live 2026-05-22; runtime dry-run gate removed 2026-05-27;
-notify shape corrected 2026-05-27.**
+**COMPLETE.**
 Service implemented, wired into FileReplacement + DuplicateDetection,
 unit tests green. Config in `SystemSettings`; reuses existing
 `JellyfinHost`/`JellyfinApiPort`/`JellyfinApiKey` rows shared with
@@ -255,9 +254,7 @@ The Jellyfin 2h interval scan stays on -- see Out of scope.
       Reuses existing `JellyfinHost`/`JellyfinApiPort`/`JellyfinApiKey`
       rows -- not seeded here, managed by `Features/Optimization`.
 - [x] 5. Implement `Services/JellyfinNotifyService.py`; config read
-      fresh from `SystemSettings` on every call (criterion 6). The
-      original implementation had a `JellyfinNotifyDryRun` gate; the
-      gate was removed 2026-05-27 (see Status).
+      fresh from `SystemSettings` on every call (criterion 6).
 - [x] 6. Unit tests per criterion 3, 4, 5, 6, 8, 9
       (`Tests/Contract/TestJellyfinNotify.py`, 13 tests including
       fresh-read-per-call and default-port guards)
@@ -318,9 +315,7 @@ under `Features/` and `Services/` (2026-05-22):
   not schema)
 - `SystemSettings` table — reuses the existing `JellyfinHost`,
   `JellyfinApiPort`, `JellyfinApiKey` rows managed by
-  `Features/Optimization`. No push-notify-specific rows (the
-  `JellyfinNotifyDryRun` row from the original implementation was
-  removed 2026-05-27).
+  `Features/Optimization`. No push-notify-specific rows.
 
 ## Files
 

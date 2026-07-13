@@ -59,7 +59,7 @@ The worker never resolves the version live (no `git rev-parse HEAD`, no environm
 
 Both deploy scripts assert, after restart, that `Workers.Version` equals the SHA they just stamped. Mismatch fails the deploy with exit code 3.
 
-The Activity page tile shows the short SHA next to the worker name; the tooltip shows the full SHA + BuildInfo. A fleet-wide mismatch banner (`/api/TeamStatus/Workers/VersionStatus`) appears when two or more enabled workers report different non-unknown versions. See `deploy/version-on-deploy.feature.md` for the current contract; `Features/TeamStatus/worker-versioning.feature.md` documents the original 3-tier shape (tier 2 removed 2026-05-27).
+The Activity page tile shows the short SHA next to the worker name; the tooltip shows the full SHA + BuildInfo. A fleet-wide mismatch banner (`/api/TeamStatus/Workers/VersionStatus`) appears when two or more enabled workers report different non-unknown versions. See `deploy/version-on-deploy.feature.md` for the current contract.
 
 ## Per-Worker Status Control
 
