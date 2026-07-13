@@ -146,7 +146,7 @@ class AudioPolicyAdmissionGate:
             return AdmissionDecision(
                 Outcome=DEFERRED_UNGAINABLE,
                 DeferReason=REASON_UNGAINABLE_ALL_STREAMS,
-                PolicyJson=None,
+                PolicyJson=json.dumps(self._PolicyToDict(Policy)),
             )
 
         return AdmissionDecision(

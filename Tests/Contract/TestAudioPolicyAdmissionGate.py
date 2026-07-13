@@ -142,6 +142,9 @@ class TestAudioPolicyAdmissionGate(unittest.TestCase):
         Decision = Gate.AdmitOrDefer(Mf)
         self.assertEqual(Decision.Outcome, DEFERRED_UNGAINABLE)
         self.assertEqual(Rev.Added, [(1, 'ungainable_all_streams')])
+        self.assertIsNotNone(Decision.PolicyJson)
+        Snapshot = json.loads(Decision.PolicyJson)
+        self.assertEqual(Snapshot['UngainablePolicy'], 'review')
 
     # directive: perfect-audio-vertical | # see perfect-audio-vertical.C12
     def test_admits_when_at_least_one_track_admissible(self):
