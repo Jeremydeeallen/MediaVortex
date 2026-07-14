@@ -47,7 +47,7 @@ When adding a new bare-metal Linux worker host:
 |---|---|---|
 | ST1 | Pre-Flight Checks | SSH reachability, Python 3.12 presence, DB reachability, mount non-empty, Intel Arc device visible |
 | ST2 | Detect torch variant | `nvidia-smi` -> cu124, else `lspci` Intel Arc `[8086:e*xx]` -> xpu, else cpu |
-| ST3 | Sync + Install | rsync source to `/opt/mediavortex/src`, create venv at `/opt/mediavortex/venv`, install torch wheel from `download.pytorch.org/whl/<variant>` + repo `requirements.txt` |
+| ST3 | Sync + Install | rsync source to `/opt/mediavortex/src`, create venv at `/opt/mediavortex/host-venv`, install torch wheel from `download.pytorch.org/whl/<variant>` (only exception to requirements.txt rule -- needs variant-specific index-url), then `pip install -r WorkerService/requirements.txt` for every other dep. All non-torch software installs go through requirements.txt -- no hand-picked pip lists. |
 | ST4 | Systemd Apply | Render one `mediavortex-worker@<n>.service` per worker slot from template; `systemctl daemon-reload` + `enable` + `restart` |
 | ST5 | Post-Deploy Verification | `systemctl is-active` all N units; `Workers` rows Online/Paused; `WorkerShareMappings` populated; version match |
 | ST6 | Runtime Pipeline | Per-worker startup -> `WorkerService.flow.md::ST0..ST13` ownership |
@@ -87,11 +87,11 @@ Wheels come from `https://download.pytorch.org/whl/<variant>`:
 # 1. Sync source tree to target
 rsync -az --delete --exclude-from=deploy/.deployignore ./ root@<ip>:/opt/mediavortex/src/
 
-# 2. Create / reuse venv
+# 2. Create / reuse venv (torch pinned via index-url; everything else via requirements.txt)
 ssh root@<ip> '
-  python3.12 -m venv /opt/mediavortex/venv --upgrade-deps
-  /opt/mediavortex/venv/bin/pip install --index-url https://download.pytorch.org/whl/<variant> torch torchaudio
-  /opt/mediavortex/venv/bin/pip install -r /opt/mediavortex/src/requirements.txt
+  python3.12 -m venv /opt/mediavortex/host-venv --upgrade-deps
+  /opt/mediavortex/host-venv/bin/pip install --index-url https://download.pytorch.org/whl/<variant> torch==2.6.0 torchaudio==2.6.0
+  /opt/mediavortex/host-venv/bin/pip install -r /opt/mediavortex/src/WorkerService/requirements.txt
 '
 
 # 3. Stamp the deployed SHA into /opt/mediavortex/VERSION
@@ -111,7 +111,7 @@ RequiresMountsFor=/mnt/media_tv /mnt/movies /mnt/xxx
 
 [Service]
 Type=simple
-ExecStart=/opt/mediavortex/venv/bin/python -m WorkerService.Main
+ExecStart=/opt/mediavortex/host-venv/bin/python -m WorkerService.Main
 WorkingDirectory=/opt/mediavortex/src
 Environment=MEDIAVORTEX_WORKER_NAME=%l-worker-%i
 Environment=MEDIAVORTEX_SHARE_MAPPINGS=T=/mnt/media_tv/,M=/mnt/movies/,Z=/mnt/xxx/
@@ -183,7 +183,7 @@ Expected: 3 rows per worker (T, M, Z), each pointing at the matching host mount.
 ### 4. Torch xpu smoke (Intel Arc targets)
 
 ```bash
-ssh root@<ip> '/opt/mediavortex/venv/bin/python -c "
+ssh root@<ip> '/opt/mediavortex/host-venv/bin/python -c "
 import torch
 print(\"torch:\", torch.__version__)
 print(\"xpu avail:\", torch.xpu.is_available())
@@ -248,8 +248,8 @@ ssh root@<ip> 'journalctl -u mediavortex-worker@1.service --no-pager -n 100'
 
 Common causes:
 - DB unreachable (`psycopg2.OperationalError`) -- check `10.0.0.15:5432`.
-- Venv broken -- reinstall: `rm -rf /opt/mediavortex/venv && py deploy/deploy-baremetal-worker.py <friendly>`.
-- torch xpu wheel mismatch -- delete `/opt/mediavortex/venv` and redeploy.
+- Venv broken -- reinstall: `rm -rf /opt/mediavortex/host-venv && py deploy/deploy-baremetal-worker.py <friendly>`.
+- torch xpu wheel mismatch -- delete `/opt/mediavortex/host-venv` and redeploy.
 
 ## Failure Modes
 
