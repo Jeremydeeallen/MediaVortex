@@ -48,21 +48,17 @@ ENV LIBVA_DRIVER_NAME=iHD
 
 # Python dependencies (WorkerService). PEP 668 on Ubuntu noble needs --break-system-packages
 # for global pip install in a single-purpose container.
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
-# TORCH_VARIANT picks the wheel: cpu, cu124 (CUDA 12.4). Intel Arc / Xe hosts run bare-metal via deploy-baremetal-worker.py, not Docker.
+# directive: transcode-flow-canonical -- Reset 28: torch is the ONLY hand-installed package (needs variant --index-url); everything else via requirements.txt.
 ARG TORCH_VARIANT=cpu
+WORKDIR /opt/mediavortex
+COPY requirements.txt ./requirements.txt
+COPY WorkerService/requirements.txt ./WorkerService/requirements.txt
 RUN pip install --no-cache-dir --break-system-packages \
-        psycopg2-binary \
-        psutil \
-        setproctitle \
-        soundfile \
- && pip install --no-cache-dir --break-system-packages \
         --index-url https://download.pytorch.org/whl/${TORCH_VARIANT} \
         torch==2.6.0 torchaudio==2.6.0 \
- && pip install --no-cache-dir --break-system-packages demucs==4.0.1
+ && pip install --no-cache-dir --break-system-packages -r WorkerService/requirements.txt
 
 # Copy application code
-WORKDIR /opt/mediavortex
 COPY . .
 
 # BUG-0085: purge stale __pycache__ that build-cache may leak into cached layer.
