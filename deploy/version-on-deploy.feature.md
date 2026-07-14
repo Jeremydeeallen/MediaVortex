@@ -64,11 +64,11 @@ COMPLETE 2026-05-27. CEO directive closed. All criteria PASS or PASS-conditional
 - [x] Slice B: `deploy-windows-worker.py` stamps VERSION + BUILD_INFO on target via SSH/PowerShell (criterion 4) -- commit `c401ae6`
 - [x] Slice C: linux + windows deploy verify `Workers.Version == stamped SHA` post-restart (criterion 5) -- commit `c401ae6`
 - [x] `.gitignore` entries for VERSION + BUILD_INFO (criterion 6) -- commit `c401ae6`
-- [x] Hot-swap doc updated -- StartWorker.py self-stamps via Scripts/StampVersion.py at every launch, so hot-swap no longer needs an explicit stamp step
+- [x] Hot-swap doc updated -- StartWorker.py self-stamps via Scripts/StampVersion.py at every launch.
 - [x] Linux fleet redeployed (dot, larry, wakko) -- all 12 workers show `c401ae6` on /Activity with BuildInfo populated
-- [x] `Templates/Activity.html`: version separator changed `v` -> `v: ` plus explicit leading space for readability
-- [x] `StartWorker.py`: pre-launch self-stamp step added -- I9 / future Windows hosts pick up local HEAD without operator intervention
-- [x] Doc supersession sweep (per directive closure gate): `WorkerService/WorkerService.flow.md` Version section rewritten; `Features/TeamStatus/worker-versioning.feature.md` marked superseded in part; `deploy/worker-deploy-linux.flow.md` post-deploy verify SELECT gained Version
+- [x] `Templates/Activity.html`: version separator `v: ` with leading space for readability
+- [x] `StartWorker.py`: pre-launch self-stamp step; Windows hosts pick up local HEAD automatically
+- [x] Doc sweep: `WorkerService/WorkerService.flow.md` Version section rewritten; `deploy/worker-deploy-linux.flow.md` post-deploy verify SELECT gained Version
 - [ ] OPERATOR: restart I9 worker so the new code path takes effect and VERSION is read at startup. /Activity should then show I9 on the same SHA as the Linux fleet; mismatch banner clears.
 
 ## Files
@@ -84,5 +84,4 @@ COMPLETE 2026-05-27. CEO directive closed. All criteria PASS or PASS-conditional
 | `deploy/worker-deploy-windows.flow.md` | Hot-swap section + Step 5 verify reference self-stamp behavior |
 | `deploy/worker-deploy-linux.flow.md` | Post-deploy verify SELECT gained Version column |
 | `WorkerService/WorkerService.flow.md` | Version section rewritten: 2-state resolver, who writes the files on each platform |
-| `Features/TeamStatus/worker-versioning.feature.md` | Marked superseded in part (tier 2 removed, Windows stamping added) |
 | `.gitignore` | Excludes `/VERSION` and `/BUILD_INFO` at repo root |

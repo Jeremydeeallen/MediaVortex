@@ -81,7 +81,7 @@ def StepPreflight(Target: str, Friendly: str) -> bool:
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
 def StepEnsureVenv(Target: str, TorchVariant: str) -> bool:
-    # directive: transcode-flow-canonical -- Reset 28: torch/torchaudio need index-url per variant; everything else installs from requirements.txt post-sync (StepInstallRequirements).
+    # directive: transcode-flow-canonical -- torch/torchaudio need index-url per variant; every other package installs from requirements.txt in StepInstallRequirements.
     Index = TorchIndexByVariant.get(TorchVariant, TorchIndexByVariant["cpu"])
     Script = (
         "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12-venv python3-pip > /dev/null && "
@@ -102,7 +102,7 @@ def StepEnsureVenv(Target: str, TorchVariant: str) -> bool:
     return True
 
 
-# directive: transcode-flow-canonical -- Reset 28: ALL software installs via requirements.txt; no hand-picked pip lists on any deploy path
+# directive: transcode-flow-canonical -- all non-torch installs via requirements.txt (enforced by Tests/Contract/TestDeployPipInstallsRequirementsTxt.py)
 def StepInstallRequirements(Target: str) -> bool:
     Script = (
         "/opt/mediavortex/host-venv/bin/pip install --no-cache-dir "
@@ -155,7 +155,7 @@ def StepSyncSource(Target: str) -> bool:
     return True
 
 
-# directive: transcode-flow-canonical -- Reset 28: stamp VERSION with actual HEAD sha, not stale disk copy
+# directive: transcode-flow-canonical -- stamp VERSION with actual HEAD sha on target
 def StepStampVersion(Target: str) -> bool:
     Head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(MediaVortexRoot), capture_output=True, text=True, timeout=10)
     if Head.returncode != 0:
@@ -170,7 +170,7 @@ def StepStampVersion(Target: str) -> bool:
     return True
 
 
-# directive: transcode-flow-canonical -- Reset 28: .claude excluded from SyncSource so schema snapshot never lands; ship explicitly
+# directive: transcode-flow-canonical -- .claude is excluded from SyncSource; ship schema snapshot explicitly
 def StepShipSchemaSnapshot(Target: str) -> bool:
     Snapshot = MediaVortexRoot / ".claude" / "schema" / "snapshot.json"
     if not Snapshot.exists():
@@ -250,7 +250,7 @@ def StepVerify(Target: str, Friendly: str, Count: int) -> bool:
     return len(Lines) >= Count
 
 
-# directive: transcode-flow-canonical -- Reset 28: bare-metal deploy must reconcile Workers.{nvenccapable,qsvcapable} same as docker path
+# directive: transcode-flow-canonical -- bare-metal deploy reconciles Workers.{nvenccapable,qsvcapable} same as docker path
 def StepReconcileCapabilities(Target: str, Friendly: str) -> bool:
     ScriptsDir = MediaVortexRoot / "Scripts"
     Prefix = f"{Friendly}-worker"

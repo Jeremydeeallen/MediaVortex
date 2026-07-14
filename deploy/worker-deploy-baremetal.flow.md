@@ -47,7 +47,7 @@ When adding a new bare-metal Linux worker host:
 |---|---|---|
 | ST1 | Pre-Flight Checks | SSH reachability, Python 3.12 presence, DB reachability, mount non-empty, Intel Arc device visible |
 | ST2 | Detect torch variant | `nvidia-smi` -> cu124, else `lspci` Intel Arc `[8086:e*xx]` -> xpu, else cpu |
-| ST3 | Sync + Install | rsync source to `/opt/mediavortex/src`, create venv at `/opt/mediavortex/host-venv`, install torch wheel from `download.pytorch.org/whl/<variant>` (only exception to requirements.txt rule -- needs variant-specific index-url), then `pip install -r WorkerService/requirements.txt` for every other dep. All non-torch software installs go through requirements.txt -- no hand-picked pip lists. |
+| ST3 | Sync + Install | rsync source to `/opt/mediavortex/src`, create venv at `/opt/mediavortex/host-venv`, install torch wheel from `download.pytorch.org/whl/<variant>` (only exception to requirements.txt rule -- needs variant-specific index-url), then `pip install -r WorkerService/requirements.txt` for every other dep. All non-torch software installs go through requirements.txt; enforced by `Tests/Contract/TestDeployPipInstallsRequirementsTxt.py`. |
 | ST4 | Systemd Apply | Render one `mediavortex-worker@<n>.service` per worker slot from template; `systemctl daemon-reload` + `enable` + `restart` |
 | ST5 | Post-Deploy Verification | `systemctl is-active` all N units; `Workers` rows Online/Paused; `WorkerShareMappings` populated; version match |
 | ST6 | Runtime Pipeline | Per-worker startup -> `WorkerService.flow.md::ST0..ST13` ownership |

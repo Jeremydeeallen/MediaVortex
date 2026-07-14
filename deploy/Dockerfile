@@ -48,7 +48,7 @@ ENV LIBVA_DRIVER_NAME=iHD
 
 # Python dependencies (WorkerService). PEP 668 on Ubuntu noble needs --break-system-packages
 # for global pip install in a single-purpose container.
-# directive: transcode-flow-canonical -- Reset 28: torch is the ONLY hand-installed package (needs variant --index-url); everything else via requirements.txt.
+# directive: transcode-flow-canonical -- torch installs by name (needs variant --index-url); every other package installs via requirements.txt. See Tests/Contract/TestDeployPipInstallsRequirementsTxt.py.
 ARG TORCH_VARIANT=cpu
 WORKDIR /opt/mediavortex
 COPY requirements.txt ./requirements.txt
