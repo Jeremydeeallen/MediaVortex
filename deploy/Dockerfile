@@ -56,7 +56,7 @@ COPY WorkerService/requirements.txt ./WorkerService/requirements.txt
 RUN pip install --no-cache-dir --break-system-packages \
         --index-url https://download.pytorch.org/whl/${TORCH_VARIANT} \
         torch==2.6.0 torchaudio==2.6.0 \
- && pip install --no-cache-dir --break-system-packages -r WorkerService/requirements.txt
+ && pip install --no-cache-dir --break-system-packages --ignore-installed -r WorkerService/requirements.txt
 
 # Copy application code
 COPY . .
