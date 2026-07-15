@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from Features.ServiceControl.PhaseDetectors.SetupPhaseDetector import SetupPhaseDetector
+from Features.ServiceControl.PhaseDetectors.PreEncodePhaseDetector import PreEncodePhaseDetector
 from Features.ServiceControl.PhaseDetectors.EncodingPhaseDetector import EncodingPhaseDetector
 from Features.ServiceControl.PhaseDetectors.PostEncodePhaseDetector import PostEncodePhaseDetector
 from Features.ServiceControl.PhaseDetectors.VerifyingPhaseDetector import VerifyingPhaseDetector
@@ -36,6 +37,26 @@ class SetupPhaseDetectorTest(unittest.TestCase):
     def test_setup_at_25min_below_default_30(self):
         Detector = SetupPhaseDetector(_FakeSettingsFactory(None))
         Stuck, _ = Detector.Detect(None, None, datetime.now(timezone.utc) - timedelta(minutes=25))
+        self.assertFalse(Stuck)
+
+
+class PreEncodePhaseDetectorTest(unittest.TestCase):
+
+    def test_fresh_preencode_returns_not_stuck(self):
+        Detector = PreEncodePhaseDetector(_FakeSettingsFactory(20))
+        Stuck, Reason = Detector.Detect(None, None, datetime.now(timezone.utc) - timedelta(minutes=8))
+        self.assertFalse(Stuck)
+        self.assertIn('in-progress', Reason)
+
+    def test_preencode_over_timeout_returns_stuck(self):
+        Detector = PreEncodePhaseDetector(_FakeSettingsFactory(20))
+        Stuck, Reason = Detector.Detect(None, None, datetime.now(timezone.utc) - timedelta(minutes=21))
+        self.assertTrue(Stuck)
+        self.assertIn('PreEncode phase stuck', Reason)
+
+    def test_preencode_default_20_min(self):
+        Detector = PreEncodePhaseDetector(_FakeSettingsFactory(None))
+        Stuck, _ = Detector.Detect(None, None, datetime.now(timezone.utc) - timedelta(minutes=15))
         self.assertFalse(Stuck)
 
 

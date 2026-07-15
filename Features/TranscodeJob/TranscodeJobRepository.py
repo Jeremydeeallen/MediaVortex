@@ -609,14 +609,14 @@ class TranscodeJobRepository(BaseRepository):
                 LoggingService.LogDebug(f"Updated progress record for attempt {TranscodeAttemptId}: {CurrentPhase} ({ProgressPercent}%) - Frame: {CurrentFrame}, FPS: {CurrentFPS}, ETA: {ETA}", "TranscodeJobRepository", "SaveTranscodeProgress")
                 return result
             else:
-                # Insert new record
-                insertQuery = """
-                    INSERT INTO TranscodeProgress
-                    (TranscodeAttemptId, PassNumber, PassType, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,
-                     CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS, LastProgressUpdate, LastFrameAdvance)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-                    RETURNING Id
-                """
+                # directive: transcode-flow-canonical -- LastFrameAdvance NULL on CurrentFrame=0
+                insertQuery = (
+                    "INSERT INTO TranscodeProgress "
+                    "(TranscodeAttemptId, PassNumber, PassType, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, "
+                    " CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS, LastProgressUpdate, LastFrameAdvance) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NULL) "
+                    "RETURNING Id"
+                )
                 parameters = (TranscodeAttemptId, 1, "Encoding", CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,
                              CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS)
 

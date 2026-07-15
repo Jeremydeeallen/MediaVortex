@@ -6,6 +6,7 @@ from Core.Path import Path, Worker
 from Core.WorkerContext import WorkerContext
 from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalExists, LocalJoin, LocalSplitExt
 from Features.AudioNormalization.Services import AudioPreEncodeFacade
+from Features.ServiceControl.JobPhase import JobPhase
 from Features.TranscodeJob.Emit.OutputFilenameBuilder import OutputFilenameBuilder
 from Features.TranscodeJob.Worker.JobResult import JobResult
 
@@ -81,6 +82,7 @@ class JobProcessor:
             BaseName = OutputFilenameBuilder().CollapseMvSuffix(BaseName)
             TargetLocalPath = LocalJoin(LocalDirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
 
+            self.QueueService.DatabaseManager.SetJobPhase(ActiveJobId, JobPhase.PreEncode)
             PreAudio = self._RunPreEncodeAudio(Mode, EffectiveInputPath, Job, TranscodeAttemptId)
             AudioPreEncodeFacade.PersistSourceLoudness(MediaFile.Id, MediaFile, PreAudio)
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, f"Building {Mode} command...")

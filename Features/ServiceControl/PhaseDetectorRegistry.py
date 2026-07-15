@@ -1,5 +1,6 @@
 from Features.ServiceControl.JobPhase import JobPhase
 from Features.ServiceControl.PhaseDetectors.SetupPhaseDetector import SetupPhaseDetector
+from Features.ServiceControl.PhaseDetectors.PreEncodePhaseDetector import PreEncodePhaseDetector
 from Features.ServiceControl.PhaseDetectors.EncodingPhaseDetector import EncodingPhaseDetector
 from Features.ServiceControl.PhaseDetectors.PostEncodePhaseDetector import PostEncodePhaseDetector
 from Features.ServiceControl.PhaseDetectors.VerifyingPhaseDetector import VerifyingPhaseDetector
@@ -15,6 +16,7 @@ class PhaseDetectorRegistry:
         Inspector = ProcessInspector()
         self._Detectors = {
             JobPhase.Setup: SetupPhaseDetector(SystemSettingsRepositoryFactory=SystemSettingsRepositoryFactory),
+            JobPhase.PreEncode: PreEncodePhaseDetector(SystemSettingsRepositoryFactory=SystemSettingsRepositoryFactory),
             JobPhase.Encoding: EncodingPhaseDetector(
                 DatabaseManager=DatabaseManager,
                 ProcessInspector=Inspector,

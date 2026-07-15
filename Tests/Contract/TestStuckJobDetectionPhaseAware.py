@@ -47,6 +47,11 @@ class StuckJobDetectionPhaseAwareTest(unittest.TestCase):
         Registry.GetDetector.assert_called_once_with(JobPhase.Setup)
         self.assertFalse(Stuck)
 
+    def test_preencode_phase_dispatches_to_preencode_detector(self):
+        Svc, Detector, Registry = _MakeService(JobPhase.PreEncode, datetime.now(timezone.utc) - timedelta(minutes=8))
+        Svc.IsJobStuck(_MakeJob())
+        Registry.GetDetector.assert_called_once_with(JobPhase.PreEncode)
+
     def test_encoding_phase_dispatches_to_encoding_detector(self):
         Svc, Detector, Registry = _MakeService(JobPhase.Encoding, datetime.now(timezone.utc) - timedelta(minutes=1))
         Svc.IsJobStuck(_MakeJob())

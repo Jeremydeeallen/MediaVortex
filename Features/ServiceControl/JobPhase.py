@@ -6,6 +6,7 @@ class JobPhase(str, Enum):
     """Domain phase of an in-flight job; each phase has distinct stuck-detection semantics."""
 
     Setup = "Setup"
+    PreEncode = "PreEncode"
     Encoding = "Encoding"
     PostEncode = "PostEncode"
     Verifying = "Verifying"
