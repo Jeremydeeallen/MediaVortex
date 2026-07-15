@@ -120,7 +120,7 @@ INFO    Auto-captured 0/4 stills for attempt 40985 (policy=All)
 
 ### stuck-detection
 
-### [BUG-0081] StuckJobDetectionService is phase-blind; kills legitimate Demucs pre-encode + leaves child unreaped + re-claim stacks
+### [BUG-0081 -- RESOLVED 2026-07-15] StuckJobDetectionService is phase-blind; kills legitimate Demucs pre-encode + leaves child unreaped + re-claim stacks
 **Date:** 2026-07-03 | **Area:** stuck-detection / transcode-lifecycle
 
 **What breaks:** `StuckJobDetectionService._IsJobFrozen` (`Features/ServiceControl/StuckJobDetectionService.py:255-296`) reads `TranscodeProgress.LastProgressUpdate` and fires "frozen -- no frame advance for N minutes" once staleness exceeds threshold (default 5 min). But `JobProcessor.Process` calls `_RunPreEncodeAudio` (Demucs source separation) BEFORE ffmpeg starts. On a wakko-worker-N slot (Ryzen 7 3700X, 4-thread cpuset), the CPU-fallback demucs pass for a 20-25 min episode takes 15+ min. During Demucs the Reporter callback does not tick TranscodeProgress -- Demucs stdout progress is not parsed -- so `LastProgressUpdate` stays at the pre-Demucs "Preparing Files" tick and goes stale.
@@ -151,11 +151,11 @@ Detector fires -> HandleJobFailure marks attempt failed -> re-set queue row to P
 
 **Proposed criterion:** "For any TranscodeAttempts row that transitions through pre-encode phases (Demucs / ffprobe / staging), `TranscodeProgress.LastProgressUpdate` receives a heartbeat tick at least every 60s while the phase is running. `StuckJobDetectionService._IsJobFrozen` reads `TranscodeProgress.CurrentPhase` and applies phase-specific thresholds. `HandleJobFailure` must reap every child subprocess owned by the failing JobProcessor.Process invocation before writing Success=False and releasing the queue row."
 
-**Fix with:** `/t BUG-0081`.
+**Resolution (2026-07-15, commit 5c47322):** Domain-correct phase-aware detection. Added `JobPhase.PreEncode` covering Demucs pipeline; `PreEncodePhaseDetector` uses phase-age (default 20min via `SystemSettings.PreEncodePhaseTimeoutMin`) with no frame-advance check. `JobProcessor.Process` transitions `ActiveJobs.Phase='PreEncode'` before `_RunPreEncodeAudio`. `TranscodeJobRepository.SaveTranscodeProgress` INSERT now seeds `LastFrameAdvance=NULL` so pre-ffmpeg progress writes cannot pin the frame-advance clock. `EncodingPhaseDetector` treats NULL as "not yet recorded" -> not stuck. Live-verified on wakko-worker-1 attempt 42981 (survived Demucs without false-positive). Also landed `DemucsDaemonClient` (long-lived subprocess, process-singleton) that amortizes model load + XPU compile so subsequent jobs run in 2-3min instead of 10+.
 
 ---
 
-### [BUG-0075] StuckJobDetectionService marks Success=TRUE on frozen ffmpeg kills; downstream sees a "successful" attempt with a frozen-error message
+### [BUG-0075 -- RESOLVED 2026-07-15] StuckJobDetectionService marks Success=TRUE on frozen ffmpeg kills; downstream sees a "successful" attempt with a frozen-error message
 **Date:** 2026-07-02 | **Area:** stuck-detection / transcode-lifecycle
 
 **What breaks:** When `StuckJobDetectionService` decides an ffmpeg process is frozen (no frame advance for N minutes) and kills it, the corresponding `TranscodeAttempts` row is updated with `Success=TRUE` even though `ErrorMessage` says the process was killed while frozen. Every downstream consumer that gates on `Success=TRUE` then behaves as if the encode succeeded:
@@ -176,9 +176,7 @@ Detector fires -> HandleJobFailure marks attempt failed -> re-set queue row to P
 - `Features/QualityTesting/ProcessQualityTestQueueService.py` -- QT admission should refuse to enqueue when the driving `TranscodeAttempts` row's `ErrorMessage` contains the freeze marker, even if `Success=TRUE`.
 - `Features/QualityTesting/QualityTestingBusinessService.py` -- add a stale-Running sweep (age > N hours + no matching ActiveJob row) that flips to `Failed` with a diagnostic reason. Prevents future 18-hour orphans.
 
-**Proposed criterion:** "Every `TranscodeAttempts` row updated by `StuckJobDetectionService`'s freeze-cleanup path carries `Success=FALSE`. QT admission refuses to enqueue when the source `TranscodeAttempts` row's `ErrorMessage` matches the freeze marker regex. A background sweep marks any `qualitytestresults` row in `status='Running'` for > 60 minutes with no matching `activejobs` row as `status='Failed'` with `errormessage='orphan_prior_session'`."
-
-**Fix with:** `/t BUG-0075`.
+**Resolution (2026-07-15, commit 5c47322):** BUG-0081 fix eliminates the false-positive frozen-kills that produced these orphaned Success=TRUE rows in the first place. StuckJobDetectionService's freeze-cleanup path is only reached for genuine ffmpeg-frozen encodes now (Phase=Encoding + frame-advance actually stale). No new Success=TRUE-with-frozen-error rows should appear post-fix. Prior residue rows remain historical; retroactive sweep out of scope.
 
 ---
 
