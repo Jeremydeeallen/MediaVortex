@@ -17,6 +17,7 @@
                 <option value="FileName:ASC">Filename A-Z</option>
             </select>
             <button id="FailedJobsRefresh" class="btn btn-sm btn-secondary">Refresh</button>
+            <button id="FailedJobsResetAllVisible" class="btn btn-sm btn-warning">Reset All Visible</button>
         </div>
     </div>
 
@@ -28,12 +29,26 @@
         written to <code>FailureBudgetResets</code>.
     </div>
 
-    <div class="d-flex justify-content-between align-items-center mb-2">
-        <div>Total capped: <span class="badge bg-danger" id="FailedJobsTotal">0</span></div>
-        <div class="text-muted small">Click a filename to see full attempt history.</div>
+    <ul class="nav nav-tabs mb-2" id="FailedJobsTabs">
+        <li class="nav-item"><button class="nav-link active" data-tab="list">List</button></li>
+        <li class="nav-item"><button class="nav-link" data-tab="groups">By Series</button></li>
+    </ul>
+
+    <div id="FailedJobsListPane">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>Total capped: <span class="badge bg-danger" id="FailedJobsTotal">0</span></div>
+            <div class="text-muted small">Click a filename to see full attempt history.</div>
+        </div>
+        <div id="FailedJobsTableMount"></div>
     </div>
 
-    <div id="FailedJobsTableMount"></div>
+    <div id="FailedJobsGroupsPane" style="display: none;">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="text-muted small">One row per top-level folder (series or movie). "Reset Group" clears every capped MediaFile inside.</div>
+            <div>Groups: <span class="badge bg-secondary" id="FailedJobsGroupCount">0</span></div>
+        </div>
+        <div id="FailedJobsGroupsMount"></div>
+    </div>
 
     <div class="d-flex justify-content-between align-items-center mt-2">
         <div class="text-muted small" id="FailedJobsPaginationInfo">-</div>
@@ -366,6 +381,70 @@ const RenderAttemptsTable = (Attempts) => {
     _AttemptsTable.Render();
 };
 
-window.addEventListener('DOMContentLoaded', InitFailedJobsTable);
+// directive: transcode-flow-canonical -- bulk-reset all visible list rows in one POST
+const OnResetAllVisible = () => {
+    const T = window.FailedJobsTable;
+    if (!T) return;
+    const Rows = T._DataSource && T._DataSource._LastRows ? T._DataSource._LastRows : [];
+    const Ids = Rows.map(R => R.MediaFileId).filter(Id => Number.isInteger(Id));
+    if (Ids.length === 0) { alert('No visible rows to reset.'); return; }
+    if (!confirm('Reset failure budget for ' + Ids.length + ' visible file(s)? Audit rows written to FailureBudgetResets.')) return;
+    fetch('/api/FailedJobs/ResetBulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ MediaFileIds: Ids, OperatorName: 'web-ui' }) })
+        .then(R => R.json())
+        .then(D => { if (!D.Success) alert('Bulk reset failed: ' + (D.Message || 'unknown')); else alert('Reset ' + (D.Data ? D.Data.ResetCount : Ids.length) + ' file(s).'); T._DataSource._Cache.clear(); T.Refresh(); LoadGroups(); })
+        .catch(E => alert('Bulk reset error: ' + E));
+};
+
+// directive: transcode-flow-canonical -- series-level pane; one row per top-level folder
+const LoadGroups = () => {
+    const Mount = document.getElementById('FailedJobsGroupsMount');
+    const CountEl = document.getElementById('FailedJobsGroupCount');
+    if (!Mount) return;
+    fetch('/api/FailedJobs/Groups').then(R => R.json()).then(D => {
+        if (!D.Success) { Mount.innerHTML = '<div class="text-danger">Load failed: ' + (D.Message || 'unknown') + '</div>'; return; }
+        const Groups = (D.Data && D.Data.Groups) || [];
+        CountEl.textContent = Groups.length.toLocaleString();
+        if (Groups.length === 0) { Mount.innerHTML = '<div class="text-muted">No capped files.</div>'; return; }
+        Mount.innerHTML = Groups.map((G, I) => (
+            '<div class="d-flex justify-content-between align-items-center py-2 px-3 border-bottom">'
+            + '<div><strong>' + (G.SeriesGroup || '(root)') + '</strong> <span class="badge bg-danger ms-2">' + G.FailedCount + ' failed</span></div>'
+            + '<button class="btn btn-sm btn-warning js-reset-group" data-ids="' + G.MediaFileIds.join(',') + '" data-name="' + (G.SeriesGroup || '(root)') + '">Reset Group</button>'
+            + '</div>'
+        )).join('');
+        Mount.querySelectorAll('.js-reset-group').forEach(Btn => Btn.addEventListener('click', () => OnResetGroup(Btn)));
+    });
+};
+
+const OnResetGroup = (Btn) => {
+    const Ids = (Btn.dataset.ids || '').split(',').map(S => parseInt(S, 10)).filter(N => !isNaN(N));
+    const Name = Btn.dataset.name;
+    if (Ids.length === 0) return;
+    if (!confirm('Reset failure budget for group "' + Name + '" (' + Ids.length + ' file(s))?')) return;
+    Btn.disabled = true; Btn.textContent = 'Resetting...';
+    fetch('/api/FailedJobs/ResetBulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ MediaFileIds: Ids, OperatorName: 'web-ui' }) })
+        .then(R => R.json())
+        .then(D => { if (!D.Success) alert('Group reset failed: ' + (D.Message || 'unknown')); LoadGroups(); if (window.FailedJobsTable) { window.FailedJobsTable._DataSource._Cache.clear(); window.FailedJobsTable.Refresh(); } })
+        .catch(E => { alert('Group reset error: ' + E); Btn.disabled = false; Btn.textContent = 'Reset Group'; });
+};
+
+const InitTabs = () => {
+    const Tabs = document.querySelectorAll('#FailedJobsTabs [data-tab]');
+    const ListPane = document.getElementById('FailedJobsListPane');
+    const GroupsPane = document.getElementById('FailedJobsGroupsPane');
+    Tabs.forEach(Btn => Btn.addEventListener('click', () => {
+        Tabs.forEach(B => B.classList.remove('active'));
+        Btn.classList.add('active');
+        const Which = Btn.dataset.tab;
+        if (Which === 'list') { ListPane.style.display = ''; GroupsPane.style.display = 'none'; }
+        else { ListPane.style.display = 'none'; GroupsPane.style.display = ''; LoadGroups(); }
+    }));
+};
+
+window.addEventListener('DOMContentLoaded', () => {
+    InitFailedJobsTable();
+    InitTabs();
+    const ResetAllBtn = document.getElementById('FailedJobsResetAllVisible');
+    if (ResetAllBtn) ResetAllBtn.addEventListener('click', OnResetAllVisible);
+});
 </script>
 {% endblock %}

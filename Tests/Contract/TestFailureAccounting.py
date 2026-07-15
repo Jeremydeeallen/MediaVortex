@@ -49,6 +49,40 @@ class TestProfileNameOnFailureRows(unittest.TestCase):
         )[0]['n'])
         self.assertEqual(n, 0)
 
+    # directive: transcode-flow-canonical -- bulk reset writes one audit row per MediaFileId + bumps LastFailureResetAt for all
+    def test_bulk_reset_updates_all_supplied_ids(self):
+        from Features.FailureAccounting.Repositories.FailedJobsRepository import FailedJobsRepository
+        Db = DatabaseService()
+        Db.ExecuteNonQuery(
+            "DELETE FROM MediaFiles WHERE RelativePath IN (%s, %s)",
+            ('__test-bulk-reset-a__.mkv', '__test-bulk-reset-b__.mkv'),
+        )
+        Db.ExecuteNonQuery(
+            "INSERT INTO MediaFiles (StorageRootId, RelativePath, FileName, SizeMB) VALUES (NULL, %s, 'a.mkv', 1.0), (NULL, %s, 'b.mkv', 1.0)",
+            ('__test-bulk-reset-a__.mkv', '__test-bulk-reset-b__.mkv'),
+        )
+        Rows = Db.ExecuteQuery(
+            "SELECT Id FROM MediaFiles WHERE RelativePath IN (%s, %s) ORDER BY RelativePath",
+            ('__test-bulk-reset-a__.mkv', '__test-bulk-reset-b__.mkv'),
+        )
+        Ids = [int(R['Id']) for R in Rows]
+        try:
+            Affected = FailedJobsRepository().ResetFailureBudgetBulk(Ids, 'test-operator')
+            self.assertEqual(Affected, 2)
+            Stamped = Db.ExecuteQuery(
+                "SELECT COUNT(*) AS n FROM MediaFiles WHERE Id = ANY(%s) AND LastFailureResetAt > NOW() - INTERVAL '5 seconds'",
+                (Ids,),
+            )
+            self.assertEqual(int(Stamped[0]['n']), 2)
+        finally:
+            Db.ExecuteNonQuery("DELETE FROM FailureBudgetResets WHERE MediaFileId = ANY(%s)", (Ids,))
+            Db.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id = ANY(%s)", (Ids,))
+
+    def test_bulk_reset_empty_list_returns_zero(self):
+        from Features.FailureAccounting.Repositories.FailedJobsRepository import FailedJobsRepository
+        Affected = FailedJobsRepository().ResetFailureBudgetBulk([], 'test-operator')
+        self.assertEqual(Affected, 0)
+
     # directive: transcode-flow-canonical | # see failure-accounting.C5 -- SaveTranscodeAttempt raises on missing ProfileName
     def test_save_attempt_raises_on_missing_profilename(self):
         from Features.TranscodeJob.TranscodeJobRepository import TranscodeJobRepository

@@ -137,6 +137,65 @@ class FailedJobsRepository(BaseRepository):
             "FailedJobsRepository", "ResetFailureBudget"
         )
 
+    # directive: transcode-flow-canonical -- bulk reset for the FailedJobs page (98-item one-at-a-time was unworkable)
+    def ResetFailureBudgetBulk(self, MediaFileIds: list, OperatorName: str) -> int:
+        """Bulk reset: one INSERT for audit rows + one UPDATE bumping LastFailureResetAt. Returns rows-updated count."""
+        if not MediaFileIds:
+            return 0
+        Ids = [int(I) for I in MediaFileIds]
+        Op = OperatorName or 'operator'
+        Placeholders = ','.join(['%s'] * len(Ids))
+        self.ExecuteNonQuery(
+            "INSERT INTO FailureBudgetResets (MediaFileId, OperatorName, PriorFailureCount) "
+            "SELECT ta.MediaFileId, %s, COUNT(*) "
+            "FROM TranscodeAttempts ta JOIN MediaFiles mf ON mf.Id = ta.MediaFileId "
+            f"WHERE ta.MediaFileId IN ({Placeholders}) AND ta.Success = FALSE "
+            "AND ta.AttemptDate > GREATEST("
+            "  COALESCE((SELECT MAX(AttemptDate) FROM TranscodeAttempts ta2 WHERE ta2.MediaFileId = ta.MediaFileId AND ta2.Success = TRUE), 'epoch'::timestamp), "
+            "  COALESCE(mf.LastFailureResetAt, 'epoch'::timestamp)"
+            ") GROUP BY ta.MediaFileId",
+            (Op,) + tuple(Ids),
+        )
+        Affected = self.ExecuteNonQuery(
+            f"UPDATE MediaFiles SET LastFailureResetAt = NOW() WHERE Id IN ({Placeholders})",
+            tuple(Ids),
+        )
+        LoggingService.LogInfo(
+            f"FailureBudget bulk-reset for {len(Ids)} MediaFileIds by {Op}; UPDATE affected={Affected}",
+            "FailedJobsRepository", "ResetFailureBudgetBulk",
+        )
+        return Affected
+
+    # directive: transcode-flow-canonical -- series-level grouping for FailedJobs; folder root == top-level path segment
+    def GetCappedJobsGrouped(self) -> list:
+        """Group capped jobs by top-level folder (RelativePath first segment). One row per group with count."""
+        Rows = self.ExecuteQuery(
+            "WITH capped AS ("
+            "  SELECT mf.Id, mf.RelativePath FROM MediaFiles mf "
+            "  WHERE (SELECT COUNT(*) FROM TranscodeAttempts ta "
+            "         WHERE ta.MediaFileId = mf.Id AND ta.Success = FALSE "
+            "         AND ta.AttemptDate > GREATEST("
+            "           COALESCE((SELECT MAX(AttemptDate) FROM TranscodeAttempts WHERE MediaFileId = mf.Id AND Success = TRUE), 'epoch'::timestamp), "
+            "           COALESCE(mf.LastFailureResetAt, 'epoch'::timestamp)"
+            "         )) >= (SELECT MaxEncodeFailures FROM FailureBudgetConfig WHERE Id = 1)"
+            ") "
+            "SELECT SPLIT_PART(RelativePath, '/', 1) AS SeriesGroup, "
+            "       COUNT(*) AS FailedCount, "
+            "       ARRAY_AGG(Id ORDER BY Id) AS MediaFileIds "
+            "FROM capped "
+            "WHERE RelativePath IS NOT NULL "
+            "GROUP BY SPLIT_PART(RelativePath, '/', 1) "
+            "ORDER BY FailedCount DESC, SeriesGroup ASC"
+        )
+        return [
+            {
+                'SeriesGroup': R['SeriesGroup'] if 'SeriesGroup' in R else R.get('seriesgroup'),
+                'FailedCount': int(R['FailedCount'] if 'FailedCount' in R else R.get('failedcount')),
+                'MediaFileIds': list(R['MediaFileIds'] if 'MediaFileIds' in R else R.get('mediafileids')),
+            }
+            for R in (Rows or [])
+        ]
+
     # directive: failure-accounting | # see failure-accounting.C7
     def GetAttemptHistory(self, MediaFileId: int) -> list:
         """Full TranscodeAttempts history for a MediaFile for the surface modal."""

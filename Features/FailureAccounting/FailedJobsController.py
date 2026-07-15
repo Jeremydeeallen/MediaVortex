@@ -88,6 +88,37 @@ def ResetFailureBudget(MediaFileId):
         return _Envelope(False, Message=str(Ex), Status=500)
 
 
+@FailedJobsBlueprint.route('/api/FailedJobs/ResetBulk', methods=['POST'])
+# directive: transcode-flow-canonical -- bulk reset endpoint; body {MediaFileIds: [...], OperatorName}
+def ResetFailureBudgetBulk():
+    """Reset a caller-supplied list of MediaFileIds in a single call."""
+    try:
+        Body = request.get_json(silent=True) or {}
+        Ids = Body.get('MediaFileIds') or []
+        if not isinstance(Ids, list) or not all(isinstance(I, int) for I in Ids):
+            return _Envelope(False, Message="MediaFileIds must be a list of integers", Status=400)
+        if not Ids:
+            return _Envelope(True, Message="No MediaFileIds provided; nothing to reset", Data={'ResetCount': 0})
+        OperatorName = str(Body.get('OperatorName') or request.remote_addr or 'operator').strip() or 'operator'
+        Count = FailedJobsRepository().ResetFailureBudgetBulk(Ids, OperatorName)
+        return _Envelope(True, Message=f"Reset {Count} MediaFile(s)", Data={'ResetCount': Count})
+    except Exception as Ex:
+        LoggingService.LogException("ResetFailureBudgetBulk failed", Ex, "FailedJobsController", "ResetFailureBudgetBulk")
+        return _Envelope(False, Message=str(Ex), Status=500)
+
+
+@FailedJobsBlueprint.route('/api/FailedJobs/Groups', methods=['GET'])
+# directive: transcode-flow-canonical -- series-level grouping for the /FailedJobs page
+def ListGroups():
+    """Return capped jobs grouped by top-level folder (series or movie title)."""
+    try:
+        Groups = FailedJobsRepository().GetCappedJobsGrouped()
+        return _Envelope(True, Data={'Groups': Groups})
+    except Exception as Ex:
+        LoggingService.LogException("ListGroups failed", Ex, "FailedJobsController", "ListGroups")
+        return _Envelope(False, Message=str(Ex), Status=500)
+
+
 @FailedJobsBlueprint.route('/api/FailedJobs/Count', methods=['GET'])
 # directive: failure-accounting | # see failure-accounting.C7
 def Count():
