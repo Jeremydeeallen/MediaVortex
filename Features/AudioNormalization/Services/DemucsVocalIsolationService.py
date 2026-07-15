@@ -51,53 +51,30 @@ class DemucsIsolationResult:
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
 class DemucsVocalIsolationService:
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C14
-    def __init__(self, FfmpegPath, PythonExe=None, ModelName=DEMUCS_MODEL_NAME, Device=None):
+    # directive: transcode-flow-canonical -- long-lived daemon amortizes model load + XPU compile
+    def __init__(self, FfmpegPath, PythonExe=None, ModelName=DEMUCS_MODEL_NAME, Device=None, Daemon=None):
         self.FfmpegPath = FfmpegPath
         self.PythonExe = PythonExe or sys.executable
         self.ModelName = ModelName
         self.Device = Device or _DetectDemucsDevice(self.PythonExe)
+        self._Daemon = Daemon
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C14
     def IsolateVocals(self, StereoInputWavPath, OutputDir):
         os.makedirs(OutputDir, exist_ok=True)
         LoggingService.LogInfo(
-            f"Demucs separating {StereoInputWavPath} -> {OutputDir} (device={self.Device})",
-            "DemucsVocalIsolationService", "IsolateVocals"
+            f"Demucs isolating {StereoInputWavPath} -> {OutputDir} (device={self.Device})",
+            "DemucsVocalIsolationService", "IsolateVocals",
         )
-        if self.Device == "xpu":
-            Preamble = "import sys\ntry:\n import intel_extension_for_pytorch\nexcept ImportError:\n pass\nfrom demucs.separate import main\nmain()"
-            Cmd = [
-                self.PythonExe, "-c", Preamble,
-                "-n", self.ModelName,
-                "-d", self.Device,
-                "--two-stems", "vocals",
-                "-o", OutputDir,
-                "--filename", "{stem}.{ext}",
-                StereoInputWavPath,
-            ]
-        else:
-            Cmd = [
-                self.PythonExe, "-m", "demucs.separate",
-                "-n", self.ModelName,
-                "-d", self.Device,
-                "--two-stems", "vocals",
-                "-o", OutputDir,
-                "--filename", "{stem}.{ext}",
-                StereoInputWavPath,
-            ]
-        Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=3600)
-        if Result.returncode != 0:
-            raise RuntimeError(
-                f"demucs failed (exit {Result.returncode}): {Result.stderr[-500:]}"
-            )
-        Sub = LocalJoin(OutputDir, self.ModelName)
-        VocalsPath = LocalJoin(Sub, "vocals.wav")
-        InstrumentalPath = LocalJoin(Sub, "no_vocals.wav")
+        Daemon = self._GetDaemon()
+        Resp = Daemon.IsolateVocals(StereoInputWavPath, OutputDir, ModelName=self.ModelName)
+        if not Resp.Success:
+            raise RuntimeError(f"demucs daemon isolation failed: {Resp.ErrorMessage}")
+        VocalsPath = Resp.VocalsWavPath
+        InstrumentalPath = Resp.InstrumentalWavPath
         if not LocalExists(VocalsPath) or not LocalExists(InstrumentalPath):
             raise RuntimeError(
-                f"demucs output missing: vocals={LocalExists(VocalsPath)} "
-                f"instrumental={LocalExists(InstrumentalPath)} dir={Sub}"
+                f"demucs output missing: vocals_exists={LocalExists(VocalsPath)} "
+                f"instrumental_exists={LocalExists(InstrumentalPath)}"
             )
         VocalsRms = self._MeasureWavRmsDbfs(VocalsPath)
         return DemucsIsolationResult(
@@ -105,6 +82,12 @@ class DemucsVocalIsolationService:
             InstrumentalWavPath=InstrumentalPath,
             VocalsRmsDbfs=VocalsRms,
         )
+
+    def _GetDaemon(self):
+        if self._Daemon is None:
+            from Features.AudioNormalization.Services.DemucsDaemonClient import GetOrStartDaemon
+            self._Daemon = GetOrStartDaemon(PythonExe=self.PythonExe)
+        return self._Daemon
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
     def MixBoostedPremix(self, IsolationResult, OutputWavPath, VocalsBoostDb, InstrumentalAttenDb, CompressorThreshold, CompressorRatio, CompressorMakeupDb, DynaudnormFrameLen, DynaudnormGaussSize):
