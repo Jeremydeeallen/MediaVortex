@@ -14,30 +14,6 @@ SILENCE_FLOOR_DBFS = -120.0
 
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
-def _DetectDemucsDevice(PythonExe):
-    Code = (
-        "try:\n"
-        " import intel_extension_for_pytorch\n"
-        "except ImportError:\n"
-        " pass\n"
-        "import torch\n"
-        "if torch.cuda.is_available():\n"
-        " print('cuda')\n"
-        "elif hasattr(torch, 'xpu') and torch.xpu.is_available():\n"
-        " print('xpu')\n"
-        "else:\n"
-        " print('cpu')\n"
-    )
-    Probe = subprocess.run(
-        [PythonExe, "-c", Code],
-        capture_output=True, text=True, timeout=30,
-    )
-    if Probe.returncode != 0:
-        return "cpu"
-    return (Probe.stdout or "cpu").strip() or "cpu"
-
-
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 class DemucsIsolationResult:
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
@@ -51,18 +27,17 @@ class DemucsIsolationResult:
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
 class DemucsVocalIsolationService:
 
-    # directive: transcode-flow-canonical -- long-lived daemon amortizes model load + XPU compile
-    def __init__(self, FfmpegPath, PythonExe=None, ModelName=DEMUCS_MODEL_NAME, Device=None, Daemon=None):
+    # directive: transcode-flow-canonical -- long-lived daemon amortizes model load + XPU compile; device detection lives inside DemucsDaemonEntry
+    def __init__(self, FfmpegPath, PythonExe=None, ModelName=DEMUCS_MODEL_NAME, Daemon=None):
         self.FfmpegPath = FfmpegPath
         self.PythonExe = PythonExe or sys.executable
         self.ModelName = ModelName
-        self.Device = Device or _DetectDemucsDevice(self.PythonExe)
         self._Daemon = Daemon
 
     def IsolateVocals(self, StereoInputWavPath, OutputDir):
         os.makedirs(OutputDir, exist_ok=True)
         LoggingService.LogInfo(
-            f"Demucs isolating {StereoInputWavPath} -> {OutputDir} (device={self.Device})",
+            f"Demucs isolating {StereoInputWavPath} -> {OutputDir} (via daemon)",
             "DemucsVocalIsolationService", "IsolateVocals",
         )
         Daemon = self._GetDaemon()
