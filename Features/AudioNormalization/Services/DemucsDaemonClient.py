@@ -1,7 +1,9 @@
 import os
+import selectors
 import subprocess
 import sys
 import threading
+import time
 import uuid
 
 from Core.Logging.LoggingService import LoggingService
@@ -37,9 +39,11 @@ def GetOrStartDaemon(PythonExe=None, StartTimeoutSec=180):
 class DemucsDaemonClient:
     """Owns the long-lived Demucs subprocess for one WorkerService instance."""
 
-    def __init__(self, PythonExe=None, StartTimeoutSec=180):
+    # directive: transcode-flow-canonical -- IsolateReadTimeoutSec caps blocking read so a hung daemon does not deadlock the WorkerService thread
+    def __init__(self, PythonExe=None, StartTimeoutSec=180, IsolateReadTimeoutSec=1800):
         self._PythonExe = PythonExe or sys.executable
         self._StartTimeoutSec = StartTimeoutSec
+        self._IsolateReadTimeoutSec = IsolateReadTimeoutSec
         self._Proc = None
         self._Lock = threading.Lock()
 
@@ -98,14 +102,41 @@ class DemucsDaemonClient:
             )
             self._Proc.stdin.write(EncodeRequest(Req) + '\n')
             self._Proc.stdin.flush()
-            ResponseLine = self._Proc.stdout.readline()
+            try:
+                ResponseLine = self._ReadLineWithDeadline(self._IsolateReadTimeoutSec)
+            except DemucsDaemonUnavailableError:
+                self._Kill()
+                raise
             if not ResponseLine:
-                Stderr = (self._Proc.stderr.read() or '')[:1000]
+                Stderr = (self._Proc.stderr.read() or '')[:1000] if self._Proc and self._Proc.stderr else ''
+                self._Kill()
                 raise DemucsDaemonUnavailableError(f'Demucs daemon closed stdout unexpectedly. Stderr tail: {Stderr}')
             Resp: IsolateResponse = DecodeResponse(ResponseLine.strip())
             if Resp.RequestId != Req.RequestId:
+                self._Kill()
                 raise DemucsDaemonUnavailableError(f'Response request-id mismatch: expected {Req.RequestId}, got {Resp.RequestId}')
             return Resp
+
+    # directive: transcode-flow-canonical -- deadline read so hung daemon does not block caller forever; returns '' on daemon exit, raises on wall-clock timeout
+    def _ReadLineWithDeadline(self, TimeoutSec):
+        Sel = selectors.DefaultSelector()
+        Sel.register(self._Proc.stdout, selectors.EVENT_READ)
+        Deadline = time.monotonic() + TimeoutSec
+        try:
+            while True:
+                Remaining = Deadline - time.monotonic()
+                if Remaining <= 0:
+                    raise DemucsDaemonUnavailableError(f'Demucs daemon response timeout after {TimeoutSec}s')
+                Events = Sel.select(timeout=min(1.0, Remaining))
+                for _Key, _Mask in Events:
+                    Line = self._Proc.stdout.readline()
+                    if not Line:
+                        return ''
+                    return Line
+                if self._Proc.poll() is not None:
+                    return ''
+        finally:
+            Sel.close()
 
     def Stop(self):
         with self._Lock:

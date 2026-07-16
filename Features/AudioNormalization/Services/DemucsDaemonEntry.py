@@ -81,7 +81,8 @@ def Main():
                 VocalsWavPath=Vocals,
                 InstrumentalWavPath=Instrumental,
             )
-        except Exception as Ex:
+        # directive: transcode-flow-canonical -- demucs.separate.main calls sys.exit on fatal(); catch SystemExit so daemon survives one bad request
+        except (Exception, SystemExit) as Ex:
             Resp = IsolateResponse(
                 RequestId=RequestId or 'unknown',
                 Success=False,

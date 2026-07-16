@@ -24,6 +24,10 @@ C6. **Sole subprocess spawn path.** `DemucsDaemonClient` is the ONLY place in `F
 
 C7. **Graceful stop.** `DemucsDaemonClient.Stop()` closes stdin (daemon exits its read loop cleanly) then SIGTERM + wait(5s) + SIGKILL if still alive. Called on WorkerService shutdown (best-effort). Verifiable: after `SIGINT` to WorkerService, daemon subprocess exits within 6s.
 
+C8. **Read deadline defeats hang.** `DemucsDaemonClient.IsolateVocals` reads response via `_ReadLineWithDeadline(IsolateReadTimeoutSec)` (default 1800s). Deadline elapsed OR daemon EOF -> daemon killed + `DemucsDaemonUnavailableError` raised. Prevents WorkerService thread from blocking forever when daemon hangs. Verifiable: freeze daemon with SIGSTOP; caller returns error within IsolateReadTimeoutSec + 1s; next `GetOrStartDaemon` respawns.
+
+C9. **SystemExit does not crash daemon.** `DemucsDaemonEntry.Main` per-request except clause catches `(Exception, SystemExit)`. `demucs.separate.main` calls `sys.exit()` on model-load / parser errors; a bare `except Exception` misses `SystemExit`, kills the daemon, and every subsequent caller reads EOF -> JSONDecodeError. Verifiable: send a request with a bogus model name; daemon returns `Success=False` with `SystemExit: ...` errmsg and remains alive to serve next request.
+
 ## Seams
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
