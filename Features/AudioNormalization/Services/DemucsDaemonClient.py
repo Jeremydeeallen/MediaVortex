@@ -65,10 +65,12 @@ class DemucsDaemonClient:
                 text=True,
                 bufsize=1,
             )
-            # directive: transcode-flow-canonical -- background reader thread makes deadline reads cross-platform (Windows select() rejects pipe fds)
+            # directive: transcode-flow-canonical -- background reader thread makes deadline reads cross-platform (Windows select() rejects pipe fds); stderr drain prevents pipe-buffer deadlock during long Demucs runs
             self._StdoutQueue = queue.Queue()
             self._ReaderThread = threading.Thread(target=self._StdoutReaderLoop, name='DemucsDaemonStdoutReader', daemon=True)
             self._ReaderThread.start()
+            self._StderrDrainThread = threading.Thread(target=self._StderrDrainLoop, name='DemucsDaemonStderrDrain', daemon=True)
+            self._StderrDrainThread.start()
             Ready = self._WaitForReady()
             if not Ready:
                 self._Kill()
@@ -83,6 +85,18 @@ class DemucsDaemonClient:
             pass
         finally:
             self._StdoutQueue.put(None)
+
+    # directive: transcode-flow-canonical -- drain stderr into rolling in-memory buffer so full pipe buffer never blocks the daemon; last 4KB kept for post-crash diagnostic
+    def _StderrDrainLoop(self):
+        self._StderrTail = []
+        try:
+            for Chunk in iter(lambda: self._Proc.stderr.read(4096), ''):
+                self._StderrTail.append(Chunk)
+                if sum(len(C) for C in self._StderrTail) > 4096:
+                    Combined = ''.join(self._StderrTail)[-4096:]
+                    self._StderrTail = [Combined]
+        except (ValueError, OSError):
+            pass
 
     def _WaitForReady(self):
         Deadline = time.monotonic() + self._StartTimeoutSec
@@ -121,10 +135,10 @@ class DemucsDaemonClient:
             except DemucsDaemonUnavailableError:
                 self._Kill()
                 raise
-            if not ResponseLine:
-                Stderr = (self._Proc.stderr.read() or '')[:1000] if self._Proc and self._Proc.stderr else ''
+            if not ResponseLine or not ResponseLine.strip():
+                StderrTail = ''.join(getattr(self, '_StderrTail', []))[-1000:]
                 self._Kill()
-                raise DemucsDaemonUnavailableError(f'Demucs daemon closed stdout unexpectedly. Stderr tail: {Stderr}')
+                raise DemucsDaemonUnavailableError(f'Demucs daemon closed stdout unexpectedly. Stderr tail: {StderrTail}')
             Resp: IsolateResponse = DecodeResponse(ResponseLine.strip())
             if Resp.RequestId != Req.RequestId:
                 self._Kill()

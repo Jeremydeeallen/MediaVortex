@@ -34,6 +34,7 @@ def _PreWarmXpu(Device):
         pass
 
 
+# directive: transcode-flow-canonical -- demucs.separate.main + torch print() to stdout; those bytes MUST NOT reach our protocol stdout or clients read them as garbage responses
 def _IsolateOnce(Req, Device):
     from demucs.separate import main as _DemucsMain
     Args = [
@@ -45,10 +46,13 @@ def _IsolateOnce(Req, Device):
         Req.InputWavPath,
     ]
     OrigArgv = sys.argv
+    OrigStdout = sys.stdout
     sys.argv = ['demucs.separate'] + Args
+    sys.stdout = sys.stderr
     try:
         _DemucsMain()
     finally:
+        sys.stdout = OrigStdout
         sys.argv = OrigArgv
     Sub = os.path.join(Req.OutputDir, Req.ModelName)
     Vocals = os.path.join(Sub, 'vocals.wav')

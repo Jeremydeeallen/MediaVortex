@@ -28,6 +28,10 @@ C8. **Read deadline defeats hang.** `DemucsDaemonClient.IsolateVocals` reads res
 
 C9. **SystemExit does not crash daemon.** `DemucsDaemonEntry.Main` per-request except clause catches `(Exception, SystemExit)`. `demucs.separate.main` calls `sys.exit()` on model-load / parser errors; a bare `except Exception` misses `SystemExit`, kills the daemon, and every subsequent caller reads EOF -> JSONDecodeError. Verifiable: send a request with a bogus model name; daemon returns `Success=False` with `SystemExit: ...` errmsg and remains alive to serve next request.
 
+C10. **Protocol stdout stays JSON-only.** `_IsolateOnce` swaps `sys.stdout` to `sys.stderr` for the duration of `demucs.separate.main`. Demucs and torch emit `print()` statements ("Separating track ...", "Selected model is a bag of ..."), progress bars, and warnings; without this swap they land on the daemon's stdout, get pumped into the client's `_StdoutQueue`, and the client parses them as responses -> JSONDecodeError `Expecting value: line 1 column 1 (char 0)` or `Response request-id mismatch` (a valid JSON print from an earlier request leaked past). Verifiable: grep `Expecting value: line 1 column 1` in `Logs` after a batch of Demucs runs == 0.
+
+C11. **Stderr never pipe-blocks the daemon.** `DemucsDaemonClient._StderrDrainLoop` runs a daemon-thread `stderr.read(4096)` loop that drains torch + demucs stderr into a rolling 4KB tail buffer. Without it, long-running Demucs invocations fill the 64KB stderr pipe buffer and block on the next write -- the daemon appears hung and hits `_ReadLineWithDeadline` timeout. Verifiable: no `DemucsDaemonUnavailableError` timeout-string hits during a 100-job batch.
+
 ## Seams
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
