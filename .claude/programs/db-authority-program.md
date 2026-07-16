@@ -132,7 +132,7 @@ Original B+ raised to A-. Structural fix is solid; tests cover all three claim p
 ### Phase 1 complete (commit `d57bdb6`, 2026-05-30)
 
 - `WorkerService.Main.SignalHandler` rewritten: replaces `Proc.kill()` with `App._StopAllCapabilities()` graceful drain + 30-min wait-for-drain poll loop. Second signal forces immediate exit.
-- Docker-on-Linux compose templates (larry, dot) gain `stop_grace_period: 30m` so docker doesn't SIGKILL the container before drain completes. Bare-metal Linux systemd units (wakko) use `TimeoutStopSec=30m` for parity.
+- Docker-on-Linux compose template (larry) gains `stop_grace_period: 30m` so docker doesn't SIGKILL the container before drain completes. Bare-metal Linux systemd units (wakko, dot) use `TimeoutStopSec=30m` for parity.
 - `deploy/deploy-fleet.py` drains before deploy by default: flips `Workers.Status='Paused'`, polls ActiveJobs until empty per worker, then restarts containers, then restores pre-deploy Status. `--no-drain` flag for emergencies.
 - Net: `py deploy/deploy-fleet.py` is now safe to run while workers are mid-encode. No more lost VMAFs / transcodes from container recreation.
 

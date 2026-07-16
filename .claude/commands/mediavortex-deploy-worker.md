@@ -11,11 +11,16 @@ Deploy a MediaVortex worker. Do NOT improvise -- the deploy steps live in the fl
 
 3. Pick the deploy path based on `$ARGUMENTS`:
 
-   - **`linux`** (Docker on Linux -- LXC or bare-metal):
+   - **`linux`** (Docker on Linux -- LXC):
      - Flow doc: `deploy/worker-deploy-linux.flow.md`
      - Entry script: `deploy/deploy-linux-worker.py <target>` (idempotent; reads SSH user / compose path / mount config from `infrastructure/terraform/inventory.toml`)
-     - Targets today: Larry (10.0.0.42, LXC), Wakko (10.0.0.230, bare-metal), dot (10.0.0.193, bare-metal -- proving ground)
+     - Targets today: Larry (10.0.0.42, LXC).
      - Source sync uses tar-over-ssh with `.deployignore` (NOT blind `scp -r`).
+
+   - **`baremetal`** (bare-metal Linux, no containers):
+     - Flow doc: `deploy/worker-deploy-baremetal.flow.md`
+     - Entry script: `deploy/deploy-baremetal-worker.py <target>` (idempotent; torch variant auto-detected: cu124 / xpu / cpu)
+     - Targets today: Wakko (10.0.0.230, Intel Arc B580), dot (10.0.0.193, NVIDIA RTX 4060).
 
    - **`windows`** (native, Task Scheduler):
      - Flow doc: `deploy/worker-deploy-windows.flow.md` (covers prerequisites, SMB credential caching, storage path resolutions, and troubleshooting)

@@ -370,7 +370,7 @@ The principle: each pick decision must either (a) be a single explicit rule with
 - `deploy/bringup.md` -- the runbook should route I9 to a local start command, not a deploy
 - `deploy/deploy-linux-worker.py` + `deploy/deploy-fleet.py` (if it exists) -- audit for inter-worker dependencies
 - `StartMediaVortex.py` -- already exists as the local lifecycle entry point; the I9-local "deploy" probably collapses into this
-- The four host-shape strategies that need to exist: LXC-Docker (larry), bare-metal-Docker (dot), bare-metal Linux (wakko), Windows-SMB (I9), and the I9-local NO-OP
+- The three host-shape strategies that need to exist: LXC-Docker (larry), bare-metal Linux (wakko, dot), Windows-SMB (I9), and the I9-local NO-OP
 
 **Fix with:** `/t BUG-0064`.
 

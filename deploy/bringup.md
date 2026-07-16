@@ -17,9 +17,8 @@ The `infrastructure` repo (`https://github.com/TheAdroitDBA/infrastructure`) is 
 **Linux under Docker** -- host in `inventory.toml`; compose template at `deploy/compose-templates/<friendly>.yml`; root SSH from dev workstation; DB reachable on `10.0.0.15:5432`. Bringup by host shape:
 
 - **LXC (Larry CT 218)**: provisioned by `infrastructure/terraform/mediavortex-workers/`, which reads `bind_mounts` from `inventory.toml`. `terraform apply` installs rootfs, mounts, Docker, NFS.
-- **Bare-metal Docker server (dot)**: run `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` first. Reads `fstab_mounts` from `inventory.toml` and idempotently installs `nfs-common` + Docker CE, applies the managed-block in `/etc/fstab`, creates `/opt/mediavortex` + mountpoints, runs `mount -a`.
 
-**Bare-metal Linux (Wakko / Intel Arc)** -- host in `inventory.toml`; root SSH; DB reachable on `10.0.0.15:5432`. Run `py infrastructure/terraform/mediavortex-baremetal-linux-bootstrap.py --host <friendly>` first. Installs `nfs-common`, Python 3.12, Intel `libze1` + `libze-intel-gpu1`, VA-API media drivers, reconciles `/etc/fstab` from `fstab_mounts`, drops the systemd template unit at `/etc/systemd/system/mediavortex-worker@.service`.
+**Bare-metal Linux (Wakko / Intel Arc + dot / NVIDIA)** -- host in `inventory.toml`; root SSH; DB reachable on `10.0.0.15:5432`. Run `py infrastructure/terraform/mediavortex-baremetal-linux-bootstrap.py --host <friendly>` first. Installs `nfs-common`, Python 3.12, GPU runtime (Intel Level Zero for Arc, NVIDIA driver + nvidia-container-toolkit for RTX), reconciles `/etc/fstab` from `fstab_mounts`, drops the systemd template unit at `/etc/systemd/system/mediavortex-worker@.service`.
 
 **Windows** -- see `worker-deploy-windows.flow.md` for the full prereq list (OpenSSH Server, Python 3.12+, SMB credential caching, Vaultwarden references).
 

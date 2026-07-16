@@ -134,7 +134,7 @@ def StepPreflight(Friendly: str, Target: str) -> tuple[bool, dict]:
     if not Out["compose_template"]:
         Out["_error"] = (
             f"Compose template missing: {ComposeTemplate}. "
-            f"Copy from a sibling (larry.yml/dot.yml) and adjust "
+            f"Copy from a sibling (larry.yml) and adjust "
             f"hostnames and cpuset."
         )
         return False, Out

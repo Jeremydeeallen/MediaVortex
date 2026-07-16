@@ -2,7 +2,7 @@
 
 **Slug:** worker-deploy-linux
 
-Deploys a MediaVortex `WorkerService` container fleet to Docker-on-Linux hosts -- LXC (Larry) and bare-metal servers (dot). Same pipeline; per-host differences (hostnames, cpuset) live in `deploy/compose-templates/<name>.yml`. Counterpart flows: `worker-deploy-baremetal.flow.md` (bare-metal Linux, no containers, e.g. Wakko / Intel Arc) and `worker-deploy-windows.flow.md` (I9-2024).
+Deploys a MediaVortex `WorkerService` container fleet to Docker-on-Linux hosts -- LXC only (Larry). Per-host differences (hostnames, cpuset) live in `deploy/compose-templates/<name>.yml`. Counterpart flows: `worker-deploy-baremetal.flow.md` (bare-metal Linux, no containers, e.g. Wakko / Intel Arc and dot / NVIDIA) and `worker-deploy-windows.flow.md` (I9-2024).
 
 ## Entry Point
 
@@ -10,14 +10,13 @@ Deploys a MediaVortex `WorkerService` container fleet to Docker-on-Linux hosts -
 py deploy/deploy-linux-worker.py <target>
 ```
 
-`<target>` is the host's friendly name from `infrastructure/terraform/inventory.toml` (e.g. `larry`, `dot`) or its IP. The script reads SSH user, IP, and the matching compose template, then runs the four-step pipeline. Idempotent.
+`<target>` is the host's friendly name from `infrastructure/terraform/inventory.toml` (e.g. `larry`) or its IP. The script reads SSH user, IP, and the matching compose template, then runs the four-step pipeline. Idempotent.
 
 ## Host Inventory
 
 | Friendly | Hostname | IP | Host Type | CPU | Workers | Compose template |
 |---|---|---|---|---|---|---|
 | larry | mediavortex-workers (CT 218) | 10.0.0.42 | LXC on Proxmox larry | 2x Xeon, 64 threads | `larry-worker-1..4` (16 threads each) | `compose-templates/larry.yml` |
-| dot | client-z490v-01 | 10.0.0.193 | bare-metal server | i9-10850K, 10C/20T, RTX 4060 | `dot-worker-1..4` (5 threads each) | `compose-templates/dot.yml` |
 
 When adding a new Docker-on-Linux worker host:
 1. Add the host to `infrastructure/terraform/inventory.toml` (friendly name, hostname, primary IP, ssh_user). Mount specifications live in the same entry: `bind_mounts` for LXC, `fstab_mounts` for bare-metal. **`inventory.toml` is the single source of truth -- never hardcode mount paths in compose templates or scripts.**
@@ -25,10 +24,9 @@ When adding a new Docker-on-Linux worker host:
 3. Add a row to the table above.
 4. Provision the host:
    - **LXC**: `terraform -chdir=infrastructure/terraform/mediavortex-workers apply` (reads `bind_mounts` via `inventory-query.py`).
-   - **Bare-metal server**: `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` (idempotent: installs `nfs-common` + Docker CE, reconciles `/etc/fstab` managed block from `fstab_mounts`, creates `/opt/mediavortex` + mountpoints, runs `mount -a`).
 5. Run `py deploy/deploy-linux-worker.py <friendly>`.
 
-For Intel Arc / Xe workstations, use `worker-deploy-baremetal.flow.md` instead -- no containers.
+For bare-metal Linux hosts (Intel Arc, NVIDIA), use `worker-deploy-baremetal.flow.md` -- no containers.
 
 ## Pipeline Overview
 
@@ -81,7 +79,7 @@ ssh root@<ip> 'docker exec mediavortex-worker-1-1 ffmpeg -hide_banner -loglevel 
 ssh root@<ip> 'rm -rf /tmp/mediavortex-build'
 ```
 
-For LXC hosts (Larry): `/opt/mediavortex/` already exists -- Terraform created it during host provisioning. For bare-metal server (dot): the script creates it on first run.
+For LXC hosts (Larry): `/opt/mediavortex/` already exists -- Terraform created it during host provisioning.
 
 Code-only redeploys use the same five steps. The FFmpeg static download is cached in a Docker build layer keyed on `FFMPEG_TAG` + `FFMPEG_ASSET`; only the `COPY . /app` layer rebuilds. Total time on a warm host: ~30-60 seconds.
 
@@ -104,9 +102,9 @@ Bumping ffmpeg:
 
 Driver / API matrix observed at deploy time:
 
-| BtbN tag | ffmpeg asset | NVENC API required | Min Nvidia driver | av1_nvenc? | Smoke-tested on dot |
-|---|---|---|---|---|---|
-| `autobuild-2026-06-23-13-52` | `ffmpeg-n8.1.2-linux64-gpl-8.1.tar.xz` | works on 13.0 | works on 595.71 | yes | 2026-06-25 PASS |
+| BtbN tag | ffmpeg asset | NVENC API required | Min Nvidia driver | av1_nvenc? |
+|---|---|---|---|---|
+| `autobuild-2026-06-23-13-52` | `ffmpeg-n8.1.2-linux64-gpl-8.1.tar.xz` | works on 13.0 | works on 595.71 | yes |
 
 Source-of-truth for required driver: the actual ffmpeg stderr at probe time, NOT this table.
 

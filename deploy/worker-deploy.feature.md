@@ -10,8 +10,8 @@ Deploy contract only. Runtime invariants (FFmpeg path, crash recovery, signal ha
 
 ## Surface
 
-- `deploy/deploy-linux-worker.py <target>` -- Docker on Linux. Covers LXC hosts (Larry) and bare-metal servers (dot). Per-host differences come from `inventory.toml`.
-- `deploy/deploy-baremetal-worker.py <target>` -- Bare-metal Linux, no containers. Covers Intel Arc / Xe workstations (Wakko). Installs WorkerService and Python deps directly on the host; systemd unit runs one WorkerService per configured worker slot. PyTorch xpu wheel from `download.pytorch.org/whl/xpu` self-contains Intel SYCL runtime -- no IPEX, no oneAPI apt install, no containers.
+- `deploy/deploy-linux-worker.py <target>` -- Docker on Linux. Covers LXC hosts (Larry). Per-host differences come from `inventory.toml`.
+- `deploy/deploy-baremetal-worker.py <target>` -- Bare-metal Linux, no containers. Covers Intel Arc / Xe workstations (Wakko) and NVIDIA hosts (dot). Installs WorkerService and Python deps directly on the host; systemd unit runs one WorkerService per configured worker slot. Torch variant auto-detected: cu124 (NVIDIA), xpu (Intel Arc), cpu (fallback).
 - `deploy/deploy-windows-worker.py <target>` -- Task Scheduler + SMB on Windows (I9-2024).
 - **Code updates on I9-2024 (Windows worker)** -- WorkerService runs from the `C:\Code\MediaVortex` source tree; stop + restart to apply changes, no re-deploy needed. Linux-Docker workers require `deploy-linux-worker.py <target>` per change because Docker bakes the source into the container image. Bare-metal Linux workers apply code changes via `deploy-baremetal-worker.py <target>` which rsyncs source + restarts the systemd units.
 - `deploy/bringup.md` -- one-page runbook picks the shape and points at the right command.
@@ -39,7 +39,7 @@ The `infrastructure` repo is the **single source of truth** for host inventory a
 
 ### Conventions
 
-7. **Worker name convention sourced from inventory.toml.** Multi-worker Linux hosts register as `<friendly>-worker-N` lowercase (`larry-worker-1..8`, `wakko-worker-1..4`, `dot-worker-1..4`). Single-worker Windows hosts register as the inventory `name` value (`I9-2024`).
+7. **Worker name convention sourced from inventory.toml.** Multi-worker Linux hosts register as `<friendly>-worker-N` lowercase (`larry-worker-1..8`, `wakko-worker-1..4`, `dot-worker-1..4`). Single-worker Windows hosts register as the inventory `name` value (`I9-2024`). Docker path applies to LXC hosts only; bare-metal hosts use `deploy-baremetal-worker.py`.
 
 8. **No credential leak.** SMB/NFS/DB credentials are read from Vaultwarden via `infrastructure/terraform/secrets.py` and passed via SSH stdin or environment variables. Grep of any deploy script for a literal credential value returns zero hits.
 
@@ -84,7 +84,6 @@ deploy/deploy-windows-worker.py
 deploy/Register-WorkerTask.ps1
 deploy/Dockerfile
 deploy/compose-templates/larry.yml
-deploy/compose-templates/dot.yml
 deploy/baremetal/
 deploy/SyncSource.py
 deploy/.deployignore
@@ -96,8 +95,8 @@ deploy/.deployignore
 
 - `deploy/worker-deploy.feature.md` -- this doc (operator-experience criteria)
 - `deploy/bringup.md` -- one-page runbook covering all shapes (criterion 9)
-- `deploy/worker-deploy-linux.flow.md` -- Docker on Linux flow (Larry LXC, dot bare-metal server)
-- `deploy/worker-deploy-baremetal.flow.md` -- Bare-metal Linux flow (Wakko / Intel Arc / no containers)
+- `deploy/worker-deploy-linux.flow.md` -- Docker on Linux flow (Larry LXC only)
+- `deploy/worker-deploy-baremetal.flow.md` -- Bare-metal Linux flow (Wakko / Intel Arc + dot / NVIDIA / no containers)
 - `deploy/worker-deploy-windows.flow.md` -- Task Scheduler + SMB flow (I9-2024)
 - `deploy/deploy-linux-worker.py` -- Docker-on-Linux entry
 - `deploy/deploy-baremetal-worker.py` -- bare-metal Linux entry
