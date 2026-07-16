@@ -36,7 +36,7 @@ class PreEncodeAudioPipeline:
             )
             self._Report('demucs.downmix', 0.0, 'Extracting stereo downmix for Demucs')
             DownmixWavPath = self._ExtractStereoDownmix(SourceFilePath, ScratchDir)
-            self._Report('demucs.isolate', 0.0, f'Isolating vocals ({self.DemucsService.ModelName} on {self.DemucsService.Device})')
+            self._Report('demucs.isolate', 0.0, f'Isolating vocals ({self.DemucsService.ModelName} via daemon)')
             Isolation = self.DemucsService.IsolateVocals(DownmixWavPath, ScratchDir)
             self._Report('demucs.premix', 0.0, 'Mixing boosted vocals + attenuated instrumental')
             PremixWavPath = LocalJoin(ScratchDir, "dialog_boost_premix.wav")

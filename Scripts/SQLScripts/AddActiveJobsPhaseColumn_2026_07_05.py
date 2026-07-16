@@ -56,7 +56,7 @@ def RunMigration():
     else:
         Db.ExecuteNonQuery(
             "ALTER TABLE ActiveJobs ADD CONSTRAINT activejobs_phase_enum "
-            "CHECK (Phase IS NULL OR Phase IN ('Setup','Encoding','PostEncode','Verifying'))",
+            "CHECK (Phase IS NULL OR Phase IN ('Setup','PreEncode','Encoding','PostEncode','Verifying'))",
             (),
         )
         print("Added CHECK constraint activejobs_phase_enum.")
