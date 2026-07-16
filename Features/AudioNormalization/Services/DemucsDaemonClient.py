@@ -1,5 +1,5 @@
 import os
-import selectors
+import queue
 import subprocess
 import sys
 import threading
@@ -46,6 +46,8 @@ class DemucsDaemonClient:
         self._IsolateReadTimeoutSec = IsolateReadTimeoutSec
         self._Proc = None
         self._Lock = threading.Lock()
+        self._StdoutQueue = None
+        self._ReaderThread = None
 
     def Start(self):
         with self._Lock:
@@ -63,31 +65,43 @@ class DemucsDaemonClient:
                 text=True,
                 bufsize=1,
             )
+            # directive: transcode-flow-canonical -- background reader thread makes deadline reads cross-platform (Windows select() rejects pipe fds)
+            self._StdoutQueue = queue.Queue()
+            self._ReaderThread = threading.Thread(target=self._StdoutReaderLoop, name='DemucsDaemonStdoutReader', daemon=True)
+            self._ReaderThread.start()
             Ready = self._WaitForReady()
             if not Ready:
                 self._Kill()
                 raise DemucsDaemonUnavailableError('Demucs daemon did not emit READY line')
             LoggingService.LogInfo('Demucs daemon ready', 'DemucsDaemonClient', 'Start')
 
+    def _StdoutReaderLoop(self):
+        try:
+            for Line in iter(self._Proc.stdout.readline, ''):
+                self._StdoutQueue.put(Line)
+        except (ValueError, OSError):
+            pass
+        finally:
+            self._StdoutQueue.put(None)
+
     def _WaitForReady(self):
-        import selectors
-        Sel = selectors.DefaultSelector()
-        Sel.register(self._Proc.stdout, selectors.EVENT_READ)
-        Elapsed = 0
-        while Elapsed < self._StartTimeoutSec:
-            Events = Sel.select(timeout=1.0)
-            for _Key, _Mask in Events:
-                Line = self._Proc.stdout.readline()
-                if Line.strip() == READY_LINE:
-                    return True
-            Elapsed += 1
-            if self._Proc.poll() is not None:
-                Stderr = (self._Proc.stderr.read() or '')[:1000]
-                LoggingService.LogError(
-                    f'Demucs daemon exited before READY (rc={self._Proc.returncode}): {Stderr}',
-                    'DemucsDaemonClient', '_WaitForReady',
-                )
+        Deadline = time.monotonic() + self._StartTimeoutSec
+        while time.monotonic() < Deadline:
+            try:
+                Line = self._StdoutQueue.get(timeout=1.0)
+            except queue.Empty:
+                if self._Proc.poll() is not None:
+                    Stderr = (self._Proc.stderr.read() or '')[:1000]
+                    LoggingService.LogError(
+                        f'Demucs daemon exited before READY (rc={self._Proc.returncode}): {Stderr}',
+                        'DemucsDaemonClient', '_WaitForReady',
+                    )
+                    return False
+                continue
+            if Line is None:
                 return False
+            if Line.strip() == READY_LINE:
+                return True
         return False
 
     def IsolateVocals(self, InputWavPath, OutputDir, ModelName='htdemucs'):
@@ -117,26 +131,22 @@ class DemucsDaemonClient:
                 raise DemucsDaemonUnavailableError(f'Response request-id mismatch: expected {Req.RequestId}, got {Resp.RequestId}')
             return Resp
 
-    # directive: transcode-flow-canonical -- deadline read so hung daemon does not block caller forever; returns '' on daemon exit, raises on wall-clock timeout
+    # directive: transcode-flow-canonical -- deadline read via reader-thread queue; cross-platform (Windows select() rejects pipe fds); returns '' on daemon exit, raises on wall-clock timeout
     def _ReadLineWithDeadline(self, TimeoutSec):
-        Sel = selectors.DefaultSelector()
-        Sel.register(self._Proc.stdout, selectors.EVENT_READ)
         Deadline = time.monotonic() + TimeoutSec
-        try:
-            while True:
-                Remaining = Deadline - time.monotonic()
-                if Remaining <= 0:
-                    raise DemucsDaemonUnavailableError(f'Demucs daemon response timeout after {TimeoutSec}s')
-                Events = Sel.select(timeout=min(1.0, Remaining))
-                for _Key, _Mask in Events:
-                    Line = self._Proc.stdout.readline()
-                    if not Line:
-                        return ''
-                    return Line
+        while True:
+            Remaining = Deadline - time.monotonic()
+            if Remaining <= 0:
+                raise DemucsDaemonUnavailableError(f'Demucs daemon response timeout after {TimeoutSec}s')
+            try:
+                Line = self._StdoutQueue.get(timeout=min(1.0, Remaining))
+            except queue.Empty:
                 if self._Proc.poll() is not None:
                     return ''
-        finally:
-            Sel.close()
+                continue
+            if Line is None:
+                return ''
+            return Line
 
     def Stop(self):
         with self._Lock:
