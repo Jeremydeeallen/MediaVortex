@@ -2037,7 +2037,7 @@ class QueueManagementBusinessService:
                         LoggingService.LogInfo(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                         return {"Success": False, "ErrorMessage": errorMsg, "CanOverride": True}
                 else:
-                    LoggingService.LogWarning(f"Force adding {mediaFile.FileName} to queue (admission gate overridden)", "QueueManagementBusinessService", "AddJobToQueue")
+                    LoggingService.LogInfo(f"Force adding {mediaFile.FileName} to queue (admission gate overridden)", "QueueManagementBusinessService", "AddJobToQueue")
 
                 # directive: transcode-flow-canonical -- failure-budget cap check (single-file admission was missing this; bulk paths already had it)
                 if not ForceAdd:

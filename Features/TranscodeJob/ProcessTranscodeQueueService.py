@@ -73,24 +73,28 @@ class ProcessTranscodeQueueService:
         if not self.FFmpegPath or not self.FFprobePath:
             try:
                 from Services.FFmpegService import FFmpegService
+                from Core.Database.DatabaseService import DatabaseService
                 Discovery = FFmpegService()
+                Persisted = False
                 if not self.FFmpegPath and Discovery.FFmpegPath:
                     self.FFmpegPath = Discovery.FFmpegPath
-                    LoggingService.LogWarning(
-                        f"FFmpegPath was NULL on worker init; discovered {self.FFmpegPath}. "
-                        f"Persist this in Workers.FFmpegPath for {self.WorkerName} to avoid the warning.",
-                        "ProcessTranscodeQueueService", "__init__"
-                    )
+                    Persisted = True
                 if not self.FFprobePath and Discovery.FFprobePath:
                     self.FFprobePath = Discovery.FFprobePath
-                    LoggingService.LogWarning(
-                        f"FFprobePath was NULL on worker init; discovered {self.FFprobePath}. "
-                        f"Persist this in Workers.FFprobePath for {self.WorkerName} to avoid the warning.",
-                        "ProcessTranscodeQueueService", "__init__"
+                    Persisted = True
+                # directive: transcode-flow-canonical -- self-heal Workers row so next boot reads clean; no warning cycle
+                if Persisted:
+                    DatabaseService().ExecuteNonQuery(
+                        "UPDATE Workers SET FFmpegPath = %s, FFprobePath = %s WHERE WorkerName = %s",
+                        (self.FFmpegPath, self.FFprobePath, self.WorkerName),
+                    )
+                    LoggingService.LogInfo(
+                        f"Discovered + persisted FFmpeg/FFprobe paths for {self.WorkerName} (ffmpeg={self.FFmpegPath}, ffprobe={self.FFprobePath})",
+                        "ProcessTranscodeQueueService", "__init__",
                     )
             except Exception as Ex:
                 LoggingService.LogException(
-                    "Failed to discover FFmpeg/FFprobe paths during worker init",
+                    "Failed to discover/persist FFmpeg/FFprobe paths during worker init",
                     Ex, "ProcessTranscodeQueueService", "__init__"
                 )
 
