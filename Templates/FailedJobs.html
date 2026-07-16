@@ -384,10 +384,10 @@ const RenderAttemptsTable = (Attempts) => {
 // directive: transcode-flow-canonical -- bulk-reset all visible list rows in one POST
 const OnResetAllVisible = () => {
     const T = window.FailedJobsTable;
-    if (!T) return;
-    const Rows = T._DataSource && T._DataSource._LastRows ? T._DataSource._LastRows : [];
+    if (!T) { alert('Failed jobs table not initialized -- reload the page.'); return; }
+    const Rows = (T.GetData && T.GetData().Rows) || [];
     const Ids = Rows.map(R => R.MediaFileId).filter(Id => Number.isInteger(Id));
-    if (Ids.length === 0) { alert('No visible rows to reset.'); return; }
+    if (Ids.length === 0) { alert('No visible rows to reset (table currently shows 0 capped files).'); return; }
     if (!confirm('Reset failure budget for ' + Ids.length + ' visible file(s)? Audit rows written to FailureBudgetResets.')) return;
     fetch('/api/FailedJobs/ResetBulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ MediaFileIds: Ids, OperatorName: 'web-ui' }) })
         .then(R => R.json())
