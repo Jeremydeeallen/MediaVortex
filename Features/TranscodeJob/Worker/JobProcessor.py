@@ -82,16 +82,8 @@ class JobProcessor:
             BaseName = OutputFilenameBuilder().CollapseMvSuffix(BaseName)
             TargetLocalPath = LocalJoin(LocalDirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
 
-            # directive: transcode-flow-canonical -- skip Demucs when source lacks confirmed English audio; Dialog Boost premix is English-vocal-model only
-            if getattr(MediaFile, 'HasExplicitEnglishAudio', None) is not True:
-                LoggingService.LogInfo(
-                    f"Skipping PreEncodeAudio (Demucs Dialog Boost) for {MediaFile.FileName}: HasExplicitEnglishAudio != True (languages={getattr(MediaFile, 'AudioLanguages', None)})",
-                    "JobProcessor", "Process",
-                )
-                PreAudio = None
-            else:
-                self.QueueService.DatabaseManager.SetJobPhase(ActiveJobId, JobPhase.PreEncode)
-                PreAudio = self._RunPreEncodeAudio(Mode, EffectiveInputPath, Job, TranscodeAttemptId)
+            self.QueueService.DatabaseManager.SetJobPhase(ActiveJobId, JobPhase.PreEncode)
+            PreAudio = self._RunPreEncodeAudio(Mode, EffectiveInputPath, Job, TranscodeAttemptId)
             AudioPreEncodeFacade.PersistSourceLoudness(MediaFile.Id, MediaFile, PreAudio)
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, f"Building {Mode} command...")
             CommandResult = Strategy.BuildCommand(

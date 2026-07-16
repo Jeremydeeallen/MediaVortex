@@ -379,9 +379,9 @@ class FFmpegAnalysisService:
             )
             return BestStream, BestIndex, AllLanguages, HasExplicitEnglish
 
-        # No English streams found — fall back to first stream
-        LoggingService.LogWarning(
-            f"No English audio stream found among {len(AudioStreams)} stream(s) (languages: {AllLanguages}), using first stream",
+        # No English streams found — fall back to first stream (normal for und / single-track sources)
+        LoggingService.LogInfo(
+            f"No explicit English audio stream among {len(AudioStreams)} stream(s) (languages: {AllLanguages}); using first stream (Dialog Boost still runs)",
             'SelectPreferredAudioStream', 'FFmpegAnalysisService'
         )
         return AudioStreams[0], 0, AllLanguages, HasExplicitEnglish
