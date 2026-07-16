@@ -12,7 +12,7 @@ Override any single check with `# allow: <reason>` within 3 lines of the offendi
 | NEEDS_PLAN | Directive doc Status names a phase + criteria list non-empty | + Write directive doc only |
 | NEEDS_DOC_PREREAD | Read every `*.feature.md` / `*.flow.md` ancestor of files in plan `## Files` | + Write directive doc only |
 | IMPLEMENTING | All content rules pass per Edit/Write | All tools, gated by content rules |
-| VERIFYING | Verification section records evidence per criterion | Read / Grep / Bash; Edit directive doc only |
+| VERIFYING | Verification section records evidence per criterion, and each criterion touching code has a live-smoke transaction line (host + stage + observed side effect) per `.claude/rules/ceo-mode.md#smoke-gate-verifying---delivering` | Read / Grep / Bash; Edit directive doc only |
 | DELIVERING | Delivery report drafted in directive doc Status; `## Promotions` section populated; directive does not grow beyond snapshot taken at IMPLEMENTING -> DELIVERING transition | All tools, including new `*.feature.md` / `*.flow.md` creation (R13 relaxed at this phase) |
 
 ## Content rules

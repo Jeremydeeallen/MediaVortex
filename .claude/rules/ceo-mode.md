@@ -37,6 +37,10 @@ During a directive: design content accretes in the directive doc. Code carries o
 - Pass `feature-criteria.md` litmus tests (rename / outsider / rewrite / negation / stability)
 - Pass `call-graph-audit.md` four-signal check (multiple flow docs / orchestration mode-branch / mode-sparse output columns / ambiguous OOS) -- a directive that ships locally clean atop a divergent pipeline is not clean
 
+## Smoke gate (VERIFYING -> DELIVERING)
+
+No advance from VERIFYING until every code change has been driven end-to-end through the affected pipeline stage on the target host, with an observable completed transaction (DB row, log line, side effect). Unit + contract test passage is a pre-condition, not evidence. WorkerService change -> restart + one real job through the affected stage. WebService change -> hit the affected endpoint against the running instance. DB migration -> apply live + one write through the affected column/constraint. Pipeline unexercisable (missing hardware / test data) -> criterion is UNVERIFIABLE; narrow directive or escalate. Silent unverified ship is refused. Reason: seam-verification catches the map; smoke-gate catches the case where the map is right but the code drifted since the map was drawn (regression pattern: `.Device` attr crash + `activejobs_phase_enum` CHECK drift, 2026-07-15).
+
 ## Escalation rules
 
 Claude escalates ONLY for:
