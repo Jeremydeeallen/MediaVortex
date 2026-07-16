@@ -2104,17 +2104,17 @@ class QueueManagementBusinessService:
                 queueItem.Priority = min(194, queueItem.Priority + 15)
                 LoggingService.LogInfo(f"Added manual addition bonus (+15, capped at 194) to priority for {mediaFile.FileName}. New priority: {queueItem.Priority}", "QueueManagementBusinessService", "AddJobToQueue")
 
-            # Save to database
-            itemId = self.Repository.SaveTranscodeQueueItem(queueItem)
+            # directive: transcode-flow-canonical -- gate BEFORE insert so ungainable / invalid-loudness / missing-policy sources never consume worker cycles
+            from Features.AudioNormalization.AudioPolicyAdmissionGate import AudioPolicyAdmissionGate, ADMITTED
+            Gate = AudioPolicyAdmissionGate()
+            Decision = Gate.AdmitOrDefer(mediaFile, IntendedProcessingMode=EffectiveMode)
+            if Decision.Outcome != ADMITTED and not ForceAdd:
+                msg = f"Audio admission gate refused MediaFileId={MediaFileId} ({mediaFile.FileName}): {Decision.DeferReason}"
+                LoggingService.LogInfo(msg, "QueueManagementBusinessService", "AddJobToQueue")
+                return {"Success": False, "ErrorMessage": msg, "DeferReason": Decision.DeferReason, "AdmissionDeferred": True, "CanOverride": True}
 
-            # T29: fire AudioPolicyAdmissionGate synchronously at insert time. # directive: transcode-worker-unification | # see work-bucket.C4, work-bucket.C5
-            try:
-                from Features.AudioNormalization.AudioPolicyAdmissionGate import AudioPolicyAdmissionGate
-                Gate = AudioPolicyAdmissionGate()
-                Decision = Gate.AdmitOrDefer(mediaFile, IntendedProcessingMode=EffectiveMode)
-                Gate.SnapshotPolicyOnQueueRow(MediaFileId, Decision.PolicyJson)
-            except Exception as AudioEx:
-                LoggingService.LogWarning(f"Audio policy snapshot failed for MediaFileId={MediaFileId}: {AudioEx}", "QueueManagementBusinessService", "AddJobToQueue")
+            itemId = self.Repository.SaveTranscodeQueueItem(queueItem)
+            Gate.SnapshotPolicyOnQueueRow(MediaFileId, Decision.PolicyJson)
 
             result = {
                 "Success": True,
