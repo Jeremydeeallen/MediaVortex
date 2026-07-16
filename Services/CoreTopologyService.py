@@ -34,7 +34,7 @@ class CoreTopologyService:
     def _Detect(self):
         """Detect core topology. Try Windows API first, then fallback heuristic."""
         if platform.system() != "Windows":
-            LoggingService.LogWarning("CoreTopologyService only supports Windows", "CoreTopologyService", "_Detect")
+            LoggingService.LogInfo("CoreTopologyService using all-cores fallback (Windows-only API not available on this platform)", "CoreTopologyService", "_Detect")
             self._FallbackAllCores()
             return
 
