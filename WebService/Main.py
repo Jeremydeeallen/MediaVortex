@@ -194,6 +194,7 @@ class WebServiceApp:
         self.PrivateStartStatusPolling()
         self.PrivateStartAudioVerticalHealth()
         self.PrivateStartFileReplacementSelfHeal()
+        self.PrivateStartAudioRemeasurementRunner()
         
         # Update service status to Running immediately after startup
         self.PrivateUpdateServiceStatus()
@@ -590,6 +591,23 @@ class WebServiceApp:
                 LoggingService.LogException("FileReplacementSelfHealService cycle raised", Ex,
                                             "WebService", "PrivateFileReplacementSelfHealLoop")
             time.sleep(Interval)
+
+    # directive: transcode-flow-canonical -- drain AdmissionDeferReason='invalid_loudness_measurement' backlog by calling AudioRemeasurementService.Process; runs on WebService which owns worker mounts + ffmpeg
+    def PrivateStartAudioRemeasurementRunner(self):
+        try:
+            self.AudioRemeasurementRunnerThread = threading.Thread(
+                target=self.PrivateAudioRemeasurementRunnerLoop,
+                daemon=True,
+                name="AudioRemeasurementRunner",
+            )
+            self.AudioRemeasurementRunnerThread.start()
+            print("AudioRemeasurementRunner started")
+        except Exception as Ex:
+            LoggingService.LogException("Failed to start AudioRemeasurementRunner", Ex, "WebService", "PrivateStartAudioRemeasurementRunner")
+
+    def PrivateAudioRemeasurementRunnerLoop(self):
+        from Features.AudioNormalization.Services.AudioRemeasurementRunner import AudioRemeasurementRunner
+        AudioRemeasurementRunner(BatchSize=20, PollSec=30).RunForever()
 
     # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.H1
     def PrivateStartAudioVerticalHealth(self):

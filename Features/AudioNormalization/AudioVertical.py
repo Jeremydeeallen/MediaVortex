@@ -39,12 +39,10 @@ class AudioVertical:
             'AllowedCodecs': AllowedCodecs,
         }
 
-    # directive: worker-runtime-state
+    # directive: transcode-flow-canonical -- audio loudness compliance is language-agnostic; the und / non-English files still need loudness normalization + Dialog Boost per operator policy
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
         if getattr(Mf, 'AudioCorruptSuspect', None) is True:
             return (None, 'audio_corrupt_suspect')
-        if getattr(Mf, 'HasExplicitEnglishAudio', None) is False:
-            return (None, 'no_english_audio')
         if not getattr(Mf, 'AudioCodec', None) and getattr(Mf, 'Resolution', None):
             return (None, 'no_audio_stream')
         if getattr(Mf, 'LoudnessMeasurementFailureReason', None):
