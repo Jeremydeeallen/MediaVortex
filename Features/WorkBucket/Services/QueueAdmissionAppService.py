@@ -42,7 +42,7 @@ class QueueAdmissionAppService:
             (Bucket.BucketName, Identity.StorageRootId, Identity.RelativePath),
         )
         Total = len(Rows)
-        Counts = {'queued': 0, 'already_queued': 0, 'already_transcoded': 0, 'skipped': 0, 'admission_deferred': 0, 'error': 0}
+        Counts = {'queued': 0, 'already_queued': 0, 'skipped': 0, 'admission_deferred': 0, 'error': 0}
         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
         Svc = QueueManagementBusinessService()
         for Row in Rows:
@@ -51,7 +51,7 @@ class QueueAdmissionAppService:
             Status = self._ClassifyAddJobResult(R)
             Counts[Status] += 1
         LoggingService.LogInfo(
-            f"Admit series: {Identity.ToCompositeKey()} bucket={Bucket.BucketName} total={Total} queued={Counts['queued']} already={Counts['already_queued']} already_transcoded={Counts['already_transcoded']} skipped={Counts['skipped']} deferred={Counts['admission_deferred']} error={Counts['error']}",
+            f"Admit series: {Identity.ToCompositeKey()} bucket={Bucket.BucketName} total={Total} queued={Counts['queued']} already={Counts['already_queued']} skipped={Counts['skipped']} deferred={Counts['admission_deferred']} error={Counts['error']}",
             "QueueAdmissionAppService",
             "AdmitSeries",
         )
@@ -59,7 +59,7 @@ class QueueAdmissionAppService:
             Inserted=Counts['queued'],
             AlreadyQueued=Counts['already_queued'],
             Total=Total,
-            Skipped=Counts['skipped'] + Counts['already_transcoded'],
+            Skipped=Counts['skipped'],
             AdmissionDeferred=Counts['admission_deferred'],
             Errored=Counts['error'],
         )
@@ -68,8 +68,6 @@ class QueueAdmissionAppService:
     def _ClassifyAddJobResult(self, R: dict) -> str:
         if R.get('AlreadyQueued'):
             return 'already_queued'
-        if R.get('AlreadyTranscoded'):
-            return 'already_transcoded'
         if R.get('AdmissionDeferred'):
             return 'admission_deferred'
         if R.get('Skipped'):

@@ -1999,7 +1999,7 @@ class QueueManagementBusinessService:
                 LoggingService.LogInfo(f"File {mediaFile.FileName} already pending (row {ExistingId})", "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": True, "AlreadyQueued": True, "ItemId": ExistingId, "FileName": mediaFile.FileName}
 
-            # directive: transcode-flow-canonical -- `-mv` in the source relative path means MediaVortex already produced this file; refuse admission with an HONEST signal (not Success=True/ItemId=0). Self-heal: promote MediaFiles.TranscodedByMediaVortex=TRUE so future WorkBucket calcs exclude it.
+            # directive: transcode-flow-canonical -- `-mv` in the source relative path means MediaVortex already produced this file; keep the metadata flag accurate (self-heal) but let compliance drive admission. A -mv file with audiocompliant=FALSE (missing Dialog Boost) SHOULD be re-admitted as AudioFix.
             _RelPath = (getattr(mediaFile, 'RelativePath', '') or '').lower()
             _Stem, _Ext = ntpath.splitext(_RelPath)
             if _Stem.endswith('-mv') and _Ext:
@@ -2007,9 +2007,6 @@ class QueueManagementBusinessService:
                     "UPDATE MediaFiles SET TranscodedByMediaVortex = TRUE WHERE Id = %s AND (TranscodedByMediaVortex IS NULL OR TranscodedByMediaVortex = FALSE)",
                     (int(MediaFileId),),
                 )
-                Msg = f"Refused: source is already a MediaVortex output (-mv) -- MediaFiles.TranscodedByMediaVortex self-healed to TRUE for {mediaFile.FileName}"
-                LoggingService.LogInfo(Msg, "QueueManagementBusinessService", "AddJobToQueue")
-                return {"Success": False, "ErrorMessage": Msg, "AlreadyTranscoded": True, "FileName": mediaFile.FileName}
 
             # Handle profile assignment if ProfileId is provided (user selected a profile)
             if ProfileId is not None:

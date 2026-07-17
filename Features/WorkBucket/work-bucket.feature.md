@@ -32,7 +32,13 @@ C5. Per-row Queue is idempotent. Returns `'queued'` first time, `'already_queued
 
 C6. Filters: multi-select drive + free-text series search. Pagination: 25 rows per page server-side via `Core.Querying.PagedQueryBuilder`.
 
-**Admission canonicalization (2026-06-28):** WorkBucket's `QueueAdmissionAppService` no longer writes `TranscodeQueue` rows directly. All admissions now route through `Features/TranscodeQueue/QueueManagementBusinessService.AddJobToQueue` (the canonical admission entry point) which synchronously invokes `AudioPolicyAdmissionGate` at INSERT time, marginal-savings gate, candidate-compliance evaluator, and AssignedProfile cascade validation. See `transcode-worker-unification` directive Phase H (T28-T30) + criteria C19-C20.
+C7. `WorkBucket` is a GENERATED column derived exclusively from the three compliance flags: `WHEN videocompliant IS NULL OR containercompliant IS NULL OR audiocompliant IS NULL THEN NULL / WHEN videocompliant = FALSE THEN 'Transcode' / WHEN containercompliant = FALSE THEN 'Remux' / WHEN audiocompliant = FALSE THEN 'AudioFix' / ELSE NULL`. `TranscodedByMediaVortex` is METADATA (which files we produced) and MUST NOT influence WorkBucket -- a MediaVortex output that never received Dialog Boost is still audio-non-compliant and belongs in AudioFix. Verifiable: `SELECT generation_expression FROM information_schema.columns WHERE table_name='mediafiles' AND column_name='workbucket'` returns the compliance-only CASE.
+
+C8. Compliance flags are always non-NULL for scanned files. The write path is `Features/TranscodeQueue/QueueManagementBusinessService.RecomputeForFiles([ids])`, invoked at every scan-insert / scan-update / post-transcode / audio-config-change site. Any row that reaches `videocompliant IS NULL` OR `containercompliant IS NULL` OR `audiocompliant IS NULL` is caught by the `NullComplianceRow` self-heal invariant on the next `AudioVerticalHealthService.RunCycle` and repaired via `RecomputeCompliance` remediation. Verifiable: after a self-heal cycle, `SELECT COUNT(*) FROM MediaFiles WHERE videocompliant IS NULL OR containercompliant IS NULL OR audiocompliant IS NULL` == 0.
+
+C9. `AdmitSeries` returns a per-outcome tally: `Inserted`, `AlreadyQueued`, `Skipped`, `AdmissionDeferred`, `Errored`. Sum of the five equals `Total`. No outcome is collapsed into another (prior bug: skipped / deferred / errored all fell into `AlreadyQueued`, hiding the reason files never queued). Verifiable: `Tests/Contract/TestQueueAdmissionAppService.py::test_admit_series_returns_admission_result`.
+
+C10. Every admission (single-file + bulk) routes through `Features/TranscodeQueue/QueueManagementBusinessService.AddJobToQueue`. Repository-layer refusal policies are forbidden -- policy lives at the app-service, data access lives at the repository (SRP). Verifiable: `grep -n "return 0" Features/TranscodeQueue/TranscodeQueueRepository.py` returns zero lines inside `SaveTranscodeQueueItem`.
 
 ## Seams
 
