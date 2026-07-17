@@ -135,8 +135,15 @@ class WorkBucketController:
                 Result = self.QueueService.AdmitSeries(Identity, Bucket)
                 return jsonify({
                     'Success': True,
-                    'Message': f"Queued {Result.Inserted}",
-                    'Data': {'Inserted': Result.Inserted, 'AlreadyQueued': Result.AlreadyQueued, 'Total': Result.Total},
+                    'Message': f"Queued {Result.Inserted} (already-queued {Result.AlreadyQueued}, already-transcoded/skipped {Result.Skipped}, deferred {Result.AdmissionDeferred}, errored {Result.Errored}) of {Result.Total}",
+                    'Data': {
+                        'Inserted': Result.Inserted,
+                        'AlreadyQueued': Result.AlreadyQueued,
+                        'Skipped': Result.Skipped,
+                        'AdmissionDeferred': Result.AdmissionDeferred,
+                        'Errored': Result.Errored,
+                        'Total': Result.Total,
+                    },
                 })
             except ValueError as Ex:
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 400

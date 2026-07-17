@@ -1,6 +1,6 @@
 import os
 import unittest
-from Core.Database.DatabaseService import DatabaseService
+from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 from Features.WorkBucket.Domain.BucketKey import BucketKey
 from Features.WorkBucket.Domain.SeriesIdentity import SeriesIdentity
 from Features.WorkBucket.Services.QueueAdmissionAppService import QueueAdmissionAppService
@@ -17,8 +17,11 @@ class TestQueueAdmissionAppService(unittest.TestCase):
     # directive: work-transcode-unified | # see work-bucket.C5
     def test_admit_one_returns_status_and_id(self):
         # see work-bucket.C5
+        Pat = '%' + EscapeLikePattern('-mv.') + '%'
         Row = DatabaseService().ExecuteQuery(
-            "SELECT Id FROM MediaFiles WHERE WorkBucket = 'Transcode' AND TranscodedByMediaVortex IS NOT TRUE LIMIT 1"
+            "SELECT Id FROM MediaFiles WHERE WorkBucket = 'Transcode' AND TranscodedByMediaVortex IS NOT TRUE "
+            "AND LOWER(RelativePath) NOT LIKE %s ESCAPE '!' LIMIT 1",
+            (Pat,),
         )
         if not Row:
             self.skipTest("No Transcode MediaFile in DB")
@@ -59,7 +62,7 @@ class TestQueueAdmissionAppService(unittest.TestCase):
             (Identity.StorageRootId, Identity.RelativePath),
         )
         Result = QueueAdmissionAppService().AdmitSeries(Identity, BucketKey.FromUrlKey('Transcode'))
-        self.assertEqual(Result.Inserted + Result.AlreadyQueued, Result.Total)
+        self.assertEqual(Result.Inserted + Result.AlreadyQueued + Result.Skipped + Result.AdmissionDeferred + Result.Errored, Result.Total)
         DatabaseService().ExecuteNonQuery(
             "DELETE FROM TranscodeQueue WHERE Status='Pending' AND MediaFileId IN ("
             "  SELECT Id FROM MediaFiles WHERE WorkBucket='Transcode' AND StorageRootId=%s AND split_part(RelativePath,'/',1)=%s"

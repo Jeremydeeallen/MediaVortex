@@ -91,14 +91,6 @@ class TranscodeQueueRepository(BaseRepository):
             if QueueItem.StorageRootId is None or not QueueItem.RelativePath:
                 raise PathError(f"SaveTranscodeQueueItem: QueueItem missing typed pair (StorageRootId={QueueItem.StorageRootId}, RelativePath={QueueItem.RelativePath!r})")
             LoggingService.LogFunctionEntry("SaveTranscodeQueueItem", "TranscodeQueueRepository", QueueItem.Id, QueueItem.RelativePath, QueueItem.Status)
-            if QueueItem.Id is None:
-                _Stem, _Ext = LocalSplitExt((QueueItem.RelativePath or '').lower())
-                if _Stem.endswith("-mv") and _Ext:
-                    LoggingService.LogWarning(
-                        f"Refusing to admit queue row -- source already MediaVortex-transcoded ({QueueItem.RelativePath})",
-                        "TranscodeQueueRepository", "SaveTranscodeQueueItem",
-                    )
-                    return 0
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor()

@@ -188,7 +188,8 @@
         fetch(ApiBase + '/Series/' + encodeURIComponent(Sid) + '/Queue', {method: 'POST'})
           .then(R => R.json()).then(P => {
             if (P.Success) {
-              FlashToast('Queued ' + P.Data.Inserted + ' files (' + P.Data.AlreadyQueued + ' already pending)');
+              const D = P.Data;
+              FlashToast('Queued ' + D.Inserted + ' of ' + D.Total + ' (already-queued ' + D.AlreadyQueued + ', skipped ' + D.Skipped + ', deferred ' + D.AdmissionDeferred + ', errored ' + D.Errored + ')');
               LoadSeries();
             } else {
               FlashToast(P.Message, 'danger');
