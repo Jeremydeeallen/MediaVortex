@@ -3,6 +3,7 @@ import re
 import os
 import threading
 import time
+from collections import deque
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
@@ -19,6 +20,8 @@ class VideoTranscodingService:
     def __init__(self):
         self.ActiveProcesses = {}
         self.ProcessThreads = {}
+        # Rolling tail of merged stdout+stderr per JobId; drained by MonitorProgress, read on failure so rc!=0 gets actual FFmpeg error text into Logs.
+        self.RecentOutput = {}
 
     # directive: transcodejob-uses-path | # see path.S5
     def TranscodeVideo(self, JobId: int, TranscodeCommand: str,
@@ -159,23 +162,30 @@ class VideoTranscodingService:
             LoggingService.LogInfo(f"Process completed with return code: {ReturnCode}", "VideoTranscodingService", "TranscodeVideo")
             LoggingService.LogInfo(f"Duration: {Duration} seconds", "VideoTranscodingService", "TranscodeVideo")
 
-            # Capture any error output if the process failed
+            # Capture any error output if the process failed. MonitorProgress consumed the merged stdout+stderr stream into self.RecentOutput; communicate() returns empty here. Read the rolling tail.
+            FFmpegTail = ""
             if ReturnCode != 0:
-                try:
-                    # Read any remaining output
-                    Output, ErrorOutput = Process.communicate()
-                    if Output:
-                        LoggingService.LogError(f"FFmpeg stdout: {Output}", "VideoTranscodingService", "TranscodeVideo")
-                    if ErrorOutput:
-                        LoggingService.LogError(f"FFmpeg stderr: {ErrorOutput}", "VideoTranscodingService", "TranscodeVideo")
-                except Exception as e:
-                    LoggingService.LogException("Exception reading FFmpeg output", e, "VideoTranscodingService", "TranscodeVideo")
+                Tail = self.RecentOutput.get(JobId)
+                if Tail:
+                    FFmpegTail = "\n".join(Tail)[-4096:]
+                    LoggingService.LogError(
+                        f"FFmpeg failed rc={ReturnCode}. Output tail (last {len(Tail)} lines):\n{FFmpegTail}",
+                        "VideoTranscodingService", "TranscodeVideo"
+                    )
+                else:
+                    LoggingService.LogError(
+                        f"FFmpeg failed rc={ReturnCode}. No captured output tail (MonitorProgress may not have run).",
+                        "VideoTranscodingService", "TranscodeVideo"
+                    )
 
             # Clean up process references
             if JobId in self.ActiveProcesses:
                 del self.ActiveProcesses[JobId]
             if JobId in self.ProcessThreads:
                 del self.ProcessThreads[JobId]
+            # Drop the rolling-tail buffer for this JobId; tail already logged/embedded above on failure path.
+            if JobId in self.RecentOutput:
+                del self.RecentOutput[JobId]
 
             # Release job from CpuAffinityService (with cooling wait enabled)
             try:
@@ -226,6 +236,8 @@ class VideoTranscodingService:
                 }
             else:
                 ErrorMessage = f"Transcoding failed with return code {ReturnCode}"
+                if FFmpegTail:
+                    ErrorMessage = f"{ErrorMessage}\nFFmpeg output tail:\n{FFmpegTail}"
                 LoggingService.LogError(f"Transcoding failed for job {JobId}: {ErrorMessage}",
                                       "VideoTranscodingService", "TranscodeVideo")
 
@@ -314,12 +326,16 @@ class VideoTranscodingService:
 
     def MonitorProgress(self, JobId: int, Process: subprocess.Popen, ProgressCallback: Callable):
         """Monitor transcoding progress and call progress callback."""
+        Tail = self.RecentOutput.setdefault(JobId, deque(maxlen=60))
         try:
             while Process.poll() is None:
                 # Read output line by line
                 Line = Process.stdout.readline()
                 if Line:
-                    ProgressData = self.ParseProgressLine(Line.strip())
+                    Stripped = Line.strip()
+                    if Stripped:
+                        Tail.append(Stripped)
+                    ProgressData = self.ParseProgressLine(Stripped)
                     if ProgressData:
                         ProgressCallback(ProgressData)
 
@@ -332,8 +348,10 @@ class VideoTranscodingService:
                     if RemainingOutput:
                         Lines = RemainingOutput.split('\n')
                         for Line in Lines:
-                            if Line.strip():
-                                ProgressData = self.ParseProgressLine(Line.strip())
+                            Stripped = Line.strip()
+                            if Stripped:
+                                Tail.append(Stripped)
+                                ProgressData = self.ParseProgressLine(Stripped)
                                 if ProgressData:
                                     ProgressCallback(ProgressData)
             except (ValueError, OSError):

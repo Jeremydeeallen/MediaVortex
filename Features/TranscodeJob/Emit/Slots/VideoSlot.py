@@ -60,9 +60,6 @@ class VideoSlot:
             self._EmitQsvArgs(Parts, ProfileSettings)
         else:
             self.SvtAv1Args.AddCodecParameters(Parts, CodecParameters, ProfileSettings)
-        VideoBitrate = ProfileSettings.get('VideoBitrateKbps')
-        if VideoBitrate and VideoBitrate != '' and VideoBitrate != 'None':
-            Parts.extend(['-maxrate', f'{VideoBitrate}k'])
 
     # directive: transcode-flow-canonical | # see transcode.ST5
     def _AppendFilmGrain(self, Parts: List[str], CodecParameters: List[str],

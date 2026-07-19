@@ -21,6 +21,10 @@ class SvtAv1EncoderArgsStrategy(IEncoderArgsStrategy):
             if 'preset' in ParamLookup:
                 CommandParts.extend(['-preset', str(Preset)])
 
+        VideoBitrate = ProfileSettings.get('VideoBitrateKbps')
+        if VideoBitrate and VideoBitrate != '' and VideoBitrate != 'None':
+            CommandParts.extend(['-maxrate', f'{VideoBitrate}k'])
+
     def AddFilmGrainParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
         ParamLookup = {}
         for Param in CodecParameters:
