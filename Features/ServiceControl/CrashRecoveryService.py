@@ -413,6 +413,11 @@ class CrashRecoveryService:
 
             for Row in Rows:
                 TaId = Row.get('ta_id')
+                # If encode is currently in-flight, the .inprogress belongs to it. Skip -- do not touch, do not finalize, do not delete. Rule: if the process is running, deletion of its output must be impossible.
+                if self.DatabaseManager.DatabaseService.ExecuteScalar(
+                    "SELECT 1 FROM TranscodeAttempts WHERE Id = %s AND Success IS NULL LIMIT 1", (TaId,)
+                ):
+                    continue
                 SrcSid = Row.get('src_sid')
                 SrcRel = Row.get('src_rel')
                 OutSid = Row.get('out_sid')

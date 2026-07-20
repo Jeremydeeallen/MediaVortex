@@ -13,8 +13,10 @@ from Features.AudioNormalization.Services.DemucsVocalIsolationService import Dem
 class PreEncodeAudioPipeline:
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
-    def __init__(self, FfmpegPath, PythonExe, DemucsService=None, ScratchRoot=None, RulesRepo=None, ProgressReporter=None):
+    def __init__(self, FfmpegPath, PythonExe, DemucsService=None, ScratchRoot=None, RulesRepo=None, ProgressReporter=None, FFprobePath=None):
         self.FfmpegPath = FfmpegPath
+        # FFprobePath optional; falls back to sibling-of-ffmpeg convention when caller does not supply it. Used to pick preferred (English) audio stream for the Dialog Boost downmix.
+        self.FFprobePath = FFprobePath or FfmpegPath.replace('ffmpeg.exe', 'ffprobe.exe').replace('/ffmpeg', '/ffprobe')
         self.PythonExe = PythonExe
         self.DemucsService = DemucsService or DemucsVocalIsolationService(FfmpegPath=FfmpegPath, PythonExe=PythonExe)
         self.ScratchRoot = ScratchRoot or tempfile.gettempdir()
@@ -94,14 +96,30 @@ class PreEncodeAudioPipeline:
                 )
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
+    def _SelectPreferredAudioIndex(self, SourceFilePath):
+        # Pick English track if present; fall back to first audio. Multi-language sources (Bluray with fre+eng) used to blindly grab a:0 -- Dialog Boost then contained boosted French mislabeled 'Dialog Boost (eng)'.
+        try:
+            from Services.FFmpegAnalysisService import FFmpegAnalysisService
+            Analysis = FFmpegAnalysisService(FFprobePath=self.FFprobePath).AnalyzeMediaFile(SourceFilePath)
+            if Analysis is not None and getattr(Analysis, 'AudioStreamIndex', None) is not None:
+                return int(Analysis.AudioStreamIndex)
+        except Exception as Ex:
+            LoggingService.LogWarning(
+                f"PreEncodeAudioPipeline: preferred-audio probe failed for {SourceFilePath}: {Ex}; falling back to a:0",
+                "PreEncodeAudioPipeline", "_SelectPreferredAudioIndex",
+            )
+        return 0
+
+    # directive: audio-dialog-boost-real | # see audio-normalization.C14
     def _ExtractStereoDownmix(self, SourceFilePath, ScratchDir):
         import os
         os.makedirs(ScratchDir, exist_ok=True)
         OutputPath = LocalJoin(ScratchDir, "source_downmix.wav")
+        PreferredIdx = self._SelectPreferredAudioIndex(SourceFilePath)
         Cmd = [
             self.FfmpegPath, "-y",
             "-i", SourceFilePath,
-            "-map", "0:a:0",
+            "-map", f"0:a:{PreferredIdx}",
             "-ac", "2",
             "-ar", "48000",
             "-c:a", "pcm_s16le",
