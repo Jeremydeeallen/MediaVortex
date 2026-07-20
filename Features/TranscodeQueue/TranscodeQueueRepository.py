@@ -361,7 +361,7 @@ class TranscodeQueueRepository(BaseRepository):
 
     QueueItemsSortWhitelist = {
         'SizeMB': 'SizeMB',
-        'Priority': '(CASE WHEN Priority >= 195 THEN Priority ELSE 0 END), SizeMB',
+        'Priority': '(CASE WHEN Priority >= 195 THEN Priority ELSE 0 END) DESC, SizeMB',
         'DateAdded': 'DateAdded',
         'FileName': 'FileName',
     }
