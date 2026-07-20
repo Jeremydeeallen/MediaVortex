@@ -162,10 +162,21 @@ class VideoTranscodingService:
             LoggingService.LogInfo(f"Process completed with return code: {ReturnCode}", "VideoTranscodingService", "TranscodeVideo")
             LoggingService.LogInfo(f"Duration: {Duration} seconds", "VideoTranscodingService", "TranscodeVideo")
 
-            # Capture any error output if the process failed. MonitorProgress consumed the merged stdout+stderr stream into self.RecentOutput; communicate() returns empty here. Read the rolling tail.
+            # Capture any error output if the process failed. MonitorProgress tees into self.RecentOutput; wait up to 2s for that thread to drain post-exit, then fall back to a direct pipe read (fast-fail case where the thread never ran).
             FFmpegTail = ""
             if ReturnCode != 0:
+                MonitorThread = self.ProcessThreads.get(JobId)
+                if MonitorThread is not None:
+                    MonitorThread.join(timeout=2.0)
                 Tail = self.RecentOutput.get(JobId)
+                if not Tail:
+                    try:
+                        Raw = Process.stdout.read() if Process.stdout else ''
+                        if Raw:
+                            Tail = deque([L.strip() for L in Raw.split('\n') if L.strip()][-60:], maxlen=60)
+                            self.RecentOutput[JobId] = Tail
+                    except (ValueError, OSError):
+                        pass
                 if Tail:
                     FFmpegTail = "\n".join(Tail)[-4096:]
                     LoggingService.LogError(
@@ -174,7 +185,7 @@ class VideoTranscodingService:
                     )
                 else:
                     LoggingService.LogError(
-                        f"FFmpeg failed rc={ReturnCode}. No captured output tail (MonitorProgress may not have run).",
+                        f"FFmpeg failed rc={ReturnCode}. No output captured (pipe drained empty).",
                         "VideoTranscodingService", "TranscodeVideo"
                     )
 
@@ -341,19 +352,18 @@ class VideoTranscodingService:
 
                 time.sleep(0.1)  # Small delay to prevent excessive CPU usage
 
-            # Read any remaining output (only if process is still running)
+            # Drain kernel pipe buffer after process exit (fast-fail case: loop above never entered).
             try:
-                if Process.poll() is None:
-                    RemainingOutput = Process.stdout.read()
-                    if RemainingOutput:
-                        Lines = RemainingOutput.split('\n')
-                        for Line in Lines:
-                            Stripped = Line.strip()
-                            if Stripped:
-                                Tail.append(Stripped)
-                                ProgressData = self.ParseProgressLine(Stripped)
-                                if ProgressData:
-                                    ProgressCallback(ProgressData)
+                RemainingOutput = Process.stdout.read()
+                if RemainingOutput:
+                    Lines = RemainingOutput.split('\n')
+                    for Line in Lines:
+                        Stripped = Line.strip()
+                        if Stripped:
+                            Tail.append(Stripped)
+                            ProgressData = self.ParseProgressLine(Stripped)
+                            if ProgressData:
+                                ProgressCallback(ProgressData)
             except (ValueError, OSError):
                 # Process stdout is closed, ignore
                 pass
