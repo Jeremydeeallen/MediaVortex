@@ -31,7 +31,9 @@ The `infrastructure` repo is the **single source of truth** for host inventory a
 
 3. **Ninety-second code-only redeploy.** A second invocation after a code change reaches `Status='Online'` with fresh `LastHeartbeat` under 90 seconds.
 
-4. **Idempotent.** Two consecutive runs against the same target both exit 0. The second reports each step as "skipped" or "verified" rather than re-doing it.
+4. **Idempotent.** The deploy script converges to the target end-state regardless of prior state. Two consecutive runs both exit 0. **Idempotent means N=1000 -- if any long-lived resource (docker build cache, log files, temp files) grows without bound across runs and can starve future runs, the deploy owns pruning it.** Disk-quota-exceeded from an accumulating docker build cache is a deploy failure, not an operator-maintenance failure.
+
+4a. **Deploy owns disk hygiene.** Every deploy script prunes any long-lived resource it created on the target that would otherwise accumulate. Docker-on-Linux prunes docker build cache + dangling images before build. Bare-metal Linux prunes stale venv caches + apt caches after install. Every deploy pre-flights a minimum-free-space check post-prune and fails loud if the target is still starved (means non-deploy artifacts filled the disk -- operator investigates). Docs/alerts monitor only; never PREVENT starvation. Prevention is the deploy's job.
 
 5. **Pre-flight fails fast.** Missing prerequisites cause non-zero exit within 30 seconds naming the failing check and a one-line remediation hint.
 

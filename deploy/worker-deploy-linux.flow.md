@@ -33,6 +33,7 @@ For bare-metal Linux hosts (Intel Arc, NVIDIA), use `worker-deploy-baremetal.flo
 | ID | Stage | Owns |
 |---|---|---|
 | ST1 | Pre-Flight Checks | SSH reachability, Docker presence, DB reachability, mount non-empty, compose template existence |
+| ST1.5 | Disk Hygiene | `docker builder prune --keep-storage 3g -f` + `docker image prune -f` + `df` verify >= 5 GB free (fail loud otherwise). Owned by the deploy; not by cron or monitoring. See worker-deploy.C4a. |
 | ST2 | Build and Deploy | SyncSource -> `docker build --build-arg COMMIT_SHA=...` -> `docker compose up -d` -> cleanup |
 | ST3 | Post-Deploy Verification | Containers Up; `Workers` rows Online/Paused; `WorkerShareMappings` populated; version match assertion |
 | ST4 | Runtime Pipeline | Per-container startup -> `WorkerService.flow.md::ST0..ST13` ownership |
@@ -49,6 +50,20 @@ The script runs these in order and exits non-zero on the first failure. Each che
 | DB reachable from target | `ssh ... 'nc -zw2 10.0.0.15 5432 && echo OK'` | `OK` | Verify postgres on `10.0.0.15`; check pg_hba.conf allows the target IP. |
 | Required mounts non-empty | `ssh ... 'ls /mnt/media_tv \| head -1 && ls /mnt/movies \| head -1 && ls /mnt/xxx \| head -1'` | Each returns at least one filename | LXC: `terraform apply` re-renders the `pct set --mp<N>` lines from `inventory.toml`. Bare-metal: re-run `mediavortex-bare-metal-bootstrap.py --host <friendly>`. |
 | Compose template exists | `ls deploy/compose-templates/<friendly>.yml` | File present | Create the template from a sibling. |
+
+## Disk Hygiene (`ST1.5`)
+
+Prunes docker resources the deploy created on prior runs, then verifies enough free space remains to build. **Owned by the deploy** (see `worker-deploy.C4a`). Runs after preflight, before source sync.
+
+| Step | Command (effectively) | Purpose |
+|---|---|---|
+| Prune build cache | `ssh ... 'docker builder prune --keep-storage 3g -f'` | Bounded cache retention (~3 GB); reclaims accumulated intermediate build layers. |
+| Prune dangling images | `ssh ... 'docker image prune -f'` | Removes tagless image layers from superseded builds; keeps running `mediavortex-worker:latest`. |
+| Verify free space | `ssh ... 'df -B1 / \| tail -1 \| awk "{print \$4}"'` | Post-prune free bytes on root filesystem. |
+
+Passes if free space >= 5 GB (5,368,709,120 bytes) after prune. Fails loud with the offending byte count. Failure means non-deploy artifacts filled the disk -- operator investigates; the deploy is not the leak.
+
+**Why 5 GB:** worker image build peaks at ~8 GB (torch + FFmpeg static + Python + source). BuildKit reuses staged layers within the run, so pre-existing 3 GB cache + 5 GB free = 8 GB build workspace.
 
 ## Build and Deploy (`ST2`)
 
@@ -226,6 +241,7 @@ Common causes:
 | DB unreachable at container start | `psycopg2.OperationalError` in logs, container restarts | Verify `10.0.0.15:5432` is reachable from the target; check `pg_hba.conf` for the target's IP. |
 | Bind mount missing on host | FFmpeg writes fail with ENOENT or EACCES | Verify mount points exist and contain data: `ls /mnt/media_tv /mnt/movies /mnt/xxx` on the target. |
 | Empty mount silently corrupts state | Worker claims jobs, hits per-file source-missing, deletes queue rows | Fixed by mount validation (worker-lifecycle criteria 20, 21). A worker now stays Paused and reports the offending mount. |
+| Disk quota exceeded mid-`tar` extraction | `SyncSource` sees non-zero remote exit; deploy aborts at ST2 | `ST1.5` now prunes build cache pre-build so this should not recur. If it does after prune, non-docker data is the leak (check `du -sh /var/lib/*` and `/tmp`); operator triages. Emergency: `ssh root@<ip> 'docker builder prune -a -f && docker image prune -a -f'` (accepts full rebuild penalty). |
 
 ## Seams
 

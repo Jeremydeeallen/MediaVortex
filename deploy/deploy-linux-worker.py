@@ -179,6 +179,39 @@ def StepPreflight(Friendly: str, Target: str) -> tuple[bool, dict]:
     return True, Out
 
 
+# see worker-deploy-linux.ST1.5 -- deploy owns disk hygiene per worker-deploy.C4a
+_MIN_FREE_BYTES_AFTER_PRUNE = 5 * 1024 * 1024 * 1024  # 5 GB build workspace floor
+_BUILD_CACHE_KEEP = "3g"
+
+
+def StepDiskHygiene(Target: str) -> tuple[bool, str]:
+    """Prune docker cache the deploy itself created, then verify enough free space to build."""
+    PruneBuilder = _RunSsh(Target, f"docker builder prune --keep-storage {_BUILD_CACHE_KEEP} -f 2>&1 | tail -3", Timeout=180)
+    if PruneBuilder.returncode != 0:
+        return False, f"docker builder prune failed: {(PruneBuilder.stderr or PruneBuilder.stdout).strip()[:300]}"
+    BuilderTail = (PruneBuilder.stdout or '').strip().splitlines()[-1] if PruneBuilder.stdout else 'no output'
+
+    PruneImages = _RunSsh(Target, "docker image prune -f 2>&1 | tail -1", Timeout=60)
+    if PruneImages.returncode != 0:
+        return False, f"docker image prune failed: {(PruneImages.stderr or PruneImages.stdout).strip()[:300]}"
+    ImagesTail = (PruneImages.stdout or '').strip().splitlines()[-1] if PruneImages.stdout else 'no output'
+
+    Df = _RunSsh(Target, "df -B1 / | tail -1 | awk '{print $4}'", Timeout=15)
+    if Df.returncode != 0:
+        return False, f"df probe failed: {(Df.stderr or Df.stdout).strip()[:200]}"
+    try:
+        FreeBytes = int((Df.stdout or '0').strip())
+    except ValueError:
+        return False, f"df output not parseable: {(Df.stdout or '').strip()[:200]!r}"
+    FreeGb = FreeBytes / (1024 ** 3)
+    if FreeBytes < _MIN_FREE_BYTES_AFTER_PRUNE:
+        return False, (
+            f"free space {FreeGb:.2f} GB below required {_MIN_FREE_BYTES_AFTER_PRUNE / (1024**3):.0f} GB after prune. "
+            f"Non-docker artifacts filled the disk -- check `du -sh /var/lib/*` and `/tmp` on {Target}."
+        )
+    return True, f"builder-prune: {BuilderTail} | image-prune: {ImagesTail} | free={FreeGb:.2f} GB"
+
+
 def StepSyncSource(Target: str) -> bool:
     SyncSource = DeployDir / "SyncSource.py"
     if not SyncSource.exists():
@@ -533,7 +566,7 @@ def Main(Argv: Optional[list] = None) -> int:
               "Deploy refuses to stamp an unknown version.", file=sys.stderr)
         return 2
 
-    Total = 1 if Args.check else 10
+    Total = 1 if Args.check else 11
     print("Pre-flight:")
     Ok, Diag = StepPreflight(Friendly, Target)
     if not Ok:
@@ -550,67 +583,73 @@ def Main(Argv: Optional[list] = None) -> int:
         return 0
 
     print("\nDeploy:")
+    HygOk, HygDetail = StepDiskHygiene(Target)
+    if not HygOk:
+        _Status(2, Total, "disk hygiene", "FAILED", HygDetail)
+        return 2
+    _Status(2, Total, "disk hygiene", "OK", HygDetail)
+
     if Args.skip_sync:
-        _Status(2, Total, "sync source", "SKIPPED", "--skip-sync")
+        _Status(3, Total, "sync source", "SKIPPED", "--skip-sync")
     else:
         if not StepSyncSource(Target):
-            _Status(2, Total, "sync source", "FAILED")
+            _Status(3, Total, "sync source", "FAILED")
             return 2
-        _Status(2, Total, "sync source", "OK")
+        _Status(3, Total, "sync source", "OK")
 
     if Args.skip_build:
-        _Status(3, Total, "docker build", "SKIPPED", "--skip-build")
+        _Status(4, Total, "docker build", "SKIPPED", "--skip-build")
     else:
         if not StepDockerBuild(Target, Sha):
-            _Status(3, Total, "docker build", "FAILED")
+            _Status(4, Total, "docker build", "FAILED")
             return 2
-        _Status(3, Total, "docker build", "OK")
+        _Status(4, Total, "docker build", "OK")
 
     if not StepPushCompose(Target, Friendly):
-        _Status(4, Total, "push compose", "FAILED")
+        _Status(5, Total, "push compose", "FAILED")
         return 2
-    _Status(4, Total, "push compose", "OK",
+    _Status(5, Total, "push compose", "OK",
             f"compose-templates/{Friendly}.yml -> /opt/mediavortex/docker-compose.yml")
 
     if not StepComposeUp(Target):
-        _Status(5, Total, "docker compose up", "FAILED")
+        _Status(6, Total, "docker compose up", "FAILED")
         return 2
-    _Status(5, Total, "docker compose up", "OK")
+    _Status(6, Total, "docker compose up", "OK")
 
     # directive: worker-runtime-state
     NvOk, NvDetail = StepNvencProbe(Target, Friendly)
     if NvOk:
-        _Status(6, Total, "nvenc probe", "OK", NvDetail)
+        _Status(7, Total, "nvenc probe", "OK", NvDetail)
     else:
-        _Status(6, Total, "nvenc probe", "FAILED", NvDetail)
+        _Status(7, Total, "nvenc probe", "FAILED", NvDetail)
         return 2
 
     StaleOk, StaleDetail = StepStalePycProbe(Target, Friendly)
     if StaleOk:
-        _Status(7, Total, "stale-pyc probe", "OK", StaleDetail)
+        _Status(8, Total, "stale-pyc probe", "OK", StaleDetail)
     else:
-        _Status(7, Total, "stale-pyc probe", "FAILED", StaleDetail)
+        _Status(8, Total, "stale-pyc probe", "FAILED", StaleDetail)
         return 2
 
     CapOk, CapDetail = StepReconcileCapabilities(Target, Friendly)
     if CapOk:
-        _Status(8, Total, "capability reconcile", "OK", CapDetail)
+        _Status(9, Total, "capability reconcile", "OK", CapDetail)
     else:
-        _Status(8, Total, "capability reconcile", "FAILED", CapDetail)
+        _Status(9, Total, "capability reconcile", "FAILED", CapDetail)
         return 2
 
     if not StepCleanupBuild(Target):
-        _Status(9, Total, "cleanup build", "FAILED",
+        _Status(10, Total, "cleanup build", "FAILED",
                 "non-fatal; /tmp/mediavortex-build may persist")
     else:
-        _Status(9, Total, "cleanup build", "OK")
+        _Status(10, Total, "cleanup build", "OK")
 
     print("\nVerify:")
     Ok, Summary = StepVerifyWorkers(Friendly, Sha)
     if Ok:
-        _Status(10, Total, "workers online", "OK", Summary)
+        _Status(11, Total, "workers online", "OK", Summary)
         return 0
-    _Status(10, Total, "workers online", "FAILED", Summary)
+    _Status(11, Total, "workers online", "FAILED", Summary)
     return 3
 
 
