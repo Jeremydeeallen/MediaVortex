@@ -66,10 +66,15 @@ class CommandComposer:
             '-metadata', f'"mediavortex_ts={Ts}"',
         ]
 
-    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C25
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C25 -- baremetal ships to /opt/mediavortex/src, Docker/Windows use different roots; check all known locations.
     def _ReadCommitShaOnce(self) -> str:
         try:
-            for Candidate in (_PyPath('/opt/mediavortex/VERSION'), _PyPath(__file__).resolve().parents[4] / 'VERSION'):
+            Candidates = [
+                _PyPath('/opt/mediavortex/src/VERSION'),
+                _PyPath('/opt/mediavortex/VERSION'),
+                _PyPath(__file__).resolve().parents[4] / 'VERSION',
+            ]
+            for Candidate in Candidates:
                 if Candidate.exists():
                     Val = Candidate.read_text(encoding='utf-8').strip()
                     return Val[:8] if Val else 'unknown'
