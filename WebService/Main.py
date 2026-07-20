@@ -203,6 +203,8 @@ class WebServiceApp:
         """Auto-sync Jellyfin FFmpeg logs on startup in a background thread."""
         def sync_worker():
             try:
+                from Core.WorkerContext import WorkerContext
+                WorkerContext.Bind()
                 from ViewModels.OptimizationViewModel import OptimizationViewModel
                 vm = OptimizationViewModel()
                 service = vm._GetJellyfinService()
@@ -308,6 +310,15 @@ class WebServiceApp:
         """Pin a StorageRoots snapshot per request -- str(path)/CanonicalDisplay/GetPrefixMap reuse one DB read."""
         # directive: path-class-perfection | # see path.C25
         from Core.Path.PathStorageRoots import PrefixMapScope, _ScopeStorageRoots, _ScopePrefixMap, _LoadFresh
+        from Core.WorkerContext import WorkerContext
+
+        @self.App.before_request
+        def _BindWorkerContext():
+            # Flask spins request handlers on Werkzeug worker threads; WorkerContext.Current fails without a per-thread Bind. Fixes C14 in e2e-bug-fixes.
+            try:
+                WorkerContext.Bind()
+            except Exception as _Ex:
+                LoggingService.LogWarning(f"WorkerContext.Bind on request thread failed: {_Ex}", "WebService", "_BindWorkerContext")
 
         @self.App.before_request
         def _OpenPathScope():

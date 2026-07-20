@@ -60,7 +60,8 @@ class CommandComposer:
             Parts.extend(self.VideoSlot.Emit(Plan_.VideoOp, MediaFile, ProfileSettings, CodecParameters, ScaleFilter, MaxCpuThreads))
             Parts.extend(AudioEmission_.StreamArgs)
             SubtitleFormats = getattr(MediaFile, 'SubtitleFormats', None)
-            Parts.extend(self.SubtitleSlot.Emit('mp4' if Plan_.ContainerOp == 'Mp4' else Plan_.ContainerOp.lower(), SubtitleFormats))
+            SubtitleStreams = self._ProbeSubtitleStreams(Context, InputPath)
+            Parts.extend(self.SubtitleSlot.Emit('mp4' if Plan_.ContainerOp == 'Mp4' else Plan_.ContainerOp.lower(), SubtitleFormats, SubtitleStreams))
             Parts.extend(self.ContainerSlot.Emit(Plan_.ContainerOp))
             Parts.extend(['-metadata', '"comment=Transcoded by MediaVortex"'])
             Parts.append('-y')
@@ -110,6 +111,28 @@ class CommandComposer:
         Analysis = self.MediaProbeAdapter.RunAnalysis(InputPath)
         if Analysis and getattr(Analysis, 'AudioStreamIndex', None) is not None:
             Context['AudioStreamIndex'] = Analysis.AudioStreamIndex
+
+    # BUG-0083 slot: per-index text-only sub mapping needs (index, codec) list from ffprobe; ffmpeg map syntax has no codec_name selector.
+    def _ProbeSubtitleStreams(self, Context: Dict[str, Any], InputPath: str) -> Optional[list]:
+        if 'SubtitleStreams' in Context:
+            return Context['SubtitleStreams']
+        if self.MediaProbeAdapter is None:
+            return None
+        try:
+            Probe = self.MediaProbeAdapter.ProbeStreams(InputPath)
+            Streams = [
+                (int(S.get('index')), (S.get('codec_name') or '').lower())
+                for S in Probe.get('streams', [])
+                if S.get('codec_type') == 'subtitle' and S.get('index') is not None
+            ]
+            Context['SubtitleStreams'] = Streams
+            return Streams
+        except Exception as Ex:
+            LoggingService.LogWarning(
+                f"CommandComposer._ProbeSubtitleStreams failed for {InputPath}: {Ex}",
+                "CommandComposer", "_ProbeSubtitleStreams",
+            )
+            return None
 
     # directive: transcode-flow-canonical | # see transcode.ST5
     def _ResolveScaleFilter(self, Plan_: Plan, ProfileSettings: Dict[str, Any],

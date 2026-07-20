@@ -46,10 +46,22 @@ class TestSubtitleSlot:
         Args = SubtitleSlot().Emit('mp4', 'dvd_subtitle')
         assert Args == []
 
-    # directive: transcode-flow-canonical | # see transcode.ST5
-    def test_pgs_mixed_with_text_still_emits_optional_map_mov_text(self):
+    # directive: transcode-flow-canonical | # see transcode.ST5 -- BUG-0083 slot: mixed without indices drops all
+    def test_pgs_mixed_with_text_no_stream_probe_drops_all(self):
         Args = SubtitleSlot().Emit('mp4', 'hdmv_pgs_subtitle,subrip')
-        assert Args == ['-map', '0:s?', '-c:s', 'mov_text']
+        assert Args == []
+
+    # directive: transcode-flow-canonical | # see transcode.ST5 -- BUG-0083 slot: mixed with probe indices keeps text
+    def test_pgs_mixed_with_text_and_probe_indices_maps_text_only(self):
+        Streams = [(2, 'hdmv_pgs_subtitle'), (3, 'subrip'), (4, 'hdmv_pgs_subtitle'), (5, 'subrip')]
+        Args = SubtitleSlot().Emit('mp4', 'hdmv_pgs_subtitle,subrip', SubtitleStreams=Streams)
+        assert Args == ['-map', '0:3?', '-map', '0:5?', '-c:s', 'mov_text']
+
+    # directive: transcode-flow-canonical | # see transcode.ST5 -- BUG-0083 slot: mixed with probe but zero text streams drops all
+    def test_pgs_mixed_with_probe_but_no_text_indices_drops_all(self):
+        Streams = [(2, 'hdmv_pgs_subtitle'), (3, 'hdmv_pgs_subtitle')]
+        Args = SubtitleSlot().Emit('mp4', 'hdmv_pgs_subtitle', SubtitleStreams=Streams)
+        assert Args == []
 
     # directive: transcode-flow-canonical | # see transcode.ST5
     def test_mkv_target_emits_copy(self):
