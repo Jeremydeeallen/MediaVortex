@@ -1,4 +1,6 @@
 import os
+from datetime import datetime, timezone
+from pathlib import Path as _PyPath
 from typing import Any, Dict, Optional
 
 from Core.Logging.LoggingService import LoggingService
@@ -31,6 +33,49 @@ class CommandComposer:
         self.OutputFilenameBuilder = OutputFilenameBuilderInstance or OutputFilenameBuilder()
         self.MediaProbeAdapter = MediaProbeAdapterInstance
         self.PlanFactory = PlanFactoryInstance or PlanFactory()
+        self._CommitSha = self._ReadCommitShaOnce()
+
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C25 -- worker + profile + encoder + commit + ts baked into moov/udta at build time (Attempt.Id not yet known).
+    def _BuildProvenanceMetadata(self, MediaFile, Plan_, ProfileSettings: Dict[str, Any]) -> list:
+        try:
+            from Core.WorkerContext import WorkerContext
+            WorkerName = WorkerContext.TryCurrent()
+            WorkerName = WorkerName.WorkerName if WorkerName else 'unknown'
+        except Exception:
+            WorkerName = 'unknown'
+        Profile = getattr(MediaFile, 'AssignedProfile', None) or 'unknown'
+        if Plan_.VideoOp == 'Copy':
+            Encoder = 'copy'
+        else:
+            UseNv = ProfileSettings.get('UseNvidiaHardware', 0)
+            UseQsv = ProfileSettings.get('UseIntelHardware', 0)
+            Codec = ProfileSettings.get('Codec') or 'libsvtav1'
+            if UseNv == 1:
+                Encoder = 'av1_nvenc' if Codec == 'av1' else Codec
+            elif UseQsv == 1:
+                Encoder = 'av1_qsv' if Codec == 'av1' else Codec
+            else:
+                Encoder = Codec
+        Ts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        return [
+            '-metadata', '"comment=Transcoded by MediaVortex"',
+            '-metadata', f'"mediavortex_worker={WorkerName}"',
+            '-metadata', f'"mediavortex_profile={Profile}"',
+            '-metadata', f'"mediavortex_encoder={Encoder}"',
+            '-metadata', f'"mediavortex_commit={self._CommitSha}"',
+            '-metadata', f'"mediavortex_ts={Ts}"',
+        ]
+
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C25
+    def _ReadCommitShaOnce(self) -> str:
+        try:
+            for Candidate in (_PyPath('/opt/mediavortex/VERSION'), _PyPath(__file__).resolve().parents[4] / 'VERSION'):
+                if Candidate.exists():
+                    Val = Candidate.read_text(encoding='utf-8').strip()
+                    return Val[:8] if Val else 'unknown'
+        except Exception:
+            pass
+        return 'unknown'
 
     # directive: transcode-flow-canonical | # see transcode.ST5
     def Build(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[CommandSpec]:
@@ -63,7 +108,7 @@ class CommandComposer:
             SubtitleStreams = self._ProbeSubtitleStreams(Context, InputPath)
             Parts.extend(self.SubtitleSlot.Emit('mp4' if Plan_.ContainerOp == 'Mp4' else Plan_.ContainerOp.lower(), SubtitleFormats, SubtitleStreams))
             Parts.extend(self.ContainerSlot.Emit(Plan_.ContainerOp))
-            Parts.extend(['-metadata', '"comment=Transcoded by MediaVortex"'])
+            Parts.extend(self._BuildProvenanceMetadata(MediaFile, Plan_, ProfileSettings))
             Parts.append('-y')
             Parts.append(f'"{OutputPath}"')
             return CommandSpec(Command=' '.join(Parts), OutputPath=OutputPath)
