@@ -1,0 +1,24 @@
+{
+  "test_name": "CriminalMinds-QSV-PresetSweep-2026-07-20",
+  "output_scale": "852:480",
+  "comparison_scale": "852:480",
+  "vmaf_n_threads": 4,
+  "sources": [
+    {
+      "id": "cm_s01e01",
+      "label": "Criminal Minds S01E01 (480p h264, 1472kbps, 41.7min)",
+      "path": "/mnt/media_tv/Criminal Minds/Season 1/Criminal Minds - S01E01 - Extreme Aggressor WEBDL-480p-mv.mp4",
+      "fps": 23.976,
+      "source_height": 480,
+      "source_codec": "h264",
+      "source_video_bitrate_kbps": 1472
+    }
+  ],
+  "variants": [
+    {"name": "v1_p1_q34", "label": "preset 1, ICQ q=34 (CURRENT PRODUCTION)", "encoder": "av1_qsv", "rc_mode": "icq", "global_quality": 34, "preset": 1, "adaptive_i": 1, "adaptive_b": 1, "bf": 7},
+    {"name": "v2_p4_q34", "label": "preset 4, ICQ q=34 (slower, same q)", "encoder": "av1_qsv", "rc_mode": "icq", "global_quality": 34, "preset": 4, "adaptive_i": 1, "adaptive_b": 1, "bf": 7},
+    {"name": "v3_p4_q30", "label": "preset 4, ICQ q=30 (Tier 2 target)", "encoder": "av1_qsv", "rc_mode": "icq", "global_quality": 30, "preset": 4, "adaptive_i": 1, "adaptive_b": 1, "bf": 7},
+    {"name": "v4_p4_q32", "label": "preset 4, ICQ q=32 (Tier 1 target)", "encoder": "av1_qsv", "rc_mode": "icq", "global_quality": 32, "preset": 4, "adaptive_i": 1, "adaptive_b": 1, "bf": 7},
+    {"name": "v5_p7_q30", "label": "preset 7, ICQ q=30 (max slow)", "encoder": "av1_qsv", "rc_mode": "icq", "global_quality": 30, "preset": 7, "adaptive_i": 1, "adaptive_b": 1, "bf": 7}
+  ]
+}
