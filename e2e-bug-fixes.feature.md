@@ -66,6 +66,10 @@ C19. `memory/KNOWN-ISSUES.md` is swept: every entry marked RESOLVED in this dire
 
 C20. Post-fix soak: `SELECT LogLevel, FunctionName, LEFT(Message, 200), COUNT(*) FROM Logs WHERE Timestamp > <post-deploy-ts> AND LogLevel IN ('WARNING','ERROR','CRITICAL') GROUP BY 1,2,3 ORDER BY 4 DESC LIMIT 20` shows no C1-C17 pattern in the top 20. New patterns discovered during soak flow through C18.
 
+### Group K -- ProfileName label integrity (added 2026-07-20)
+
+C22. `TranscodeAttempts.ProfileName` reflects the real profile used (e.g. `AV1 Tier 2 Good`), NEVER the ProcessingMode fallback (`Transcode` / `Remux` / `AudioFix` / `SubtitleFix` / `Quick`). Root cause 2026-07-20: `ProcessTranscodeQueueService.CreateTranscodeAttempt` (line 973-995) synthesizes a `MockMediaFile` with `AssignedProfile=None` when the fetched MediaFile is None, then falls back to `ProfileName = JobMode`. `HandleJobFailure` (line 1204-1206) uses the same fallback via `Job.AssignedProfile` which is ALWAYS empty (the field exists on `TranscodeQueueModel` line 20 but the claim query never populates it). Result: 100% of the 4,477 successful attempts in the last 14 days were written as `ProfileName='Transcode'`, hiding real quality attribution. Fix (fail-loud, SSOT-clean): (a) delete the mock-MediaFile fallback in `CreateTranscodeAttempt`; (b) delete the JobMode fallback in both call sites; (c) add helper `_ResolveMediaFileOrRaise(Job)` that fetches by `MediaFileId` (primary-key lookup, not fragile `GetMediaFileByPath`) and raises when unresolvable; (d) add `_ResolveProfileNameOrRaise(MediaFile)` that raises if AssignedProfile is empty; (e) delete stale `TranscodeQueueModel.AssignedProfile` field (never populated by any claim query -- misleading, was the seed of the wrong-fallback pattern); (f) contract test asserts `TranscodeAttempts.ProfileName = MediaFiles.AssignedProfile` for every new row. Historical rows NOT backfilled (AssignedProfile may have changed since attempt; label snapshot is the correct semantic). Verification: after fix + fleet redeploy, `SELECT DISTINCT ProfileName FROM TranscodeAttempts WHERE AttemptDate > <post-deploy-ts>` returns only real profile names, never mode strings.
+
 ### Group J -- diagnostic capture (added 2026-07-18 after rc=222 blind investigation)
 
 C21. On any non-zero FFmpeg returncode, the tail of FFmpeg stderr (last 4 KB) writes to `TranscodeAttempts.ErrorMessage` AND to a `LoggingService.LogError` with `ClassName='VideoTranscodingService'` / `'QualityTestingBusinessService'` and the full attempt Id. Baseline: 38 non-zero returncodes/48h with zero stderr captured in `Logs` -- every failure a black box (root cause of rc=222 cluster unknown without pulling live ffmpeg re-runs). Fix: `Features/TranscodeJob/VideoTranscodingService.py:~164-172` and `Features/QualityTesting/QualityTestingBusinessService.py:~966-974` -- restructure the `Process.communicate()` block so `ErrorOutput` tail is captured into a variable that is (a) returned to the caller for persistence on the attempt row and (b) logged at ERROR when `returncode != 0`. Complements C13 (which stops logging FFmpeg output on returncode==0). Verification: force one rc=222 attempt post-fix; `SELECT ErrorMessage FROM TranscodeAttempts WHERE Id = <n>` returns the encoder's actual error text.
@@ -222,7 +226,7 @@ _Populated as bugs are triaged and fixes land._
 
 ## Status
 
-**Phase:** NEEDS_STANDARDS_REVIEW
+**Phase:** IMPLEMENTING
 **Owner:** claude-opus-4-7
 **Opened:** 2026-07-17
 **Stack position:** top (interrupts audio-vertical-dialog-boost-enforcement)

@@ -17,7 +17,6 @@ class TranscodeQueueModel:
     SizeMB: float = 0.0
     Priority: int = 0
     Status: str = "Pending"
-    AssignedProfile: str = ""
     ProcessingMode: str = "Transcode"
     ClaimedBy: Optional[str] = None
     MediaFileId: Optional[int] = None

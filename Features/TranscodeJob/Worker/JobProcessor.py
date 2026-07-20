@@ -112,8 +112,7 @@ class JobProcessor:
             TemporaryFilePathId = self.QueueService.PrivateCreateTemporaryFilePathRecord(
                 TranscodeAttemptId, SrcId, SrcRel, OutId, OutRel)
 
-            # directive: transcode-flow-canonical | # see transcode.ST5
-            ProfileName = Strategy.DefaultProfileName(Job)
+            # directive: e2e-bug-fixes | # see e2e-bug-fixes.C22 -- ProfileName written at INSERT; do not overwrite with Strategy fallback.
             self.QueueService.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                 'FilePath': Job.FilePath,
                 'AttemptDate': datetime.now(timezone.utc),
@@ -121,7 +120,6 @@ class JobProcessor:
                 'NewSizeBytes': 0,
                 'Success': None,
                 'FfpmpegCommand': CommandResult.Command,
-                'ProfileName': ProfileName,
                 'VMAF': None,
             })
 

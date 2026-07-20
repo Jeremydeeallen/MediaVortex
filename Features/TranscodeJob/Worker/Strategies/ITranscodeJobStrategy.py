@@ -28,7 +28,3 @@ class ITranscodeJobStrategy(ABC):
         # see worker-loop.C3
         raise NotImplementedError
 
-    # directive: transcode-flow-canonical | # see transcode.ST5
-    def DefaultProfileName(self, Job) -> str:
-        """Strategy's ProfileName default for TranscodeAttempts.ProfileName write; encode strategies override to return Job.AssignedProfile."""
-        raise NotImplementedError

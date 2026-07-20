@@ -25,7 +25,3 @@ class AudioFixJobStrategy(ITranscodeJobStrategy):
         # see worker-loop.C3
         Qs = QueueService or self.QueueService
         Qs.HandleRemuxResult(Job, Result, TranscodeAttemptId, ActiveJobId, OutputPath)
-
-    # directive: transcode-flow-canonical | # see transcode.ST5
-    def DefaultProfileName(self, Job) -> str:
-        return 'AudioFix'

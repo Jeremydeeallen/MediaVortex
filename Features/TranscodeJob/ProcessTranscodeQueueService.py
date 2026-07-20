@@ -719,6 +719,23 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception getting media file data", e, "ProcessTranscodeQueueService", "GetMediaFileData")
             return None
 
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C22
+    def _ResolveMediaFileOrRaise(self, Job: TranscodeQueueModel, Caller: str) -> MediaFileModel:
+        MediaFileId = getattr(Job, 'MediaFileId', None)
+        if not MediaFileId:
+            raise ValueError(f"{Caller}: Job {getattr(Job, 'Id', None)} missing MediaFileId; cannot resolve profile.")
+        Mf = self.DatabaseManager.GetMediaFileById(MediaFileId)
+        if Mf is None:
+            raise ValueError(f"{Caller}: MediaFileId {MediaFileId} not found in DB for Job {getattr(Job, 'Id', None)}.")
+        return Mf
+
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C22
+    def _ResolveProfileNameOrRaise(self, MediaFile: MediaFileModel, Caller: str) -> str:
+        Name = getattr(MediaFile, 'AssignedProfile', None)
+        if not Name:
+            raise ValueError(f"{Caller}: MediaFile {getattr(MediaFile, 'Id', None)} has no AssignedProfile; refuse to label attempt with ProcessingMode fallback.")
+        return Name
+
     # directive: nvenc-rate-anchored-remediation
     def DispatchDisposition(self, TranscodeAttemptId: int, Job: TranscodeQueueModel,
                             OutputFilePath: str) -> None:
@@ -970,29 +987,20 @@ class ProcessTranscodeQueueService:
         try:
             if TranscodingSettings is None:
                 TranscodingSettings = {}
-            if MediaFile is None and getattr(Job, 'MediaFileId', None):
-                MediaFile = self.GetMediaFileData(Job)
             if MediaFile is None:
-                MediaFile = type('MockMediaFile', (), {'AssignedProfile': None})()
+                MediaFile = self._ResolveMediaFileOrRaise(Job, "CreateTranscodeAttempt")
 
             ProfileSettings = TranscodingSettings.get('ProfileSettings', {})
             CodecFlags = TranscodingSettings.get('CodecFlags', {})
 
-            ProfileName = MediaFile.AssignedProfile if hasattr(MediaFile, 'AssignedProfile') else None
-            QualityTestRequiredForProfile = True
-            if ProfileName:
-                # allow: R12 SQL preexisting; relocate to ProfilesRepository in follow-up
-                ProfileRow = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                    "SELECT qualitytestrequired FROM profiles WHERE profilename = %s LIMIT 1",
-                    (ProfileName,),
-                )
-                if ProfileRow:
-                    QualityTestRequiredForProfile = bool(ProfileRow[0].get('QualityTestRequired'))
-
-            # directive: transcode-flow-canonical -- universal JobMode fallback retires __UNRESOLVED__ sentinel
-            JobMode = (getattr(Job, 'ProcessingMode', None) or 'Transcode').strip()
-            if not ProfileName:
-                ProfileName = JobMode
+            # directive: e2e-bug-fixes | # see e2e-bug-fixes.C22
+            ProfileName = self._ResolveProfileNameOrRaise(MediaFile, "CreateTranscodeAttempt")
+            # allow: R12 SQL preexisting; relocate to ProfilesRepository in follow-up
+            ProfileRow = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT qualitytestrequired FROM profiles WHERE profilename = %s LIMIT 1",
+                (ProfileName,),
+            )
+            QualityTestRequiredForProfile = bool(ProfileRow[0].get('QualityTestRequired')) if ProfileRow else True
 
             Attempt = TranscodeAttemptModel(
                 StorageRootId=Job.StorageRootId,
@@ -1201,9 +1209,9 @@ class ProcessTranscodeQueueService:
                 # Update TranscodeFiles record for overall file status (failure)
                 self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, False, MediaFileId=Job.MediaFileId)
             else:
-                # directive: transcode-flow-canonical -- universal JobMode fallback retires __UNRESOLVED__ sentinel
-                JobMode = (getattr(Job, 'ProcessingMode', None) or 'Transcode').strip()
-                ResolvedProfileName = getattr(Job, 'AssignedProfile', None) or JobMode
+                # directive: e2e-bug-fixes | # see e2e-bug-fixes.C22
+                MediaFile = self._ResolveMediaFileOrRaise(Job, "HandleJobFailure")
+                ResolvedProfileName = self._ResolveProfileNameOrRaise(MediaFile, "HandleJobFailure")
 
                 Attempt = TranscodeAttemptModel(
                     StorageRootId=Job.StorageRootId,
