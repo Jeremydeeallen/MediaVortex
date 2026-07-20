@@ -179,8 +179,8 @@ def StepPreflight(Friendly: str, Target: str) -> tuple[bool, dict]:
     return True, Out
 
 
-# see worker-deploy-linux.ST1.5 -- deploy owns disk hygiene per worker-deploy.C4a
-_MIN_FREE_BYTES_AFTER_PRUNE = 5 * 1024 * 1024 * 1024  # 5 GB build workspace floor
+# see worker-deploy-linux.ST1.5
+_MIN_FREE_BYTES_AFTER_PRUNE = 15 * 1024 * 1024 * 1024
 _BUILD_CACHE_KEEP = "3g"
 
 

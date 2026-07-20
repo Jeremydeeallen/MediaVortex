@@ -61,9 +61,9 @@ Prunes docker resources the deploy created on prior runs, then verifies enough f
 | Prune dangling images | `ssh ... 'docker image prune -f'` | Removes tagless image layers from superseded builds; keeps running `mediavortex-worker:latest`. |
 | Verify free space | `ssh ... 'df -B1 / \| tail -1 \| awk "{print \$4}"'` | Post-prune free bytes on root filesystem. |
 
-Passes if free space >= 5 GB (5,368,709,120 bytes) after prune. Fails loud with the offending byte count. Failure means non-deploy artifacts filled the disk -- operator investigates; the deploy is not the leak.
+Passes if free space >= 15 GB (16,106,127,360 bytes) after prune. Fails loud with the offending byte count. Failure means non-deploy artifacts filled the disk -- operator investigates; the deploy is not the leak.
 
-**Why 5 GB:** worker image build peaks at ~8 GB (torch + FFmpeg static + Python + source). BuildKit reuses staged layers within the run, so pre-existing 3 GB cache + 5 GB free = 8 GB build workspace.
+**Why 15 GB:** worker image fresh-build peaks at ~15 GB (torch 2.6 + nvidia-cuda-* wheel install + torchaudio + demucs + system libs). The previous running image (~8 GB) is retained during build because it stays tagged `mediavortex-worker:latest` until BuildKit tags the new one atomically at build success. Peak concurrent disk = old image + build workspace. Rootfs sizing on each host must accommodate this: larry LXC 218 = 40 GB (was 20 GB, 20 GB blew out mid-`pip install` 2026-07-20). Bare-metal hosts (wakko, dot) have >200 GB rootfs -- not a concern.
 
 ## Build and Deploy (`ST2`)
 
