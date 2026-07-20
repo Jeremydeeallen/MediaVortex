@@ -396,13 +396,18 @@ class CrashRecoveryService:
             from Core.Path.Worker import Worker as _WorkerCR
             _PmCR = _GPMCR()
             _CtxCR = _WorkerCR.Current(Db=self.DatabaseManager.DatabaseService)
+            # Only surface actual orphans: encode terminal AND no VMAF pending. Two conditions live in the WHERE clause where the data lives; the loop iterates real orphans only.
             Query = (
                 "SELECT tfp.Id AS tfp_id, tfp.TranscodeAttemptId AS ta_id, "
                 "tfp.SourceStorageRootId AS src_sid, tfp.SourceRelativePath AS src_rel, "
                 "tfp.OutputStorageRootId AS out_sid, tfp.OutputRelativePath AS out_rel "
                 "FROM TemporaryFilePaths tfp "
                 "JOIN TranscodeAttempts ta ON ta.Id = tfp.TranscodeAttemptId "
-                "WHERE ta.WorkerName = %s"
+                "LEFT JOIN QualityTestingQueue qtq "
+                "  ON qtq.TranscodeAttemptId = ta.Id AND qtq.DateCompleted IS NULL "
+                "WHERE ta.WorkerName = %s "
+                "  AND ta.Success IS NOT NULL "
+                "  AND qtq.Id IS NULL"
             )
             Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(Query, (self.WorkerName,))
             if not Rows:
@@ -413,11 +418,6 @@ class CrashRecoveryService:
 
             for Row in Rows:
                 TaId = Row.get('ta_id')
-                # If encode is currently in-flight, the .inprogress belongs to it. Skip -- do not touch, do not finalize, do not delete. Rule: if the process is running, deletion of its output must be impossible.
-                if self.DatabaseManager.DatabaseService.ExecuteScalar(
-                    "SELECT 1 FROM TranscodeAttempts WHERE Id = %s AND Success IS NULL LIMIT 1", (TaId,)
-                ):
-                    continue
                 SrcSid = Row.get('src_sid')
                 SrcRel = Row.get('src_rel')
                 OutSid = Row.get('out_sid')
@@ -467,12 +467,8 @@ class CrashRecoveryService:
                             FinalizeEx, "CrashRecoveryService", "_RecoverInProgressArtifacts"
                         )
 
-                # directive: path-perfect-implementation -- skip .inprogress delete if there is an active QualityTestingQueue row (VMAF-pending, not orphaned)
-                ActiveQtq = self.DatabaseManager.DatabaseService.ExecuteScalar(
-                    "SELECT 1 FROM QualityTestingQueue WHERE TranscodeAttemptId = %s AND DateCompleted IS NULL LIMIT 1",
-                    (TaId,),
-                )
-                if InProgressExists and not ActiveQtq:
+                # Row selection already guarantees terminal-attempt + no-pending-QT. Delete unconditionally when file exists.
+                if InProgressExists:
                     try:
                         os.remove(InProgressPath)
                         InProgressDeleted += 1
