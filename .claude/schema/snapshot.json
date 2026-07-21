@@ -1603,11 +1603,6 @@
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
-    "loudnessmeasurementfailurereason": {
-      "data_type": "character varying",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
     "lumavariance": {
       "data_type": "double precision",
       "is_generated": "NEVER",
@@ -5526,6 +5521,11 @@
       "data_type": "text",
       "is_generated": "NEVER",
       "is_nullable": "YES"
+    },
+    "hwacceldecodeenabled": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
     },
     "id": {
       "data_type": "bigint",
