@@ -35,6 +35,8 @@ class TranscodeAttemptModel:
     PreferredAttempt: bool = False
     WorkerName: Optional[str] = None
     MediaFileId: Optional[int] = None
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C29 -- SSOT for the ProcessingMode this attempt was created for. Consumers (PFR, PostFlightRegistry) read directly; do not infer from ProfileName.
+    ProcessingMode: Optional[str] = None
 
     # directive: path-schema-migration | # see path.S8
     def __post_init__(self):

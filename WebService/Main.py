@@ -193,7 +193,6 @@ class WebServiceApp:
         # Start status polling for service control
         self.PrivateStartStatusPolling()
         self.PrivateStartAudioVerticalHealth()
-        self.PrivateStartFileReplacementSelfHeal()
         self.PrivateStartAudioRemeasurementRunner()
         
         # Update service status to Running immediately after startup
@@ -576,32 +575,6 @@ class WebServiceApp:
             print("Status polling started")
         except Exception as e:
             LoggingService.LogException("Failed to start status polling", e, "WebService", "PrivateStartStatusPolling")
-
-    # directive: filereplacement-drain-bug | # see filereplacement.C11
-    def PrivateStartFileReplacementSelfHeal(self):
-        try:
-            self.FileReplacementSelfHealThread = threading.Thread(
-                target=self.PrivateFileReplacementSelfHealLoop,
-                daemon=True,
-                name="FileReplacementSelfHeal",
-            )
-            self.FileReplacementSelfHealThread.start()
-            print("FileReplacementSelfHealService started")
-        except Exception as Ex:
-            LoggingService.LogException("Failed to start FileReplacementSelfHealService", Ex, "WebService", "PrivateStartFileReplacementSelfHeal")
-
-    # directive: filereplacement-drain-bug | # see filereplacement.C11
-    def PrivateFileReplacementSelfHealLoop(self):
-        from Features.FileReplacement.FileReplacementSelfHealService import FileReplacementSelfHealService
-        Svc = FileReplacementSelfHealService()
-        Interval = 120
-        while True:
-            try:
-                Svc.Run()
-            except Exception as Ex:
-                LoggingService.LogException("FileReplacementSelfHealService cycle raised", Ex,
-                                            "WebService", "PrivateFileReplacementSelfHealLoop")
-            time.sleep(Interval)
 
     # directive: transcode-flow-canonical -- drain AdmissionDeferReason='invalid_loudness_measurement' backlog by calling AudioRemeasurementService.Process; runs on WebService which owns worker mounts + ffmpeg
     def PrivateStartAudioRemeasurementRunner(self):

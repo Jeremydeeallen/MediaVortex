@@ -201,9 +201,14 @@ class FileReplacementBusinessService:
                     'ErrorMessage': f'Transcoded file not found at: {LocalTranscodedPath}',
                 }
 
-            # directive: transcode-flow-canonical | # see transcode.ST9
+            # directive: e2e-bug-fixes | # see e2e-bug-fixes.C29 -- ProcessingMode is now an SSOT column on TranscodeAttempts; do NOT infer from ProfileName. C22 forced ProfileName to be the real profile name; the inference broke silently and orphaned every -mv.mp4.inprogress this session.
             from Features.TranscodeJob import ProcessingModeMetadata
-            AttemptMode = (transcode_attempt.ProfileName or 'Transcode')
+            AttemptMode = transcode_attempt.ProcessingMode
+            if not AttemptMode:
+                raise ValueError(
+                    f"TranscodeAttempts.ProcessingMode is NULL for attempt {TranscodeAttemptId}. "
+                    "Historical rows from before the ProcessingMode column existed cannot be replayed."
+                )
             ModeMeta = ProcessingModeMetadata.GetOrDefault(AttemptMode)
             isRemux = not ModeMeta['RequiresProfileGates']
             EffectiveOldBytes = transcode_attempt.OldSizeBytes

@@ -750,7 +750,13 @@ class ProcessTranscodeQueueService:
                     self.DatabaseManager,
                     FFprobePath=self.FFprobePath,
                 )
-                ReplacementService.ProcessFileReplacement(TranscodeAttemptId)
+                # directive: e2e-bug-fixes | # see e2e-bug-fixes.C29 -- fail-loud on PFR failure; silently ignoring the Success=False return orphaned every -mv.mp4.inprogress this session.
+                PfrResult = ReplacementService.ProcessFileReplacement(TranscodeAttemptId)
+                if not (PfrResult or {}).get('Success', False):
+                    raise RuntimeError(
+                        f"ProcessFileReplacement returned failure for TranscodeAttempt {TranscodeAttemptId}: "
+                        f"{(PfrResult or {}).get('ErrorMessage', 'unknown error')}"
+                    )
 
             elif Disposition == 'Pending':
                 from Services.QualityTestQueueService import QualityTestQueueService
@@ -1024,6 +1030,7 @@ class ProcessTranscodeQueueService:
                 StartTime=TranscodingSettings.get('StartTime') if TranscodingSettings else None,
                 WorkerName=self.WorkerName,
                 MediaFileId=getattr(Job, 'MediaFileId', None),
+                ProcessingMode=(getattr(Job, 'ProcessingMode', None) or 'Transcode'),
             )
 
             return self.DatabaseManager.SaveTranscodeAttempt(Attempt)

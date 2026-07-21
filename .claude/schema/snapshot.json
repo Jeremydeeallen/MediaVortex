@@ -4663,6 +4663,11 @@
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
+    "processingmode": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
     "profilename": {
       "data_type": "text",
       "is_generated": "NEVER",

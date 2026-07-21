@@ -41,7 +41,9 @@ class TranscodeJobRepository(BaseRepository):
             ReplacementType=row.get('ReplacementType'),
             StartTime=row.get('StartTime'),
             PreferredAttempt=bool(row.get('PreferredAttempt', False)),
-            WorkerName=row.get('WorkerName')
+            WorkerName=row.get('WorkerName'),
+            MediaFileId=row.get('MediaFileId'),
+            ProcessingMode=row.get('ProcessingMode'),
         )
 
     def _MapRowToTranscodeFile(self, row) -> TranscodeFileModel:
@@ -89,7 +91,7 @@ class TranscodeJobRepository(BaseRepository):
         "SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds, "
         "FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF, "
         "FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt, "
-        "WorkerName"
+        "WorkerName, MediaFileId, ProcessingMode"
     )
 
     # directive: path-schema-migration | # see path.S8
@@ -219,8 +221,8 @@ class TranscodeJobRepository(BaseRepository):
                         " SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds, "
                         " FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF, "
                         " FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt, "
-                        " WorkerName, MediaFileId) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                        " WorkerName, MediaFileId, ProcessingMode) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                         "RETURNING Id"
                     )
                     parameters = (
@@ -233,7 +235,7 @@ class TranscodeJobRepository(BaseRepository):
                         Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, ProfileNameForInsert, Attempt.VMAF,
                         Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType, Attempt.StartTime,
                         Attempt.PreferredAttempt,
-                        Attempt.WorkerName, MediaFileId
+                        Attempt.WorkerName, MediaFileId, Attempt.ProcessingMode,
                     )
                     LoggingService.LogInfo(f"Insert attempt parameters: {parameters}", "TranscodeJobRepository", "SaveTranscodeAttempt")
                     # directive: transcode-flow-canonical -- ta_one_inflight_per_mfid enforces one Success-NULL row per MediaFileId; UniqueViolation = race lost, release queue row
