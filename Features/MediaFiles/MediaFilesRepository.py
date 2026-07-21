@@ -24,7 +24,7 @@ _FULL_SELECT_COLS = (
     "AudioComplete, AudioCorruptSuspect, AudioCorruptReason, "
     "SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, "
     "SourceIntegratedThresholdLufs, AdmissionDeferReason, "
-    "LoudnessMeasurementFailureReason, AudioNormalizationMode"
+    "AudioNormalizationMode"
 )
 
 
@@ -94,7 +94,6 @@ class MediaFilesRepository(BaseRepository):
             SourceTruePeakDbtp=(row.get('SourceTruePeakDbtp') or row.get('sourcetruepeakdbtp')),
             SourceIntegratedThresholdLufs=(row.get('SourceIntegratedThresholdLufs') or row.get('sourceintegratedthresholdlufs')),
             AdmissionDeferReason=(row.get('AdmissionDeferReason') or row.get('admissiondeferreason')),
-            LoudnessMeasurementFailureReason=(row.get('LoudnessMeasurementFailureReason') or row.get('loudnessmeasurementfailurereason')),
             AudioNormalizationMode=(row.get('AudioNormalizationMode') or row.get('audionormalizationmode')),
         )
 

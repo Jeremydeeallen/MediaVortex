@@ -17,7 +17,6 @@ class _FakeMf:
     AudioComplete: Optional[bool] = True
     AudioCorruptSuspect: Optional[bool] = False
     HasExplicitEnglishAudio: Optional[bool] = True
-    LoudnessMeasurementFailureReason: Optional[str] = None
     Resolution: Optional[str] = '1280x720'
     AssignedProfile: Optional[str] = 'Test'
     AudioChannels: Optional[int] = 2

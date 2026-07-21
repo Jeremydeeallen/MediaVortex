@@ -48,7 +48,7 @@ class ComplianceGate:
                        HasExplicitEnglishAudio, AudioLanguages,
                        SourceIntegratedLufs, SourceLoudnessRangeLU,
                        SourceTruePeakDbtp, SourceIntegratedThresholdLufs,
-                       LoudnessMeasuredAt, LoudnessMeasurementFailureReason,
+                       LoudnessMeasuredAt,
                        AudioComplete, AudioCorruptSuspect
                 FROM MediaFiles WHERE Id = %s
                 """,
@@ -103,7 +103,6 @@ class ComplianceGate:
                 'SourceTruePeakDbtp': Src.get('SourceTruePeakDbtp'),
                 'SourceIntegratedThresholdLufs': Src.get('SourceIntegratedThresholdLufs'),
                 'LoudnessMeasuredAt': Src.get('LoudnessMeasuredAt'),
-                'LoudnessMeasurementFailureReason': Src.get('LoudnessMeasurementFailureReason'),
             }
 
             try:

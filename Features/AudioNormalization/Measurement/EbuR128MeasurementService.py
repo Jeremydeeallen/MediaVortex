@@ -25,7 +25,6 @@ PERSIST_WITH_FINGERPRINT_SQL = (
     "SourceLoudnessRangeLU = %s, "
     "SourceTruePeakDbtp = %s, "
     "SourceIntegratedThresholdLufs = %s, "
-    "LoudnessMeasurementFailureReason = %s, "
     "LoudnessMeasuredAt = NOW(), "
     "LastProbedFileSize = %s, "
     "LastProbedFileMtime = %s "
@@ -39,7 +38,6 @@ PERSIST_MEASUREMENT_ONLY_SQL = (
     "SourceLoudnessRangeLU = %s, "
     "SourceTruePeakDbtp = %s, "
     "SourceIntegratedThresholdLufs = %s, "
-    "LoudnessMeasurementFailureReason = %s, "
     "LoudnessMeasuredAt = NOW() "
     "WHERE Id = %s"
 )
@@ -148,24 +146,23 @@ class EbuR128MeasurementService:
             return None, 'parse_failed'
         return Parsed, None
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C13
-    def PersistLoudness(self, MediaFileId, Loudness, FileSize=None, FileMtime=None, FailureReason=None):
-        """Write the four loudness columns + failure reason + change-detection fingerprint."""
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C28 -- FailureReason column deleted; MeasureAndPersist still returns it for the caller to log, but nothing persists it (was legacy off-contract cruft that raced with worker encodes).
+    def PersistLoudness(self, MediaFileId, Loudness, FileSize=None, FileMtime=None):
+        """Write the four loudness columns + change-detection fingerprint."""
         try:
             I = Loudness.IntegratedLufs if Loudness else None
             L = Loudness.LoudnessRangeLU if Loudness else None
             P = Loudness.TruePeakDbtp if Loudness else None
             T = Loudness.IntegratedThresholdLufs if Loudness else None
-            FR = None if Loudness else FailureReason
             if FileSize is not None and FileMtime is not None:
                 DatabaseService().ExecuteNonQuery(
                     PERSIST_WITH_FINGERPRINT_SQL,
-                    (I, L, P, T, FR, FileSize, FileMtime, MediaFileId),
+                    (I, L, P, T, FileSize, FileMtime, MediaFileId),
                 )
             else:
                 DatabaseService().ExecuteNonQuery(
                     PERSIST_MEASUREMENT_ONLY_SQL,
-                    (I, L, P, T, FR, MediaFileId),
+                    (I, L, P, T, MediaFileId),
                 )
             return True
         except Exception as Ex:
@@ -203,7 +200,5 @@ class EbuR128MeasurementService:
         FileMtime = datetime.fromtimestamp(Stat.st_mtime)
 
         Loudness, Reason = self.MeasureLoudness(LocalFilePath, AudioStreamIndex)
-        Ok = self.PersistLoudness(
-            MediaFileId, Loudness, FileSize, FileMtime, FailureReason=Reason
-        )
+        Ok = self.PersistLoudness(MediaFileId, Loudness, FileSize, FileMtime)
         return Ok, Reason

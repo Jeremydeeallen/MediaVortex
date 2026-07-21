@@ -55,7 +55,6 @@ class MediaFileModel:
     SourceTruePeakDbtp: Optional[float] = None
     SourceIntegratedThresholdLufs: Optional[float] = None
     AdmissionDeferReason: Optional[str] = None
-    LoudnessMeasurementFailureReason: Optional[str] = None
     AudioNormalizationMode: Optional[str] = None
     FFprobeFailureCount: Optional[int] = 0
     LastFFprobeError: Optional[str] = None

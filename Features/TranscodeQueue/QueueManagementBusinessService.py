@@ -1537,7 +1537,6 @@ class QueueManagementBusinessService:
             SourceLoudnessRangeLU=Row.get('SourceLoudnessRangeLU'),
             SourceTruePeakDbtp=Row.get('SourceTruePeakDbtp'),
             SourceIntegratedThresholdLufs=Row.get('SourceIntegratedThresholdLufs'),
-            LoudnessMeasurementFailureReason=Row.get('LoudnessMeasurementFailureReason'),
             # directive: mv-trust-savings-and-clamp -- AC3 wiring.
             TranscodedByMediaVortex=bool(Row.get('TranscodedByMediaVortex')) if Row.get('TranscodedByMediaVortex') is not None else None,
         )
@@ -1825,7 +1824,7 @@ class QueueManagementBusinessService:
                 "AudioComplete, AudioCorruptSuspect, AudioBitrateKbps, AudioChannels, "
                 "SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, "
                 "SourceIntegratedThresholdLufs, LoudnessMeasuredAt, "
-                "LoudnessMeasurementFailureReason, TranscodedByMediaVortex, "
+                "TranscodedByMediaVortex, "
                 "WorkBucket "
                 "FROM MediaFiles WHERE Id IN (" + placeholders + ")",
                 tuple(MediaFileIds)
