@@ -55,8 +55,11 @@ class VideoVertical:
         ResExceeds = R.get('ResolutionExceedsProfileTarget') if 'ResolutionExceedsProfileTarget' in R else R.get('resolutionexceedsprofiletarget')
         return Allowed, (float(Threshold) if Threshold is not None else 0.0), bool(ResExceeds)
 
-    # directive: transcode-worker-unification
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C31 -- MV outputs are compliance-exempt on the video side; original source is gone (deleted at first successful replacement), re-transcoding compressed AV1 produces generation-loss. Audio/Container verticals still run so audio-only or container-only issues route through AudioFix/Remux.
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
+        if bool(getattr(Mf, 'TranscodedByMediaVortex', False)):
+            return (True, 'mediavortex_output_accepted')
+
         AllowedCodecs, BppThreshold, ResExceeds = self._LoadRules()
 
         Profile = self._Resolver.Resolve(Mf)
