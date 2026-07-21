@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from Core.Database.BaseRepository import BaseRepository
 
 
-CAPABILITY_COLUMNS = ('TranscodeEnabled', 'QualityTestEnabled', 'ScanEnabled', 'RemuxEnabled', 'NvencCapable')
+CAPABILITY_COLUMNS = ('TranscodeEnabled', 'QualityTestEnabled', 'ScanEnabled', 'RemuxEnabled', 'NvencCapable', 'HwAccelDecodeEnabled')
 
 
 # directive: worker-routing | # see worker-routing.C15

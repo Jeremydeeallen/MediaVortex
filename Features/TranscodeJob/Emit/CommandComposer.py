@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalDirname, LocalSamePath
 from Features.TranscodeJob.Emit.CommandSpec import CommandSpec
+from Features.TranscodeJob.Emit.HwAccelResolver import HwAccelResolver
 from Features.TranscodeJob.Emit.MediaProbeAdapter import MediaProbeAdapter
 from Features.TranscodeJob.Emit.OutputFilenameBuilder import OutputFilenameBuilder
 from Features.TranscodeJob.Emit.Plan import Plan, PlanFactory
@@ -24,7 +25,7 @@ class CommandComposer:
     def __init__(self, VideoSlotInstance=None, AudioSlotInstance=None, SubtitleSlotInstance=None,
                  ContainerSlotInstance=None, ResolutionCalculatorInstance=None,
                  OutputFilenameBuilderInstance=None, MediaProbeAdapterInstance=None,
-                 PlanFactoryInstance=None):
+                 PlanFactoryInstance=None, HwAccelResolverInstance=None):
         self.VideoSlot = VideoSlotInstance or VideoSlot(VideoFilterBuilder=VideoFilterBuilder())
         self.AudioSlot = AudioSlotInstance or AudioSlot()
         self.SubtitleSlot = SubtitleSlotInstance or SubtitleSlot()
@@ -33,6 +34,7 @@ class CommandComposer:
         self.OutputFilenameBuilder = OutputFilenameBuilderInstance or OutputFilenameBuilder()
         self.MediaProbeAdapter = MediaProbeAdapterInstance
         self.PlanFactory = PlanFactoryInstance or PlanFactory()
+        self.HwAccelResolver = HwAccelResolverInstance or HwAccelResolver()
         self._CommitSha = self._ReadCommitShaOnce()
 
     # directive: e2e-bug-fixes | # see e2e-bug-fixes.C25 -- worker + profile + encoder + commit + ts baked into moov/udta at build time (Attempt.Id not yet known).
@@ -99,11 +101,24 @@ class CommandComposer:
                 return None
             self._EnrichAudioStreamIndex(Context, InputPath)
             ScaleFilter = self._ResolveScaleFilter(Plan_, ProfileSettings, Context, MediaFile)
+            # directive: e2e-bug-fixes | # see e2e-bug-fixes.C27 -- per-worker hwaccel decode; swaps scale filter to backend-native variant.
+            HwAccel = None
+            if Plan_.VideoOp == 'Reencode':
+                from Core.WorkerContext import WorkerContext
+                try:
+                    Wc = WorkerContext.TryCurrent()
+                    WorkerName = Wc.WorkerName if Wc else None
+                except Exception:
+                    WorkerName = None
+                HwAccel = self.HwAccelResolver.Resolve(WorkerName, ProfileSettings, MediaFile, bool(ScaleFilter))
+                ScaleFilter = self.HwAccelResolver.AdaptScaleFilter(ScaleFilter, HwAccel)
             AudioEmission_ = self.AudioSlot.Emit(Plan_.AudioOp, MediaFile, Context)
             Parts = [FFmpegPath]
             StartTime = Context.get('StartTime')
             if StartTime and StartTime.strip():
                 Parts.extend(['-ss', StartTime.strip()])
+            if HwAccel:
+                Parts.extend(HwAccel.InputArgs)
             Parts.extend(['-i', f'"{InputPath}"'])
             Parts.extend(AudioEmission_.InputArgs)
             MaxCpuThreads = Context.get('MaxCpuThreads')

@@ -82,6 +82,7 @@ function RenderTile(W, StaleSec, DivergenceSec) {
       ${CapToggle('RemuxEnabled', 'Remux', W.RemuxEnabled)}
       ${CapToggle('QualityTestEnabled', 'Quality', W.QualityTestEnabled)}
       ${CapToggle('ScanEnabled', 'Scan', W.ScanEnabled)}
+      ${CapToggle('HwAccelDecodeEnabled', 'HwAccel', W.HwAccelDecodeEnabled)}
       ${NvencBadge}
     </div>`;
   const Ver = (W.Version || 'unknown').toString().substring(0, 8);

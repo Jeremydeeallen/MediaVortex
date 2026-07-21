@@ -83,6 +83,40 @@ C25. Every MediaVortex-emitted `-mv.mp4` carries provenance metadata in its `moo
   - `mediavortex_ts` = UTC ISO 8601 timestamp at command-build time
 No Attempt.Id because command builds BEFORE the attempt row is created (chicken/egg). Operator can join by (worker, ts) if needed. Verifiable: post-fix, `ffprobe -show_format -v error <any-new-mv.mp4> | grep mediavortex_` returns all 5 keys.
 
+### Group O -- Hardware-accelerated decode (added 2026-07-21)
+
+C27. `CommandComposer.Build` emits `-hwaccel` + `-hwaccel_output_format` pre-input args (and swaps the scale filter to the hwaccel-native variant) whenever the claiming worker's `Workers.HwAccelDecodeEnabled = TRUE` AND the source codec is in the backend's allow-list AND the encoder can accept hardware surfaces end-to-end. Root cause 2026-07-21: `VideoSlot._EmitQsvArgs` + `_EmitNvencArgs` only add OUTPUT-side encoder args (`-c:v av1_qsv` / `av1_nvenc`); no `-hwaccel qsv` / `-hwaccel cuda` before `-i`. Every frame CPU-decodes -> RAM -> PCIe upload -> GPU encode -> PCIe download -> file. Two roundtrips per frame; CPU decode is the throughput bottleneck. Live measurement 2026-07-21 (The Resident S01E11 hevc 1080p, 60s sample):
+
+| Config | Encoder | fps | speed | Gain |
+|---|---|---|---|---|
+| Baseline (no hwaccel, no scale) | av1_qsv wakko | 251 | 10.4x | -- |
+| +hwaccel qsv (decode-only) | av1_qsv wakko | 317 | 13.2x | +27% |
+| Baseline + CPU scale 1080p->720p | av1_qsv wakko | 367 | 15.3x | -- |
+| +hwaccel qsv + scale_qsv (zero-copy) | av1_qsv wakko | **657** | **27.4x** | **+79%** |
+| Baseline (no hwaccel, no scale) | av1_nvenc dot | 386 | 16.1x | -- |
+| +hwaccel cuda +output_format cuda | av1_nvenc dot | **503** | **21.0x** | **+30%** |
+| Baseline + CPU scale 1080p->720p | av1_nvenc dot | 671 | 28.0x | -- |
+| +hwaccel cuda + scale_cuda | av1_nvenc dot | 264 | 11.0x | **-61% regression** |
+
+**v1 rules (KISS -- no orchestration branching; decisions live in one resolver):**
+- QSV + codec supported: always emit `-hwaccel qsv -hwaccel_output_format qsv`; when scale filter present, swap `scale=` for `scale_qsv=`. Full zero-copy always.
+- NVENC + codec supported + NO scale filter needed: emit `-hwaccel cuda -hwaccel_output_format cuda`. Same-res encode benefits.
+- NVENC + codec supported + scale needed: NO hwaccel emitted (baseline CPU-decode + CPU-scale already 671 fps; `scale_cuda` on this ffmpeg build regresses to 264 fps).
+- Codec not in backend allow-list (`h264, hevc, av1, vp9, mpeg2video, vc1`): NO hwaccel emitted (CPU fallback).
+- `Workers.HwAccelDecodeEnabled = FALSE`: NO hwaccel emitted (operator kill switch, per-host, GUI-toggleable via Admin/Workers page).
+
+**Files touched:**
+- `Scripts/SQLScripts/AddWorkersHwAccelDecodeEnabled_2026_07_21.py` -- migration (default FALSE; operator opts each host in via GUI)
+- `Features/TranscodeJob/Emit/HwAccelResolver.py` -- new; `HwAccelConfig` dataclass + `HwAccelResolver.Resolve(WorkerRow, ProfileSettings, MediaFile, RequiresScale) -> Optional[HwAccelConfig]`
+- `Features/TranscodeJob/Emit/CommandComposer.py` -- reads worker row fresh from `WorkerContext.Current().WorkerName`; passes `HwAccelConfig` to slot emission; swaps scale filter suffix when backend requires it
+- `Features/TranscodeJob/Emit/Slots/VideoSlot.py` -- new `EmitInputArgs(HwAccel)` seam returns pre-input args (`[]` when None); `Emit(...)` (output-side) unchanged
+- `Features/Activity/Services/DashboardSnapshotService.py` -- SELECT includes `hwacceldecodeenabled` for the Admin/Workers page
+- `Templates/AdminWorkers.html` -- checkbox column mirroring `TranscodeEnabled` pattern
+- `Features/Workers/WorkersController.py` -- PATCH endpoint accepts `HwAccelDecodeEnabled`
+- `Tests/Contract/TestHwAccelResolver.py` -- allow-list + toggle + scale-filter swap invariants
+
+Verification: (a) After migration + deploy + `UPDATE Workers SET HwAccelDecodeEnabled=TRUE WHERE WorkerName='wakko-worker-1'`, next wakko transcode's `TranscodeAttempts.FfPmpegCommand` includes `-hwaccel qsv -hwaccel_output_format qsv` and `-vf scale_qsv=...` (when scaling). (b) Live encode fps observed on `/Activity` is >=2x prior sample on same file class. (c) `SELECT count(*) FROM TranscodeAttempts WHERE FfPmpegCommand LIKE '%hwaccel qsv%' AND AttemptDate > <post-deploy-ts>` returns non-zero. (d) VMAF gate unaffected (same encoder settings, different feed path).
+
 ### Group N -- Dialog Boost as Track 0 (added 2026-07-21)
 
 C26. Every 2-track MediaVortex-emitted `-mv.mp4` places Dialog Boost at output audio Track 0 and Original at output audio Track 1. `default=1` disposition stays on the Boost track; Original carries `default=0`. Root motivation 2026-07-21: MP4/MKV `default` flag is advisory. Many TV apps (older Samsung / LG, PS5, several Chromecast profiles, some Jellyfin TV clients) pick output-index-0 blindly regardless of `default` disposition. Result today: ~half of playback surfaces get Original instead of Boost even though the DB says Boost was default. Fix: swap emit order in `AudioFilterEmitter.EmitTracks:132-141` -- when `EmitDialogBoost and IsDefaultLanguage` is true for a stream, emit `_BuildDialogBoostBlock` first (OutputIndex 0) then `_BuildOriginalBlock` (OutputIndex 1, IsDefault=False). Non-boost path unchanged (Original at Track 0 with `default=IsDefaultLanguage`). Both signals (track index + default flag) then align. Historical `-mv.mp4` files keep old order; not backfilled (advisory-flag-aware clients still play Boost via default). Verification: post-fix, `ffprobe -show_streams -select_streams a <any-new-2-track-mv.mp4>` shows stream 0 with title=`Dialog Boost`, stream 1 with title=`Original`, and stream 0 `DISPOSITION:default=1`.
