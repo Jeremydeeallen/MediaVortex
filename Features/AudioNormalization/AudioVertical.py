@@ -45,7 +45,8 @@ class AudioVertical:
             return (None, 'audio_corrupt_suspect')
         if not getattr(Mf, 'AudioCodec', None) and getattr(Mf, 'Resolution', None):
             return (None, 'no_audio_stream')
-        if getattr(Mf, 'LoudnessMeasurementFailureReason', None):
+        # directive: e2e-bug-fixes | # see e2e-bug-fixes.C28 -- FR + valid measurement = stale race artifact (AudioRemeasurementRunner writing FR while an encode reads the same source over SMB). Only defer when we actually lack measurements.
+        if getattr(Mf, 'LoudnessMeasurementFailureReason', None) and getattr(Mf, 'SourceIntegratedLufs', None) is None:
             return (None, 'loudness_measurement_failed')
 
         Rules = self._LoadRules()
