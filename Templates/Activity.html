@@ -30,7 +30,7 @@
       <div id="ActiveJobsWrapper" class="d-none">
         <table class="activity-tbl">
           <thead><tr>
-            <th>File</th><th>Size</th><th>Worker</th><th>Job Type</th><th>Phase</th>
+            <th>File</th><th>Size</th><th>Worker</th><th>Job Type</th><th>Profile</th><th>Phase</th>
             <th class="text-end">Speed</th><th class="text-end">Progress</th><th class="text-end">ETA</th>
             <th>Target</th><th>Codec</th><th class="text-end">Savings</th>
           </tr></thead>
@@ -133,6 +133,7 @@ function RenderActiveJobs(Jobs) {
       '<td>' + FormatSizeMB(J.SizeMB) + '</td>' +
       '<td>' + EscapeHtml(J.WorkerName || J.ClaimedBy || '?') + '</td>' +
       '<td>' + EscapeHtml(J.ProcessingMode || J.WorkBucket || '?') + '</td>' +
+      '<td>' + EscapeHtml(J.ProfileName || '-') + '</td>' +
       '<td class="' + PhaseClass + '">' + EscapeHtml(Phase || '-') + '</td>' +
       '<td class="text-end">' + FormatSpeed(Speed) + '</td>' +
       '<td class="text-end">' + FormatProgress(Progress) + '</td>' +
