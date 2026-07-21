@@ -13,11 +13,12 @@ class VideoSlot:
 
     # directive: transcode-flow-canonical | # see transcode.ST5
     def Emit(self, Op: str, MediaFile, ProfileSettings: Dict[str, Any],
-             CodecParameters: List[str], ScaleFilter: Optional[str], MaxCpuThreads: Optional[int]) -> List[str]:
+             CodecParameters: List[str], ScaleFilter: Optional[str], MaxCpuThreads: Optional[int],
+             HwAccelActive: bool = False) -> List[str]:
         if Op == 'Copy':
             return self._EmitStreamCopy(MediaFile)
         if Op == 'Reencode':
-            return self._EmitReencode(MediaFile, ProfileSettings, CodecParameters, ScaleFilter, MaxCpuThreads)
+            return self._EmitReencode(MediaFile, ProfileSettings, CodecParameters, ScaleFilter, MaxCpuThreads, HwAccelActive)
         raise ValueError(f"VideoSlot.Emit: unknown Op={Op!r}")
 
     # directive: transcode-flow-canonical | # see transcode.ST5
@@ -30,7 +31,8 @@ class VideoSlot:
 
     # directive: transcode-flow-canonical | # see transcode.ST5
     def _EmitReencode(self, MediaFile, ProfileSettings: Dict[str, Any], CodecParameters: List[str],
-                      ScaleFilter: Optional[str], MaxCpuThreads: Optional[int]) -> List[str]:
+                      ScaleFilter: Optional[str], MaxCpuThreads: Optional[int],
+                      HwAccelActive: bool = False) -> List[str]:
         Parts: List[str] = ['-map', '0:v:0']
         UseNvidiaHardware = ProfileSettings.get('UseNvidiaHardware', 0)
         Codec = ProfileSettings.get('Codec')
@@ -46,9 +48,11 @@ class VideoSlot:
             if VideoFilter:
                 Parts.extend(['-vf', f'"{VideoFilter}"'])
         self._AppendFilmGrain(Parts, CodecParameters, ProfileSettings, VideoCodec)
-        PixFmt = ProfileSettings.get('PixelFormat')
-        if PixFmt:
-            Parts.extend(['-pix_fmt', str(PixFmt)])
+        # directive: e2e-bug-fixes | # see e2e-bug-fixes.C27 -- when hwaccel_output_format qsv/cuda delivers hardware surfaces, output -pix_fmt would demand CPU frames and rc=218/4294967256 the encode. Encoder derives pixfmt from surface.
+        if not HwAccelActive:
+            PixFmt = ProfileSettings.get('PixelFormat')
+            if PixFmt:
+                Parts.extend(['-pix_fmt', str(PixFmt)])
         return Parts
 
     # directive: transcode-flow-canonical | # see transcode.ST5

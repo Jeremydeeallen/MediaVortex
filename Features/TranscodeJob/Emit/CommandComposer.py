@@ -122,7 +122,7 @@ class CommandComposer:
             Parts.extend(['-i', f'"{InputPath}"'])
             Parts.extend(AudioEmission_.InputArgs)
             MaxCpuThreads = Context.get('MaxCpuThreads')
-            Parts.extend(self.VideoSlot.Emit(Plan_.VideoOp, MediaFile, ProfileSettings, CodecParameters, ScaleFilter, MaxCpuThreads))
+            Parts.extend(self.VideoSlot.Emit(Plan_.VideoOp, MediaFile, ProfileSettings, CodecParameters, ScaleFilter, MaxCpuThreads, HwAccelActive=bool(HwAccel)))
             Parts.extend(AudioEmission_.StreamArgs)
             SubtitleFormats = getattr(MediaFile, 'SubtitleFormats', None)
             SubtitleStreams = self._ProbeSubtitleStreams(Context, InputPath)

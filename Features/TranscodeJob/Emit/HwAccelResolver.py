@@ -52,10 +52,11 @@ class HwAccelResolver:
             )
         return None
 
-    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C27
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C27 -- scale_qsv/scale_cuda accept h=-1 (keep aspect) but reject h=-2 (scale filter's even-round shorthand). Swap prefix + coerce -2 to -1.
     def AdaptScaleFilter(self, ScaleFilter: Optional[str], HwAccel: Optional[HwAccelConfig]) -> Optional[str]:
         if not ScaleFilter or not HwAccel or not HwAccel.ScaleFilterName:
             return ScaleFilter
         if ScaleFilter.startswith('scale='):
-            return HwAccel.ScaleFilterName + '=' + ScaleFilter[len('scale='):]
+            Rest = ScaleFilter[len('scale='):].replace('h=-2', 'h=-1')
+            return HwAccel.ScaleFilterName + '=' + Rest
         return ScaleFilter
