@@ -133,12 +133,14 @@ class AudioFilterEmitter:
             StreamIdx = Stream.get('index', 0)
             Language = StreamLanguageMap.get(StreamIdx, 'und')
             IsDefaultLanguage = (Language == DefaultLanguage)
-            OriginalIsDefault = (IsDefaultLanguage and not (EmitDialogBoost and IsDefaultLanguage))
-            Blocks.append(self._BuildOriginalBlock(MediaFile, Stream, Language, StreamIdx, OutputIndex, OriginalIsDefault, R))
-            OutputIndex += 1
+            # directive: e2e-bug-fixes | # see e2e-bug-fixes.C26 -- Boost at Track 0 so index-blind TVs get it; default flag on Track 0 stays consistent.
             if EmitDialogBoost and IsDefaultLanguage:
                 Blocks.append(self._BuildDialogBoostBlock(Language, OutputIndex, DemucsPremixPath, R, PremixMeasuredI, PremixMeasuredLra, PremixMeasuredTp, PremixMeasuredThresh))
                 OutputIndex += 1
+                Blocks.append(self._BuildOriginalBlock(MediaFile, Stream, Language, StreamIdx, OutputIndex, False, R))
+            else:
+                Blocks.append(self._BuildOriginalBlock(MediaFile, Stream, Language, StreamIdx, OutputIndex, IsDefaultLanguage, R))
+            OutputIndex += 1
         return Blocks
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C8
