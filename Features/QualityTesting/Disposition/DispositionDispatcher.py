@@ -30,8 +30,8 @@ class DispositionDispatcher:
         from Features.QualityTesting.Disposition.RetainInprogressPolicy import RetainInprogressPolicy as _DefaultPolicy
         self.RetainPolicy = RetainInprogressPolicy or _DefaultPolicy()
 
-    # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8
-    def Dispatch(self, TranscodeAttemptId: int) -> DispositionResult:
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C30 -- EncodeSucceeded is a caller fact (ffmpeg returncode), not a DB read; Success stays NULL through the pipeline until HandleTranscodingResult flips it after full pipeline success.
+    def Dispatch(self, TranscodeAttemptId: int, EncodeSucceeded: Optional[bool] = None) -> DispositionResult:
         """Decide + commit disposition for an attempt; idempotent on non-Pending; returns legacy DispositionResult."""
         try:
             Row = self._ReadAttemptRow(TranscodeAttemptId)
@@ -53,7 +53,7 @@ class DispositionDispatcher:
 
             GateConfig = self.GateConfigRepository.Get()
             VmafCapableWorkerOnline = self._QueryVmafCapableWorkerOnline()
-            Attempt = self._BuildDeciderInput(Row, VmafCapableWorkerOnline)
+            Attempt = self._BuildDeciderInput(Row, VmafCapableWorkerOnline, EncodeSucceeded)
             GateInput = self._BuildGateInput(GateConfig)
 
             Outcome = self.Decider.Decide(Attempt, GateInput)
@@ -142,10 +142,11 @@ class DispositionDispatcher:
             )
             return False
 
-    # directive: transcode-flow-canonical | # see transcode.ST7 -- C14 BucketKey wire-up
-    def _BuildDeciderInput(self, Row: dict, VmafCapableWorkerOnline: bool) -> dict:
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C30 -- EncodeSucceeded arrives from caller; fall back to Row.get('Success') only for legacy re-dispatch paths (VMAF landing, operator skip) that don't carry an explicit encode-success signal.
+    def _BuildDeciderInput(self, Row: dict, VmafCapableWorkerOnline: bool, EncodeSucceeded: Optional[bool] = None) -> dict:
+        SuccessInput = EncodeSucceeded if EncodeSucceeded is not None else bool(Row.get('Success'))
         return {
-            'Success': bool(Row.get('Success')),
+            'Success': SuccessInput,
             'OldSize': Row.get('OldSizeBytes') or 0,
             'NewSize': Row.get('NewSizeBytes') or 0,
             'QualityTestRequired': bool(Row.get('QualityTestRequired')),

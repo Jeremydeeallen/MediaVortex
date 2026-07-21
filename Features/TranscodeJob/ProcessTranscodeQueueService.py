@@ -736,48 +736,29 @@ class ProcessTranscodeQueueService:
             raise ValueError(f"{Caller}: MediaFile {getattr(MediaFile, 'Id', None)} has no AssignedProfile; refuse to label attempt with ProcessingMode fallback.")
         return Name
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C30 -- exceptions propagate; caller (HandleTranscodingResult) writes Success=False + ErrorMessage in its outer catch. No internal swallow.
     def DispatchDisposition(self, TranscodeAttemptId: int, Job: TranscodeQueueModel,
-                            OutputFilePath: str) -> None:
-        """Replace -> FileReplacementBusinessService; Pending -> QualityTestQueue; other terminals audited by dispatcher (Requeue reschedules via BUG-0079 wiring)."""
-        try:
-            Result = self.DispositionDispatcher.Dispatch(TranscodeAttemptId)
-            Disposition = Result.Disposition
+                            OutputFilePath: str, EncodeSucceeded: bool = True) -> None:
+        """Replace -> FileReplacementBusinessService; Pending -> QualityTestQueue; other terminals audited by dispatcher. Raises on any pipeline failure so HandleTranscodingResult flips Success=False."""
+        Result = self.DispositionDispatcher.Dispatch(TranscodeAttemptId, EncodeSucceeded=EncodeSucceeded)
+        Disposition = Result.Disposition
 
-            if Disposition == 'Replace':
-                from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
-                ReplacementService = FileReplacementBusinessService(
-                    self.DatabaseManager,
-                    FFprobePath=self.FFprobePath,
-                )
-                # directive: e2e-bug-fixes | # see e2e-bug-fixes.C29 -- fail-loud on PFR failure; silently ignoring the Success=False return orphaned every -mv.mp4.inprogress this session.
-                PfrResult = ReplacementService.ProcessFileReplacement(TranscodeAttemptId)
-                if not (PfrResult or {}).get('Success', False):
-                    raise RuntimeError(
-                        f"ProcessFileReplacement returned failure for TranscodeAttempt {TranscodeAttemptId}: "
-                        f"{(PfrResult or {}).get('ErrorMessage', 'unknown error')}"
-                    )
-
-            elif Disposition == 'Pending':
-                from Services.QualityTestQueueService import QualityTestQueueService
-                QualityTestQueueService(self.DatabaseManager).AddToQualityTestQueue(TranscodeAttemptId)
-
-            else:
-                pass
-        except Exception as Ex:
-            # directive: filereplacement-drain-bug | # see filereplacement.C11
-            LoggingService.LogException(
-                f"DispatchDisposition failed for TranscodeAttempt {TranscodeAttemptId}",
-                Ex, "ProcessTranscodeQueueService", "DispatchDisposition",
+        if Disposition == 'Replace':
+            from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
+            ReplacementService = FileReplacementBusinessService(
+                self.DatabaseManager,
+                FFprobePath=self.FFprobePath,
             )
-            try:
-                from Core.Database.DatabaseService import DatabaseService as _DbForErr
-                _DbForErr().ExecuteNonQuery(
-                    "UPDATE TranscodeAttempts SET ErrorMessage = %s WHERE Id = %s",
-                    (f"DispatchDisposition failed: {str(Ex)[:400]}", TranscodeAttemptId),
+            PfrResult = ReplacementService.ProcessFileReplacement(TranscodeAttemptId)
+            if not (PfrResult or {}).get('Success', False):
+                raise RuntimeError(
+                    f"ProcessFileReplacement returned failure for TranscodeAttempt {TranscodeAttemptId}: "
+                    f"{(PfrResult or {}).get('ErrorMessage', 'unknown error')}"
                 )
-            except Exception:
-                pass
+
+        elif Disposition == 'Pending':
+            from Services.QualityTestQueueService import QualityTestQueueService
+            QualityTestQueueService(self.DatabaseManager).AddToQualityTestQueue(TranscodeAttemptId)
 
     # directive: nvenc-rate-anchored-remediation
     def _MarkMediaFileSourceMissing(self, MediaFileId: int, ErrorMessage: str) -> None:
@@ -1158,28 +1139,24 @@ class ProcessTranscodeQueueService:
                     LoggingService.LogWarning(f"Invalid file size data - NewSizeBytes: {NewSizeBytes}, OldSizeBytes: {OldSizeBytes}",
                                             "ProcessTranscodeQueueService", "HandleTranscodingResult")
 
-                # Update attempt record with success details
+                # directive: e2e-bug-fixes | # see e2e-bug-fixes.C30 -- Success stays NULL through the pipeline; flipped TRUE only after DispatchDisposition completes end-to-end so ta_one_inflight_per_mfid keeps the claim held for the whole encode-through-replacement span.
                 self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
-                    'Success': True,
                     'CompletedDate': datetime.now(timezone.utc),
                     'TranscodeDurationSeconds': TranscodeResult.get('Duration', 0.0),
                     'NewSizeBytes': NewSizeBytes,
                     'SizeReductionBytes': SizeReductionBytes,
                     'SizeReductionPercent': SizeReductionPercent,
-                    'QualityTestRequired': True  # Disposition function decides at post-flight
+                    'QualityTestRequired': True
                 })
 
-                # Update TranscodeFiles record for overall file status
                 self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes, MediaFileId=Job.MediaFileId)
 
-                # LocalOutputPath was already set during command building (single source of truth)
+                self.DispatchDisposition(TranscodeAttemptId, Job, OutputFilePath, EncodeSucceeded=True)
 
-                self.DispatchDisposition(TranscodeAttemptId, Job, OutputFilePath)
+                self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {'Success': True})
 
-                # Delete job from queue (successful completion)
                 self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
 
-                # Clean up progress data for completed job
                 self.DatabaseManager.DeleteTranscodeProgress(TranscodeAttemptId)
 
                 # Complete active job if it exists
@@ -1199,7 +1176,9 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, TranscodeResult.get('ErrorMessage', 'Unknown error'), TranscodeAttemptId, ActiveJobId)
 
         except Exception as e:
+            # directive: e2e-bug-fixes | # see e2e-bug-fixes.C30 -- any exception in the post-encode pipeline (DispatchDisposition, PFR, rename, MediaFiles update) flips Success=FALSE + writes ErrorMessage; no ghost row with Success=NULL or Success=TRUE + FileReplaced=FALSE possible.
             LoggingService.LogException("Exception handling transcoding result", e, "ProcessTranscodeQueueService", "HandleTranscodingResult")
+            self.HandleJobFailure(Job, f"Post-encode pipeline failed: {str(e)[:400]}", TranscodeAttemptId, ActiveJobId)
 
     # directive: nvenc-rate-anchored-remediation
     def HandleJobFailure(self, Job: TranscodeQueueModel, ErrorMessage: str, TranscodeAttemptId: int = None, ActiveJobId: int = None):

@@ -22,6 +22,19 @@ class TestFileReplacementDrain(unittest.TestCase):
         Stuck = int(Rows[0]['stuck'])
         self.assertEqual(Stuck, 0, f"FileReplacement drain invariant violated: {Stuck} attempts have Disposition=Replace AND FileReplaced=False for >15min")
 
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C30
+    def test_success_true_requires_filereplaced_true_for_replace_disposition(self):
+        Db = DatabaseService()
+        Rows = Db.ExecuteQuery(
+            "SELECT COUNT(*) AS ghost FROM TranscodeAttempts "
+            "WHERE Success = TRUE "
+            "AND Disposition = 'Replace' "
+            "AND FileReplaced = FALSE "
+            "AND AttemptDate < NOW() - INTERVAL '15 minutes'"
+        )
+        Ghost = int(Rows[0]['ghost'])
+        self.assertEqual(Ghost, 0, f"Success semantic violated: {Ghost} attempts have Success=TRUE AND Disposition=Replace AND FileReplaced=FALSE. Under C30 semantic, Success=TRUE requires end-to-end pipeline completion.")
+
     # directive: e2e-bug-fixes | # see e2e-bug-fixes.C29
     def test_dispatchdisposition_fails_loud_on_pfr_failure(self):
         Source = (_REPO / 'Features' / 'TranscodeJob' / 'ProcessTranscodeQueueService.py').read_text(encoding='utf-8')
