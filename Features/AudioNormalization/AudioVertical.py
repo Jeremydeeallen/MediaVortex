@@ -2,6 +2,7 @@ from typing import List, Optional, Tuple
 
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
+from Features.MediaFile.Domain.MediaFileScope import IsAudioOnlyContainer
 from Repositories.DatabaseManager import DatabaseManager
 from Features.AudioNormalization.AudioPolicyAdmissionGate import AudioPolicyAdmissionGate
 
@@ -33,8 +34,10 @@ class AudioVertical:
             'AllowedCodecs': AllowedCodecs,
         }
 
-    # directive: transcode-flow-canonical -- audio loudness compliance is language-agnostic; the und / non-English files still need loudness normalization + Dialog Boost per operator policy
+    # directive: transcode-flow-canonical -- C34 audio-only containers are out of pipeline scope
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
+        if IsAudioOnlyContainer(Mf):
+            return (None, 'non_video_scope')
         if getattr(Mf, 'AudioCorruptSuspect', None) is True:
             return (None, 'audio_corrupt_suspect')
         if not getattr(Mf, 'AudioCodec', None) and getattr(Mf, 'Resolution', None):

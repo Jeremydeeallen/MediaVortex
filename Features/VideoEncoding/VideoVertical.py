@@ -2,6 +2,7 @@ from typing import List, Optional, Tuple
 
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
+from Features.MediaFile.Domain.MediaFileScope import IsAudioOnlyContainer
 from Repositories.DatabaseManager import DatabaseManager
 
 
@@ -45,8 +46,10 @@ class VideoVertical:
         Threshold = R.get('BppTranscodeThreshold') if 'BppTranscodeThreshold' in R else R.get('bpptranscodethreshold')
         return Allowed, (float(Threshold) if Threshold is not None else 0.0)
 
-    # directive: transcode-flow-canonical -- C33 profile-independent baseline; MV outputs pass through per C31
+    # directive: transcode-flow-canonical -- C34 audio-only containers precede every other rule
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
+        if IsAudioOnlyContainer(Mf):
+            return (None, 'non_video_scope')
         if bool(getattr(Mf, 'TranscodedByMediaVortex', False)):
             return (True, 'mediavortex_output_accepted')
 

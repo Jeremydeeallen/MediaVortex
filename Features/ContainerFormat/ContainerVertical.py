@@ -2,6 +2,7 @@ from typing import List, Optional, Tuple
 
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
+from Features.MediaFile.Domain.MediaFileScope import IsAudioOnlyContainer
 from Repositories.DatabaseManager import DatabaseManager
 
 
@@ -32,8 +33,10 @@ class ContainerVertical:
         Csv = (Rows[0].get('AcceptableContainersCsv') or Rows[0].get('acceptablecontainerscsv') or '').strip()
         return [C.strip().lower() for C in Csv.split(',') if C.strip()]
 
-    # directive: transcode-flow-canonical -- C33 profile-independent baseline
+    # directive: transcode-flow-canonical -- C34 audio-only containers short-circuit before rules load
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
+        if IsAudioOnlyContainer(Mf):
+            return (None, 'non_video_scope')
         AllowedContainers = self._LoadRules()
         if not AllowedContainers:
             raise RuntimeError('ContainerComplianceRules.AcceptableContainersCsv is empty')

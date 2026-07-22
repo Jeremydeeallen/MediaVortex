@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalDirname, LocalSamePath
+from Features.MediaFile.Domain.MediaFileScope import IsAudioOnlyContainer
 from Features.TranscodeJob.Emit.CommandSpec import CommandSpec
 from Features.TranscodeJob.Emit.HwAccelResolver import HwAccelResolver
 from Features.TranscodeJob.Emit.MediaProbeAdapter import MediaProbeAdapter
@@ -16,6 +17,11 @@ from Features.TranscodeJob.Emit.Slots.ContainerSlot import ContainerSlot
 from Features.TranscodeJob.Emit.Slots.SubtitleSlot import SubtitleSlot
 from Features.TranscodeJob.Emit.Slots.VideoSlot import VideoSlot
 from Features.TranscodeJob.Emit.VideoFilterBuilder import VideoFilterBuilder
+
+
+# directive: transcode-flow-canonical -- C34
+class NonVideoSourceError(ValueError):
+    pass
 
 
 # directive: transcode-flow-canonical | # see transcode.ST5
@@ -86,6 +92,15 @@ class CommandComposer:
 
     # directive: transcode-flow-canonical | # see transcode.ST5
     def Build(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[CommandSpec]:
+        if IsAudioOnlyContainer(MediaFile):
+            raise NonVideoSourceError(
+                f"CommandComposer.Build refuses audio-only container "
+                f"(MediaFileId={getattr(MediaFile, 'Id', None)}, "
+                f"ContainerFormat={getattr(MediaFile, 'ContainerFormat', None)!r}, "
+                f"JobId={getattr(Job, 'Id', None)}). "
+                f"WorkBucket classifier should route audio-only files to 'Unclassified' -- "
+                f"reaching CommandComposer means the classifier gate was bypassed."
+            )
         try:
             Plan_ = self.PlanFactory.FromProcessingMode(getattr(Job, 'ProcessingMode', None))
             ProfileSettings = Context.get('ProfileSettings', {}) or {}
