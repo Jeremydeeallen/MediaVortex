@@ -52,7 +52,6 @@ already-paused tables.
 ## Status
 
 Seeded scanners at ship time:
-- `AudioVerticalHealth` (Enabled=FALSE; H1 audio vertical self-healing)
 - `ContinuousScan` (Enabled=TRUE; FileScanning periodic file discovery)
 
 ### Files

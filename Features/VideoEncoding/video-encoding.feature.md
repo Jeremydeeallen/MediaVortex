@@ -59,9 +59,8 @@ C6. **MediaVortex outputs are compliance-exempt on the video side.** When `Media
 ### What is EXPLICITLY NOT a contract
 
 - The wrap of `TranscodeOperation` (dies at directive 7; will be inlined)
-- The wrap of `EffectiveProfileResolver` (moves to Profiles vertical in a follow-up directive)
 - `_PIXEL_COUNTS` map + `_ASSUMED_FPS=24` (future: probe real fps when available)
-- The format of `VideoCompliantReason` strings (today: `<RuleName>:<Actual>`, `efficient_bpp_override`, `no_effective_profile`; future tunable)
+- The format of `VideoCompliantReason` strings (today: `<RuleName>:<Actual>`, `efficient_bpp_override`; future tunable)
 
 ## Known Gap to Target
 

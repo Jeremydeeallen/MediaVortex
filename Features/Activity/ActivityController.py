@@ -127,7 +127,6 @@ def LibraryCompliance():
             'Loudness': Repo.GetLoudnessBreakdown(),
             'AudioNormalization': Repo.GetAudioNormalizationBreakdown(),
             'AudioConsistencyBands': Repo.GetAudioConsistencyBands(),
-            'AudioVerticalHealth': Repo.GetAudioVerticalHealth(),
         })
     except Exception as Ex:
         LoggingService.LogException(

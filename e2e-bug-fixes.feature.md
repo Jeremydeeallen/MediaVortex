@@ -264,7 +264,7 @@ Two files, same pattern. If return code is 0 and non-empty Output, the caller al
 
 **File:** `WebService/Main.py:sync_worker` inside `_start_jellyfin_sync` (~line 205-222)
 **Root cause:** Thread spawned at 220 doesn't call `WorkerContext.Bind()`. Downstream `RefreshJellyfinData()` -> ... -> `WorkerContext.Current()` at some deep call site raises.
-**Fix:** At top of `sync_worker` body, before any other call: `WorkerContext.Bind(WorkerContextForWebService())` or the equivalent WebService pseudo-worker binding pattern. Look at other WebService threads (e.g. `AudioVerticalHealthService`, `FileReplacementSelfHealService` per web.out log) for the canonical bind call.
+**Fix:** At top of `sync_worker` body, before any other call: `WorkerContext.Bind(WorkerContextForWebService())` or the equivalent WebService pseudo-worker binding pattern. Look at other WebService background threads (`AudioRemeasurementRunner`, `ServiceStatusTracker`) for the canonical bind call.
 **Ripple:** None -- adds one line at thread entry.
 
 **Domain question resolved:** WebService already has a pseudo-worker binding pattern for background threads; reuse it here.

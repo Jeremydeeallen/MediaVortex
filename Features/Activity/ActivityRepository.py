@@ -216,52 +216,6 @@ class ActivityRepository(BaseRepository):
         )
         return dict(Rows[0]) if Rows else {}
 
-    # directive: audio-vertical-live-evidence | # see audio-normalization.H4
-    def GetAudioVerticalHealth(self) -> Dict:
-        """Return the most-recent-per-invariant AudioVerticalHealthRuns row + 24h remediation sum."""
-        try:
-            Rows = self.DatabaseService.ExecuteQuery(
-                "WITH latest AS ("
-                "  SELECT DISTINCT ON (InvariantName) "
-                "    InvariantName, DetectedCount, RemediatedCount, Timestamp "
-                "  FROM AudioVerticalHealthRuns "
-                "  WHERE Timestamp > NOW() - INTERVAL '24 hours' "
-                "  ORDER BY InvariantName, Timestamp DESC"
-                "), summed AS ("
-                "  SELECT InvariantName, SUM(RemediatedCount)::int AS RemediatedSum "
-                "  FROM AudioVerticalHealthRuns "
-                "  WHERE Timestamp > NOW() - INTERVAL '24 hours' "
-                "  GROUP BY InvariantName"
-                ") "
-                "SELECT l.InvariantName, l.DetectedCount AS Detected, "
-                "       s.RemediatedSum AS RemediatedLast24h "
-                "FROM latest l JOIN summed s ON s.InvariantName = l.InvariantName "
-                "ORDER BY l.InvariantName"
-            )
-            LastRows = self.DatabaseService.ExecuteQuery(
-                "SELECT MAX(Timestamp) AS LastRunAt FROM AudioVerticalHealthRuns"
-            )
-            LastRunAt = LastRows[0]['lastrunat'] if LastRows and LastRows[0].get('lastrunat') else None
-            PolicyRows = self.DatabaseService.ExecuteQuery(
-                "SELECT COALESCE(PreVerticalReNormalizePolicy, 'lazy') AS Pol "
-                "FROM AudioNormalizationConfig WHERE Scope = 'global' LIMIT 1"
-            )
-            PreVerticalPolicy = (PolicyRows[0]['pol'] if PolicyRows else 'lazy') or 'lazy'
-            return {
-                'LastRunAt': LastRunAt.isoformat() if LastRunAt else None,
-                'PreVerticalPolicy': PreVerticalPolicy,
-                'Last24h': [
-                    {
-                        'Invariant': R['invariantname'],
-                        'Detected': int(R['detected'] or 0),
-                        'Remediated': int(R['remediatedlast24h'] or 0),
-                    }
-                    for R in (Rows or [])
-                ],
-            }
-        except Exception:
-            return {'LastRunAt': None, 'PreVerticalPolicy': 'lazy', 'Last24h': []}
-
     # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C15
     def GetAudioConsistencyBands(self) -> List[Dict]:
         """Return v_audio_consistency_summary rows for the Activity dashboard."""

@@ -20,7 +20,6 @@ CREATE_SQL = (
 
 
 SEED_NAMES = (
-    'AudioVerticalHealth',
     'ContinuousScan',
 )
 

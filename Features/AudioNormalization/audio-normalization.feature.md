@@ -20,7 +20,6 @@ The vertical absorbed the loudnorm measurement vertical (`Features/LoudnessAnaly
 | W5 | Run library-wide policy sweep | CLI script | `py Scripts/SweepAudioPolicyForExistingFiles.py [--apply]` | `Scripts/SweepAudioPolicyForExistingFiles.Main` |
 | W6 | Mark a file for re-measurement | (internal -- admission gate) | -- | `AudioRemeasurementService.MarkForRemeasurement` |
 | W7 | View speech-enrichment pending count | -- | `GET /api/AudioNormalization/EnrichmentQueue/Status` | `AudioNormalizationController.enrichment_status` |
-| W8 | View self-healing actions taken in last 24h | Activity page Library Compliance card "Self-healing" sub-section | `GET /api/Activity/LibraryCompliance` (AudioVerticalHealth key) | `ActivityRepository.GetAudioVerticalHealth` |
 | W9 | Run the live-DB invariant probe | CLI | `py -m pytest Tests/Contract/TestAudioInvariants.py` | `TestAudioInvariants` reuses H1 invariant detectors against live DB |
 | W10 | Pick pre-vertical re-normalize policy | Settings tab field `PreVerticalReNormalizePolicy` | `POST /api/AudioNormalization/Settings` | `AudioNormalizationConfigRepository` writes the column |
 
@@ -129,68 +128,6 @@ resolver, PostEncodeAudioHandler invocation) has its own contract test
 under `Tests/Contract/`. Boundaries protected against regression at the
 test layer, not by live-encode discovery.
 
-## Self-Healing
-
-The vertical detects and heals its own DB-state discrepancies via an
-in-system recurring service. Operator does not run scripts to fix
-vertical state.
-
-H1. `AudioVerticalHealthService`
-(`Features/AudioNormalization/SelfHealing/AudioVerticalHealthService.py`)
-is one row in the shared `Scanners` orchestrator table
-(see `Features/FileScanning/scanners.feature.md`). The row carries
-`ScannerName='AudioVerticalHealth'`, `Enabled BOOL`, `IntervalSec INT`,
-`BatchSize INT`, `DryRun BOOL`, `LastRunAt TIMESTAMP`. The WebService
-background-thread loop reads the row fresh per cycle (`db-is-authority`)
-and stamps `LastRunAt` via `ScannersRepository.RecordRun` on every
-successful cycle. Operator controls everything via `/Admin/Scanners`;
-no SQL needed; no WebService restart needed to flip switches.
-
-Constructor injects `List[IAudioVerticalInvariant]`, a per-invariant
-`Dict[invariant_name -> IAudioVerticalRemediation]`, a
-`RemediationBatch` cap (default 100), and a `DryRun BOOL` (default
-False). Each cycle: for each invariant -> `Detect()` returns
-offending row ids -> matched `Remediation.Apply()` runs against the
-FIRST `RemediationBatch` ids (UNLESS `DryRun=True`, in which case
-`Apply` is skipped and the audit row carries
-`DRY_RUN: would have remediated N`) -> result + `capped X->N` note
-written to `AudioVerticalHealthRuns` table. The batch cap protects
-cycle time: without it, a single invariant with 18k+ detected rows
-blocks every subsequent cycle for many hours. DryRun is the safety
-net: when an invariant or remediation regresses (it has, twice), the
-operator can re-enable H1 in DryRun first and watch the audit table
-to confirm what it WOULD do before flipping DryRun off.
-
-Six invariants ship in the initial composition:
-- `PendingQueueWithoutPolicyJson` -> `BackfillPolicyJson` remediation
-- `SuccessfulAttemptWithoutTracksEmitted` -> `EnqueueReProbe` remediation
-- `StaleOperatorReview` (>30 days) -> `AlertOperatorReview` remediation
-- `InvalidMeasurementWithoutRemeasure` (>24h, 0 attempts) ->
-  `EnqueueRemeasurement` remediation
-- `PreVerticalTranscodedFile` (gated by `PreVerticalReNormalizePolicy`
-  policy field) -> `EnqueueRetranscode` remediation
-- `ConsistencyBandDeviantWithComplete` -> `EnqueueRemeasurement`
-  remediation
-
-H2. `Scripts/SweepAudioPolicyForExistingFiles.py` does not exist post
-2026-06-17. The H1 service's
-`PendingQueueWithoutPolicyJson` + `BackfillPolicyJson` pair owns the
-same use case continuously.
-
-H3. `Tests/Contract/TestAudioInvariants.py` runs against the live DB.
-Each test instantiates the matching `IAudioVerticalInvariant` and asserts
-`Detect()` returns zero violations. Failing tests name offending row ids.
-This is the canonical "is the vertical healthy" probe -- same code path
-as H1 detection (DRY).
-
-H4. `/api/Activity/LibraryCompliance` payload carries
-`AudioVerticalHealth: {LastRunAt, PreVerticalPolicy, Last24h: [{Invariant,
-Detected, Remediated}]}`. `Detected` is the count from the most-recent
-cycle per invariant (current backlog); `Remediated` is the sum across
-all cycles in the last 24h (throughput). The template's
-`Self-healing (last 24h)` sub-section renders the table plus the
-`PreVerticalPolicy` badge.
-
 ## Operational
 
 O1. Stale-code Linux containers are paused at the DB level. Status
@@ -265,7 +202,7 @@ emit a detected-language stderr line.
 ## Cross-Vertical Contract
 
 This section locks the audio vertical's public surface. Any other vertical
-(Compliance, Self-Healing, Scanning, TranscodeJob, FileReplacement, etc.)
+(Compliance, Scanning, TranscodeJob, FileReplacement, etc.)
 interacts with the audio vertical ONLY through what is listed below. Other
 verticals MUST NOT open any audio-vertical source file or import from any
 class not enumerated here. The audio vertical reserves the right to change
@@ -368,7 +305,6 @@ vertical changes these freely:
 | Other vertical | Direction | Through |
 |---|---|---|
 | Compliance | Compliance READS audio-vertical columns to evaluate `IsCompliant` | Columns listed above |
-| Self-Healing | Self-Healing invariants READ audio-vertical columns + call SELECT-only repository methods | Columns + future `IAudioVerticalInvariant` registry (currently lives inside audio dir; will MOVE to self-healing vertical when that vertical is properly factored) |
 | Scanning | Scanning writes new `MediaFiles` rows; audio vertical's admission gate then sees them on next admit | New MediaFiles flow through normal admission |
 | TranscodeJob | TranscodeJob's shape classes CALL audio vertical's three public functions to build argv | `EmitTracks` + `GetEffectivePolicy` + `Probe` |
 | FileReplacement | FileReplacement CALLS `MarkAudioComplete` after a successful audio-touching transcode replaces the file | `AudioStateService.MarkAudioComplete` |
@@ -402,12 +338,6 @@ C1-C38 shipped. Live-verified end-to-end across all six ProcessingModes
 | Features/AudioNormalization/AudioPolicyAdmissionGate.py | Pre-queue gate + PolicyJson snapshot + BackfillAllPending (no time window) |
 | Features/AudioNormalization/Services/AudioStateService.py | Audio-state machine on MediaFile (S2; renamed from AudioCompletionService) |
 | Features/AudioNormalization/Workers/PostEncodeAudioHandler.py | Post-encode probe + canonical-path resolve (S3; extracted from ProcessTranscodeQueueService) |
-| Features/AudioNormalization/SelfHealing/AudioVerticalHealthService.py | Recurring scan + remediation (H1) |
-| Features/AudioNormalization/SelfHealing/IAudioVerticalInvariant.py | ABC for invariant detectors (OCP) |
-| Features/AudioNormalization/SelfHealing/IAudioVerticalRemediation.py | ABC for remediations (OCP) |
-| Features/AudioNormalization/SelfHealing/Invariants/*.py | Per-kind invariant impls (6 ship) |
-| Features/AudioNormalization/SelfHealing/Remediations/*.py | Per-action remediation impls (5 ship) |
-| Tests/Contract/TestAudioInvariants.py | Live-DB invariant probe (H3) |
 | Features/AudioNormalization/AudioNormalizationController.py | Flask blueprint |
 | Features/AudioNormalization/LanguageDetector.py | 5+1 layered detection |
 | Features/AudioNormalization/LoudnessMeasurementValidator.py | Validity + silence-floor predicate |

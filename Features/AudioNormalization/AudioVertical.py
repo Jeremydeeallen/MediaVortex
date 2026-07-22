@@ -4,7 +4,6 @@ from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
 from Features.AudioNormalization.AudioPolicyAdmissionGate import AudioPolicyAdmissionGate
-from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
 
 
 # directive: compliance-symmetry
@@ -14,12 +13,11 @@ _BITRATE_ROUNDING_TOLERANCE = 1.05
 # directive: compliance-symmetry
 class AudioVertical:
 
-    # directive: compliance-symmetry
-    def __init__(self, Gate: Optional[AudioPolicyAdmissionGate] = None, Db: Optional[DatabaseService] = None, RepoMgr: Optional[DatabaseManager] = None, ProfileResolver: Optional[EffectiveProfileResolver] = None):
+    # directive: transcode-flow-canonical -- C33 profile-independent baseline
+    def __init__(self, Gate: Optional[AudioPolicyAdmissionGate] = None, Db: Optional[DatabaseService] = None, RepoMgr: Optional[DatabaseManager] = None):
         self._Gate = Gate or AudioPolicyAdmissionGate()
         self._Db = Db or DatabaseService()
         self._RepoMgr = RepoMgr or DatabaseManager()
-        self._Resolver = ProfileResolver or EffectiveProfileResolver()
 
     # directive: worker-runtime-state
     def _LoadRules(self) -> dict:

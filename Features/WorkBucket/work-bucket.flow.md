@@ -24,7 +24,7 @@ Each stage is stateless per request. No in-process caching between requests.
 
 ### ST1 -- Controller dispatch (`Features/WorkBucket/WorkBucketController.py`)
 
-Receives all `/Work/<bucket>` and `/api/Work/<bucket>/*` HTTP requests. Parses `url_key` into a `BucketKey` VO (validates bucket name; rejects unknown keys with 400). Routes to ST2-ST6 by method + path pattern. All error responses use `{'Success': False, 'Message': '...'}` envelope.
+Receives all `/Work/<bucket>` and `/api/Work/<bucket>/*` HTTP requests. Parses `url_key` into a `BucketKey` VO (validates bucket name against `{Transcode, Remux, Audio, Compliant, Unclassified}`; rejects unknown keys with 400). Routes to ST2-ST6 by method + path pattern. All error responses use `{'Success': False, 'Message': '...'}` envelope. `Compliant` bucket disables Queue-all + Queue-one write routes at the controller layer (browse-only). `Unclassified` bucket disables Set-profile route (files here have no profile-eligible state); Force-decide route recomputes compliance.
 
 ### ST2 -- Page render (`WorkBucketController.render_page`)
 

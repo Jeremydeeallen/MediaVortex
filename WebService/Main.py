@@ -192,7 +192,6 @@ class WebServiceApp:
         
         # Start status polling for service control
         self.PrivateStartStatusPolling()
-        self.PrivateStartAudioVerticalHealth()
         self.PrivateStartAudioRemeasurementRunner()
         
         # Update service status to Running immediately after startup
@@ -593,48 +592,6 @@ class WebServiceApp:
         from Features.AudioNormalization.Services.AudioRemeasurementRunner import AudioRemeasurementRunner
         AudioRemeasurementRunner(BatchSize=20, PollSec=30).RunForever()
 
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.H1
-    def PrivateStartAudioVerticalHealth(self):
-        """Start the AudioVerticalHealthService recurring loop in a background daemon thread."""
-        try:
-            self.AudioVerticalHealthThread = threading.Thread(
-                target=self.PrivateAudioVerticalHealthLoop,
-                daemon=True,
-                name="AudioVerticalHealth",
-            )
-            self.AudioVerticalHealthThread.start()
-            print("AudioVerticalHealthService started")
-        except Exception as Ex:
-            LoggingService.LogException("Failed to start AudioVerticalHealthService", Ex, "WebService", "PrivateStartAudioVerticalHealth")
-
-    # directive: audio-vertical-phase-1-completion | # see directive.md P3
-    def PrivateAudioVerticalHealthLoop(self):
-        """Background loop. Reads the `AudioVerticalHealth` row of the Scanners config table fresh per cycle (db-is-authority). When Enabled=TRUE, runs the cycle; when DryRun=TRUE, Detect runs but Remediation.Apply does not. Operator toggles via /Admin/Scanners without restart. Stamps LastRunAt on every successful cycle."""
-        from Features.AudioNormalization.SelfHealing.AudioVerticalHealthComposition import BuildAudioVerticalHealthService
-        from Features.FileScanning.ScannersRepository import ScannersRepository
-        Repo = ScannersRepository()
-        Name = 'AudioVerticalHealth'
-        while True:
-            try:
-                Row = Repo.Get(Name) or {}
-                Enabled = bool(Row.get('enabled'))
-                DryRun = bool(Row.get('dryrun'))
-                Interval = max(60, int(Row.get('intervalsec') or 300))
-                Batch = max(1, int(Row.get('batchsize') or 100))
-            except Exception:
-                Enabled = False
-                DryRun = False
-                Interval = 300
-                Batch = 100
-            if Enabled:
-                try:
-                    Svc = BuildAudioVerticalHealthService(RemediationBatch=Batch, DryRun=DryRun)
-                    Svc.RunCycle()
-                    Repo.RecordRun(Name)
-                except Exception as Ex:
-                    LoggingService.LogException("AudioVerticalHealthService cycle raised", Ex, "WebService", "PrivateAudioVerticalHealthLoop")
-            time.sleep(Interval)
-    
     def PrivateServiceStatusLoop(self):
         """Background thread to update service status."""
         while not self.ShutdownEvent:

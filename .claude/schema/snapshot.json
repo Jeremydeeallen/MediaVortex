@@ -299,43 +299,6 @@
       "is_nullable": "NO"
     }
   },
-  "audioverticalhealthruns": {
-    "detectedcount": {
-      "data_type": "integer",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
-    },
-    "durationms": {
-      "data_type": "integer",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
-    },
-    "id": {
-      "data_type": "bigint",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
-    },
-    "invariantname": {
-      "data_type": "text",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
-    },
-    "notes": {
-      "data_type": "text",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
-    "remediatedcount": {
-      "data_type": "integer",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
-    },
-    "timestamp": {
-      "data_type": "timestamp without time zone",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    }
-  },
   "clipbuilderexports": {
     "clipduration": {
       "data_type": "real",

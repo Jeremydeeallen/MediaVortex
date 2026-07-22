@@ -25,9 +25,9 @@ def get_compliance_summary(media_file_id):
         Resolver = EffectiveProfileResolver()
         Profile = Resolver.Resolve(Mf)
 
-        Vid = VideoVertical(Db=Db, RepoMgr=Mgr, ProfileResolver=Resolver).Evaluate(Mf)
-        Aud = AudioVertical(Db=Db, RepoMgr=Mgr, ProfileResolver=Resolver).Evaluate(Mf)
-        Con = ContainerVertical(Db=Db, RepoMgr=Mgr, ProfileResolver=Resolver).Evaluate(Mf)
+        Vid = VideoVertical(Db=Db, RepoMgr=Mgr).Evaluate(Mf)
+        Aud = AudioVertical(Db=Db, RepoMgr=Mgr).Evaluate(Mf)
+        Con = ContainerVertical(Db=Db, RepoMgr=Mgr).Evaluate(Mf)
 
         Bucket = _DeriveBucket(Vid[0], Con[0], Aud[0])
         PlannedOps = _PlannedOps(Bucket, Vid[0], Con[0], Aud[0])
@@ -69,17 +69,17 @@ def render_compliance_summary(media_file_id):
     return render_template('ComplianceSummary.html', media_file_id=media_file_id)
 
 
-# directive: compliance-symmetry
+# directive: transcode-flow-canonical -- C33 5-branch bucket including Compliant + Unclassified
 def _DeriveBucket(VideoCompliant, ContainerCompliant, AudioCompliant):
     if VideoCompliant is None or ContainerCompliant is None or AudioCompliant is None:
-        return None
+        return 'Unclassified'
+    if VideoCompliant and ContainerCompliant and AudioCompliant:
+        return 'Compliant'
     if VideoCompliant is False:
         return 'Transcode'
     if ContainerCompliant is False:
         return 'Remux'
-    if AudioCompliant is False:
-        return 'AudioFix'
-    return None
+    return 'AudioFix'
 
 
 # directive: compliance-symmetry

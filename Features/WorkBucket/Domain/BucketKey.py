@@ -45,6 +45,22 @@ _REGISTRY = (
         Subtitle='Files where audio is the only blocker; container + video stream-copy through.',
         Icon='fas fa-volume-up',
     ),
+    BucketKey(
+        UrlKey='Compliant',
+        BucketName='Compliant',
+        ProcessingMode='None',
+        Title='Compliant',
+        Subtitle='Files meeting library baseline. Browse only; force-enqueue via quality-tier route.',
+        Icon='fas fa-check-circle',
+    ),
+    BucketKey(
+        UrlKey='Unclassified',
+        BucketName='Unclassified',
+        ProcessingMode='None',
+        Title='Unclassified',
+        Subtitle='Files where compliance has not decided (probe pending or permanently deferred).',
+        Icon='fas fa-question-circle',
+    ),
 )
 
 

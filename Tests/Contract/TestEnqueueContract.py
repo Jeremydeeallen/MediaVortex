@@ -15,7 +15,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 TOP_LEVEL_PRODUCERS = [
     "Features/TranscodeQueue/QueueManagementBusinessService.py",
-    "Features/AudioNormalization/SelfHealing/Remediations/EnqueueRetranscode.py",
     "Features/QualityTesting/QualityTestController.py",
 ]
 

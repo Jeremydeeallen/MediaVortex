@@ -1551,35 +1551,6 @@ class QueueManagementBusinessService:
         SyntheticMf = MediaFileModel(AssignedProfile=ProfileName, ResolutionCategory=ResolutionCategory, VideoBitrateKbps=VideoBitrateKbps)
         return EffectiveProfileResolver().Resolve(SyntheticMf)
 
-    @staticmethod
-    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C13
-    def _LegacyRefusalReasonFromDecision(Decision) -> Optional[str]:
-        """Map ComplianceDecision to a single legacy snake_case refusal string -- gate name when blocked; first applies-reason rule name when non-compliant; None when compliant."""
-        if Decision.GateBlocked is not None:
-            GateMap = {'EnglishAudio': 'no_english_audio', 'AudioCorruptSuspect': 'audio_corrupt_suspect', 'AudioStream': 'no_audio_stream', 'LoudnessMeasurements': 'awaiting_loudness_measurement', 'ProbeMetadata': 'no_probe_metadata', 'EffectiveProfile': 'no_effective_profile', 'ResolutionCategory': 'no_resolution_category', 'ProfileThresholds': 'no_profile_thresholds'}
-            return GateMap.get(Decision.GateBlocked, Decision.GateBlocked.lower())
-        if Decision.IsCompliant is True:
-            return None
-        for R in Decision.Reasons:
-            if R.get('Outcome') == 'applies':
-                Rule = R.get('Rule', '')
-                if Rule == 'ResolutionExceedsProfileTarget':
-                    return 'downscale_needed'
-                if Rule == 'AcceptableVideoCodecsCsv':
-                    return 'video_codec_not_acceptable'
-                if Rule == 'EstimatedSavingsMBThreshold':
-                    return 'savings_exceeds_threshold'
-                if Rule == 'AcceptableContainersCsv':
-                    return 'container_not_acceptable'
-                if Rule == 'AcceptableAudioCodecsMp4Csv':
-                    return 'audio_codec_not_acceptable'
-                if Rule == 'RequireAudioNormalized':
-                    return 'audio_not_normalized'
-                if Rule == 'LoudnessOffTarget':
-                    return 'audio_not_normalized'
-                if Rule == 'SubtitleFixApplies':
-                    return 'subtitle_format_not_acceptable'
-        return 'needs_work'
 
     # ─── Marginal-savings gate (data-driven queue admission) ──────────────
     # Owns marginal-savings-gate.feature.md criteria 1-7. Two collaborators:

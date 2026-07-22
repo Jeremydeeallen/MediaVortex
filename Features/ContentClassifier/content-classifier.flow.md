@@ -8,10 +8,13 @@
 1. Probe metadata written
 2. `ContentSignals` written (if compute succeeded)
 3. `ComputePriorityScore` written
+4. Compliance recompute fired (`QueueManagementBusinessService.RecomputeForFiles`)
 
 Also invoked manually from `Scripts/SQLScripts/BackfillProfileAssignments.py` for historical NULL-profile rows.
 
 The classifier is the only writer of `AssignedProfile` with `AssignedProfileSource='classifier'`. Operator assignments via the Scanning page write `'operator'`; ad-hoc SQL writes `'manual_sql'`.
+
+**Classifier role: HINT for auto-enqueue paths.** `AssignedProfile` is not a compliance input. Compliance evaluators (`AudioVertical.Evaluate` + `VideoVertical.Evaluate` + `ContainerVertical.Evaluate`) read baseline rules from their respective `*ComplianceRules` tables and never consume `AssignedProfile`. The classifier's output steers the scanner auto-enqueue path + backfill scripts + `/Work/Compliant` operator-visible recommendation, not the compliance decision itself. Ordering of classifier vs compliance recompute inside the probe hook chain is therefore behavior-irrelevant to bucket assignment.
 
 ## Pipeline
 

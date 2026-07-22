@@ -4,7 +4,7 @@
 
 ## What It Does
 
-Renders `/Work/Transcode`, `/Work/Remux`, and `/Work/Audio` as an always-grouped-by-series view of files that need work in that bucket. Each series row exposes file count, total GB, common resolution/codec, an InQueue badge, a per-series profile dropdown, and a Queue-all button. Series rows expand inline to show their files, sorted by size. The page replaces the old Media tab (the retired per-show-settings UI); per-series sticky profile assignment is preserved in the internal `SeriesProfiles` table.
+Renders `/Work/Transcode`, `/Work/Remux`, `/Work/Audio`, `/Work/Compliant`, and `/Work/Unclassified` as always-grouped-by-series views. Work-needed buckets (Transcode/Remux/Audio) expose file count, total GB, common resolution/codec, InQueue badge, per-series profile dropdown, and a Queue-all button. `Compliant` is browse/audit-only -- no Queue-all button; the operator can still force-enqueue a compliant file via the single-file admit route + quality-tier query param. `Unclassified` surfaces in-flight rows (probe hook not yet complete) plus permanently-deferred rows (`audio_corrupt_suspect`, `no_audio_stream`); action is force-decide (re-run compliance) or defer forever. Every scanned MediaFile lands in exactly one of the five buckets by construction -- `WorkBucket IS NULL` is impossible for probe-complete rows.
 
 ## Workflows
 
@@ -20,7 +20,7 @@ Renders `/Work/Transcode`, `/Work/Remux`, and `/Work/Audio` as an always-grouped
 
 ## Success Criteria
 
-C1. `/Work/Transcode`, `/Work/Remux`, and `/Work/Audio` each render only `MediaFiles.WorkBucket = <X>` rows. Spot-checkable: `SELECT WorkBucket FROM MediaFiles WHERE Id IN (...the ids surfaced by /api/Work/Transcode...)` returns only `Transcode`.
+C1. `/Work/Transcode`, `/Work/Remux`, `/Work/Audio`, `/Work/Compliant`, `/Work/Unclassified` each render only `MediaFiles.WorkBucket = <X>` rows. Spot-checkable: `SELECT WorkBucket FROM MediaFiles WHERE Id IN (...the ids surfaced by /api/Work/Transcode...)` returns only `Transcode`.
 
 C2. Series rows default-sorted by total GB descending; secondary file-row sort by size desc. `Sort: File count desc` and `Sort: Series name asc` are alternative sort modes via the toolbar.
 
@@ -32,9 +32,9 @@ C5. Per-row Queue is idempotent. Returns `'queued'` first time, `'already_queued
 
 C6. Filters: multi-select drive + free-text series search. Pagination: 25 rows per page server-side via `Core.Querying.PagedQueryBuilder`.
 
-C7. `WorkBucket` is a GENERATED column derived exclusively from the three compliance flags: `WHEN videocompliant IS NULL OR containercompliant IS NULL OR audiocompliant IS NULL THEN NULL / WHEN videocompliant = FALSE THEN 'Transcode' / WHEN containercompliant = FALSE THEN 'Remux' / WHEN audiocompliant = FALSE THEN 'AudioFix' / ELSE NULL`. `TranscodedByMediaVortex` is METADATA (which files we produced) and MUST NOT influence WorkBucket -- a MediaVortex output that never received Dialog Boost is still audio-non-compliant and belongs in AudioFix. Verifiable: `SELECT generation_expression FROM information_schema.columns WHERE table_name='mediafiles' AND column_name='workbucket'` returns the compliance-only CASE.
+C7. `WorkBucket` is a GENERATED column derived exclusively from the three compliance flags: `WHEN videocompliant IS NULL OR containercompliant IS NULL OR audiocompliant IS NULL THEN 'Unclassified' / WHEN videocompliant AND containercompliant AND audiocompliant THEN 'Compliant' / WHEN NOT videocompliant THEN 'Transcode' / WHEN NOT containercompliant THEN 'Remux' / ELSE 'AudioFix'`. Every MediaFile row has a non-NULL bucket. `TranscodedByMediaVortex` is METADATA (which files we produced) and MUST NOT influence WorkBucket. Verifiable: `SELECT generation_expression FROM information_schema.columns WHERE table_name='mediafiles' AND column_name='workbucket'` returns the five-branch CASE.
 
-C8. Compliance flags are always non-NULL for scanned files. The write path is `Features/TranscodeQueue/QueueManagementBusinessService.RecomputeForFiles([ids])`, invoked at every scan-insert / scan-update / post-transcode / audio-config-change site. Any row that reaches `videocompliant IS NULL` OR `containercompliant IS NULL` OR `audiocompliant IS NULL` is caught by the `NullComplianceRow` self-heal invariant on the next `AudioVerticalHealthService.RunCycle` and repaired via `RecomputeCompliance` remediation. Verifiable: after a self-heal cycle, `SELECT COUNT(*) FROM MediaFiles WHERE videocompliant IS NULL OR containercompliant IS NULL OR audiocompliant IS NULL` == 0.
+C8. Every compliance evaluator is profile-independent. `AudioVertical.Evaluate`, `VideoVertical.Evaluate`, and `ContainerVertical.Evaluate` read baseline rules from `AudioComplianceRules`/`VideoComplianceRules`/`ContainerComplianceRules` respectively and return `(True|False|None, str|None)` without invoking `EffectiveProfileResolver`. `AssignedProfile` is a HINT for auto-enqueue paths only; it is never a compliance input. Verifiable: `grep -n "EffectiveProfileResolver" Features/VideoEncoding/VideoVertical.py Features/ContainerFormat/ContainerVertical.py Features/AudioNormalization/AudioVertical.py` returns 0 lines. Contract test `Tests/Contract/TestVerticalsAreProfileIndependent.py` asserts each vertical accepts a MediaFile with `AssignedProfile=NULL` and returns a decision without raising.
 
 C9. `AdmitSeries` returns a per-outcome tally: `Inserted`, `AlreadyQueued`, `Skipped`, `AdmissionDeferred`, `Errored`. Sum of the five equals `Total`. No outcome is collapsed into another (prior bug: skipped / deferred / errored all fell into `AlreadyQueued`, hiding the reason files never queued). Verifiable: `Tests/Contract/TestQueueAdmissionAppService.py::test_admit_series_returns_admission_result`.
 

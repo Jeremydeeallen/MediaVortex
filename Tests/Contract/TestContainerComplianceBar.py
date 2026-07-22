@@ -2,62 +2,57 @@ import unittest
 from dataclasses import dataclass
 from typing import Optional
 
-from Features.Profiles.EffectiveProfile import EffectiveProfile
 from Features.ContainerFormat.ContainerVertical import ContainerVertical
 
 
-# directive: compliance-symmetry
+# directive: transcode-flow-canonical -- C33 profile-independent baseline
 @dataclass
 class _FakeMf:
     Id: int = 1
     ContainerFormat: Optional[str] = 'mov,mp4,m4a,3gp,3g2,mj2'
-    AssignedProfile: Optional[str] = 'Test'
+    AssignedProfile: Optional[str] = None
 
 
-# directive: compliance-symmetry
-class _StubResolver:
-    def __init__(self, P): self._P = P
-    def Resolve(self, _): return self._P
+# directive: transcode-flow-canonical -- C33 baseline rules injected via stub Db
+class _StubDb:
+    def __init__(self, AllowedCsv: str = 'mp4'):
+        self._Csv = AllowedCsv
+
+    def ExecuteQuery(self, _Sql, _Params=None):
+        return [{'acceptablecontainerscsv': self._Csv}]
 
 
-# directive: compliance-symmetry
-def _Vert(Container):
-    Profile = EffectiveProfile(ProfileName='Test', Container=Container)
-    return ContainerVertical(ProfileResolver=_StubResolver(Profile))
-
-
+# directive: transcode-flow-canonical -- C33
 class TestContainerComplianceBar(unittest.TestCase):
 
-    # directive: compliance-symmetry
-    def test_mp4_source_against_mp4_profile_is_compliant(self):
-        C, R = _Vert('mp4').Evaluate(_FakeMf(ContainerFormat='mov,mp4,m4a,3gp,3g2,mj2'))
+    def test_mp4_source_against_mp4_baseline_is_compliant(self):
+        C, R = ContainerVertical(Db=_StubDb('mp4')).Evaluate(_FakeMf(ContainerFormat='mov,mp4,m4a,3gp,3g2,mj2'))
         self.assertTrue(C)
         self.assertIsNone(R)
 
-    # directive: compliance-symmetry
-    def test_mkv_source_against_mp4_profile_is_noncompliant(self):
-        C, R = _Vert('mp4').Evaluate(_FakeMf(ContainerFormat='matroska,webm'))
+    def test_mkv_source_against_mp4_baseline_is_noncompliant(self):
+        C, R = ContainerVertical(Db=_StubDb('mp4')).Evaluate(_FakeMf(ContainerFormat='matroska,webm'))
         self.assertFalse(C)
         self.assertIn('container:', R)
 
-    # directive: compliance-symmetry
-    def test_mkv_source_against_mkv_profile_is_compliant(self):
-        C, _ = _Vert('mkv').Evaluate(_FakeMf(ContainerFormat='matroska,webm'))
+    def test_mkv_source_against_mkv_baseline_is_compliant(self):
+        C, _ = ContainerVertical(Db=_StubDb('mkv')).Evaluate(_FakeMf(ContainerFormat='matroska,webm'))
         self.assertTrue(C)
 
-    # directive: compliance-symmetry
-    def test_mp4_universe_mp4_mkv_m4v_mov(self):
-        for Profile in ('mp4', 'mkv', 'm4v', 'mov'):
-            with self.subTest(Profile=Profile):
-                C, _ = _Vert(Profile).Evaluate(_FakeMf(ContainerFormat=Profile))
+    def test_mp4_and_mkv_both_allowed(self):
+        for Ctr in ('mp4', 'mkv', 'm4v', 'mov'):
+            with self.subTest(Container=Ctr):
+                C, _ = ContainerVertical(Db=_StubDb('mp4,mkv')).Evaluate(_FakeMf(ContainerFormat=Ctr))
                 self.assertTrue(C)
 
-    # directive: compliance-symmetry
-    def test_no_profile_returns_undecidable(self):
-        Vert = ContainerVertical(ProfileResolver=_StubResolver(None))
-        C, R = Vert.Evaluate(_FakeMf())
+    def test_no_source_container_returns_none(self):
+        C, R = ContainerVertical(Db=_StubDb('mp4')).Evaluate(_FakeMf(ContainerFormat=None))
         self.assertIsNone(C)
-        self.assertEqual(R, 'no_effective_profile')
+        self.assertEqual(R, 'no_source_container')
+
+    def test_empty_rules_raises(self):
+        with self.assertRaises(RuntimeError):
+            ContainerVertical(Db=_StubDb('')).Evaluate(_FakeMf())
 
 
 if __name__ == '__main__':
