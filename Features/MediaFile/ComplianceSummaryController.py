@@ -7,12 +7,13 @@ from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
 from Features.VideoEncoding.VideoVertical import VideoVertical
 from Features.AudioNormalization.AudioVertical import AudioVertical
 from Features.ContainerFormat.ContainerVertical import ContainerVertical
+from Features.MediaFile.ComplianceSummary import DeriveBucket as _DeriveBucket, PlannedOps as _PlannedOps
 
 
 ComplianceSummaryBlueprint = Blueprint('compliance_summary', __name__, template_folder='templates')
 
 
-# directive: compliance-symmetry
+# directive: transcode-flow-canonical -- C33
 @ComplianceSummaryBlueprint.route('/api/MediaFile/<int:media_file_id>/ComplianceSummary', methods=['GET'])
 def get_compliance_summary(media_file_id):
     try:
@@ -63,46 +64,13 @@ def get_compliance_summary(media_file_id):
         return jsonify({'success': False, 'error': str(Ex)}), 500
 
 
-# directive: compliance-symmetry
+# directive: transcode-flow-canonical -- C33
 @ComplianceSummaryBlueprint.route('/MediaFile/<int:media_file_id>/ComplianceSummary', methods=['GET'])
 def render_compliance_summary(media_file_id):
     return render_template('ComplianceSummary.html', media_file_id=media_file_id)
 
 
-# directive: transcode-flow-canonical -- C33 5-branch bucket including Compliant + Unclassified
-def _DeriveBucket(VideoCompliant, ContainerCompliant, AudioCompliant):
-    if VideoCompliant is None or ContainerCompliant is None or AudioCompliant is None:
-        return 'Unclassified'
-    if VideoCompliant and ContainerCompliant and AudioCompliant:
-        return 'Compliant'
-    if VideoCompliant is False:
-        return 'Transcode'
-    if ContainerCompliant is False:
-        return 'Remux'
-    return 'AudioFix'
-
-
-# directive: compliance-symmetry
-def _PlannedOps(Bucket, VideoCompliant, ContainerCompliant, AudioCompliant):
-    if Bucket is None:
-        return []
-    Ops = []
-    if Bucket == 'Transcode':
-        Ops.append('video_reencode')
-        if ContainerCompliant is False:
-            Ops.append('container_rewrite')
-        if AudioCompliant is False:
-            Ops.append('audio_reencode_loudnorm')
-    elif Bucket == 'Remux':
-        Ops.append('container_rewrite')
-        if AudioCompliant is False:
-            Ops.append('audio_reencode_loudnorm')
-    elif Bucket == 'AudioFix':
-        Ops.append('audio_reencode_loudnorm')
-    return Ops
-
-
-# directive: compliance-symmetry
+# directive: transcode-flow-canonical -- C33
 def _ResolveAudioPolicy(Db, Mf):
     MediaFileId = getattr(Mf, 'Id', None)
     StorageRootId = getattr(Mf, 'StorageRootId', None)

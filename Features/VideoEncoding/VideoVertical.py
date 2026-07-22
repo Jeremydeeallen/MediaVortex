@@ -71,7 +71,7 @@ class VideoVertical:
             Compliant, Reason = self.Evaluate(Mf)
             self._WriteResult(Id, Compliant, Reason)
 
-    # directive: compliance-symmetry
+    # directive: transcode-flow-canonical -- C33
     def _WriteResult(self, MediaFileId: int, Compliant, Reason):
         self._Db.ExecuteNonQuery(
             "UPDATE MediaFiles SET VideoCompliant = %s, VideoCompliantReason = %s WHERE Id = %s",

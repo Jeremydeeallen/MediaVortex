@@ -99,7 +99,7 @@ This section locks the Profiles vertical's public surface. Other verticals inter
 
 | Column | Read by | Owner |
 |---|---|---|
-| `MediaFiles.{Id, FilePath, ResolutionCategory, AssignedProfile}` | `EffectiveProfileResolver.Resolve` (used by every other compliance vertical) | FileScanning + MediaProbe |
+| `MediaFiles.{Id, FilePath, ResolutionCategory, AssignedProfile}` | `EffectiveProfileResolver.Resolve` (enqueue + admission + UI paths) | FileScanning + MediaProbe |
 | `RootFolders.{Id, FolderPath}` | `ProfileController.assign_profile_to_root_folder` | FileScanning |
 | `CrfBitrateEstimates.*` | `EffectiveProfileResolver` (CRF strategy) | Optional sub-component for CRF profiles |
 
@@ -107,7 +107,7 @@ This section locks the Profiles vertical's public surface. Other verticals inter
 
 | Class.method | External caller(s) |
 |---|---|
-| `EffectiveProfileResolver.Resolve(MediaFile) -> Optional[EffectiveProfile]` | VideoVertical, future Container/Audio verticals |
+| `EffectiveProfileResolver.Resolve(MediaFile) -> Optional[EffectiveProfile]` | `QueueManagementBusinessService` at admission, `ComplianceSummaryController` for UI display, `QualityTestController` for QT setup. NOT consumed by `VideoVertical` / `AudioVertical` / `ContainerVertical` per C33 (compliance is profile-independent). |
 | `EncoderKnobRepository.GetEncoderKnobsForProfile(ProfileName, SourceResolution) -> EncoderKnobs` | CommandBuilder, TranscodeJob |
 | `ProfileService.CopyProfile / DeleteProfile / AddThreshold` | (operator UI) |
 

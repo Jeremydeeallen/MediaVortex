@@ -8,11 +8,11 @@ from Features.TranscodeQueue.QueueManagementBusinessService import QueueManageme
 ComplianceRecomputeBlueprint = Blueprint('compliance_recompute', __name__)
 
 
-# directive: compliance-recompute-tools
+# directive: transcode-flow-canonical -- C33
 BATCH_SIZE = 500
 
 
-# directive: compliance-recompute-tools
+# directive: transcode-flow-canonical -- C33
 def _FetchIds(Db, ProfileName, StorageRootId, Limit):
     Wheres = []
     Args = []
@@ -29,7 +29,7 @@ def _FetchIds(Db, ProfileName, StorageRootId, Limit):
     return [int(R['id']) for R in Rows]
 
 
-# directive: compliance-recompute-tools
+# directive: transcode-flow-canonical -- C33
 def _SnapshotBuckets(Db, Ids):
     if not Ids:
         return {}
@@ -41,7 +41,7 @@ def _SnapshotBuckets(Db, Ids):
     return {int(R['id']): R['workbucket'] for R in Rows}
 
 
-# directive: compliance-recompute-tools
+# directive: transcode-flow-canonical -- C33
 @ComplianceRecomputeBlueprint.route('/api/Compliance/Recompute', methods=['POST'])
 def recompute_compliance():
     try:

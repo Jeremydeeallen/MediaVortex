@@ -42,6 +42,14 @@ class TestWorkBucketGeneratedColumn(unittest.TestCase):
         self.assertTrue(Distinct.issubset(Allowed),
             f"Distinct buckets {Distinct} must be subset of {Allowed} per C33")
 
+    # directive: transcode-flow-canonical -- C33j bucket ProcessingMode validity
+    def test_new_buckets_have_valid_processing_mode(self):
+        ValidModes = {'Transcode', 'Remux', 'AudioFix', 'Quick', 'SubtitleFix', 'TestVariant'}
+        for UrlKey in ('Compliant', 'Unclassified'):
+            Bucket = BucketKey.FromUrlKey(UrlKey)
+            self.assertIn(Bucket.ProcessingMode, ValidModes,
+                f"{UrlKey}.ProcessingMode={Bucket.ProcessingMode!r} must be a valid queue mode per C33j")
+
 
 if __name__ == '__main__':
     unittest.main()

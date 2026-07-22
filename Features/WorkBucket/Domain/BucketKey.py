@@ -48,15 +48,15 @@ _REGISTRY = (
     BucketKey(
         UrlKey='Compliant',
         BucketName='Compliant',
-        ProcessingMode='None',
+        ProcessingMode='Transcode',
         Title='Compliant',
-        Subtitle='Files meeting library baseline. Browse only; force-enqueue via quality-tier route.',
+        Subtitle='Files meeting library baseline. Browse only; force-enqueue defaults to Transcode mode.',
         Icon='fas fa-check-circle',
     ),
     BucketKey(
         UrlKey='Unclassified',
         BucketName='Unclassified',
-        ProcessingMode='None',
+        ProcessingMode='Transcode',
         Title='Unclassified',
         Subtitle='Files where compliance has not decided (probe pending or permanently deferred).',
         Icon='fas fa-question-circle',

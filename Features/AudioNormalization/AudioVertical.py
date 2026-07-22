@@ -6,11 +6,7 @@ from Repositories.DatabaseManager import DatabaseManager
 from Features.AudioNormalization.AudioPolicyAdmissionGate import AudioPolicyAdmissionGate
 
 
-# directive: compliance-symmetry
-_BITRATE_ROUNDING_TOLERANCE = 1.05
-
-
-# directive: compliance-symmetry
+# directive: transcode-flow-canonical -- C33
 class AudioVertical:
 
     # directive: transcode-flow-canonical -- C33 profile-independent baseline
@@ -59,7 +55,7 @@ class AudioVertical:
             return (True, None)
         return (False, 'needs_normalization')
 
-    # directive: compliance-symmetry
+    # directive: transcode-flow-canonical -- C33
     def RecomputeFor(self, MediaFileIds: List[int]) -> None:
         for Id in MediaFileIds:
             Mf = self._RepoMgr.GetMediaFileById(Id)
@@ -68,7 +64,7 @@ class AudioVertical:
             Compliant, Reason = self.Evaluate(Mf)
             self._WriteResult(Id, Compliant, Reason)
 
-    # directive: compliance-symmetry
+    # directive: transcode-flow-canonical -- C33
     def _WriteResult(self, MediaFileId: int, Compliant, Reason):
         self._Db.ExecuteNonQuery(
             "UPDATE MediaFiles SET AudioCompliant = %s, AudioCompliantReason = %s WHERE Id = %s",
