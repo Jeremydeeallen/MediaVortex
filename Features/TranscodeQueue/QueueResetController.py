@@ -136,13 +136,10 @@ def ResetTranscodeAttempts(Repository: TranscodeQueueRepository) -> Dict[str, An
 
         itemsToReset = countResult[0]['Count'] if countResult else 0
 
-        # Mark running attempts as terminated (set Success to False and add error message)
-        updateQuery = """UPDATE TranscodeAttempts
-                        SET Success = FALSE,
-                            ErrorMessage = 'Terminated due to system reset',
-                            AttemptDate = NOW()
-                        WHERE Success IS NULL"""
-        updateResult = Repository.DatabaseService.ExecuteNonQuery(updateQuery)
+        # directive: e2e-bug-fixes | # see e2e-bug-fixes.C32 -- SQL moved to TranscodeJobRepository.MarkAllInflightAttemptsTerminated; AttemptDate no longer overwritten.
+        from Features.TranscodeJob.TranscodeJobRepository import TranscodeJobRepository
+        TjRepo = TranscodeJobRepository()
+        updateResult = TjRepo.MarkAllInflightAttemptsTerminated('Terminated due to system reset')
 
         if updateResult is not None:
             LoggingService.LogInfo(f"Marked {itemsToReset} transcode attempts as terminated",

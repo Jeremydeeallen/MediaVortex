@@ -83,6 +83,14 @@ C25. Every MediaVortex-emitted `-mv.mp4` carries provenance metadata in its `moo
   - `mediavortex_ts` = UTC ISO 8601 timestamp at command-build time
 No Attempt.Id because command builds BEFORE the attempt row is created (chicken/egg). Operator can join by (worker, ts) if needed. Verifiable: post-fix, `ffprobe -show_format -v error <any-new-mv.mp4> | grep mediavortex_` returns all 5 keys.
 
+### Group T -- AttemptDate immutability (added 2026-07-21)
+
+C32. `TranscodeAttempts.AttemptDate` is set once at `CreateTranscodeAttempt` and never overwritten. Root cause 2026-07-21 (surfaced by larry CPU-Demucs canary): `JobProcessor.Process` line 116-124 UPDATEd `AttemptDate = datetime.now(timezone.utc)` AFTER Demucs pre-pass and BEFORE encode. Wall-time reports (CompletedDate - AttemptDate) then measured only the encode portion, hiding all pre-encode time. Real observed CPU-Demucs took ~12.5 min but DB `wall_sec` showed 59-150s -- a 6-15x under-count that would mask real performance regressions and make throughput planning impossible.
+
+The offending UPDATE re-wrote 7 fields (FilePath, AttemptDate, OldSizeBytes, NewSizeBytes, Success, FfpmpegCommand, VMAF). Only `FfpmpegCommand` was actually new information (command not known until after `BuildCommand`); the other 6 were redundant re-writes of values already correct from `CreateTranscodeAttempt`. Fix: reduce the UPDATE to write ONLY `FfpmpegCommand`. Delete the redundant fields.
+
+Verification: (a) requeue an AudioFix on larry -> `SELECT AttemptDate FROM TranscodeAttempts WHERE Id = <n>` matches the pre-Demucs timestamp; `wall_sec = CompletedDate - AttemptDate` reports the true full-pipeline wall (source.measure + Demucs + encode + post-encode); (b) contract test asserts that on a two-phase pipeline (any Demucs-required mode), the `AttemptDate` seen 30s into the pipeline equals the `AttemptDate` seen at completion.
+
 ### Group S -- MediaVortex-output compliance exemption (added 2026-07-21)
 
 C31. `VideoVertical.Evaluate` returns `(True, 'mediavortex_output_accepted')` as its first check when `Mf.TranscodedByMediaVortex` is True. Every subsequent video-side rule (codec allowlist, bpp threshold, resolution-exceeds, bitrate-ceiling) is skipped for MV outputs. `AudioVertical` and `ContainerVertical` still run so audio-only or container-only issues route through `AudioFix` / `Remux` as normal.

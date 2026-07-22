@@ -112,15 +112,9 @@ class JobProcessor:
             TemporaryFilePathId = self.QueueService.PrivateCreateTemporaryFilePathRecord(
                 TranscodeAttemptId, SrcId, SrcRel, OutId, OutRel)
 
-            # directive: e2e-bug-fixes | # see e2e-bug-fixes.C22 -- ProfileName written at INSERT; do not overwrite with Strategy fallback.
+            # directive: e2e-bug-fixes | # see e2e-bug-fixes.C32 -- AttemptDate is immutable after CreateTranscodeAttempt; only FfpmpegCommand is new information here (built post-BuildCommand). Every other field is already set at INSERT.
             self.QueueService.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
-                'FilePath': Job.FilePath,
-                'AttemptDate': datetime.now(timezone.utc),
-                'OldSizeBytes': Job.SizeBytes,
-                'NewSizeBytes': 0,
-                'Success': None,
                 'FfpmpegCommand': CommandResult.Command,
-                'VMAF': None,
             })
 
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, Mode, 0.0, f"Running {Mode}...")

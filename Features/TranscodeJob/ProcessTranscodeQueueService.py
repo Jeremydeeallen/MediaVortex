@@ -467,22 +467,13 @@ class ProcessTranscodeQueueService:
         self.PrivateCreateTemporaryFilePathRecord(
             TranscodeAttemptId, SrcId, SrcRel, OutId, OutRel)
 
+        # directive: e2e-bug-fixes | # see e2e-bug-fixes.C32 -- AttemptDate immutable; only variant-specific + post-BuildCommand fields written here.
         self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
-            'FilePath': Job.FilePath,
-            'AttemptDate': datetime.now(timezone.utc),
             'Quality': Ps.get('Quality', 0),
-            'OldSizeBytes': Job.SizeBytes,
-            'NewSizeBytes': 0,
-            'Success': None,
-            'SizeReductionBytes': 0,
-            'SizeReductionPercent': 0.0,
-            'ErrorMessage': None,
-            'TranscodeDurationSeconds': 0.0,
             'FfpmpegCommand': TranscodeCommand,
             'AudioBitrateKbps': Ps.get('AudioBitrateKbps'),
             'VideoBitrateKbps': Ps.get('VideoBitrateKbps'),
             'ProfileName': MediaFile.AssignedProfile,
-            'VMAF': None,
             'TestVariantSetId': Job.TestVariantSetId,
             'TestVariantName': VariantName,
         })

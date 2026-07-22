@@ -262,9 +262,10 @@ class TranscodeJobRepository(BaseRepository):
                     return attemptId
                 else:
                     LoggingService.LogInfo(f"Updating existing attempt with ID: {Attempt.Id}", "TranscodeJobRepository", "SaveTranscodeAttempt")
+                    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C32 -- AttemptDate is set once at INSERT and never overwritten by UPDATE; caller-side wall-time reports depend on immutability.
                     query = (
                         "UPDATE TranscodeAttempts "
-                        "SET AttemptDate = %s, Quality = %s, OldSizeBytes = %s, NewSizeBytes = %s, "
+                        "SET Quality = %s, OldSizeBytes = %s, NewSizeBytes = %s, "
                         "    Success = %s, SizeReductionBytes = %s, SizeReductionPercent = %s, ErrorMessage = %s, "
                         "    TranscodeDurationSeconds = %s, FfpmpegCommand = %s, AudioBitrateKbps = %s, "
                         "    VideoBitrateKbps = %s, ProfileName = %s, VMAF = %s, "
@@ -272,7 +273,7 @@ class TranscodeJobRepository(BaseRepository):
                         "WHERE Id = %s"
                     )
                     parameters = (
-                        Attempt.AttemptDate, Attempt.Quality,
+                        Attempt.Quality,
                         Attempt.OldSizeBytes, Attempt.NewSizeBytes, Attempt.Success,
                         Attempt.SizeReductionBytes, Attempt.SizeReductionPercent, Attempt.ErrorMessage,
                         Attempt.TranscodeDurationSeconds,
@@ -292,15 +293,33 @@ class TranscodeJobRepository(BaseRepository):
             LoggingService.LogException("Exception in SaveTranscodeAttempt", e, "TranscodeJobRepository", "SaveTranscodeAttempt")
             raise
 
-    # directive: path-schema-migration | # see path.S8
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C32 -- system-reset marks all in-flight attempts terminated; AttemptDate stays immutable.
+    def MarkAllInflightAttemptsTerminated(self, ErrorMessage: str) -> int:
+        """UPDATE all Success IS NULL attempts to Success=FALSE + ErrorMessage. AttemptDate untouched (immutable). Returns rowcount."""
+        Query = (
+            "UPDATE TranscodeAttempts "
+            "SET Success = FALSE, ErrorMessage = %s "
+            "WHERE Success IS NULL"
+        )
+        Result = self.DatabaseService.ExecuteNonQuery(Query, (ErrorMessage,))
+        return int(Result) if Result is not None else 0
+
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C32 -- AttemptDate is set once at INSERT and is IMMUTABLE. UpdateTranscodeAttempt refuses it; caller attempting to write AttemptDate is a bug.
     def UpdateTranscodeAttempt(self, AttemptId: int, Updates: Dict[str, Any]) -> bool:
-        """Update specific fields of a transcoding attempt."""
+        """Update specific fields of a transcoding attempt. AttemptDate is immutable and cannot be updated."""
         try:
             LoggingService.LogFunctionEntry("UpdateTranscodeAttempt", "TranscodeJobRepository", AttemptId, Updates)
 
+            if 'AttemptDate' in Updates:
+                raise ValueError(
+                    "UpdateTranscodeAttempt: AttemptDate is immutable after CreateTranscodeAttempt (e2e-bug-fixes.C32). "
+                    "Rewriting it corrupts wall-time reports by hiding pre-encode phases (Demucs, source.measure). "
+                    "Set once at INSERT; never overwritten."
+                )
+
             valid_fields = [
                 'StorageRootId', 'RelativePath',
-                'AttemptDate', 'Quality', 'OldSizeBytes', 'NewSizeBytes',
+                'Quality', 'OldSizeBytes', 'NewSizeBytes',
                 'Success', 'SizeReductionBytes', 'SizeReductionPercent', 'ErrorMessage',
                 'TranscodeDurationSeconds', 'FfpmpegCommand', 'AudioBitrateKbps',
                 'VideoBitrateKbps', 'ProfileName', 'VMAF', 'FileReplaced', 'FileReplacedDate',
