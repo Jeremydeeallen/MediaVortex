@@ -1959,6 +1959,17 @@ class QueueManagementBusinessService:
                 LoggingService.LogError(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
 
+            # directive: transcode-flow-canonical -- C34 audio-only containers refused at admission; ForceAdd cannot override
+            from Features.MediaFile.Domain.MediaFileScope import IsAudioOnlyContainer
+            if IsAudioOnlyContainer(mediaFile):
+                errorMsg = (
+                    f"MediaFileId {MediaFileId} ({mediaFile.FileName}) has audio-only ContainerFormat "
+                    f"{getattr(mediaFile, 'ContainerFormat', None)!r}; "
+                    f"non-video containers are out of pipeline scope and cannot be queued (even with ForceAdd)."
+                )
+                LoggingService.LogWarning(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
+                return {"Success": False, "ErrorMessage": errorMsg}
+
             # Targeted per-MediaFileId dedup; returns AlreadyQueued=True with existing row ID so callers can be idempotent.
             ExistingRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
                 "SELECT Id FROM TranscodeQueue WHERE MediaFileId = %s AND Status = 'Pending' LIMIT 1",

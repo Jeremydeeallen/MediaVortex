@@ -102,5 +102,51 @@ class TestNonVideoContainersExcluded(unittest.TestCase):
             Composer.Build(Mf, Job, Context={'FFmpegPath': '/usr/bin/ffmpeg'})
 
 
+class TestTranscodeQueueRefusesAudioOnlyLive(unittest.TestCase):
+
+    def setUp(self):
+        from Core.Database.DatabaseService import DatabaseService
+        self.Db = DatabaseService()
+        Rows = self.Db.ExecuteQuery(
+            "SELECT Id, StorageRootId, RelativePath, FileName, SizeMB "
+            "FROM MediaFiles "
+            "WHERE ContainerFormat = 'mp3' "
+            "LIMIT 1"
+        )
+        if not Rows:
+            self.skipTest("no mp3 MediaFile present for live test")
+        self.Row = Rows[0]
+
+    def test_direct_insert_raises(self):
+        import psycopg2
+        Params = (
+            int(self.Row.get('storagerootid') or 2),
+            self.Row.get('relativepath') or 'test.mp3',
+            self.Row.get('filename') or 'test.mp3',
+            '',
+            1_000_000,
+            float(self.Row.get('sizemb') or 1.0),
+            1,
+            'Pending',
+            'Transcode',
+            int(self.Row.get('id')),
+        )
+        Sql = (
+            "INSERT INTO TranscodeQueue "
+            "(StorageRootId, RelativePath, FileName, Directory, "
+            "SizeBytes, SizeMB, Priority, Status, ProcessingMode, MediaFileId, DateAdded) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())"
+        )
+        with self.assertRaises(psycopg2.errors.RaiseException):
+            self.Db.ExecuteNonQuery(Sql, Params)
+
+    def test_add_job_refuses_forceadd(self):
+        from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+        Svc = QueueManagementBusinessService()
+        Result = Svc.AddJobToQueue(int(self.Row.get('id')), Priority=200, ForceAdd=True)
+        self.assertFalse(Result.get('Success'))
+        self.assertIn('audio-only', (Result.get('ErrorMessage') or '').lower())
+
+
 if __name__ == '__main__':
     unittest.main()
