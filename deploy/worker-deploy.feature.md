@@ -10,8 +10,9 @@ Deploy contract only. Runtime invariants (FFmpeg path, crash recovery, signal ha
 
 ## Surface
 
-- `deploy/deploy-linux-worker.py <target>` -- Docker on Linux. Covers LXC hosts (Larry). Per-host differences come from `inventory.toml`.
-- `deploy/deploy-baremetal-worker.py <target>` -- Bare-metal Linux, no containers. Covers Intel Arc / Xe workstations (Wakko) and NVIDIA hosts (dot). Installs WorkerService and Python deps directly on the host; systemd unit runs one WorkerService per configured worker slot. Torch variant auto-detected: cu124 (NVIDIA), xpu (Intel Arc), cpu (fallback).
+- `deploy/deploy-fleet.py [--hosts <name,...>] [--no-drain]` -- **canonical operator entry.** Drains live workers via `Workers.Status='Paused'`, dispatches each host to its correct backend via `SelectDeployScript(Host)` (compose-template presence -> docker; absence -> baremetal), restarts local I9 WorkerService, restores pre-drain Status, polls `Workers.Version` until fleet matches HEAD. Per-shape scripts below are the internal backends.
+- `deploy/deploy-linux-worker.py <target>` -- Docker on Linux backend. Covers LXC hosts (Larry). Refuses if no compose template. Per-host differences come from `inventory.toml`.
+- `deploy/deploy-baremetal-worker.py <target>` -- Bare-metal Linux backend, no containers. Covers Intel Arc / Xe workstations (Wakko) and NVIDIA hosts (dot). Refuses if a docker compose template exists for the host (misuse -> fleet script). Installs WorkerService and Python deps directly on the host; systemd unit runs one WorkerService per configured worker slot. Torch variant auto-detected: cu124 (NVIDIA), xpu (Intel Arc), cpu (fallback).
 - `deploy/deploy-windows-worker.py <target>` -- Task Scheduler + SMB on Windows (I9-2024).
 - **Code updates on I9-2024 (Windows worker)** -- WorkerService runs from the `C:\Code\MediaVortex` source tree; stop + restart to apply changes, no re-deploy needed. Linux-Docker workers require `deploy-linux-worker.py <target>` per change because Docker bakes the source into the container image. Bare-metal Linux workers apply code changes via `deploy-baremetal-worker.py <target>` which rsyncs source + restarts the systemd units.
 - `deploy/bringup.md` -- one-page runbook picks the shape and points at the right command.

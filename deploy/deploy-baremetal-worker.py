@@ -1,4 +1,3 @@
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 import argparse
 import subprocess
 import sys
@@ -20,25 +19,21 @@ TorchIndexByVariant = {
 }
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def _Status(Step: int, Total: int, Title: str, Result: str = "...", Detail: str = "") -> None:
     Tag = {"OK": "[OK]   ", "SKIPPED": "[SKIP] ", "FAILED": "[FAIL] ", "...": "[..]   "}.get(Result, f"[{Result}] ")
     Suffix = f" -- {Detail}" if Detail else ""
     print(f"  {Tag}({Step}/{Total}) {Title}{Suffix}", flush=True)
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def _Ssh(Target: str, Cmd: str, Timeout: int = 60) -> subprocess.CompletedProcess:
     return subprocess.run(["ssh", *SshOpts, Target, Cmd], capture_output=True, text=True, timeout=Timeout)
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def _Scp(LocalPath: Path, Target: str, RemotePath: str, Timeout: int = 300) -> bool:
     R = subprocess.run(["scp", *SshOpts, "-r", str(LocalPath), f"{Target}:{RemotePath}"], capture_output=True, text=True, timeout=Timeout)
     return R.returncode == 0
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def _ResolveTarget(TargetArg: str, InventoryToml: Path, UserOverride: Optional[str]):
     if not InventoryToml.exists():
         return TargetArg, TargetArg, (UserOverride or "root"), DefaultWorkerCount
@@ -58,7 +53,6 @@ def _ResolveTarget(TargetArg: str, InventoryToml: Path, UserOverride: Optional[s
     return TargetArg, TargetArg, (UserOverride or "root"), DefaultWorkerCount
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def _DetectTorchVariant(Target: str) -> str:
     R = _Ssh(Target, "nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1", Timeout=10)
     if (R.stdout or "").strip():
@@ -69,7 +63,6 @@ def _DetectTorchVariant(Target: str) -> str:
     return "cpu"
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def StepPreflight(Target: str, Friendly: str) -> bool:
     R = _Ssh(Target, "which python3.12 && which docker || which podman; test -d /mnt/media_tv && echo mounts_ok", Timeout=10)
     if "mounts_ok" not in (R.stdout or ""):
@@ -79,7 +72,6 @@ def StepPreflight(Target: str, Friendly: str) -> bool:
     return True
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def StepEnsureVenv(Target: str, TorchVariant: str) -> bool:
     # directive: transcode-flow-canonical -- torch/torchaudio need index-url per variant; every other package installs from requirements.txt in StepInstallRequirements.
     Index = TorchIndexByVariant.get(TorchVariant, TorchIndexByVariant["cpu"])
@@ -118,7 +110,6 @@ def StepInstallRequirements(Target: str) -> bool:
     return True
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def StepEnsureFfmpeg(Target: str) -> bool:
     R = _Ssh(Target, "test -x /usr/local/bin/ffmpeg && echo FFMPEG_OK", Timeout=10)
     if "FFMPEG_OK" in (R.stdout or ""):
@@ -184,7 +175,6 @@ def StepShipSchemaSnapshot(Target: str) -> bool:
     return True
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def StepInstallSystemdUnit(Target: str, Friendly: str) -> bool:
     UnitLocal = BaremetalDir / "mediavortex-worker@.service"
     EnvLocal = BaremetalDir / "worker.env.template"
@@ -199,7 +189,6 @@ def StepInstallSystemdUnit(Target: str, Friendly: str) -> bool:
     return True
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def StepStopContainersAndClearDb(Target: str, Friendly: str) -> bool:
     R = _Ssh(Target, "docker ps -a --filter 'name=mediavortex-worker-' --format '{{.Names}}' | head -20", Timeout=10)
     Names = [N for N in (R.stdout or "").splitlines() if N.strip()]
@@ -242,7 +231,6 @@ def StepStartInstances(Target: str, Friendly: str, Count: int) -> bool:
     return True
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def StepVerify(Target: str, Friendly: str, Count: int) -> bool:
     R = _Ssh(Target, "systemctl list-units 'mediavortex-worker@*' --no-legend --state=active | awk '{print $1}' | head -8", Timeout=10)
     Lines = [L.strip() for L in (R.stdout or "").splitlines() if L.strip()]
@@ -268,7 +256,6 @@ def StepReconcileCapabilities(Target: str, Friendly: str) -> bool:
     return True
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def main():
     Parser = argparse.ArgumentParser(description="Idempotent bare-metal deploy for MediaVortex WorkerService.")
     Parser.add_argument("target", help="Friendly name (dot, wakko, larry) or IP literal.")
@@ -279,6 +266,10 @@ def main():
     Args = Parser.parse_args()
 
     Friendly, Ip, User, InventoryCount = _ResolveTarget(Args.target, Args.inventory, Args.user)
+    ComposeTemplate = MediaVortexRoot / "deploy" / "compose-templates" / f"{Friendly}.yml"
+    if ComposeTemplate.exists():
+        print(f"[FAIL] {Friendly} is a docker/LXC host (compose template present at {ComposeTemplate}). Use deploy-linux-worker.py, or invoke deploy-fleet.py --hosts {Friendly} which routes by backend.")
+        return 1
     Count = Args.count or InventoryCount
     Target = f"{User}@{Ip}"
     print("=" * 60)

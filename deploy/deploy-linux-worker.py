@@ -264,7 +264,6 @@ def _DetectTorchVariant(Target: str) -> str:
     return "cpu"
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
 def StepDockerBuild(Target: str, Sha: str) -> bool:
     FfmpegTag, FfmpegAsset = _LoadFfmpegPin()
     TorchVariant = _DetectTorchVariant(Target)

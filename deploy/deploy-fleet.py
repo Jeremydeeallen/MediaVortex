@@ -150,14 +150,20 @@ def RestoreWorkerStatus(Db, OriginalStatus: dict) -> None:
     print(f"restored Status for {len([s for s in OriginalStatus.values() if s != 'Paused'])} worker(s)")
 
 
+def SelectDeployScript(Host: str) -> str:
+    if (ROOT / "deploy" / "compose-templates" / f"{Host}.yml").exists():
+        return "deploy/deploy-linux-worker.py"
+    return "deploy/deploy-baremetal-worker.py"
+
+
 def DeployRemoteHost(Host: str) -> tuple:
-    """Run deploy/deploy-linux-worker.py for a host. Returns (host, rc, tail)."""
+    Script = SelectDeployScript(Host)
     R = subprocess.run(
-        [sys.executable, "deploy/deploy-linux-worker.py", Host],
+        [sys.executable, Script, Host],
         cwd=str(ROOT), capture_output=True, text=True,
     )
     Tail = "\n        ".join(R.stdout.strip().splitlines()[-3:])
-    return (Host, R.returncode, Tail)
+    return (Host, R.returncode, Tail, Script.rsplit("/", 1)[-1])
 
 
 def RestartLocalWorker() -> str:
@@ -317,12 +323,12 @@ def Main() -> int:
                 Results.append(F.result())
 
     AnyFail = False
-    for H, Rc, Tail in Results:
+    for H, Rc, Tail, Backend in Results:
         if Rc == 0:
-            print(f"   [OK]   {H}")
+            print(f"   [OK]   {H} via {Backend}")
         else:
             AnyFail = True
-            print(f"   [FAIL] {H} rc={Rc}\n        {Tail}")
+            print(f"   [FAIL] {H} via {Backend} rc={Rc}\n        {Tail}")
 
     if LocalNames and not Args.skip_local:
         Status = RestartLocalWorker()
