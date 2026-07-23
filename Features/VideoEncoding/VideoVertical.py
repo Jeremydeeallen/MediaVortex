@@ -32,10 +32,10 @@ class VideoVertical:
         self._Db = Db or DatabaseService()
         self._RepoMgr = RepoMgr or DatabaseManager()
 
-    # directive: transcode-flow-canonical -- C33 baseline rules only, no profile lookup
+    # directive: transcode-flow-canonical | # see video-encoding.C2
     def _LoadRules(self):
         Rows = self._Db.ExecuteQuery(
-            "SELECT AcceptableVideoCodecsCsv, BppTranscodeThreshold "
+            "SELECT AcceptableVideoCodecsCsv, BppTranscodeThreshold, MinSizeMbPerMinuteToTranscode "
             "FROM VideoComplianceRules ORDER BY Id LIMIT 1"
         )
         if not Rows:
@@ -43,21 +43,33 @@ class VideoVertical:
         R = Rows[0]
         Csv = (R.get('AcceptableVideoCodecsCsv') or R.get('acceptablevideocodecscsv') or '').strip()
         Allowed = [C.strip().lower() for C in Csv.split(',') if C.strip()]
-        Threshold = R.get('BppTranscodeThreshold') if 'BppTranscodeThreshold' in R else R.get('bpptranscodethreshold')
-        return Allowed, (float(Threshold) if Threshold is not None else 0.0)
+        BppThreshold = R.get('BppTranscodeThreshold') if 'BppTranscodeThreshold' in R else R.get('bpptranscodethreshold')
+        MinMbPerMin = R.get('MinSizeMbPerMinuteToTranscode') if 'MinSizeMbPerMinuteToTranscode' in R else R.get('minsizembperminutetotranscode')
+        return (
+            Allowed,
+            (float(BppThreshold) if BppThreshold is not None else 0.0),
+            (float(MinMbPerMin) if MinMbPerMin is not None else 0.0),
+        )
 
-    # directive: transcode-flow-canonical -- C34 audio-only containers precede every other rule
+    # directive: transcode-flow-canonical | # see video-encoding.C7
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
         if IsAudioOnlyContainer(Mf):
             return (None, 'non_video_scope')
         if bool(getattr(Mf, 'TranscodedByMediaVortex', False)):
             return (True, 'mediavortex_output_accepted')
 
-        AllowedCodecs, BppThreshold = self._LoadRules()
+        AllowedCodecs, BppThreshold, MinMbPerMin = self._LoadRules()
 
         SrcCodec = (getattr(Mf, 'Codec', None) or '').lower()
         if SrcCodec and AllowedCodecs and SrcCodec not in AllowedCodecs:
             return (False, f'codec:{SrcCodec}')
+
+        SizeMb = getattr(Mf, 'SizeMB', None)
+        DurationMin = getattr(Mf, 'DurationMinutes', None)
+        if SizeMb is not None and DurationMin is not None and float(DurationMin) > 0 and MinMbPerMin > 0:
+            Ratio = float(SizeMb) / float(DurationMin)
+            if Ratio < MinMbPerMin:
+                return (True, f'efficient_size_override:{Ratio:.2f}<{MinMbPerMin:.2f}')
 
         Bpp = _ComputeBpp(Mf)
         if Bpp is not None and BppThreshold > 0 and Bpp > BppThreshold:

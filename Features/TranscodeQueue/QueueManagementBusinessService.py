@@ -1929,10 +1929,16 @@ class QueueManagementBusinessService:
 
     # directive: path-schema-migration | # see path.S8
     def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None, ForceAdd: bool = False, ProcessingMode: str = None, QualityLabel: str = None, QualityTier: int = None) -> Dict[str, Any]:
-        """Add a specific media file to the transcoding queue; dedupe via typed-pair identity. ProcessingMode overrides default 'Transcode'; non-Transcode modes skip profile/savings/VMAF gates. QualityLabel/QualityTier resolve to ProfileId via ProfileRepository lookup (family-agnostic tier ladder, C25)."""
+        """Add a specific media file to the transcoding queue; dedupe via typed-pair identity. ProcessingMode overrides MediaFile.WorkBucket; non-Transcode modes skip profile/savings/VMAF gates. QualityLabel/QualityTier resolve to ProfileId via ProfileRepository lookup (family-agnostic tier ladder, C25)."""
         # directive: transcode-flow-canonical | # see transcode.ST2
         from Features.TranscodeJob import ProcessingModeMetadata
-        EffectiveMode = ProcessingMode or 'Transcode'
+        EffectiveMode = ProcessingMode
+        if not EffectiveMode:
+            _BucketRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT WorkBucket FROM MediaFiles WHERE Id = %s", (int(MediaFileId),)
+            )
+            _Bucket = _BucketRows[0].get('workbucket') if _BucketRows else None
+            EffectiveMode = _Bucket if _Bucket in ('Transcode', 'Remux', 'AudioFix', 'SubtitleFix') else 'Transcode'
         IsTranscodeMode = ProcessingModeMetadata.GetOrDefault(EffectiveMode)['RequiresProfileGates']
         try:
             LoggingService.LogFunctionEntry("AddJobToQueue", "QueueManagementBusinessService", MediaFileId, Priority)
