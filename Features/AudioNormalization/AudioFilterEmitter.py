@@ -1,4 +1,4 @@
-# directive: audio-dialog-boost-real | # see audio-normalization.C8
+# directive: audio-dialog-boost-real | # see audio-normalization.ST3
 from typing import List, Optional
 
 from Features.AudioNormalization.AudioDispositionResolver import AudioDispositionResolver
@@ -7,25 +7,40 @@ from Features.AudioNormalization.LanguageDetector import LanguageDetector
 from Features.AudioNormalization.Repositories.AudioComplianceRulesRepository import AudioComplianceRulesRepository
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C8
+# directive: audio-dialog-boost-real | # see audio-normalization.ST3
 def _DbToLinear(Db):
     return 10.0 ** (float(Db) / 20.0)
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C8
+# directive: transcode-flow-canonical | # see audio-normalization.ST3
+_ALIMITER_LIMIT_MIN = 0.0625
+_ALIMITER_LIMIT_MAX = 1.0
+
+
+# directive: transcode-flow-canonical | # see audio-normalization.ST3
+def _AlimiterArg(LimitLinear):
+    Value = float(LimitLinear)
+    if not (_ALIMITER_LIMIT_MIN <= Value <= _ALIMITER_LIMIT_MAX):
+        raise ValueError(
+            f"alimiter limit {Value:.6f} out of range [{_ALIMITER_LIMIT_MIN}, {_ALIMITER_LIMIT_MAX}]"
+        )
+    return f"alimiter=level_in=1:level_out=1:limit={Value:.4f}:attack=1:release=50:level=false"
+
+
+# directive: audio-dialog-boost-real | # see audio-normalization.ST3
 def _ResolveFfmpegCodec(CodecName):
     Normalized = str(CodecName or 'aac').strip().lower()
     return {'opus': 'libopus', 'aac': 'aac', 'libopus': 'libopus'}.get(Normalized, 'aac')
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C8
+# directive: audio-dialog-boost-real | # see audio-normalization.ST3
 MIN_TRANSPARENT_KBPS_PER_CH = 48
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C8
+# directive: audio-dialog-boost-real | # see audio-normalization.ST3
 class TrackBlock:
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C8
+    # directive: audio-dialog-boost-real | # see audio-normalization.ST3
     def __init__(self, Label, Language, Strategy):
         self.Label = Label
         self.Language = Language
@@ -38,7 +53,7 @@ class TrackBlock:
         self.DispositionArgs = []
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C8
+# directive: audio-dialog-boost-real | # see audio-normalization.ST3
 def _GetField(Obj, Name):
     if hasattr(Obj, Name):
         return getattr(Obj, Name)
@@ -50,40 +65,28 @@ def _GetField(Obj, Name):
     return None
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C8
+# directive: transcode-flow-canonical | # see audio-normalization.ST3
 def _BuildTrack0Chain(MediaFile, TargetLufs, TargetTruePeakDbtp, SampleLimitHeadroomDb):
     SrcI = float(_GetField(MediaFile, 'SourceIntegratedLufs'))
     SrcLra = float(_GetField(MediaFile, 'SourceLoudnessRangeLU'))
     SrcTp = float(_GetField(MediaFile, 'SourceTruePeakDbtp'))
     SrcThresh = float(_GetField(MediaFile, 'SourceIntegratedThresholdLufs'))
     EffectiveTargetTp = float(TargetTruePeakDbtp) - float(SampleLimitHeadroomDb)
-    GainShift = float(TargetLufs) - SrcI
-    ClipNeeded = max(0.0, SrcTp + GainShift - EffectiveTargetTp)
-    if ClipNeeded > 0.0:
-        PreLimitDb = SrcTp - ClipNeeded
-        PreLimitLinear = _DbToLinear(PreLimitDb)
-        EffectiveMeasuredTp = PreLimitDb
-        PreChain = f"alimiter=level_in=1:level_out=1:limit={PreLimitLinear:.4f}:attack=1:release=50:level=false,"
-    else:
-        EffectiveMeasuredTp = SrcTp
-        PreChain = ""
-    Measured = (
-        f"measured_I={SrcI:.2f}"
-        f":measured_LRA={SrcLra:.2f}"
-        f":measured_TP={EffectiveMeasuredTp:.2f}"
-        f":measured_thresh={SrcThresh:.2f}"
-    )
+    SampleLimit = _DbToLinear(EffectiveTargetTp)
     return (
-        f"{PreChain}"
         f"loudnorm=I={float(TargetLufs):.2f}"
         f":LRA={max(SrcLra, 1.0):.2f}"
         f":TP={EffectiveTargetTp:.2f}"
-        f":{Measured}"
+        f":measured_I={SrcI:.2f}"
+        f":measured_LRA={SrcLra:.2f}"
+        f":measured_TP={SrcTp:.2f}"
+        f":measured_thresh={SrcThresh:.2f}"
         f":linear=true"
+        f",{_AlimiterArg(SampleLimit)}"
     )
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C8
+# directive: audio-dialog-boost-real | # see audio-normalization.ST3
 def _BuildDialogBoostLoudnormFilter(TargetLufs, TargetLra, TargetTruePeakDbtp, MeasuredI=None, MeasuredLra=None, MeasuredTp=None, MeasuredThresh=None):
     Base = (
         f"loudnorm=I={float(TargetLufs):.2f}"
@@ -101,16 +104,16 @@ def _BuildDialogBoostLoudnormFilter(TargetLufs, TargetLra, TargetTruePeakDbtp, M
     return Base
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C8
+# directive: audio-dialog-boost-real | # see audio-normalization.ST3
 class AudioFilterEmitter:
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C8
+    # directive: audio-dialog-boost-real | # see audio-normalization.ST3
     def __init__(self, LanguageDetectorInstance=None, DispositionResolver=None, RulesRepo=None):
         self.LanguageDetector = LanguageDetectorInstance or LanguageDetector()
         self.DispositionResolver = DispositionResolver or AudioDispositionResolver()
         self._RulesRepo = RulesRepo or AudioComplianceRulesRepository()
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C8
+    # directive: audio-dialog-boost-real | # see audio-normalization.ST3
     def EmitTracks(self, MediaFile, Policy, AudioStreams=None, LibraryDefault=None, DemucsPremixPath=None, VocalsRmsDbfs=None, Rules=None, PremixMeasuredI=None, PremixMeasuredLra=None, PremixMeasuredTp=None, PremixMeasuredThresh=None):
         R = Rules or self._RulesRepo.GetRules()
         if AudioStreams is None:
@@ -143,7 +146,7 @@ class AudioFilterEmitter:
             OutputIndex += 1
         return Blocks
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C8
+    # directive: audio-dialog-boost-real | # see audio-normalization.ST3
     def _ShouldEmitDialogBoost(self, DemucsPremixPath, VocalsRmsDbfs, VocalsFallbackDbfs):
         if not DemucsPremixPath:
             return False
@@ -151,7 +154,7 @@ class AudioFilterEmitter:
             return False
         return True
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C8
+    # directive: audio-dialog-boost-real | # see audio-normalization.ST3
     def _BuildOriginalBlock(self, MediaFile, Stream, Language, StreamIdx, OutputIndex, IsDefault, R):
         Channels = self._ResolveSourceChannels(MediaFile)
         Bitrate = max(MIN_TRANSPARENT_KBPS_PER_CH, int(R['Track0BitratePerChannelKbps']), int(R['Track0MinPerChannelKbps'])) * Channels
@@ -175,7 +178,7 @@ class AudioFilterEmitter:
         Block.DispositionArgs = [f'-disposition:a:{OutputIndex}', '1' if IsDefault else '0']
         return Block
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C8
+    # directive: audio-dialog-boost-real | # see audio-normalization.ST3
     def _BuildDialogBoostBlock(self, Language, OutputIndex, DemucsPremixPath, R, MeasuredI=None, MeasuredLra=None, MeasuredTp=None, MeasuredThresh=None):
         TargetTp = float(R['TargetTruePeakDbtp'])
         EffectiveTp = TargetTp - float(R['SampleLimitHeadroomDb'])
@@ -189,13 +192,13 @@ class AudioFilterEmitter:
             f'-b:a:{OutputIndex}', f"{int(R['Track1StereoBitrateKbps'])}k",
             f'-ar:{OutputIndex}', '48000',
         ]
-        Filter = _BuildDialogBoostLoudnormFilter(R['DialogBoostTargetLufs'], R['DialogBoostTargetLra'], EffectiveTp, MeasuredI, MeasuredLra, MeasuredTp, MeasuredThresh) + f",alimiter=level_in=1:level_out=1:limit={SampleLimit:.4f}:attack=1:release=50:level=false"
+        Filter = _BuildDialogBoostLoudnormFilter(R['DialogBoostTargetLufs'], R['DialogBoostTargetLra'], EffectiveTp, MeasuredI, MeasuredLra, MeasuredTp, MeasuredThresh) + f",{_AlimiterArg(SampleLimit)}"
         Block.FilterArgs = [f'-filter:a:{OutputIndex}', Filter]
         Block.MetadataArgs = self._BuildMetadataArgs(Language, 'Dialog Boost', OutputIndex)
         Block.DispositionArgs = [f'-disposition:a:{OutputIndex}', '1']
         return Block
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C8
+    # directive: audio-dialog-boost-real | # see audio-normalization.ST3
     def _BuildMetadataArgs(self, Language, Label, OutputIndex):
         return [
             f'-metadata:s:a:{OutputIndex}', f'"language={Language}"',
@@ -203,7 +206,7 @@ class AudioFilterEmitter:
             f'-metadata:s:a:{OutputIndex}', f'"handler_name={Label} ({Language})"',
         ]
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C8
+    # directive: audio-dialog-boost-real | # see audio-normalization.ST3
     def _ResolveSourceChannels(self, MediaFile):
         Channels = _GetField(MediaFile, 'AudioChannels')
         MediaFileId = _GetField(MediaFile, 'Id')
@@ -229,7 +232,7 @@ class AudioFilterEmitter:
             )
         return max(1, min(8, ChannelsInt))
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C8
+    # directive: audio-dialog-boost-real | # see audio-normalization.ST3
     def _PickDefaultLanguage(self, AudioStreams, StreamLanguageMap, LibraryDefault):
         Present = [StreamLanguageMap.get(S.get('index'), 'und') for S in AudioStreams]
         Result = self.DispositionResolver.PickDefaultLanguage(Present, LibraryDefault)
