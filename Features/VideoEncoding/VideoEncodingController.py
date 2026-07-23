@@ -13,39 +13,29 @@ _Db = DatabaseService()
 _BackfillStatus = {'Running': False, 'Total': 0, 'Completed': 0, 'StartedAt': None, 'FinishedAt': None, 'DurationSec': None, 'LastError': None}
 
 
-# directive: transcode-worker-unification
+# directive: transcode-flow-canonical | # see video-encoding.C2
 @VideoEncodingBlueprint.route('/Rules', methods=['GET'])
 def GetRules():
     Rows = _Db.ExecuteQuery(
-        "SELECT Id, AcceptableVideoCodecsCsv, EstimatedSavingsMBThreshold, PreventUpscale, ResolutionExceedsProfileTarget, BppTranscodeThreshold, LastUpdated "
-        "FROM VideoComplianceRules ORDER BY Id LIMIT 1"
+        "SELECT Id, AcceptableVideoCodecsCsv, LastUpdated FROM VideoComplianceRules ORDER BY Id LIMIT 1"
     )
     if not Rows:
         return jsonify({'Success': False, 'Message': 'VideoComplianceRules has no rows -- migration not applied'}), 500
     return jsonify({'Success': True, 'Data': Rows[0]}), 200
 
 
-# directive: transcode-worker-unification
+# directive: transcode-flow-canonical | # see video-encoding.C2
 @VideoEncodingBlueprint.route('/Rules', methods=['PUT'])
 def UpdateRules():
     Body = request.get_json(silent=True) or {}
     Codecs = (Body.get('AcceptableVideoCodecsCsv') or '').strip()
-    Threshold = Body.get('EstimatedSavingsMBThreshold')
-    PreventUpscale = Body.get('PreventUpscale')
-    ResExceeds = Body.get('ResolutionExceedsProfileTarget')
-    BppThreshold = Body.get('BppTranscodeThreshold')
     if not Codecs:
         return jsonify({'Success': False, 'Message': 'AcceptableVideoCodecsCsv is required'}), 400
-    if Threshold is None or int(Threshold) < 0:
-        return jsonify({'Success': False, 'Message': 'EstimatedSavingsMBThreshold must be a non-negative integer'}), 400
-    if BppThreshold is None or float(BppThreshold) <= 0:
-        return jsonify({'Success': False, 'Message': 'BppTranscodeThreshold must be a positive number'}), 400
     _Db.ExecuteNonQuery(
-        "UPDATE VideoComplianceRules SET AcceptableVideoCodecsCsv = %s, EstimatedSavingsMBThreshold = %s, PreventUpscale = %s, ResolutionExceedsProfileTarget = %s, BppTranscodeThreshold = %s, LastUpdated = NOW() WHERE Id = (SELECT Id FROM VideoComplianceRules ORDER BY Id LIMIT 1)",
-        (Codecs, int(Threshold), bool(PreventUpscale), bool(ResExceeds), float(BppThreshold)),
+        "UPDATE VideoComplianceRules SET AcceptableVideoCodecsCsv = %s, LastUpdated = NOW() WHERE Id = (SELECT Id FROM VideoComplianceRules ORDER BY Id LIMIT 1)",
+        (Codecs,),
     )
-    LoggingService.LogInfo(f"VideoComplianceRules updated: codecs={Codecs!r} savings_threshold={Threshold} upscale={PreventUpscale} resexceeds={ResExceeds} bpp_threshold={BppThreshold}", 'VideoEncodingController', 'UpdateRules')
-    # directive: worker-runtime-state
+    LoggingService.LogInfo(f"VideoComplianceRules updated: codecs={Codecs!r}", 'VideoEncodingController', 'UpdateRules')
     _SpawnBackfill('Video')
     return jsonify({'Success': True, 'Message': 'Saved; library recompute kicked off in background.'}), 200
 

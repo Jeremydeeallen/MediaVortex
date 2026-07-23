@@ -102,24 +102,8 @@
       <table class="table">
         <tbody>
           <tr>
-            <th style="width: 40%;">Acceptable video codecs (CSV)<br><small class="text-muted">Files with codec NOT in this list -> needs transcode</small></th>
+            <th style="width: 40%;">Acceptable video codecs (CSV)<br><small class="text-muted">Files with codec NOT in this list -> needs transcode. Efficient-source check compares SourceKbps to the assigned profile's TargetKbps at the file's resolution -- edit that in the Profiles admin, not here.</small></th>
             <td><input type="text" id="Vc_Codecs" class="form-control form-control-sm" style="max-width: 340px;"></td>
-          </tr>
-          <tr>
-            <th>Estimated savings threshold (MB)<br><small class="text-muted">Predicted savings &gt;= threshold -&gt; needs transcode.</small></th>
-            <td><input type="number" id="Vc_SavingsThreshold" class="form-control form-control-sm" min="0" style="max-width: 140px;"></td>
-          </tr>
-          <tr>
-            <th>BppTranscodeThreshold<br><small class="text-muted">Source BPP &gt; threshold -&gt; force transcode (wasteful source). Default 0.05.<br><code>BPP = (VideoBitrateKbps &times; 1000) &divide; (Width &times; Height &times; FrameRate)</code></small></th>
-            <td><input type="number" step="0.001" id="Vc_BppThreshold" class="form-control form-control-sm" min="0.001" style="max-width: 140px;"></td>
-          </tr>
-          <tr>
-            <th>Prevent upscale<br><small class="text-muted">When source resolution &lt; profile target, never propose transcode</small></th>
-            <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Vc_PreventUpscale"></div></td>
-          </tr>
-          <tr>
-            <th>Block when source resolution exceeds profile target<br><small class="text-muted">Triggers transcode for downscale candidates</small></th>
-            <td><div class="form-check form-switch"><input type="checkbox" class="form-check-input" id="Vc_ResExceeds"></div></td>
           </tr>
           <tr>
             <th></th>
@@ -193,18 +177,10 @@ async function LoadVideoRules() {
   if (!J.Success) { document.getElementById('Vc_Msg').textContent = 'Load failed: ' + J.Message; return; }
   const D = J.Data;
   document.getElementById('Vc_Codecs').value = D.AcceptableVideoCodecsCsv || '';
-  document.getElementById('Vc_SavingsThreshold').value = D.EstimatedSavingsMBThreshold;
-  document.getElementById('Vc_BppThreshold').value = D.BppTranscodeThreshold;
-  document.getElementById('Vc_PreventUpscale').checked = !!D.PreventUpscale;
-  document.getElementById('Vc_ResExceeds').checked = !!D.ResolutionExceedsProfileTarget;
 }
 async function SaveVideoRules() {
   const Body = {
     AcceptableVideoCodecsCsv: document.getElementById('Vc_Codecs').value,
-    EstimatedSavingsMBThreshold: parseInt(document.getElementById('Vc_SavingsThreshold').value, 10),
-    BppTranscodeThreshold: parseFloat(document.getElementById('Vc_BppThreshold').value),
-    PreventUpscale: document.getElementById('Vc_PreventUpscale').checked,
-    ResolutionExceedsProfileTarget: document.getElementById('Vc_ResExceeds').checked,
   };
   const R = await fetch('/api/VideoEncoding/Rules', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(Body) });
   const J = await R.json();

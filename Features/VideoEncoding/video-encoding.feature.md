@@ -10,14 +10,14 @@ Answers one question per MediaFile: is the video stream at library baseline (cod
 
 | # | User action | Surface element | Handler | Backing class.method |
 |---|---|---|---|---|
-| W1 | Operator edits acceptable codecs / BppTranscodeThreshold | `/Admin/Compliance` Video Rules tab | `PUT /api/VideoEncoding/Rules` | `VideoEncodingController.UpdateRules` (updates row + backfills every MediaFileId via `VideoVertical().RecomputeFor`) |
+| W1 | Operator edits acceptable video codecs (CSV) | `/Admin/Compliance` Video Rules tab | `PUT /api/VideoEncoding/Rules` | `VideoEncodingController.UpdateRules` (updates row + backfills every MediaFileId via `VideoVertical().RecomputeFor`) |
 | W2 | Probe completion triggers Video recompute | scanner post-probe | per-file `RecomputeFor` | `VideoVertical.RecomputeFor([Id])` |
 | W3 | Admin bulk recompute | CLI | -- | `VideoVertical.RecomputeFor(all_ids)` |
 
 ## Success Criteria
 
 C1. `VideoVertical.RecomputeFor(MediaFileIds)` writes `(VideoCompliant, VideoCompliantReason)` for each id.
-C2. `VideoVertical.Evaluate` reads exactly one knob from `VideoComplianceRules`: `AcceptableVideoCodecsCsv`. Codec check rejects when source codec is NOT in the allowed CSV. The `BppTranscodeThreshold` and `MinSizeMbPerMinuteToTranscode` columns are retired -- still present in the schema pending cleanup, no longer read.
+C2. `VideoVertical.Evaluate` reads exactly one knob from `VideoComplianceRules`: `AcceptableVideoCodecsCsv`. Codec check rejects when source codec is NOT in the allowed CSV.
 C3. **Efficient-source rule (DOMAIN.md 2026-07-23):** when the source's `VideoBitrateKbps` is at or below the file's assigned profile's `TargetKbps` for the file's `ResolutionCategory` (looked up in `ProfileThresholds`, joined by `Profiles.ProfileName`), `Evaluate` returns `(True, 'source_at_or_below_target:<src><=<target>')`. When the source is above the target, returns `(False, 'source_above_target:<src>><target>')`. When any of AssignedProfile / ResolutionCategory / VideoBitrateKbps is missing, the check is skipped and evaluation falls through to `(True, None)`. `ContentClass` defaults to `'live_action'` when the MediaFile does not carry the attribute. This rule REPLACES the retired bpp gate and the retired efficient-size-override total-bitrate proxy; both are gone from the code.
 C4. `VideoComplianceRules` read fresh per `Evaluate` call (`db-is-authority` -- no `__init__` cache).
 C5. Fail-loud: missing rules row -> `RuntimeError`; missing MediaFileId -> `ValueError`; no try/except.

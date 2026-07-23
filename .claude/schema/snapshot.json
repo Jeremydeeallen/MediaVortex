@@ -5356,16 +5356,6 @@
       "is_generated": "NEVER",
       "is_nullable": "NO"
     },
-    "bpptranscodethreshold": {
-      "data_type": "double precision",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
-    },
-    "estimatedsavingsmbthreshold": {
-      "data_type": "integer",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
-    },
     "id": {
       "data_type": "integer",
       "is_generated": "NEVER",
@@ -5375,26 +5365,6 @@
       "data_type": "timestamp without time zone",
       "is_generated": "NEVER",
       "is_nullable": "YES"
-    },
-    "maxsourcebpp_deprecated_2026_06_29": {
-      "data_type": "numeric",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
-    },
-    "minsourcebpp_deprecated_2026_06_29": {
-      "data_type": "double precision",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
-    },
-    "preventupscale": {
-      "data_type": "boolean",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
-    },
-    "resolutionexceedsprofiletarget": {
-      "data_type": "boolean",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
     }
   },
   "vmafconfidencestats": {
