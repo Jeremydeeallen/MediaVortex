@@ -93,6 +93,7 @@ class ComplianceGate:
                 'VideoBitrateKbps': ProbeResult.get('VideoBitrateKbps'),
                 'DurationMinutes': ProbeResult.get('DurationMinutes'),
                 'SizeMB': SizeMB,
+                'TranscodedByMediaVortex': True,
                 'AssignedProfile': Src.get('AssignedProfile'),
                 'HasExplicitEnglishAudio': Src.get('HasExplicitEnglishAudio'),
                 'AudioLanguages': Src.get('AudioLanguages'),
