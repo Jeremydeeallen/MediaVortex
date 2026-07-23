@@ -35,45 +35,51 @@ class VideoVertical:
     # directive: transcode-flow-canonical | # see video-encoding.C2
     def _LoadRules(self):
         Rows = self._Db.ExecuteQuery(
-            "SELECT AcceptableVideoCodecsCsv, BppTranscodeThreshold, MinSizeMbPerMinuteToTranscode "
-            "FROM VideoComplianceRules ORDER BY Id LIMIT 1"
+            "SELECT AcceptableVideoCodecsCsv FROM VideoComplianceRules ORDER BY Id LIMIT 1"
         )
         if not Rows:
             raise RuntimeError('VideoComplianceRules has no rows -- migration not applied')
-        R = Rows[0]
-        Csv = (R.get('AcceptableVideoCodecsCsv') or R.get('acceptablevideocodecscsv') or '').strip()
-        Allowed = [C.strip().lower() for C in Csv.split(',') if C.strip()]
-        BppThreshold = R.get('BppTranscodeThreshold') if 'BppTranscodeThreshold' in R else R.get('bpptranscodethreshold')
-        MinMbPerMin = R.get('MinSizeMbPerMinuteToTranscode') if 'MinSizeMbPerMinuteToTranscode' in R else R.get('minsizembperminutetotranscode')
-        return (
-            Allowed,
-            (float(BppThreshold) if BppThreshold is not None else 0.0),
-            (float(MinMbPerMin) if MinMbPerMin is not None else 0.0),
-        )
+        Csv = (Rows[0].get('AcceptableVideoCodecsCsv') or Rows[0].get('acceptablevideocodecscsv') or '').strip()
+        return [C.strip().lower() for C in Csv.split(',') if C.strip()]
 
-    # directive: transcode-flow-canonical | # see video-encoding.C7
+    # directive: transcode-flow-canonical | # see video-encoding.C3
+    def _TargetKbpsFor(self, ProfileName: str, ResolutionCategory: str, ContentClass: str) -> Optional[int]:
+        Rows = self._Db.ExecuteQuery(
+            "SELECT pt.TargetKbps FROM Profiles p "
+            "JOIN ProfileThresholds pt ON pt.ProfileId = p.Id "
+            "WHERE p.ProfileName = %s AND pt.Resolution = %s AND pt.ContentClass = %s "
+            "  AND pt.TargetKbps IS NOT NULL "
+            "ORDER BY pt.Id LIMIT 1",
+            (ProfileName, ResolutionCategory, ContentClass),
+        )
+        if not Rows:
+            return None
+        Value = Rows[0].get('targetkbps') if 'targetkbps' in Rows[0] else Rows[0].get('TargetKbps')
+        return int(Value) if Value is not None else None
+
+    # directive: transcode-flow-canonical | # see video-encoding.C3
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
         if IsAudioOnlyContainer(Mf):
             return (None, 'non_video_scope')
         if bool(getattr(Mf, 'TranscodedByMediaVortex', False)):
             return (True, 'mediavortex_output_accepted')
 
-        AllowedCodecs, BppThreshold, MinMbPerMin = self._LoadRules()
+        AllowedCodecs = self._LoadRules()
 
         SrcCodec = (getattr(Mf, 'Codec', None) or '').lower()
         if SrcCodec and AllowedCodecs and SrcCodec not in AllowedCodecs:
             return (False, f'codec:{SrcCodec}')
 
-        SizeMb = getattr(Mf, 'SizeMB', None)
-        DurationMin = getattr(Mf, 'DurationMinutes', None)
-        if SizeMb is not None and DurationMin is not None and float(DurationMin) > 0 and MinMbPerMin > 0:
-            Ratio = float(SizeMb) / float(DurationMin)
-            if Ratio < MinMbPerMin:
-                return (True, f'efficient_size_override:{Ratio:.2f}<{MinMbPerMin:.2f}')
-
-        Bpp = _ComputeBpp(Mf)
-        if Bpp is not None and BppThreshold > 0 and Bpp > BppThreshold:
-            return (False, f'high_bpp_excessive:{Bpp:.3f}>{BppThreshold:.3f}')
+        AssignedProfile = getattr(Mf, 'AssignedProfile', None)
+        ResolutionCategory = getattr(Mf, 'ResolutionCategory', None)
+        SrcKbps = getattr(Mf, 'VideoBitrateKbps', None)
+        if AssignedProfile and ResolutionCategory and SrcKbps and int(SrcKbps) > 0:
+            ContentClass = getattr(Mf, 'ContentClass', None) or 'live_action'
+            Target = self._TargetKbpsFor(AssignedProfile, ResolutionCategory, ContentClass)
+            if Target is not None:
+                if int(SrcKbps) <= int(Target):
+                    return (True, f'source_at_or_below_target:{int(SrcKbps)}<={int(Target)}')
+                return (False, f'source_above_target:{int(SrcKbps)}>{int(Target)}')
 
         return (True, None)
 

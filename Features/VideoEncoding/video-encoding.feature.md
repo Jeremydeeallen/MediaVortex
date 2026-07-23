@@ -17,20 +17,19 @@ Answers one question per MediaFile: is the video stream at library baseline (cod
 ## Success Criteria
 
 C1. `VideoVertical.RecomputeFor(MediaFileIds)` writes `(VideoCompliant, VideoCompliantReason)` for each id.
-C2. `VideoVertical.Evaluate` reads exactly three knobs from `VideoComplianceRules`: `AcceptableVideoCodecsCsv` + `BppTranscodeThreshold` + `MinSizeMbPerMinuteToTranscode`. Codec check rejects when source codec is NOT in the allowed CSV. No profile lookup.
-C3. Single-threshold BPP rule with `BPP = (VideoBitrateKbps * 1000) / (Width * Height * FrameRate)`, using each MediaFile's actual `Resolution` (parsed as `<Width>x<Height>`) and `FrameRate` (clamped to `[1, 120]`). When `BPP > BppTranscodeThreshold`, return `(False, 'high_bpp_excessive:<bpp>><threshold>')`. Default `BppTranscodeThreshold=0.05`.
+C2. `VideoVertical.Evaluate` reads exactly one knob from `VideoComplianceRules`: `AcceptableVideoCodecsCsv`. Codec check rejects when source codec is NOT in the allowed CSV. The `BppTranscodeThreshold` and `MinSizeMbPerMinuteToTranscode` columns are retired -- still present in the schema pending cleanup, no longer read.
+C3. **Efficient-source rule (DOMAIN.md 2026-07-23):** when the source's `VideoBitrateKbps` is at or below the file's assigned profile's `TargetKbps` for the file's `ResolutionCategory` (looked up in `ProfileThresholds`, joined by `Profiles.ProfileName`), `Evaluate` returns `(True, 'source_at_or_below_target:<src><=<target>')`. When the source is above the target, returns `(False, 'source_above_target:<src>><target>')`. When any of AssignedProfile / ResolutionCategory / VideoBitrateKbps is missing, the check is skipped and evaluation falls through to `(True, None)`. `ContentClass` defaults to `'live_action'` when the MediaFile does not carry the attribute. This rule REPLACES the retired bpp gate and the retired efficient-size-override total-bitrate proxy; both are gone from the code.
 C4. `VideoComplianceRules` read fresh per `Evaluate` call (`db-is-authority` -- no `__init__` cache).
 C5. Fail-loud: missing rules row -> `RuntimeError`; missing MediaFileId -> `ValueError`; no try/except.
 C6. **MediaVortex outputs are compliance-exempt on the video side.** When `MediaFiles.TranscodedByMediaVortex = TRUE`, `Evaluate` returns `(True, 'mediavortex_output_accepted')` before any other rule fires. Domain rule: an MV-produced file's original source has been deleted; re-transcoding compressed AV1 through any profile produces generation-loss. `AudioVertical` and `ContainerVertical` still run so audio-only or container-only issues on MV outputs route through `AudioFix` / `Remux` normally.
-
-C7. **Efficient-size override.** When `SizeMB / DurationMinutes < MinSizeMbPerMinuteToTranscode` AND the source codec is in the allowed CSV, `Evaluate` returns `(True, 'efficient_size_override:<ratio><threshold>')`. Runs AFTER the codec allowlist check and BEFORE the bpp rule. Domain rule: total bitrate is the correct test for "is this file small enough to skip re-encoding" -- bpp (bits-per-pixel) misfires on low-resolution efficient sources (a 624x352 HEVC file at 302 kbps has bpp 0.057 but total 2.16 MB/min). Container mismatches still route the file to `Remux`; audio issues still route to `AudioFix`; only the Transcode operator is suppressed. Default `MinSizeMbPerMinuteToTranscode=5.0` (operator rationale: a 30-minute video under 150 MB should never be re-encoded).
 
 ## Seams
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
 |---|---|---|---|---|---|
 | S1 | `RecomputeFor` -> `MediaFiles.VideoCompliant` | `VideoVertical._WriteResult` | `(VideoCompliant: bool/NULL, VideoCompliantReason: text/NULL)` | Generated column `WorkBucket` reflects the flag on next SELECT | Post-RecomputeFor SELECT |
-| S2 | `VideoComplianceRules` -> vertical | DB UPDATE via UI / direct SQL | `AcceptableVideoCodecsCsv`, `BppTranscodeThreshold`, `MinSizeMbPerMinuteToTranscode` | `_LoadRules` parses per call | UPDATE then observe change |
+| S2 | `VideoComplianceRules` -> vertical | DB UPDATE via UI / direct SQL | `AcceptableVideoCodecsCsv` (only read column post-2026-07-23) | `_LoadRules` parses per call | UPDATE then observe change |
+| S3 | `Profiles` + `ProfileThresholds` -> vertical | ContentClassifier populates `MediaFiles.AssignedProfile`; operator edits `ProfileThresholds.TargetKbps` via `/Admin/Profiles` | `_TargetKbpsFor(ProfileName, ResolutionCategory, ContentClass)` returns `TargetKbps` | `Evaluate` compares `VideoBitrateKbps` against target for efficient-source verdict | `TestVideoComplianceBar` cases covering source-at-or-below-target and source-above-target |
 
 ## Cross-Vertical Contract
 
@@ -46,7 +45,8 @@ C7. **Efficient-size override.** When `SizeMB / DurationMinutes < MinSizeMbPerMi
 
 | Column | Read by | Owner |
 |---|---|---|
-| `MediaFiles.Codec`, `VideoBitrateKbps`, `Resolution`, `FrameRate`, `TranscodedByMediaVortex`, `SizeMB`, `DurationMinutes` | `Evaluate` | MediaProbe vertical |
+| `MediaFiles.Codec`, `VideoBitrateKbps`, `TranscodedByMediaVortex`, `ResolutionCategory`, `AssignedProfile` | `Evaluate` | MediaProbe vertical + ContentClassifier |
+| `Profiles.ProfileName`, `ProfileThresholds.TargetKbps` / `Resolution` / `ContentClass` | `_TargetKbpsFor` | Profiles vertical (operator via `/Admin/Profiles`) |
 
 ### Stable function entry points (cross-vertical callers)
 
@@ -58,7 +58,7 @@ C7. **Efficient-size override.** When `SizeMB / DurationMinutes < MinSizeMbPerMi
 ### What is EXPLICITLY NOT a contract
 
 - `_PIXEL_COUNTS` map + `_ASSUMED_FPS=24` (future: probe real fps when available)
-- The format of `VideoCompliantReason` strings (today: `codec:<name>`, `efficient_size_override:<ratio><threshold>`, `high_bpp_excessive:<bpp>><threshold>`, `mediavortex_output_accepted`)
+- The format of `VideoCompliantReason` strings (today: `codec:<name>`, `source_at_or_below_target:<src><=<target>`, `source_above_target:<src>><target>`, `mediavortex_output_accepted`)
 
 ## Status
 
