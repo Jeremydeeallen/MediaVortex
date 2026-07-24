@@ -25,12 +25,15 @@ class TestQualityTestQueueFreezeMarkerRefusal(unittest.TestCase):
             "Truthy `if not Attempt.Success` conflates freeze with in-flight.",
         )
 
-    def test_refuses_success_none_in_flight(self):
+    def test_admits_success_none_per_flow_seam_s3(self):
         Src = self._Source()
         Pattern = re.compile(r"Attempt\.Success\s+is\s+None", re.MULTILINE)
-        self.assertIsNotNone(
+        self.assertIsNone(
             Pattern.search(Src),
-            "AddToQualityTestQueue must explicitly refuse Attempt.Success is None (in-flight).",
+            "AddToQualityTestQueue must NOT refuse Success=None. Per DOMAIN.md 2026-07-23 + "
+            "transcode.flow.md S2/S3 seams, the transcode job ends at ffmpeg exit and QT is a "
+            "downstream consumer. Freeze-marker (Success=False) is the only refusal. "
+            "Commit 40cce5db added this refusal and blocked the S3 seam; the refusal is retired.",
         )
 
     def test_freeze_marker_log_names_freeze(self):

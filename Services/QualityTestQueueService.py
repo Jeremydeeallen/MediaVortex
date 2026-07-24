@@ -46,12 +46,6 @@ class QualityTestQueueService:
                     "QualityTestQueueService", "AddToQualityTestQueue",
                 )
                 return None
-            if Attempt.Success is None:
-                LoggingService.LogError(
-                    f"TranscodeAttempt {TranscodeAttemptId} refused for QT admission: attempt still in-flight (Success IS NULL)",
-                    "QualityTestQueueService", "AddToQualityTestQueue",
-                )
-                return None
 
             # Duplicate-check via repository helper; in-memory filter avoids inline SQL
             ExistingQueue = self.DatabaseManager.GetQualityTestQueue() or []
