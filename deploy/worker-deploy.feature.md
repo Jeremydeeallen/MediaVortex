@@ -75,6 +75,8 @@ The `infrastructure` repo is the **single source of truth** for host inventory a
 
 18. **Deploy scripts UPSERT deploy-owned columns only.** RegisterWorker's ON CONFLICT DO UPDATE clause enumerates ONLY deploy-owned columns (`Platform`, `FFmpegPath`, `FFprobePath`, `ShareMountPrefix`, `MaxCpuThreads`, `Version`, `BuildInfo`, `LastHeartbeat`). Operator-owned columns are absent from the ON CONFLICT UPDATE clause. Verifiable: grep the RegisterWorker SQL for any operator-owned column name in its UPDATE list returns 0.
 
+19. **Deploy runtime recorded.** Every invocation of `deploy-fleet.py` writes one `DeployHistory` row: `StartedAt`, `CompletedAt`, `PriorSha`, `NewSha`, `ElapsedSeconds`, `HostsAttempted` (CSV), `HostsSucceeded` (CSV), `Outcome` (`OK` / `PARTIAL` / `TIMEOUT` / `FAILED`), `ErrorMessage` (nullable). Row is INSERTed at fleet-script entry (only `StartedAt` + `PriorSha` populated) and UPDATEd at exit. If the script is killed mid-run the row stays partial with `CompletedAt IS NULL` and `Outcome='KILLED'` on next fleet start's cleanup pass. Verifiable: `SELECT COUNT(*) FROM DeployHistory WHERE StartedAt > NOW() - INTERVAL '24 hours'` equals number of deploys run today; `SELECT MAX(ElapsedSeconds), AVG(ElapsedSeconds) FROM DeployHistory WHERE Outcome='OK' AND StartedAt > NOW() - INTERVAL '30 days'` gives regression signal.
+
 ## Deviation from conventions
 
 - **Criterion 8 (no credential leak)**: `deploy/deploy-windows-worker.py:82-88` contains a literal `MEDIAVORTEX_DB_PASSWORD: "mediavortex"` default. Rationale: per `CLAUDE.md`, the homelab DB password equals the DB name and user; it is not a secret.

@@ -288,9 +288,31 @@ def Main() -> int:
     from Core.Database.DatabaseService import DatabaseService
     Db = DatabaseService()
 
+    # directive: deploy-worker-identity-invariants | # see worker-deploy.C19
+    _PriorShaRow = Db.ExecuteQuery("SELECT NewSha FROM DeployHistory WHERE Outcome='OK' ORDER BY Id DESC LIMIT 1")
+    _PriorSha = _PriorShaRow[0].get('newsha') if _PriorShaRow else None
+    Db.ExecuteNonQuery(
+        "INSERT INTO DeployHistory (StartedAt, PriorSha, NewSha, Outcome) "
+        "VALUES (NOW(), %s, %s, 'RUNNING') RETURNING Id",
+        (_PriorSha, Sha),
+    )
+    HistId = Db.GetLastInsertId()
+
+    def _FinishHist(Outcome, Attempted, Succeeded, ErrorMessage=None):
+        if not HistId:
+            return
+        Db.ExecuteNonQuery(
+            "UPDATE DeployHistory SET CompletedAt=NOW(), "
+            "ElapsedSeconds=EXTRACT(EPOCH FROM (NOW() - StartedAt))::int, "
+            "HostsAttempted=%s, HostsSucceeded=%s, Outcome=%s, ErrorMessage=%s "
+            "WHERE Id=%s",
+            (",".join(Attempted), ",".join(Succeeded), Outcome, ErrorMessage, HistId),
+        )
+
     Pre = LiveWorkers(Db)
     if not Pre:
         print("ERROR: no workers heartbeating in the last 5 minutes")
+        _FinishHist('FAILED', [], [], 'no live workers')
         return 1
 
     ExpectedNames = [R["WorkerName"] for R in Pre]
@@ -348,15 +370,19 @@ def Main() -> int:
 
     print(f"polling for fleet to reach {Sha[:8]} (up to {POLL_TIMEOUT_SEC}s)...")
     Ok, Missing = WaitForFleet(Db, Sha, ExpectedNames)
+    OkNames = sorted(R["WorkerName"] for R in Ok)
     if not Missing:
         print(f"== FLEET ON {Sha[:8]} ({len(Ok)} workers) ==")
         for R in sorted(Ok, key=lambda r: r["WorkerName"]):
             print(f"   {R['WorkerName']:<20} {R['Version'][:8]}")
+        _FinishHist('OK' if not AnyFail else 'PARTIAL', ExpectedNames, OkNames,
+                    None if not AnyFail else 'per-host failures during deploy')
         return 0 if not AnyFail else 1
 
     print(f"== TIMEOUT: {len(Missing)} worker(s) not on {Sha[:8]} ==")
     for N in Missing:
         print(f"   {N}")
+    _FinishHist('TIMEOUT', ExpectedNames, OkNames, f"timeout: {len(Missing)} worker(s) not on SHA")
     return 1
 
 

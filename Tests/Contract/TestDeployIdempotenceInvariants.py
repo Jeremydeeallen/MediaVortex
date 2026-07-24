@@ -103,5 +103,30 @@ class TestRegisterWorkerUpsertOperatorColumns(unittest.TestCase):
         )
 
 
+class TestDeployHistoryRecorded(unittest.TestCase):
+    # see worker-deploy.C19
+
+    def test_fleet_deploy_inserts_deployhistory_row(self):
+        Src = (DEPLOY_DIR / 'deploy-fleet.py').read_text(encoding='utf-8')
+        self.assertIn('DeployHistory', Src, 'deploy-fleet.py must write to DeployHistory')
+        self.assertTrue(
+            re.search(r'INSERT\s+INTO\s+DeployHistory', Src, re.IGNORECASE),
+            'deploy-fleet.py must INSERT into DeployHistory at run start',
+        )
+        self.assertTrue(
+            re.search(r'UPDATE\s+DeployHistory', Src, re.IGNORECASE),
+            'deploy-fleet.py must UPDATE the DeployHistory row at run exit with CompletedAt + ElapsedSeconds',
+        )
+        self.assertIn('ElapsedSeconds', Src, 'exit UPDATE must set ElapsedSeconds')
+        self.assertIn('Outcome', Src, 'exit UPDATE must set Outcome')
+
+    def test_deployhistory_table_migration_exists(self):
+        Migration = SCRIPTS_DIR / 'SQLScripts' / 'CreateDeployHistoryTable_2026_07_24.py'
+        self.assertTrue(Migration.exists(), 'CreateDeployHistoryTable migration must exist')
+        Src = Migration.read_text(encoding='utf-8')
+        for Col in ('StartedAt', 'CompletedAt', 'PriorSha', 'NewSha', 'ElapsedSeconds', 'Outcome'):
+            self.assertIn(Col, Src, f'DeployHistory schema must define {Col}')
+
+
 if __name__ == '__main__':
     unittest.main()
