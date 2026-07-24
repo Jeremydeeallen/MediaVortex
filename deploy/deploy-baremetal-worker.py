@@ -189,18 +189,13 @@ def StepInstallSystemdUnit(Target: str, Friendly: str) -> bool:
     return True
 
 
+# directive: deploy-worker-identity-invariants | # see worker-deploy.C15
 def StepStopContainersAndClearDb(Target: str, Friendly: str) -> bool:
     R = _Ssh(Target, "docker ps -a --filter 'name=mediavortex-worker-' --format '{{.Names}}' | head -20", Timeout=10)
     Names = [N for N in (R.stdout or "").splitlines() if N.strip()]
     if Names:
         _Ssh(Target, "cd /opt/mediavortex && docker compose down --timeout 30 2>&1 | tail -3", Timeout=120)
-    QueryScript = MediaVortexRoot / "Scripts" / "SQLScripts" / "QueryDatabase.py"
-    Del = subprocess.run(
-        [sys.executable, str(QueryScript), "sql", f"DELETE FROM Workers WHERE LOWER(WorkerName) LIKE '{Friendly.lower()}-worker-%'", "--commit"],
-        capture_output=True, text=True, timeout=30,
-    )
-    Detail = f"stopped {len(Names)} container(s); DB clear: {(Del.stdout or '').strip().splitlines()[-1][:60] if Del.stdout else 'err'}"
-    _Status(10, 14, "stop containers + clear DB", "OK", Detail)
+    _Status(10, 14, "stop containers", "OK", f"stopped {len(Names)} container(s); Workers rows preserved (operator state)")
     return True
 
 

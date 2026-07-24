@@ -164,53 +164,58 @@ class WorkerServiceApp:
 
         return socket.gethostname()
 
+    # directive: deploy-worker-identity-invariants | # see worker-deploy.C17
     def _ClaimPrefixedWorkerName(self, Prefix: str) -> str:
-        """Claim the lowest available {Prefix}-N name using a DB advisory lock.
-
-        A slot is 'available' if no Workers row exists for it, or the existing
-        row has a heartbeat older than 2 minutes (stale/dead worker).
-        """
-        LockId = hash(Prefix) & 0x7FFFFFFF  # positive 32-bit advisory lock key
+        LockId = hash(Prefix) & 0x7FFFFFFF
         try:
-            # Use a raw connection to hold the advisory lock across queries
-            import psycopg2
             Conn = self.DatabaseManager.DatabaseService.GetConnection()
             Conn.autocommit = False
             Cur = Conn.cursor()
             try:
-                # Acquire session-level advisory lock to serialize claiming
                 Cur.execute("SELECT pg_advisory_lock(%s)", (LockId,))
-
-                # Find all existing workers with this prefix
                 Cur.execute(
                     "SELECT WorkerName, LastHeartbeat FROM Workers "
                     "WHERE WorkerName LIKE %s ESCAPE '!' ORDER BY WorkerName",
                     (EscapeLikePattern(Prefix) + '-%',)
                 )
                 Existing = {Row[0]: Row[1] for Row in Cur.fetchall()}
-
-                # directive: transcode-flow-canonical -- naive-UTC threshold matches DB timestamp_without_timezone semantics
                 from datetime import timedelta, timezone
                 StaleThreshold = datetime.now(tz=timezone.utc).replace(tzinfo=None) - timedelta(minutes=2)
                 Slot = 1
+                Reclaim = False
                 while True:
                     CandidateName = f"{Prefix}-{Slot}"
                     if CandidateName not in Existing:
-                        break  # unclaimed slot
+                        break
                     Heartbeat = Existing[CandidateName]
                     if Heartbeat is None or Heartbeat < StaleThreshold:
-                        break  # stale slot, safe to reclaim
+                        Reclaim = True
+                        break
                     Slot += 1
-
                 ClaimedName = f"{Prefix}-{Slot}"
+                if Reclaim:
+                    Cur.execute(
+                        "UPDATE Workers SET LastHeartbeat = NOW() WHERE WorkerName = %s",
+                        (ClaimedName,),
+                    )
+                else:
+                    Cur.execute(
+                        "INSERT INTO Workers (WorkerName, Status, LastHeartbeat, RegisteredAt) "
+                        "VALUES (%s, 'Paused', NOW(), NOW())",
+                        (ClaimedName,),
+                    )
+                Conn.commit()
                 LoggingService.LogInfo(
-                    f"Claimed worker name '{ClaimedName}' (prefix={Prefix}, slot={Slot})",
+                    f"Claimed worker name '{ClaimedName}' (prefix={Prefix}, slot={Slot}, reclaim={Reclaim})",
                     "WorkerService", "_ClaimPrefixedWorkerName"
                 )
                 return ClaimedName
             finally:
-                Cur.execute("SELECT pg_advisory_unlock(%s)", (LockId,))
-                Conn.commit()
+                try:
+                    Cur.execute("SELECT pg_advisory_unlock(%s)", (LockId,))
+                    Conn.commit()
+                except Exception:
+                    pass
                 Cur.close()
         except Exception as E:
             LoggingService.LogException(

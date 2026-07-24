@@ -65,6 +65,16 @@ The `infrastructure` repo is the **single source of truth** for host inventory a
     - **Remote-worker deploys are independent.** No fleet orchestration blocks host A on host B's heartbeat.
     - **One entry script per shape.** LXC-Docker, bare-metal-Docker, bare-metal Linux, and Windows-SMB each have their own strategy; no copy-paste between shapes.
 
+### Idempotence + operator state (DOMAIN.md 2026-07-24)
+
+15. **No destructive DELETE on Workers.** No deploy script may execute `DELETE FROM Workers` (or any variant that removes rows for the target host). Deploy MUST preserve operator-owned columns across runs: `Status`, `TranscodeEnabled`, `RemuxEnabled`, `QualityTestEnabled`, `ScanEnabled`, `MaxConcurrentJobs`, `MaxConcurrentQualityTestJobs`, `MaxCpuThreads`, `AcceptsInterlaced`, `ForceDisposition`. Verifiable: `grep -rn 'DELETE FROM Workers' deploy/` returns 0.
+
+16. **No Status coalesce to Online.** No deploy script (or its helpers in `deploy-fleet.py`) may treat missing/NULL `Status` as `Online`. `COALESCE(Status, 'Online')` is forbidden. A missing `Status` for a captured live worker is a fail-loud condition -- the deploy exits non-zero rather than default any operator-owned column. Verifiable: `grep -rn "COALESCE.*Status.*Online" deploy/` returns 0.
+
+17. **Slot claim is atomic against slot INSERT.** `WorkerService/Main.py._ClaimPrefixedWorkerName` reserves the slot by INSERTing the Workers row for the claimed name INSIDE the same advisory-lock scope that computed the slot. The function does not return a claimed name until a Workers row for that name exists in the DB. N concurrent processes starting from a clean state claim N distinct slot numbers, never colliding on `-1`. Verifiable: `Tests/Contract/TestWorkerSlotAtomicClaim.py` spawns N=8 concurrent calls against an empty Workers table and asserts exactly N distinct WorkerName values return.
+
+18. **Deploy scripts UPSERT deploy-owned columns only.** RegisterWorker's ON CONFLICT DO UPDATE clause enumerates ONLY deploy-owned columns (`Platform`, `FFmpegPath`, `FFprobePath`, `ShareMountPrefix`, `MaxCpuThreads`, `Version`, `BuildInfo`, `LastHeartbeat`). Operator-owned columns are absent from the ON CONFLICT UPDATE clause. Verifiable: grep the RegisterWorker SQL for any operator-owned column name in its UPDATE list returns 0.
+
 ## Deviation from conventions
 
 - **Criterion 8 (no credential leak)**: `deploy/deploy-windows-worker.py:82-88` contains a literal `MEDIAVORTEX_DB_PASSWORD: "mediavortex"` default. Rationale: per `CLAUDE.md`, the homelab DB password equals the DB name and user; it is not a secret.

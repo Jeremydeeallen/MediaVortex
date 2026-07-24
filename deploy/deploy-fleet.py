@@ -82,9 +82,10 @@ def WriteVersion(Sha: str) -> None:
     (ROOT / "VERSION").write_text(Sha + "\n", encoding="utf-8")
 
 
+# directive: deploy-worker-identity-invariants | # see worker-deploy.C16
 def LiveWorkers(Db) -> list:
     return Db.ExecuteQuery(
-        "SELECT WorkerName, COALESCE(Version, '') AS Version, COALESCE(Status, 'Online') AS Status "
+        "SELECT WorkerName, COALESCE(Version, '') AS Version, Status "
         "FROM Workers WHERE LastHeartbeat > NOW() - INTERVAL '5 minutes' "
         "ORDER BY WorkerName"
     )
@@ -96,11 +97,19 @@ def DrainWorkers(Db, WorkerNames: list) -> dict:
         return {}
 
     print(f"draining {len(WorkerNames)} worker(s) -- flipping Status='Paused', waiting for in-flight work to complete...")
+    # directive: deploy-worker-identity-invariants | # see worker-deploy.C16
     PreRows = Db.ExecuteQuery(
-        "SELECT WorkerName, COALESCE(Status, 'Online') AS Status FROM Workers WHERE WorkerName = ANY(%s)",
+        "SELECT WorkerName, Status FROM Workers WHERE WorkerName = ANY(%s)",
         (WorkerNames,),
     )
-    Original = {R["WorkerName"]: R["Status"] for R in PreRows}
+    Original = {R["WorkerName"]: R["Status"] for R in PreRows if R["Status"] is not None}
+    MissingStatus = [R["WorkerName"] for R in PreRows if R["Status"] is None]
+    if MissingStatus:
+        raise RuntimeError(
+            f"DrainWorkers: {len(MissingStatus)} worker(s) have NULL Status which is a data invariant violation: "
+            f"{MissingStatus}. Refusing to restore because there is no truthful value to restore to. "
+            f"Fix the Workers row(s) manually before re-running deploy."
+        )
 
     Db.ExecuteNonQuery(
         "UPDATE Workers SET Status = 'Paused' WHERE WorkerName = ANY(%s) AND Status <> 'Paused'",

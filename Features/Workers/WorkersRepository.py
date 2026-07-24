@@ -98,23 +98,22 @@ class WorkersRepository:
         Version + BuildInfo are nullable; workers without resolved versions
         register cleanly with NULL values that the UI renders as "unknown"."""
         try:
-            query = """
-                INSERT INTO Workers (WorkerName, Platform, FFmpegPath, FFprobePath,
-                                     ShareMountPrefix, MaxConcurrentJobs, MaxCpuThreads,
-                                     Version, BuildInfo,
-                                     Status, LastHeartbeat, RegisteredAt)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'Paused', NOW(), NOW())
-                ON CONFLICT (WorkerName) DO UPDATE SET
-                    Platform = EXCLUDED.Platform,
-                    FFmpegPath = COALESCE(EXCLUDED.FFmpegPath, Workers.FFmpegPath),
-                    FFprobePath = COALESCE(EXCLUDED.FFprobePath, Workers.FFprobePath),
-                    ShareMountPrefix = COALESCE(EXCLUDED.ShareMountPrefix, Workers.ShareMountPrefix),
-                    MaxConcurrentJobs = EXCLUDED.MaxConcurrentJobs,
-                    MaxCpuThreads = COALESCE(EXCLUDED.MaxCpuThreads, Workers.MaxCpuThreads),
-                    Version = EXCLUDED.Version,
-                    BuildInfo = EXCLUDED.BuildInfo,
-                    LastHeartbeat = NOW()
-            """
+            # directive: deploy-worker-identity-invariants | # see worker-deploy.C18
+            query = (
+                "INSERT INTO Workers (WorkerName, Platform, FFmpegPath, FFprobePath, "
+                "                     ShareMountPrefix, MaxConcurrentJobs, MaxCpuThreads, "
+                "                     Version, BuildInfo, "
+                "                     Status, LastHeartbeat, RegisteredAt) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'Paused', NOW(), NOW()) "
+                "ON CONFLICT (WorkerName) DO UPDATE SET "
+                "    Platform = EXCLUDED.Platform, "
+                "    FFmpegPath = COALESCE(EXCLUDED.FFmpegPath, Workers.FFmpegPath), "
+                "    FFprobePath = COALESCE(EXCLUDED.FFprobePath, Workers.FFprobePath), "
+                "    ShareMountPrefix = COALESCE(EXCLUDED.ShareMountPrefix, Workers.ShareMountPrefix), "
+                "    Version = EXCLUDED.Version, "
+                "    BuildInfo = EXCLUDED.BuildInfo, "
+                "    LastHeartbeat = NOW()"
+            )
             self.DatabaseService.ExecuteNonQuery(query, (
                 WorkerName, Platform, FFmpegPath, FFprobePath,
                 ShareMountPrefix, MaxConcurrentJobs, MaxCpuThreads,
