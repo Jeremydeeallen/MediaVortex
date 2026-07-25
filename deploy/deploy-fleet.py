@@ -277,11 +277,23 @@ def Main() -> int:
         print("ERROR: git HEAD unreadable")
         return 2
 
-    Origin = GitOriginMain()
-    if Origin and Origin != Sha and not Args.target:
-        print(f"WARN: HEAD ({Sha[:8]}) != origin/main ({Origin[:8]}). "
-              f"Workers will be on a SHA that is not pushed.")
-        print("      Push first OR pass --target <pushed-sha>.")
+    # DOMAIN.md 2026-07-25 -- deploy requires committed + pushed + up-to-date branch
+    if not Args.target:
+        Dirty = _Sh(["git", "status", "--porcelain"], cwd=str(ROOT)).stdout.strip()
+        if Dirty:
+            print("ERROR: working tree is dirty. Commit first. Refused:")
+            for L in Dirty.splitlines()[:20]:
+                print(f"  {L}")
+            print("See DOMAIN.md 2026-07-25 -- deploy requires a committed + pushed + up-to-date branch.")
+            return 2
+        Origin = GitOriginMain()
+        if not Origin:
+            print("ERROR: origin/main unreadable. `git fetch origin` first.")
+            return 2
+        if Origin != Sha:
+            print(f"ERROR: HEAD ({Sha[:8]}) != origin/main ({Origin[:8]}). "
+                  f"Push (or pull) first. See DOMAIN.md 2026-07-25.")
+            return 2
 
     print(f"deploy-fleet: target = {Sha[:8]}")
 

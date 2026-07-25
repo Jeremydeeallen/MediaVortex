@@ -9,6 +9,17 @@ Rules:
 - Any code, rule, or table that answers the same question differently = refactor. This doc is the ratchet.
 - Cross-check every new directive against this doc BEFORE opening.
 
+## 2026-07-25 -- Who owns what (meta-rule)
+
+Question: Who decides domain questions, and who implements them?
+
+Answer: **Operator owns the WHAT and the WHY. Claude owns the HOW.**
+
+- Domain decisions (what the system does, why it does it, which trade-offs are acceptable) come from the operator. Claude MUST NOT invent domain rationale (e.g. "GPU contention" as the reason for a rule when no test data exists). If a decision lacks stated rationale, record "operator instruction; no tested rationale" -- do not fabricate one.
+- When Claude perceives a domain question that has not been answered, Claude MUST surface it to the operator and record their answer here BEFORE writing implementation. Claude does not choose between domain options; Claude implements the operator's chosen option.
+- Every rule, contract test, code path, skill, and directive that touches a domain concern MUST be traceable to a `DOMAIN.md` entry. If it isn't, either the rule is wrong or the domain entry is missing.
+- Correction pattern: when Claude puts speculation into memory or a rule and the operator flags it, Claude corrects the artifact + records the correction so the speculation doesn't propagate.
+
 ---
 
 ## 2026-07-23 -- Pipeline operators
@@ -124,3 +135,96 @@ Consequences:
 - Deploy scripts MUST use ON CONFLICT DO NOTHING (for inserts of operator-owned defaults) or ON CONFLICT DO UPDATE with an explicit column list that excludes operator-owned columns.
 
 Historical damage (2026-07-24): running `deploy-baremetal-worker.py` on dot + wakko flipped `dot-worker-{2,3,4}` and `wakko-worker-{2,3,4}` from Paused to Online because the DELETE nuked operator state and RestoreWorkerStatus captured post-COALESCE 'Online' as the Original. Same run caused four systemd processes on each host to all claim WorkerName='{host}-worker-1' because `_ClaimPrefixedWorkerName` returned a slot name without atomically writing the row, so all four processes read empty state and picked slot 1.
+
+## 2026-07-25 -- Workers MUST be drained before deploy
+
+Question: What must be true before a worker's WorkerService process restarts as part of a deploy?
+
+Answer: **A worker MUST have `ActiveJobs=0` before its process restarts.** Killing an encoder mid-flight loses the work, produces `.inprogress` file orphans, corrupts audio-normalization scratch dirs, and forces a full re-encode next admission. Drain is not optional.
+
+Drain contract:
+- Deploy sets `Workers.Status='Paused'` for every worker it intends to restart. The worker's own claim loop MUST honor Paused and stop claiming new work at the next poll.
+- Deploy waits until `ActiveJobs` count for the paused worker reaches 0 before touching the process.
+- Drain wait has an upper bound (currently `DRAIN_TIMEOUT_SEC = 1800` = 30 minutes). Deploy MUST NOT exceed this without operator interruption; on exceed, deploy either aborts OR forces a supervised kill with explicit `--force-drain` flag from the operator. It does NOT silently `SIGTERM` mid-encode.
+- Drain applies to EVERY deploy path: `deploy-fleet.py` (canonical), `deploy-baremetal-worker.py`, `deploy-linux-worker.py`, `deploy-windows-worker.py`. Each script's entry point verifies drain BEFORE code sync + restart. No shortcut path exists.
+
+Consequences:
+- The `--no-drain` flag on `deploy-fleet.py` is EMERGENCY-only and must log to `DeployHistory.ErrorMessage` with the operator-supplied reason.
+- Any script or skill that restarts a worker without checking `ActiveJobs=0` is a bug.
+- Every deploy path is contract-test-locked against this invariant (`Tests/Contract/TestDeployMustDrain.py`).
+
+## 2026-07-25 -- Workers MUST be up-to-date before coming back Online
+
+Question: When can a worker's `Workers.Status` return to `'Online'` after a deploy?
+
+Answer: **Only when the worker's registered `Workers.Version` matches the deploy target SHA AND `LastHeartbeat` is fresh (< 60s).** A worker that has restarted but is still on the old SHA MUST remain `Paused` until it registers on the new SHA.
+
+Version-freshness contract:
+- Deploy captures target SHA at entry, stores in `DeployHistory.NewSha`.
+- After restart, deploy polls `Workers.Version` per host with a bounded timeout (`POLL_TIMEOUT_SEC = 300` = 5 minutes).
+- `RestoreWorkerStatus` only sets `Status` back to the operator's pre-drain intent for workers that have reached `Version = TargetSha[:8]` AND `LastHeartbeat < 60s`.
+- Workers that fail the version-match check within the poll window stay `Paused`. Deploy exits with `Outcome='TIMEOUT'` and names the stragglers.
+- Operator's original `Status` intent (Online vs Paused) is preserved through the drain-deploy-restore cycle. If pre-drain was Online AND post-restart version-matches, worker returns to Online. If pre-drain was Paused, worker stays Paused.
+
+Consequences:
+- No worker is ever Online while running old code. Split-SHA fleet is a bug the deploy catches.
+- If deploy times out, workers stay Paused (safe default). Operator investigates the straggler.
+- The version bump + status flip happen as a single logical step per worker, not fleet-wide -- one worker on new SHA, one on old, is transient but never Online-old + Online-new simultaneously.
+- Every deploy path is contract-test-locked against this invariant (`Tests/Contract/TestDeployVersionGate.py`).
+
+## 2026-07-25 -- Worker identity is deploy-assigned, not runtime-derived
+
+Question: How does a WorkerService process learn its `WorkerName`?
+
+Answer: **`MEDIAVORTEX_WORKER_NAME` is the sole source. Deploy writes it. WorkerService reads it. Fail-loud if unset.**
+
+- Bare-metal: systemd `EnvironmentFile=/etc/mediavortex/instance-%i.env` loads one file per instance. Deploy writes one file per slot with `MEDIAVORTEX_WORKER_NAME=<friendly>-worker-<N>`.
+- Docker: compose sets `MEDIAVORTEX_WORKER_NAME` per service.
+- Windows (I9): environment variable set by the launcher script.
+- `WorkerService.Main._ResolveWorkerName` raises when the env var is missing. No `MEDIAVORTEX_WORKER_PREFIX`, no advisory-lock slot race, no `socket.gethostname()` fallback, no heartbeat-staleness reclaim.
+
+Consequences:
+- Runtime identity races (multiple processes computing the same slot at boot) are impossible by construction.
+- Second process accidentally spawned for the same `MEDIAVORTEX_WORKER_NAME` still exists but cannot exceed the per-worker concurrency cap (see next entry).
+- Any code path that derives `WorkerName` from anything other than the env var is a bug.
+
+Historical damage (2026-07-25): 4 wakko processes + 2 dot processes all claimed the same WorkerName post-Deco-DHCP reboot. `_ClaimPrefixedWorkerName` (retired) read stale heartbeats under a race window and all returned slot 1. `Workers.MaxConcurrentJobs=1` was violated N-way per host. Root cause: identity was computed, not assigned.
+
+## 2026-07-25 -- Per-worker concurrency lives in the DB, not in code
+
+Question: What prevents a worker from exceeding `Workers.MaxConcurrentJobs`?
+
+Answer: **The claim SQL. `Core.Database.WorkerCapabilityPredicate.BuildInflightCapPredicate(WorkerName, JobType)` emits a WHERE-clause fragment that refuses claim when `<in-flight count for this worker> >= <cap column>`.**
+
+- Transcode: `TranscodeAttempts` where `Success IS NULL AND WorkerName=?` compared to `Workers.MaxConcurrentJobs`.
+- QualityTest: `QualityTestingQueue` where `Status='Running' AND ClaimedBy=?` compared to `Workers.MaxConcurrentQualityTestJobs`.
+- The DB is the authority. Client-side `WorkerLoopService.SlotSemaphore` remains as a rate-limit only (prevents local thread explosion in the happy path); it is not the invariant enforcer.
+
+Consequences:
+- A misdeployed second process for the same `WorkerName` (which shouldn't happen post the identity fix, but belt-and-suspenders) cannot claim beyond the cap. The SECOND concurrent claim's SQL sees count == cap and returns 0 rows.
+- Adjusting concurrency is a DB update, not a code change (per `feedback_no_hardcoded_values`).
+- Any `Claim*` function that omits `BuildInflightCapPredicate` for its JobType is a bug.
+- Contract test: `Tests/Contract/TestClaimAuthority.py::TestTranscodeConcurrencyCapLive` proves refusal at cap boundary.
+
+## 2026-07-25 -- All workers must be on the most recent build
+
+Question: What version of the code may a worker be running?
+
+Answer: **Every worker in the fleet MUST be on the current HEAD build. No version drift.**
+
+- `Workers.Version` for every row with `Status IN ('Online','Paused')` AND fresh `LastHeartbeat` MUST equal the repo HEAD SHA.
+- Drift between hosts (some on old SHA, some on new) is a bug the deploy is responsible for closing. Not "eventually consistent" -- deploy exits non-zero if it can't converge every named host.
+- Deploy is the only sanctioned path to close the gap. No hand-editing `Workers.Version`. No skipping a host because it's "fine as-is."
+- If a host can't be updated (offline, unreachable, hardware fault), the deploy names the straggler and the operator either fixes it or removes it from the fleet.
+
+## 2026-07-25 -- Deploy requires a committed + pushed + up-to-date branch
+
+Question: What state must the source tree be in before running a deploy?
+
+Answer: **`git status --porcelain` MUST be empty AND local `HEAD` MUST equal `origin/main`.**
+
+- No dirty deploys. Uncommitted changes MUST be committed before deploy runs.
+- No unpushed deploys. Local commits MUST be pushed to `origin/main` before deploy runs.
+- No behind-main deploys. Local MUST NOT lag `origin/main`.
+- Fleet + per-host deploy entry-points fail-loud when either check fails. The message names the offending files or the SHA delta.
+- No override flag. The bar is absolute -- if a deploy needs to happen mid-work, commit the work first.
