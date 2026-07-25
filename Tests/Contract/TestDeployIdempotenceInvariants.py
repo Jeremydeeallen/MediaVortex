@@ -58,26 +58,71 @@ class TestNoStatusCoalesceInDeploy(unittest.TestCase):
         )
 
 
-class TestClaimPrefixedWorkerNameAtomicReserve(unittest.TestCase):
-    # see worker-deploy.C17
+class TestDeterministicWorkerIdentity(unittest.TestCase):
+    """WorkerName is deploy-assigned. Runtime slot-claim + advisory locks + prefix env + hostname fallback are retired. See .claude/rules/claim-authority.md#worker-identity-is-deterministic-deploy-assigned."""
 
-    def test_insert_or_update_inside_advisory_lock_scope(self):
+    def test_claim_prefixed_worker_name_retired(self):
+        for Py in WORKER_SERVICE.rglob('*.py'):
+            Src = Py.read_text(encoding='utf-8', errors='replace')
+            self.assertNotIn(
+                '_ClaimPrefixedWorkerName', Src,
+                f'{Py.relative_to(REPO_ROOT)}: _ClaimPrefixedWorkerName must be deleted; identity is deploy-assigned via MEDIAVORTEX_WORKER_NAME.',
+            )
+
+    def test_prefix_env_retired(self):
+        for Root in (WORKER_SERVICE, DEPLOY_DIR):
+            for Path_ in Root.rglob('*'):
+                if not Path_.is_file():
+                    continue
+                if Path_.suffix.lower() not in ('.py', '.service', '.yml', '.env', '.template'):
+                    continue
+                Src = Path_.read_text(encoding='utf-8', errors='replace')
+                self.assertNotIn(
+                    'MEDIAVORTEX_WORKER_PREFIX', Src,
+                    f'{Path_.relative_to(REPO_ROOT)}: MEDIAVORTEX_WORKER_PREFIX must be retired; systemd EnvironmentFile=/etc/mediavortex/instance-%i.env sets MEDIAVORTEX_WORKER_NAME.',
+                )
+
+    def test_worker_prefix_env_write_retired(self):
+        for Py in DEPLOY_DIR.rglob('*.py'):
+            Src = Py.read_text(encoding='utf-8', errors='replace')
+            self.assertNotIn(
+                'worker-prefix.env', Src.replace("rm -f /etc/mediavortex/worker-prefix.env", ""),
+                f'{Py.relative_to(REPO_ROOT)}: worker-prefix.env write must be retired (rm -f cleanup is allowed).',
+            )
+
+    def test_age_slot_heartbeats_retired(self):
+        for Py in DEPLOY_DIR.rglob('*.py'):
+            Src = Py.read_text(encoding='utf-8', errors='replace')
+            self.assertNotIn(
+                'StepAgeSlotHeartbeats', Src,
+                f'{Py.relative_to(REPO_ROOT)}: StepAgeSlotHeartbeats must be retired; deterministic identity removes need to age slots.',
+            )
+
+    def test_worker_service_has_no_hostname_fallback(self):
         Src = (WORKER_SERVICE / 'Main.py').read_text(encoding='utf-8')
-        StartIdx = Src.find('def _ClaimPrefixedWorkerName')
-        self.assertGreater(StartIdx, -1, '_ClaimPrefixedWorkerName not found')
+        self.assertNotIn(
+            'socket.gethostname', Src,
+            'WorkerService/Main.py must not fall back to socket.gethostname(); MEDIAVORTEX_WORKER_NAME is the sole source. See .claude/rules/claim-authority.md.',
+        )
+
+    def test_resolve_worker_name_fail_louds_on_missing_env(self):
+        Src = (WORKER_SERVICE / 'Main.py').read_text(encoding='utf-8')
+        StartIdx = Src.find('def _ResolveWorkerName')
+        self.assertGreater(StartIdx, -1, '_ResolveWorkerName not found')
         NextDef = Src.find('\n    def ', StartIdx + 1)
         Body = Src[StartIdx:NextDef if NextDef > 0 else len(Src)]
-        self.assertIn('pg_advisory_lock', Body, 'must acquire advisory lock')
-        self.assertIn('pg_advisory_unlock', Body, 'must release advisory lock')
+        self.assertIn('MEDIAVORTEX_WORKER_NAME', Body, 'must read MEDIAVORTEX_WORKER_NAME')
         self.assertTrue(
-            re.search(r'INSERT\s+INTO\s+Workers', Body, re.IGNORECASE),
-            'must INSERT into Workers within the claim so slot is reserved before returning',
+            re.search(r'raise\s+\w+Error', Body),
+            '_ResolveWorkerName must raise on missing MEDIAVORTEX_WORKER_NAME (no fallback).',
         )
-        LockIdx = Body.find('pg_advisory_lock')
-        UnlockIdx = Body.find('pg_advisory_unlock')
-        InsertIdx = re.search(r'INSERT\s+INTO\s+Workers', Body, re.IGNORECASE).start()
-        self.assertLess(LockIdx, InsertIdx, 'INSERT must be inside lock scope (after acquire)')
-        self.assertLess(InsertIdx, UnlockIdx, 'INSERT must be inside lock scope (before release)')
+
+    def test_systemd_unit_uses_per_instance_env_file(self):
+        Unit = (DEPLOY_DIR / 'baremetal' / 'mediavortex-worker@.service').read_text(encoding='utf-8')
+        self.assertIn(
+            'EnvironmentFile=/etc/mediavortex/instance-%i.env', Unit,
+            'systemd unit must load per-instance env file so MEDIAVORTEX_WORKER_NAME is set per systemd instance.',
+        )
 
 
 class TestRegisterWorkerUpsertOperatorColumns(unittest.TestCase):

@@ -83,6 +83,37 @@ def BuildNvencPredicate(WorkerName: str) -> Tuple[str, tuple]:
     return Fragment, (WorkerName,)
 
 
+# directive: transcode-flow-canonical | # see claim-authority.md
+_INFLIGHT_SHAPE = {
+    "Transcode": (
+        "TranscodeAttempts",
+        "Success IS NULL AND WorkerName",
+        "MaxConcurrentJobs",
+    ),
+    "QualityTest": (
+        "QualityTestingQueue",
+        "Status = 'Running' AND ClaimedBy",
+        "MaxConcurrentQualityTestJobs",
+    ),
+}
+
+
+# directive: transcode-flow-canonical | # see claim-authority.md
+def BuildInflightCapPredicate(WorkerName: str, JobType: str) -> Tuple[str, tuple]:
+    """Per-worker concurrency gate. Refuses claim when in-flight count >= Workers.<CapColumn>. DB is authority; client semaphore is rate-limit only. See .claude/rules/claim-authority.md."""
+    if JobType not in _INFLIGHT_SHAPE:
+        raise ValueError(
+            f"JobType {JobType!r} not registered in _INFLIGHT_SHAPE. "
+            f"Known: {sorted(_INFLIGHT_SHAPE)}."
+        )
+    Table, WhereCol, CapCol = _INFLIGHT_SHAPE[JobType]
+    Fragment = (
+        f"(SELECT COUNT(*) FROM {Table} WHERE {WhereCol} = %s) < "
+        f"(SELECT {CapCol} FROM Workers WHERE WorkerName = %s)"
+    )
+    return Fragment, (WorkerName, WorkerName)
+
+
 # directive: transcode-worker-unification | # see transcode.ST6
 def BuildQsvPredicate(WorkerName: str) -> Tuple[str, tuple]:
     """Single source for the Intel QSV hardware gate; outer query joins Profiles p on profilename = mf.AssignedProfile."""

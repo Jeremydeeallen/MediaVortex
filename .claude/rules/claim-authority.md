@@ -44,12 +44,31 @@ Idempotent. Runs on every live worker. Releases the `ta_one_inflight_per_mfid` s
 
 This is the ONLY cross-worker terminal write in the system. Every other worker-owned attempt is written by its owner.
 
+## Worker identity is deterministic (deploy-assigned)
+
+`WorkerName` is assigned at deploy time via `MEDIAVORTEX_WORKER_NAME` env var. Bare-metal: systemd `EnvironmentFile=/etc/mediavortex/instance-%i.env` sets one file per instance (deploy writes them). Docker: compose sets `MEDIAVORTEX_WORKER_NAME` per service. Runtime slot-claim, advisory locks, heartbeat-staleness reclaim, prefix env vars, and `socket.gethostname()` fallbacks are forbidden. `WorkerService.Main._ResolveWorkerName` fail-louds when the env var is missing -- no derivation from any other source.
+
+Reason (2026-07-25 recurring incident): runtime slot-claim races produced N processes with identical WorkerName, each holding a `BoundedSemaphore(MaxConcurrentJobs=1)`, each claiming one job = N concurrent per WorkerName. Root class: identity was computed, not assigned. Deterministic assignment closes the class.
+
+## Per-worker concurrency invariant (DB-authoritative)
+
+Every claim query gates on `<in-flight count for this worker> < <cap column>` via `Core.Database.WorkerCapabilityPredicate.BuildInflightCapPredicate(WorkerName, JobType)`. Shape per job type:
+
+| JobType | In-flight table | In-flight predicate | Cap column |
+|---|---|---|---|
+| `Transcode` | `TranscodeAttempts` | `Success IS NULL AND WorkerName = ?` | `Workers.MaxConcurrentJobs` |
+| `QualityTest` | `QualityTestingQueue` | `Status = 'Running' AND ClaimedBy = ?` | `Workers.MaxConcurrentQualityTestJobs` |
+
+The DB is the authority. A misdeployed second process for the same WorkerName cannot exceed the cap because the SECOND concurrent claim query sees `count = MaxConcurrentJobs` and refuses. Client-side `WorkerLoopService.SlotSemaphore` remains as a rate-limiter (prevents thread explosion in the happy path), but the invariant lives in DB.
+
 ## What is forbidden
 
 - Cross-host stuck-detect writing to `TranscodeAttempts` / `TranscodeQueue` / `TranscodeProgress` / `ActiveJobs` for jobs owned by another worker.
 - Any `WHERE`-clause comparison of `ActiveJobs.WorkerName` against `socket.gethostname()`. Use `WorkerContext.Current().WorkerName`.
 - Any two-step `SELECT id then UPDATE id` claim pattern. Use one statement with `FOR UPDATE SKIP LOCKED`.
 - Any code path that INSERTs a second `TranscodeAttempts` row with `Success IS NULL` for a MediaFileId that already has an in-flight attempt. The DB refuses; callers catch `IntegrityError` + retry with the next queue row.
+- Runtime WorkerName derivation from `MEDIAVORTEX_WORKER_PREFIX`, hostname, container ID, or any slot-claim mechanism. `MEDIAVORTEX_WORKER_NAME` is the sole source; fail-loud when unset.
+- Claim queries that omit `BuildInflightCapPredicate` for their JobType. Per-worker concurrency lives in the DB gate, not in client code.
 
 ## When this rule applies (PR triggers)
 

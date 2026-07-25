@@ -13,7 +13,6 @@ import os
 import setproctitle
 import time
 import threading
-import socket
 import platform as platform_mod
 import shutil
 from datetime import datetime, timezone
@@ -26,7 +25,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Services.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
-from Core.Database.DatabaseService import EscapeLikePattern
 import os as _os_path_for_v2_helpers
 from typing import Optional
 from Features.ServiceControl.ServiceControlRepository import ServiceControlRepository
@@ -146,83 +144,19 @@ class WorkerServiceApp:
 
         LoggingService.LogInfo(f"WorkerServiceApp __init__ completed. PID: {CurrentPid}", "WorkerService", "__init__")
 
+    # directive: transcode-flow-canonical | # see claim-authority.md
     def _ResolveWorkerName(self) -> str:
-        """Determine this worker's name.
-
-        Priority:
-        1. MEDIAVORTEX_WORKER_NAME env var (exact name override)
-        2. MEDIAVORTEX_WORKER_PREFIX env var -> claims {prefix}-N via DB
-        3. socket.gethostname() (fallback -- container ID or machine hostname)
-        """
-        ExactName = os.environ.get('MEDIAVORTEX_WORKER_NAME')
-        if ExactName:
-            return ExactName.strip()
-
-        Prefix = os.environ.get('MEDIAVORTEX_WORKER_PREFIX')
-        if Prefix:
-            return self._ClaimPrefixedWorkerName(Prefix.strip())
-
-        return socket.gethostname()
-
-    # directive: deploy-worker-identity-invariants | # see worker-deploy.C17
-    def _ClaimPrefixedWorkerName(self, Prefix: str) -> str:
-        LockId = hash(Prefix) & 0x7FFFFFFF
-        try:
-            Conn = self.DatabaseManager.DatabaseService.GetConnection()
-            Conn.autocommit = False
-            Cur = Conn.cursor()
-            try:
-                Cur.execute("SELECT pg_advisory_lock(%s)", (LockId,))
-                Cur.execute(
-                    "SELECT WorkerName, LastHeartbeat FROM Workers "
-                    "WHERE WorkerName LIKE %s ESCAPE '!' ORDER BY WorkerName",
-                    (EscapeLikePattern(Prefix) + '-%',)
-                )
-                Existing = {Row[0]: Row[1] for Row in Cur.fetchall()}
-                from datetime import timedelta, timezone
-                StaleThreshold = datetime.now(tz=timezone.utc).replace(tzinfo=None) - timedelta(minutes=2)
-                Slot = 1
-                Reclaim = False
-                while True:
-                    CandidateName = f"{Prefix}-{Slot}"
-                    if CandidateName not in Existing:
-                        break
-                    Heartbeat = Existing[CandidateName]
-                    if Heartbeat is None or Heartbeat < StaleThreshold:
-                        Reclaim = True
-                        break
-                    Slot += 1
-                ClaimedName = f"{Prefix}-{Slot}"
-                if Reclaim:
-                    Cur.execute(
-                        "UPDATE Workers SET LastHeartbeat = NOW() WHERE WorkerName = %s",
-                        (ClaimedName,),
-                    )
-                else:
-                    Cur.execute(
-                        "INSERT INTO Workers (WorkerName, Status, LastHeartbeat, RegisteredAt) "
-                        "VALUES (%s, 'Paused', NOW(), NOW())",
-                        (ClaimedName,),
-                    )
-                Conn.commit()
-                LoggingService.LogInfo(
-                    f"Claimed worker name '{ClaimedName}' (prefix={Prefix}, slot={Slot}, reclaim={Reclaim})",
-                    "WorkerService", "_ClaimPrefixedWorkerName"
-                )
-                return ClaimedName
-            finally:
-                try:
-                    Cur.execute("SELECT pg_advisory_unlock(%s)", (LockId,))
-                    Conn.commit()
-                except Exception:
-                    pass
-                Cur.close()
-        except Exception as E:
-            LoggingService.LogException(
-                f"Failed to claim prefixed name for '{Prefix}', falling back to hostname",
-                E, "WorkerService", "_ClaimPrefixedWorkerName"
+        """WorkerName is deploy-assigned via MEDIAVORTEX_WORKER_NAME. Fail-loud if unset. See .claude/rules/claim-authority.md#worker-identity-is-deterministic-deploy-assigned."""
+        Name = os.environ.get('MEDIAVORTEX_WORKER_NAME')
+        if not Name or not Name.strip():
+            raise RuntimeError(
+                "MEDIAVORTEX_WORKER_NAME is unset. WorkerName MUST be deploy-assigned. "
+                "Bare-metal: systemd EnvironmentFile=/etc/mediavortex/instance-%i.env. "
+                "Docker: compose environment MEDIAVORTEX_WORKER_NAME=<name>. "
+                "Prefix-claim, hostname fallback, and slot advisory-lock are retired. "
+                "See .claude/rules/claim-authority.md."
             )
-            return socket.gethostname()
+        return Name.strip()
 
     def _RegisterAndLoadWorkerConfig(self) -> dict:
         """Register this worker in the Workers table and load its configuration."""
@@ -1252,7 +1186,10 @@ def _VerifyRequiredPaths():
     if platform_mod.system().lower() != 'windows':
         return
 
-    WorkerName = (os.environ.get('MEDIAVORTEX_WORKER_NAME') or socket.gethostname()).strip()
+    WorkerName = os.environ.get('MEDIAVORTEX_WORKER_NAME', '').strip()
+    if not WorkerName:
+        print("[FATAL] MEDIAVORTEX_WORKER_NAME unset; cannot verify mount bindings. See .claude/rules/claim-authority.md.", flush=True)
+        sys.exit(1)
 
     try:
         from Core.Database.DatabaseService import DatabaseService

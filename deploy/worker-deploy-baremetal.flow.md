@@ -104,41 +104,36 @@ Systemd template unit at `/etc/systemd/system/mediavortex-worker@.service`:
 
 ```ini
 [Unit]
-Description=MediaVortex Worker %i
+Description=MediaVortex WorkerService instance %i
 After=network-online.target
 Wants=network-online.target
-RequiresMountsFor=/mnt/media_tv /mnt/movies /mnt/xxx
 
 [Service]
 Type=simple
-ExecStart=/opt/mediavortex/host-venv/bin/python -m WorkerService.Main
+User=root
 WorkingDirectory=/opt/mediavortex/src
-Environment=MEDIAVORTEX_WORKER_NAME=%l-worker-%i
-Environment=MEDIAVORTEX_SHARE_MAPPINGS=T=/mnt/media_tv/,M=/mnt/movies/,Z=/mnt/xxx/
-Environment=MEDIAVORTEX_DB_HOST=10.0.0.15
-Environment=MEDIAVORTEX_DB_PORT=5432
-Environment=MEDIAVORTEX_DB_NAME=mediavortex
-Environment=MEDIAVORTEX_DB_USER=mediavortex
-Environment=MEDIAVORTEX_DB_PASSWORD=mediavortex
-Environment=CPUSET=%i
-Restart=on-failure
-RestartSec=5s
-TimeoutStopSec=30m
+EnvironmentFile=/etc/mediavortex/worker.env
+EnvironmentFile=/etc/mediavortex/instance-%i.env
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/root
+ExecStart=/opt/mediavortex/host-venv/bin/python /opt/mediavortex/src/WorkerService/Main.py
+Restart=always
+RestartSec=10
+TimeoutStopSec=1800
+KillSignal=SIGTERM
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-`%l` = short hostname; `%i` = worker slot index. So `mediavortex-worker@1.service` on host `wakko` produces `MEDIAVORTEX_WORKER_NAME=wakko-worker-1`.
+Per-instance identity: `deploy-baremetal-worker.py::StepInstallSystemdUnit` writes one `/etc/mediavortex/instance-<N>.env` per slot with `MEDIAVORTEX_WORKER_NAME=<friendly>-worker-<N>`. Systemd's `%i` substitution selects the right env file per instance. `WorkerService.Main._ResolveWorkerName` reads `MEDIAVORTEX_WORKER_NAME` and fail-louds when unset -- no prefix env, no advisory-lock slot claim, no hostname fallback. See `.claude/rules/claim-authority.md#worker-identity-is-deterministic-deploy-assigned`.
 
 Apply per slot:
 ```bash
 ssh root@<ip> '
   systemctl daemon-reload
-  for i in 1 2 3 4; do
-    systemctl enable mediavortex-worker@$i.service
-    systemctl restart mediavortex-worker@$i.service
-  done
+  systemctl enable --now mediavortex-worker@1.service mediavortex-worker@2.service mediavortex-worker@3.service mediavortex-worker@4.service
 '
 ```
 

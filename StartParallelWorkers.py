@@ -21,10 +21,10 @@ def _ResolvePython():
     return sys.executable
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
-def _LaunchOne(PythonExe, Prefix, Slot):
+# directive: transcode-flow-canonical | # see claim-authority.md
+def _LaunchOne(PythonExe, WorkerName):
     Env = os.environ.copy()
-    Env["MEDIAVORTEX_WORKER_PREFIX"] = Prefix
+    Env["MEDIAVORTEX_WORKER_NAME"] = WorkerName
     return subprocess.Popen(
         [PythonExe, str(WorkerEntry)],
         cwd=str(RootDirectory),
@@ -33,11 +33,11 @@ def _LaunchOne(PythonExe, Prefix, Slot):
     )
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C14
+# directive: transcode-flow-canonical | # see claim-authority.md
 def main():
     Parser = argparse.ArgumentParser(description="Launch N parallel MediaVortex workers.")
     Parser.add_argument("--count", type=int, default=3, help="Number of worker instances (default 3).")
-    Parser.add_argument("--prefix", type=str, default="i9", help="Worker name prefix (default 'i9'); each becomes {prefix}-N.")
+    Parser.add_argument("--prefix", type=str, default="i9", help="Worker name prefix; each becomes {prefix}-worker-N (matches deploy-assigned naming).")
     Args = Parser.parse_args()
 
     if not WorkerEntry.exists():
@@ -45,14 +45,15 @@ def main():
         return 2
 
     PythonExe = _ResolvePython()
-    print(f"Launching {Args.count} workers with prefix '{Args.prefix}' using {PythonExe}")
+    print(f"Launching {Args.count} workers as '{Args.prefix}-worker-1..{Args.count}' using {PythonExe}")
     print("=" * 60)
 
     Children = []
     for Slot in range(Args.count):
-        Child = _LaunchOne(PythonExe, Args.prefix, Slot + 1)
+        WorkerName = f"{Args.prefix}-worker-{Slot + 1}"
+        Child = _LaunchOne(PythonExe, WorkerName)
         Children.append(Child)
-        print(f"[OK] launched pid {Child.pid} (slot {Slot + 1})")
+        print(f"[OK] launched pid {Child.pid} as {WorkerName}")
         time.sleep(2)
 
     print()

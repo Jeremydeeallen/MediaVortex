@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
-from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate, _ALLOWED_CAPABILITIES
+from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate, BuildInflightCapPredicate, _ALLOWED_CAPABILITIES
 from Repositories.DatabaseManager import DatabaseManager
 
 
@@ -496,6 +496,109 @@ class TestNvencRouting(unittest.TestCase):
             self.assertEqual(Job.Id, QId, "Claimed row Id mismatch -- expected sentinel queue row")
         finally:
             self._DeleteQueueRow(QId)
+
+
+# Per-worker concurrency cap (BuildInflightCapPredicate)
+
+class TestInflightCapPredicateHelper(unittest.TestCase):
+    """Fragment shape + param order + JobType whitelist."""
+
+    def test_transcode_fragment_shape(self):
+        Frag, Params = BuildInflightCapPredicate("w1", "Transcode")
+        self.assertIn("SELECT COUNT(*) FROM TranscodeAttempts", Frag)
+        self.assertIn("Success IS NULL AND WorkerName = %s", Frag)
+        self.assertIn("SELECT MaxConcurrentJobs FROM Workers", Frag)
+        self.assertEqual(Params, ("w1", "w1"))
+
+    def test_qt_fragment_shape(self):
+        Frag, Params = BuildInflightCapPredicate("w1", "QualityTest")
+        self.assertIn("SELECT COUNT(*) FROM QualityTestingQueue", Frag)
+        self.assertIn("Status = 'Running' AND ClaimedBy = %s", Frag)
+        self.assertIn("SELECT MaxConcurrentQualityTestJobs FROM Workers", Frag)
+        self.assertEqual(Params, ("w1", "w1"))
+
+    def test_unknown_job_type_raises(self):
+        with self.assertRaises(ValueError):
+            BuildInflightCapPredicate("w1", "TotallyMadeUp")
+
+
+class TestTranscodeConcurrencyCapLive(unittest.TestCase):
+    """Live-DB proof that ClaimNextPendingJob refuses when in-flight count == MaxConcurrentJobs."""
+
+    SENTINEL_WORKER = "_test-inflight-cap-worker"
+    SENTINEL_PROFILE = "_test-inflight-cap-profile"
+    SENTINEL_FILE = "_test-inflight-cap-file.mkv"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Db = DatabaseService()
+        cls.Dm = DatabaseManager()
+        cls._Wipe()
+        cls.Db.ExecuteNonQuery(
+            "INSERT INTO Workers (WorkerName, Platform, Status, TranscodeEnabled, "
+            "QualityTestEnabled, RemuxEnabled, ScanEnabled, Enabled, AcceptsInterlaced, "
+            "MaxConcurrentJobs, LastHeartbeat) "
+            "VALUES (%s, 'linux', 'Online', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, 1, NOW())",
+            (cls.SENTINEL_WORKER,),
+        )
+        cls.Db.ExecuteNonQuery(
+            "INSERT INTO Profiles (ProfileName, Codec, UseNvidiaHardware, UseIntelHardware, RateControlMode, Draft, Active) "
+            "VALUES (%s, 'h264', 0, 0, 'vbr', FALSE, TRUE) ON CONFLICT (ProfileName) DO NOTHING",
+            (cls.SENTINEL_PROFILE,),
+        )
+        cls.Db.ExecuteNonQuery(
+            "INSERT INTO MediaFiles (FileName, RelativePath, StorageRootId, AssignedProfile, SizeMB, ContainerFormat) "
+            "VALUES (%s, %s, 1, %s, 100, 'matroska,webm') ON CONFLICT DO NOTHING",
+            (cls.SENTINEL_FILE, f"_inflight_cap/{cls.SENTINEL_FILE}", cls.SENTINEL_PROFILE),
+        )
+        Rows = cls.Db.ExecuteQuery("SELECT Id FROM MediaFiles WHERE FileName = %s", (cls.SENTINEL_FILE,))
+        cls.MfId = (Rows[0].get('Id') or Rows[0].get('id')) if Rows else None
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._Wipe()
+
+    @classmethod
+    def _Wipe(cls):
+        cls.Db.ExecuteNonQuery("DELETE FROM TranscodeAttempts WHERE WorkerName = %s", (cls.SENTINEL_WORKER,))
+        cls.Db.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE FileName = %s", (cls.SENTINEL_FILE,))
+        cls.Db.ExecuteNonQuery("DELETE FROM MediaFiles WHERE FileName = %s", (cls.SENTINEL_FILE,))
+        cls.Db.ExecuteNonQuery("DELETE FROM Profiles WHERE ProfileName = %s", (cls.SENTINEL_PROFILE,))
+        cls.Db.ExecuteNonQuery("DELETE FROM Workers WHERE WorkerName = %s", (cls.SENTINEL_WORKER,))
+
+    def _EnqueueRow(self) -> int:
+        self.Db.ExecuteNonQuery(
+            "INSERT INTO TranscodeQueue (MediaFileId, FileName, RelativePath, Directory, StorageRootId, "
+            "SizeBytes, SizeMB, Priority, Status, DateAdded, ProcessingMode) "
+            "VALUES (%s, %s, %s, %s, 1, 104857600, 100, 250, 'Pending', NOW(), 'Transcode')",
+            (self.MfId, self.SENTINEL_FILE, f"_inflight_cap/{self.SENTINEL_FILE}", "_inflight_cap"),
+        )
+        Rows = self.Db.ExecuteQuery(
+            "SELECT Id FROM TranscodeQueue WHERE FileName = %s AND Status = 'Pending' ORDER BY Id DESC LIMIT 1",
+            (self.SENTINEL_FILE,),
+        )
+        return Rows[0].get('Id') or Rows[0].get('id')
+
+    def _CleanupQueue(self):
+        self.Db.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE FileName = %s", (self.SENTINEL_FILE,))
+
+    def test_second_claim_refused_when_at_max_concurrent_jobs(self):
+        """Worker with MaxConcurrentJobs=1 + 1 in-flight attempt cannot claim a second row."""
+        Q1 = self._EnqueueRow()
+        try:
+            Job1 = self.Dm.ClaimNextPendingJob(self.SENTINEL_WORKER, AcceptsInterlaced=True)
+            self.assertIsNotNone(Job1, "First claim must succeed (in-flight count 0 < cap 1)")
+            self.Db.ExecuteNonQuery(
+                "INSERT INTO TranscodeAttempts (MediaFileId, WorkerName, Success, AttemptDate, ProfileName) "
+                "VALUES (%s, %s, NULL, NOW(), %s)",
+                (self.MfId, self.SENTINEL_WORKER, self.SENTINEL_PROFILE),
+            )
+            Q2 = self._EnqueueRow()
+            Job2 = self.Dm.ClaimNextPendingJob(self.SENTINEL_WORKER, AcceptsInterlaced=True)
+            self.assertIsNone(Job2, "Second claim must be refused (in-flight count 1 == cap 1)")
+        finally:
+            self._CleanupQueue()
+            self.Db.ExecuteNonQuery("DELETE FROM TranscodeAttempts WHERE WorkerName = %s", (self.SENTINEL_WORKER,))
 
 
 if __name__ == "__main__":

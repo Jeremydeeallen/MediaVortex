@@ -922,11 +922,13 @@ class QualityTestRepository(BaseRepository):
         qt-queue-visibility-and-override.feature.md C4.
         """
         try:
-            from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate
+            from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate, BuildInflightCapPredicate
             # directive: failure-accounting | # see failure-accounting.C6
             from Core.Database.FailureBudgetPredicate import BuildCapPredicate
             CapabilityFragment, CapabilityParams = BuildClaimPredicate(WorkerName, "QualityTestEnabled")
             CapPredicateFragment, _CapParams = BuildCapPredicate("ta.MediaFileId")
+            # directive: transcode-flow-canonical | # see claim-authority.md
+            InflightFragment, InflightParams = BuildInflightCapPredicate(WorkerName, "QualityTest")
             select_query = (
                 "SELECT qtq.Id, qtq.TranscodeAttemptId, qtq.OriginalFilePath, qtq.LocalSourcePath, "
                 "qtq.TranscodedFilePath, qtq.DateAdded "
@@ -937,10 +939,11 @@ class QualityTestRepository(BaseRepository):
                 "  AND qtq.DateStarted IS NULL "
                 "  AND " + CapabilityFragment + " "
                 "  AND " + CapPredicateFragment + " "
+                "  AND " + InflightFragment + " "
                 "ORDER BY qtq.DateAdded ASC LIMIT 1"
             )
 
-            jobs = self.DatabaseService.ExecuteQuery(select_query, CapabilityParams)
+            jobs = self.DatabaseService.ExecuteQuery(select_query, CapabilityParams + InflightParams)
             if not jobs or len(jobs) == 0:
                 LoggingService.LogDebug(f"No claimable QT jobs for {WorkerName} (Paused / QualityTestEnabled=FALSE / no Pending rows)", "DatabaseManager", "ClaimQualityTestJob")
                 return None

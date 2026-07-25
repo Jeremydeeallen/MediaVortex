@@ -22,15 +22,51 @@ services:
     <<: *worker-base
     hostname: larry-worker-1
     cpuset: "0-7"
+    environment:
+      MEDIAVORTEX_WORKER_NAME: "larry-worker-1"
+      PYTHONUNBUFFERED: "1"
+      MEDIAVORTEX_DB_HOST: "10.0.0.15"
+      MEDIAVORTEX_DB_PORT: "5432"
+      MEDIAVORTEX_DB_NAME: "mediavortex"
+      MEDIAVORTEX_DB_USER: "mediavortex"
+      MEDIAVORTEX_DB_PASSWORD: "mediavortex"
+      MEDIAVORTEX_SHARE_MAPPINGS: "T=/mnt/media_tv/,M=/mnt/movies/,Z=/mnt/xxx/"
   worker-2:
     <<: *worker-base
     hostname: larry-worker-2
     cpuset: "8-15"
+    environment:
+      MEDIAVORTEX_WORKER_NAME: "larry-worker-2"
+      PYTHONUNBUFFERED: "1"
+      MEDIAVORTEX_DB_HOST: "10.0.0.15"
+      MEDIAVORTEX_DB_PORT: "5432"
+      MEDIAVORTEX_DB_NAME: "mediavortex"
+      MEDIAVORTEX_DB_USER: "mediavortex"
+      MEDIAVORTEX_DB_PASSWORD: "mediavortex"
+      MEDIAVORTEX_SHARE_MAPPINGS: "T=/mnt/media_tv/,M=/mnt/movies/,Z=/mnt/xxx/"
   worker-3:
     <<: *worker-base
     hostname: larry-worker-3
     cpuset: "16-23"
+    environment:
+      MEDIAVORTEX_WORKER_NAME: "larry-worker-3"
+      PYTHONUNBUFFERED: "1"
+      MEDIAVORTEX_DB_HOST: "10.0.0.15"
+      MEDIAVORTEX_DB_PORT: "5432"
+      MEDIAVORTEX_DB_NAME: "mediavortex"
+      MEDIAVORTEX_DB_USER: "mediavortex"
+      MEDIAVORTEX_DB_PASSWORD: "mediavortex"
+      MEDIAVORTEX_SHARE_MAPPINGS: "T=/mnt/media_tv/,M=/mnt/movies/,Z=/mnt/xxx/"
   worker-4:
     <<: *worker-base
     hostname: larry-worker-4
     cpuset: "24-31"
+    environment:
+      MEDIAVORTEX_WORKER_NAME: "larry-worker-4"
+      PYTHONUNBUFFERED: "1"
+      MEDIAVORTEX_DB_HOST: "10.0.0.15"
+      MEDIAVORTEX_DB_PORT: "5432"
+      MEDIAVORTEX_DB_NAME: "mediavortex"
+      MEDIAVORTEX_DB_USER: "mediavortex"
+      MEDIAVORTEX_DB_PASSWORD: "mediavortex"
+      MEDIAVORTEX_SHARE_MAPPINGS: "T=/mnt/media_tv/,M=/mnt/movies/,Z=/mnt/xxx/"
