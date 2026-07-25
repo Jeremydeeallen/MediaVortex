@@ -6,6 +6,7 @@
 
 # Log files
 *.log
+*.log.out
 *.log.cutree
 *.err
 ffmpeg2pass-*.log
@@ -16,6 +17,10 @@ vmaf_test_*.xml
 Scripts/Smoke/*.results.json
 backfill-shard-*
 Logs/
+
+# Operator screenshots (dev artifacts at repo root; never source-controlled)
+/admin-workers-*.png
+/*.png
 
 # Pipeline test harness mutable spool (real file backups + Jellyfin capture)
 Tests/Pipeline/_backup/*
