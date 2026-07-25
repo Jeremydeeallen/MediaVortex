@@ -71,6 +71,7 @@ function RenderTile(W, StaleSec, DivergenceSec) {
     ? `<div class="small text-danger mt-1">Mount error: ${W.MountValidationError}</div>`
     : '';
   const NvencBadge = W.NvencCapable ? '<span class="badge bg-info text-dark ms-1">NVENC</span>' : '';
+  const QsvBadge = W.QsvCapable ? '<span class="badge bg-warning text-dark ms-1">QSV</span>' : '';
   const CapToggle = (Cap, Label, Enabled) => `
     <label class="form-check form-check-inline form-check-reverse mb-0" style="font-size:0.78em;">
       <input type="checkbox" class="form-check-input cap-toggle" data-worker="${Name}" data-cap="${Cap}" ${Enabled ? 'checked' : ''}>
@@ -83,7 +84,7 @@ function RenderTile(W, StaleSec, DivergenceSec) {
       ${CapToggle('QualityTestEnabled', 'Quality', W.QualityTestEnabled)}
       ${CapToggle('ScanEnabled', 'Scan', W.ScanEnabled)}
       ${CapToggle('HwAccelDecodeEnabled', 'HwAccel', W.HwAccelDecodeEnabled)}
-      ${NvencBadge}
+      ${NvencBadge}${QsvBadge}
     </div>`;
   const Ver = (W.Version || 'unknown').toString().substring(0, 8);
   const Diverge = W.IntentDiverges === true;
