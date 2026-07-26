@@ -204,7 +204,9 @@ Tests/Contract/TestAdequacyGate.py                                  -- retired p
 - Symptom: 298 Pending Remux rows dead-lettered. Only larry-worker-1 has `RemuxEnabled=TRUE`; larry has no NVENC/QSV; all 298 rows carry AV1-profile files; universal AV1 codec gate refused larry.
 - Fix: `Features/TranscodeQueue/TranscodeQueueRepository.py::ClaimNextPendingJob` -- gate the AV1 encoder check behind `NOT pm.RequiresProfileGates` (True only for Transcode mode, per `ProcessingModes` seed). Stream-copy modes (Remux/AudioFix/Quick/SubtitleFix) bypass the encoder-capability check because they don't re-encode video.
 - Dry-run SQL against 10.0.0.15 with larry-worker-1 identity + new WHERE clause returns 3 claimable Remux rows (e.g. Law & Order SVU S23E09 -- QueueId 155916). Pre-fix returned 0.
-- I9 WebService + WorkerService restarted on new source. Larry Docker container (LXC 218 on Proxmox larry, 10.0.0.42) requires `deploy/deploy-*.py` redeploy to pick up the fix; operator territory per operational limits.
+- I9 WebService + WorkerService restarted on new source.
+- Larry fleet deployed via `deploy-fleet.py --hosts larry`. `Workers.Version` for larry-worker-1/2/3/4 = `fb12c3eb146c412e765e654a9553ef090750ddcc` (C9 commit).
+- **Live claim observed**: `larry-worker-1` claimed `TranscodeQueue.Id=155916` (SVU S23E09, ProcessingMode=Remux, profile codec=av1). Row now `Status=Running ClaimedBy=larry-worker-1`. First non-nvenc/qsv worker to successfully claim an AV1-profile Remux row.
 
 ### Resume Marker
 
