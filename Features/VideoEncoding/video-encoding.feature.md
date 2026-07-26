@@ -1,26 +1,31 @@
-# Video Encoding -- video compliance (profile-independent baseline)
+# Video Encoding -- video compliance (bitrate-driven multiplier)
 
 **Slug:** video-encoding
 
 ## What It Does
 
-Answers one question per MediaFile: is the video stream at library baseline (codec in the allowed list; bpp under the transcode threshold)? Writes `(VideoCompliant, VideoCompliantReason)`. One of three per-domain compliance verticals (Audio / Video / Container). Profile-independent: consumer never reads `AssignedProfile` or any Profile row.
+Answers one question per MediaFile: is the video stream compliant (source bitrate at or below the per-resolution multiplier over Tier 1 target)? Writes `(VideoCompliant, VideoCompliantReason)`. One of three per-domain compliance verticals (Audio / Video / Container). Codec is orthogonal -- not a compliance signal. Compact-source classification IS the gate; there is no separate admission-time exclusion (see DOMAIN.md 2026-07-26).
 
 ## Workflows
 
 | # | User action | Surface element | Handler | Backing class.method |
 |---|---|---|---|---|
-| W1 | Operator edits acceptable video codecs (CSV) | `/Admin/Compliance` Video Rules tab | `PUT /api/VideoEncoding/Rules` | `VideoEncodingController.UpdateRules` (updates row + backfills every MediaFileId via `VideoVertical().RecomputeFor`) |
+| W1 | Operator edits per-resolution multiplier | `/settings` Transcoding card, Video compliance section | `PUT /api/SystemSettings/Transcoding` (VideoCompliance section) | `SystemSettingsController.UpdateTranscodingSettings` -> `VideoComplianceThresholdsRepository.UpsertAll` |
 | W2 | Probe completion triggers Video recompute | scanner post-probe | per-file `RecomputeFor` | `VideoVertical.RecomputeFor([Id])` |
-| W3 | Admin bulk recompute | CLI | -- | `VideoVertical.RecomputeFor(all_ids)` |
+| W3 | Bulk recompute after multiplier retune | CLI: `py Scripts/RecomputeWorkBuckets.py` | -- | `VideoVertical.RecomputeFor(all_ids)` |
 
 ## Success Criteria
 
-C1. `VideoVertical.RecomputeFor(MediaFileIds)` writes `(VideoCompliant, VideoCompliantReason)` for each id.
-C2. `VideoVertical.Evaluate` reads exactly one knob from `VideoComplianceRules`: `AcceptableVideoCodecsCsv`. Codec check rejects when source codec is NOT in the allowed CSV.
-C3. **Efficient-source rule (DOMAIN.md 2026-07-23):** when the source's `VideoBitrateKbps` is at or below the file's assigned profile's `TargetKbps` for the file's `ResolutionCategory` (looked up in `ProfileThresholds`, joined by `Profiles.ProfileName`), `Evaluate` returns `(True, 'source_at_or_below_target:<src><=<target>')`. When the source is above the target, returns `(False, 'source_above_target:<src>><target>')`. When any of AssignedProfile / ResolutionCategory / VideoBitrateKbps is missing, the check is skipped and evaluation falls through to `(True, None)`. `ContentClass` defaults to `'live_action'` when the MediaFile does not carry the attribute. This rule REPLACES the retired bpp gate and the retired efficient-size-override total-bitrate proxy; both are gone from the code.
-C4. `VideoComplianceRules` read fresh per `Evaluate` call (`db-is-authority` -- no `__init__` cache).
-C5. Fail-loud: missing rules row -> `RuntimeError`; missing MediaFileId -> `ValueError`; no try/except.
+C1. `VideoVertical.Evaluate` returns non-compliant iff `SourceKbps > Tier1TargetKbps * Multiplier(ResolutionCategory)`. Reason strings: `source_at_or_below_multiplier:<src><=<threshold>(tier1=<t>*<m>)` or `source_above_multiplier:<src>><threshold>(tier1=<t>*<m>)`. Tier1TargetKbps from `TierLadderRepository.GetTier1Target(Family, ContentClass, Resolution)`. Multiplier from `VideoComplianceThresholdsRepository.GetMultiplier(ResolutionCategory)`.
+
+C2. Codec is not a compliance input. `MediaFiles.Codec` value never influences `VideoCompliant`. Legacy `VideoComplianceRules` table + `acceptablevideocodecscsv` column dropped.
+
+C3. `VideoComplianceThresholds(ResolutionCategory UNIQUE, Multiplier NUMERIC(4,2) CHECK>0, LastUpdated)` seeded with `(480p, 1.5), (720p, 2.0), (1080p, 2.0), (2160p, 3.0)`. Every read fresh per `Evaluate` call (`db-is-authority` -- no `__init__` cache).
+
+C4. Operator tunes multipliers via `/settings` GUI. GET `/api/SystemSettings/Transcoding` returns `VideoCompliance: [{ResolutionCategory, Multiplier}, ...]`. PUT persists via `VideoComplianceThresholdsRepository.UpsertAll`. No SQL required.
+
+C5. Fail-loud: missing multiplier row for a MediaFile's ResolutionCategory -> `RuntimeError`; missing MediaFileId -> `ValueError`; no try/except. Missing Family / Tier1 / AssignedProfile falls through to `(True, None)` (insufficient-data compliant-by-default; existing pattern preserved).
+
 C6. **MediaVortex outputs are compliance-exempt on the video side.** When `MediaFiles.TranscodedByMediaVortex = TRUE`, `Evaluate` returns `(True, 'mediavortex_output_accepted')` before any other rule fires. Domain rule: an MV-produced file's original source has been deleted; re-transcoding compressed AV1 through any profile produces generation-loss. `AudioVertical` and `ContainerVertical` still run so audio-only or container-only issues on MV outputs route through `AudioFix` / `Remux` normally.
 
 ## Seams
@@ -28,8 +33,8 @@ C6. **MediaVortex outputs are compliance-exempt on the video side.** When `Media
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
 |---|---|---|---|---|---|
 | S1 | `RecomputeFor` -> `MediaFiles.VideoCompliant` | `VideoVertical._WriteResult` | `(VideoCompliant: bool/NULL, VideoCompliantReason: text/NULL)` | Generated column `WorkBucket` reflects the flag on next SELECT | Post-RecomputeFor SELECT |
-| S2 | `VideoComplianceRules` -> vertical | DB UPDATE via UI / direct SQL | `AcceptableVideoCodecsCsv` (only read column post-2026-07-23) | `_LoadRules` parses per call | UPDATE then observe change |
-| S3 | `Profiles` + `ProfileThresholds` -> vertical | ContentClassifier populates `MediaFiles.AssignedProfile`; operator edits `ProfileThresholds.TargetKbps` via `/Admin/Profiles` | `_TargetKbpsFor(ProfileName, ResolutionCategory, ContentClass)` returns `TargetKbps` | `Evaluate` compares `VideoBitrateKbps` against target for efficient-source verdict | `TestVideoComplianceBar` cases covering source-at-or-below-target and source-above-target |
+| S2 | `VideoComplianceThresholds` -> vertical | operator via `/settings` PUT | 4 rows `(ResolutionCategory TEXT, Multiplier NUMERIC(4,2))`; multiplier > 0 (CHECK) | `GetMultiplier` reads fresh per call; fail-loud on missing row | `TestVideoComplianceMultiplier` |
+| S3 | `Profiles` + `ProfileThresholds` -> `TierLadderRepository.GetTier1Target` | Backfill migration seeds Tier 1 rows | JOIN on `Family + QualityTier=1 + ContentClass + Resolution` -> INT kbps or None | vertical multiplies by multiplier; falls through to `(True, None)` on None | `TestVideoComplianceMultiplier` |
 
 ## Cross-Vertical Contract
 
@@ -39,14 +44,14 @@ C6. **MediaVortex outputs are compliance-exempt on the video side.** When `Media
 |---|---|
 | `MediaFiles.VideoCompliant` | `VideoVertical._WriteResult` |
 | `MediaFiles.VideoCompliantReason` | `VideoVertical._WriteResult` |
-| `VideoComplianceRules.*` | operator via `/Admin/Compliance` Video Rules tab |
+| `VideoComplianceThresholds.*` | operator via `/settings` Transcoding card |
 
 ### Columns the VideoEncoding vertical READS from external tables
 
 | Column | Read by | Owner |
 |---|---|---|
-| `MediaFiles.Codec`, `VideoBitrateKbps`, `TranscodedByMediaVortex`, `ResolutionCategory`, `AssignedProfile` | `Evaluate` | MediaProbe vertical + ContentClassifier |
-| `Profiles.ProfileName`, `ProfileThresholds.TargetKbps` / `Resolution` / `ContentClass` | `_TargetKbpsFor` | Profiles vertical (operator via `/Admin/Profiles`) |
+| `MediaFiles.VideoBitrateKbps`, `TranscodedByMediaVortex`, `ResolutionCategory`, `AssignedProfile`, `ContentClass` | `Evaluate` | MediaProbe vertical + ContentClassifier |
+| `Profiles.Family`, `ProfileThresholds.TargetKbps` (Tier 1) | `TierLadderRepository.GetTier1Target` | Profiles vertical (operator via `/settings` bitrate ladder) |
 
 ### Stable function entry points (cross-vertical callers)
 

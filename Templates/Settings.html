@@ -505,10 +505,10 @@
             </div>
         </div>
 
-        <!-- =============== SECTION: Transcoding (tier ladder + adequacy + confidence) =============== -->
+        <!-- =============== SECTION: Transcoding (tier ladder + video compliance + confidence) =============== -->
         <div class="settings-section">
             <div class="card-header" data-bs-toggle="collapse" data-bs-target="#TranscodingSection">
-                <span><i class="fas fa-sliders-h me-2"></i> Transcoding &mdash; tier ladder, adequacy, VMAF confidence</span>
+                <span><i class="fas fa-sliders-h me-2"></i> Transcoding &mdash; tier ladder, video compliance, VMAF confidence</span>
                 <i class="fas fa-chevron-down"></i>
             </div>
             <div id="TranscodingSection" class="collapse">
@@ -529,28 +529,9 @@
                     <h6 class="mb-2">ICQ ladder (per-tier IcqQ)</h6>
                     <div id="IcqLadderContainer" class="mb-3"><em class="text-muted small">Loading&hellip;</em></div>
 
-                    <h6 class="mb-2">Admission adequacy gate</h6>
-                    <table class="table settings-table mb-3">
-                        <tbody>
-                            <tr>
-                                <th>Enable Tier 1 exclusion
-                                    <br><small class="text-muted">When ON, files whose source kbps already sits at or below the Tier 1 target are excluded from re-encode admission.</small>
-                                </th>
-                                <td>
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox" id="AdequacyGateEnabled" role="switch">
-                                        <label class="form-check-label" for="AdequacyGateEnabled">Adequacy gate active</label>
-                                    </div>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th>Margin (%)
-                                    <br><small class="text-muted">Boundary = Tier1TargetKbps &times; (1 + margin/100). Higher margin excludes more sources.</small>
-                                </th>
-                                <td><input type="number" step="0.5" id="AdequacyGateMarginPercent" class="form-control form-control-sm" min="0" max="100" style="max-width: 140px;"></td>
-                            </tr>
-                        </tbody>
-                    </table>
+                    <h6 class="mb-2">Video compliance (per-resolution multiplier over Tier 1 target)</h6>
+                    <p class="text-muted small mb-2">SourceKbps &gt; Tier1TargetKbps &times; Multiplier &rarr; file classified <code>WorkBucket='Transcode'</code>. Otherwise the file falls through to Remux/AudioFix/Compliant depending on other columns. Higher multiplier = stricter (more sources treated compliant).</p>
+                    <div id="VideoComplianceContainer" class="mb-3"><em class="text-muted small">Loading&hellip;</em></div>
 
                     <h6 class="mb-2">VMAF confidence-skip</h6>
                     <table class="table settings-table mb-3">
@@ -2235,7 +2216,7 @@ function SavePostTranscodeGateConfig() {
     }).fail(function(X) { alert('Save failed: ' + X.responseText); });
 }
 
-var _TranscodingSettings = { BitrateLadder: [], IcqLadder: [], TierLabels: {} };
+var _TranscodingSettings = { BitrateLadder: [], IcqLadder: [], TierLabels: {}, VideoCompliance: [] };
 
 function LoadTranscodingSettings() {
     var Filter = ($('#ConfidenceStatsFilter').val() || '').trim();
@@ -2248,14 +2229,34 @@ function LoadTranscodingSettings() {
         _TranscodingSettings.BitrateLadder = R.BitrateLadder || [];
         _TranscodingSettings.IcqLadder = R.IcqLadder || [];
         _TranscodingSettings.TierLabels = R.TierLabels || {};
-        $('#AdequacyGateEnabled').prop('checked', !!(R.Adequacy && R.Adequacy.Enabled));
-        $('#AdequacyGateMarginPercent').val((R.Adequacy && R.Adequacy.MarginPercent) || 0);
+        _TranscodingSettings.VideoCompliance = R.VideoCompliance || [];
         $('#MinConfidenceSampleCount').val((R.Confidence && R.Confidence.MinConfidenceSampleCount) || 10);
         $('#MinConfidencePassRate').val((R.Confidence && R.Confidence.MinConfidencePassRate) || 0.95);
         $('#SigmaMargin').val((R.Confidence && R.Confidence.SigmaMargin) || 2.0);
         RenderTranscodingLadders();
+        RenderVideoCompliance();
         RenderConfidenceStats(R.ConfidenceStats || []);
     }).fail(function(X) { alert('Load failed: ' + X.responseText); });
+}
+
+function RenderVideoCompliance() {
+    var Container = $('#VideoComplianceContainer').empty();
+    var Rows = _TranscodingSettings.VideoCompliance || [];
+    if (!Rows.length) {
+        Container.append('<em class="text-muted small">No thresholds seeded. Apply AddVideoComplianceThresholds_2026_07_26.py.</em>');
+        return;
+    }
+    var H = '<table class="table table-sm table-bordered mb-0" style="max-width: 640px;">';
+    H += '<thead><tr><th>Resolution</th><th>Multiplier</th><th class="text-muted">Effective floor (Tier 1 target &times; multiplier)</th></tr></thead><tbody>';
+    Rows.forEach(function(R) {
+        H += '<tr data-resolution="' + R.ResolutionCategory + '">';
+        H += '<td class="fw-bold">' + R.ResolutionCategory + '</td>';
+        H += '<td><input type="number" step="0.05" min="0.01" class="form-control form-control-sm compliance-multiplier" value="' + R.Multiplier + '" style="max-width: 110px;"></td>';
+        H += '<td class="text-muted small">tier1 &times; ' + R.Multiplier.toFixed(2) + '</td>';
+        H += '</tr>';
+    });
+    H += '</tbody></table>';
+    Container.append(H);
 }
 
 function _TierHeader(T) {
@@ -2363,13 +2364,19 @@ function SaveTranscodingSettings() {
         });
         IcqRows.push(Row);
     });
+    var VideoComplianceRows = [];
+    $('#VideoComplianceContainer tr[data-resolution]').each(function() {
+        var Tr = $(this);
+        var Res = Tr.data('resolution');
+        var Mul = parseFloat(Tr.find('.compliance-multiplier').val());
+        if (Res && !isNaN(Mul) && Mul > 0) {
+            VideoComplianceRows.push({ ResolutionCategory: Res, Multiplier: Mul });
+        }
+    });
     var Body = {
         BitrateLadder: BitrateRows,
         IcqLadder: IcqRows,
-        Adequacy: {
-            Enabled: $('#AdequacyGateEnabled').is(':checked'),
-            MarginPercent: parseFloat($('#AdequacyGateMarginPercent').val() || '0')
-        },
+        VideoCompliance: VideoComplianceRows,
         Confidence: {
             MinConfidenceSampleCount: parseInt($('#MinConfidenceSampleCount').val() || '10', 10),
             MinConfidencePassRate: parseFloat($('#MinConfidencePassRate').val() || '0.95'),
@@ -2384,7 +2391,7 @@ function SaveTranscodingSettings() {
     }).done(function(R) {
         if (R.Success) {
             var Stamp = new Date().toISOString().substring(0, 19).replace('T', ' ');
-            $('#TranscodingLastSaved').text('Saved ' + Stamp + ' (bitrate cells: ' + (R.Updated ? R.Updated.BitrateCells : '?') + ', icq cells: ' + (R.Updated ? R.Updated.IcqCells : '?') + ')');
+            $('#TranscodingLastSaved').text('Saved ' + Stamp + ' (bitrate cells: ' + (R.Updated ? R.Updated.BitrateCells : '?') + ', icq cells: ' + (R.Updated ? R.Updated.IcqCells : '?') + ', compliance multipliers: ' + (R.Updated ? R.Updated.VideoComplianceMultipliers : '?') + ')');
             LoadTranscodingSettings();
         } else {
             alert('Save failed: ' + (R.Error || 'unknown'));

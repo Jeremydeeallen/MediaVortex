@@ -12,7 +12,7 @@ class TestCrossVerticalLeak(unittest.TestCase):
     # directive: compliance-symmetry
     def test_videovertical_drops_legacy_decision_logic(self):
         Source = (_REPO / 'Features' / 'VideoEncoding' / 'VideoVertical.py').read_text(encoding='utf-8')
-        for Forbidden in ('EstimatedSavingsMB', 'IsAlreadyEfficient', 'MvTrusted', 'TranscodedByMediaVortex', 'VideoComplianceRules'):
+        for Forbidden in ('EstimatedSavingsMB', 'IsAlreadyEfficient', 'MvTrusted', 'VideoComplianceRules', 'AcceptableVideoCodecsCsv'):
             self.assertNotIn(Forbidden, Source, f'VideoVertical.py still references legacy symbol: {Forbidden}')
 
     # directive: compliance-symmetry

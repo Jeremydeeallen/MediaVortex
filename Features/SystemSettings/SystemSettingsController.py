@@ -434,12 +434,13 @@ class SystemSettingsController:
                 return jsonify({'Success': False, 'Error': str(e)}), 500
 
         @self.Blueprint.route('/Transcoding', methods=['GET'])
-        # directive: transcode-flow-canonical | # see systemsettings.C10
+        # directive: video-compliance-multiplier | # see video-encoding.C4
         def GetTranscodingSettings():
             try:
                 from Features.Profiles.TierLadderRepository import TierLadderRepository
                 from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
                 from Features.QualityTesting.VmafConfidenceStatsRepository import VmafConfidenceStatsRepository
+                from Features.VideoEncoding.VideoComplianceThresholdsRepository import VideoComplianceThresholdsRepository
 
                 LadderRepo = TierLadderRepository()
                 BitrateCells = LadderRepo.GetBitrateLadder()
@@ -451,13 +452,11 @@ class SystemSettingsController:
 
                 GateCfg = PostTranscodeGateConfigRepository().Get()
 
-                AdequacyEnabledRow = self.Repository.GetSystemSetting('AdequacyGateEnabled')
-                AdequacyMarginRow = self.Repository.GetSystemSetting('AdequacyGateMarginPercent')
-                AdequacyEnabled = True if AdequacyEnabledRow is None else (AdequacyEnabledRow.strip().lower() not in ('false', '0', 'no', 'off'))
-                try:
-                    AdequacyMargin = float(AdequacyMarginRow) if AdequacyMarginRow is not None else 0.0
-                except (TypeError, ValueError):
-                    AdequacyMargin = 0.0
+                Thresholds = VideoComplianceThresholdsRepository().GetAll()
+                VideoCompliance = [
+                    {'ResolutionCategory': T.ResolutionCategory, 'Multiplier': T.Multiplier}
+                    for T in Thresholds
+                ]
 
                 Filter = request.args.get('filter', '').strip() or None
                 Limit = int(request.args.get('limit', '200'))
@@ -468,10 +467,7 @@ class SystemSettingsController:
                     'BitrateLadder': BitrateLadder,
                     'IcqLadder': IcqLadder,
                     'TierLabels': TierLabels,
-                    'Adequacy': {
-                        'Enabled': AdequacyEnabled,
-                        'MarginPercent': AdequacyMargin,
-                    },
+                    'VideoCompliance': VideoCompliance,
                     'Confidence': {
                         'MinConfidenceSampleCount': int(GateCfg.MinConfidenceSampleCount),
                         'MinConfidencePassRate': float(GateCfg.MinConfidencePassRate),
@@ -485,15 +481,16 @@ class SystemSettingsController:
                 return jsonify({'Success': False, 'Error': str(e)}), 500
 
         @self.Blueprint.route('/Transcoding', methods=['PUT'])
-        # directive: transcode-flow-canonical | # see systemsettings.C10
+        # directive: video-compliance-multiplier | # see video-encoding.C4
         def UpdateTranscodingSettings():
             try:
                 Data = request.get_json() or {}
                 from Features.Profiles.TierLadderRepository import TierLadderRepository
                 from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
+                from Features.VideoEncoding.VideoComplianceThresholdsRepository import VideoComplianceThresholdsRepository, ComplianceThreshold
 
                 LadderRepo = TierLadderRepository()
-                Updated = {'BitrateCells': 0, 'IcqCells': 0}
+                Updated = {'BitrateCells': 0, 'IcqCells': 0, 'VideoComplianceMultipliers': 0}
 
                 for Row in (Data.get('BitrateLadder') or []):
                     Family = Row.get('Family')
@@ -528,20 +525,22 @@ class SystemSettingsController:
                             continue
                         Updated['IcqCells'] += LadderRepo.UpdateIcqCell(Family, CC, Tier, Icq)
 
-                Adequacy = Data.get('Adequacy') or {}
-                if 'Enabled' in Adequacy:
-                    Val = 'true' if bool(Adequacy['Enabled']) else 'false'
-                    self.Repository.AddOrUpdateSystemSetting('AdequacyGateEnabled', Val,
-                        'Whether AdequacyGate excludes files whose SourceKbps <= Tier1TargetKbps at admission.', 'boolean')
-                if 'MarginPercent' in Adequacy and Adequacy['MarginPercent'] is not None:
-                    try:
-                        Margin = float(Adequacy['MarginPercent'])
-                    except (TypeError, ValueError):
-                        return jsonify({'Success': False, 'Error': f"Adequacy.MarginPercent must be numeric"}), 400
-                    if Margin < 0.0 or Margin > 100.0:
-                        return jsonify({'Success': False, 'Error': "Adequacy.MarginPercent must be in [0.0,100.0]"}), 400
-                    self.Repository.AddOrUpdateSystemSetting('AdequacyGateMarginPercent', str(Margin),
-                        'Percent margin applied to Tier1TargetKbps before AdequacyGate compares to SourceKbps.', 'numeric')
+                VideoCompliance = Data.get('VideoCompliance') or []
+                if VideoCompliance:
+                    Rows = []
+                    for R in VideoCompliance:
+                        Res = R.get('ResolutionCategory')
+                        Mul = R.get('Multiplier')
+                        if not Res or Mul is None:
+                            return jsonify({'Success': False, 'Error': "VideoCompliance rows require ResolutionCategory + Multiplier"}), 400
+                        try:
+                            MulF = float(Mul)
+                        except (TypeError, ValueError):
+                            return jsonify({'Success': False, 'Error': f"VideoCompliance.Multiplier must be numeric (got {Mul!r})"}), 400
+                        if MulF <= 0.0:
+                            return jsonify({'Success': False, 'Error': f"VideoCompliance.Multiplier must be > 0 (got {MulF})"}), 400
+                        Rows.append(ComplianceThreshold(ResolutionCategory=Res, Multiplier=MulF))
+                    Updated['VideoComplianceMultipliers'] = VideoComplianceThresholdsRepository().UpsertAll(Rows)
 
                 Confidence = Data.get('Confidence') or {}
                 GateArgs = {}

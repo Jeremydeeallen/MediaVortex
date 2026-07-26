@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-07-26
-**Status:** Active -- phase: NEEDS_DOC_PREREAD
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** video-compliance-multiplier
 
 ## Outcome
@@ -118,15 +118,15 @@ Tests/Contract/TestAdequacyGate.py                                  -- retired p
 ### Progress
 
 - [x] NEEDS_PLAN complete: criteria + audit + seams + files.
-- [ ] NEEDS_DOC_PREREAD: partial-read `video-encoding.feature.md`, `admission-adequacy-gate.feature.md`, `work-bucket.feature.md`, `work-bucket.flow.md`, `transcode.flow.md`, `profile-tier-ladder.feature.md` per anchors in `## Files`.
+- [x] NEEDS_DOC_PREREAD: pre-reads complete.
 - [ ] IMPLEMENTING: land C1-C8 in sequenced commits (migrations first; then repo+vertical; then controller+UI; then AdequacyGate retirement; then contract tests; then recompute script; then DOMAIN.md).
 - [ ] VERIFYING: contract tests green + live smoke transaction per criterion.
 - [ ] DELIVERING: Promotions rows (video-encoding.feature.md rewrite, work-bucket.feature.md reason strings, gui-editable-knobs.md rule doc creation).
 
 ### Resume Marker
 
-**Next step:** partial-read every `*.feature.md` / `*.flow.md` ancestor of files in `## Files`. Then advance to IMPLEMENTING.
+**Next step:** land migrations (C1 add table, C2 drop old table, C3 drop AdequacyGate artifacts).
 
-**Phase:** NEEDS_DOC_PREREAD
+**Phase:** IMPLEMENTING
 
 **Prior directive** (closed 2026-07-26): `.claude/directives/closed/2026-07-26-transcode-flow-canonical-closed.md`.

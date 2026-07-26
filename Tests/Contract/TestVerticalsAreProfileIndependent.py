@@ -27,7 +27,7 @@ class _FakeMf:
 
 class _StubVideoDb:
     def ExecuteQuery(self, _Sql, _Params=None):
-        return [{'acceptablevideocodecscsv': 'av1'}]
+        return []
 
 
 class _StubContainerDb:

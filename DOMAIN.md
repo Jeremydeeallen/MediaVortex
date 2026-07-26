@@ -336,38 +336,22 @@ Bottom line: fewer expensive full re-encodes, more cheap Remux + AudioFix operat
 
 ---
 
-## Open Domain Questions (2026-07-26)
+## Resolved Domain Questions (2026-07-26)
 
-Claude needs operator answers before implementation can proceed. All four questions relate to work already in-flight this session.
+Answered during `video-compliance-multiplier` directive planning.
 
-### Q1: Codec compliance tail policy
+### Q1: Codec compliance tail policy -- (a) Kill the allowlist entirely
 
-The retirement of `VideoComplianceRules.acceptablevideocodecscsv` leaves 34 files (0.07% of library) on truly-legacy codecs (wmv3=17, msmpeg4v3=13, wmv2=2, vp9=1, vc1=1). Under the new bitrate-only rule, they will be compliance-evaluated by bitrate alone.
+Bitrate rule alone drives compliance. Truly-unplayable codec edge cases fail the container-remux stream-copy downstream and land in the operator queue for manual handling. No blocklist table. If false-positive-compliant unplayable files show up in `/Work/Remux` post-cutover, a small `UnsupportedVideoCodecs` blocklist is a follow-up directive, not a blocker for this one.
 
-Options:
-- **(a) Kill the allowlist entirely.** Trust bitrate + container-remux path to catch unplayable edge cases. Operator overrides remain available.
-- **(b) Keep a small "playability blocklist"** in a new tiny table (e.g. `UnsupportedVideoCodecs`) with 4-5 entries. These force Transcode regardless of bitrate.
-- **(c) Something else** you'd rather.
+### Q2: All operator knobs editable via GUI -- (a) Domain rule
 
-### Q2: All operator knobs editable via GUI -- domain rule or design principle?
+Every operator-facing DB knob (per-vertical thresholds, multipliers, gate configs, ladder cells) MUST be tunable via `/settings` or `/Admin/*` GUI without SQL or code. Enforcement is judgment-gate per `.claude/rules/gui-editable-knobs.md`. Reviewer flags any new operator-facing table/column shipped without a matching handler.
 
-You said this session: "all knobs should be editable via GUI in the settings." Is this a DOMAIN RULE ("operator MUST be able to tune X via GUI, never SQL or code") -- in which case any new operator-facing DB knob without a GUI is a bug -- or a design principle (preferred but not enforced)?
+### Q3: Reclassify authorization after multiplier lands -- one-shot recompute script
 
-Options:
-- **(a) Domain rule.** Add a rule entry. Contract test can grep for new operator-facing tables/columns without a matching `/settings` handler.
-- **(b) Design principle only.** No enforcement; taste + code review.
+`Scripts/RecomputeWorkBuckets.py` invokes `VideoVertical.RecomputeFor(all_ids)` -- same Python classifier the scanner uses, no duplicated SQL. Operator drain-first sequence (Workers.Status='Paused' + wait ActiveJobs=0 per `feedback_coordinate_live_worker_writes.md`), then run script, then verify WorkBucket delta counts, then unpause. Deploy-time auto-recompute rejected -- operator wants visibility on the shift before workers act.
 
-### Q3: Reclassify authorization after multiplier lands
+### Q4: Worker-affecting paths list -- stands as declared
 
-Multipliers going live re-derives ~30k MediaFiles rows currently in `WorkBucket='Transcode'`. Some will drop to Compliant/Remux/AudioFix. How does the recompute happen?
-
-Options:
-- **(a) One-shot script.** Run manually post-migration; script exits with row-count deltas. Operator sees changes before workers act.
-- **(b) Automatic during deploy.** Migration includes an `UPDATE MediaFiles SET WorkBucket = ...` recompute. Deploy converges data + code together.
-- **(c) Background scanner adoption.** Next scanner tick re-derives incrementally. Slow convergence but no operator action needed.
-
-### Q4: Worker-affecting paths -- authoritative list correct?
-
-The 2026-07-26 "Fleet-on-HEAD applies only to worker-affecting commits" entry (Deploy section) lists paths. Is that list complete + correct? Anything missing / anything wrongly included?
-
-Once these four answers are recorded here, the code work (compliance multiplier feature + reclassify sweep) can proceed in a fresh session without re-litigating any domain question.
+The 2026-07-26 "Fleet-on-HEAD applies only to worker-affecting commits" entry above is authoritative. Adding a new top-level directory means updating that list BEFORE the first commit that touches it.

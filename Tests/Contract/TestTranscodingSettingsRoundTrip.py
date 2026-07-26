@@ -35,16 +35,18 @@ class TestTranscodingSettingsRoundTrip(unittest.TestCase):
         self.assertTrue(Result.get('Success'), Result)
         return Result
 
-    def test_get_returns_all_six_sections(self):
+    def test_get_returns_all_sections(self):
         Body = self._Get()
         self.assertIn('BitrateLadder', Body)
         self.assertIn('IcqLadder', Body)
-        self.assertIn('Adequacy', Body)
+        self.assertIn('VideoCompliance', Body)
         self.assertIn('Confidence', Body)
         self.assertIn('QualityTestEnabled', Body)
         self.assertIn('ConfidenceStats', Body)
-        self.assertIn('Enabled', Body['Adequacy'])
-        self.assertIn('MarginPercent', Body['Adequacy'])
+        self.assertIsInstance(Body['VideoCompliance'], list)
+        for R in Body['VideoCompliance']:
+            self.assertIn('ResolutionCategory', R)
+            self.assertIn('Multiplier', R)
         for Knob in ('MinConfidenceSampleCount', 'MinConfidencePassRate', 'SigmaMargin'):
             self.assertIn(Knob, Body['Confidence'])
 
@@ -69,23 +71,18 @@ class TestTranscodingSettingsRoundTrip(unittest.TestCase):
         for Tier in range(1, 6):
             self.assertIn(f'Tier{Tier}', QsvRows[0])
 
-    def test_adequacy_toggle_round_trips(self):
-        Original = self._Get()['Adequacy']
+    def test_video_compliance_multiplier_round_trips(self):
+        Original = self._Get()['VideoCompliance']
+        Original480 = next((R for R in Original if R['ResolutionCategory'] == '480p'), None)
+        self.assertIsNotNone(Original480, '480p threshold row missing -- migration not applied')
+        OriginalMultiplier = float(Original480['Multiplier'])
         try:
-            self._Put({'Adequacy': {'Enabled': False, 'MarginPercent': 12.5}})
-            After = self._Get()['Adequacy']
-            self.assertFalse(After['Enabled'])
-            self.assertAlmostEqual(float(After['MarginPercent']), 12.5, places=2)
-
-            self._Put({'Adequacy': {'Enabled': True, 'MarginPercent': 0.0}})
-            Restored = self._Get()['Adequacy']
-            self.assertTrue(Restored['Enabled'])
-            self.assertAlmostEqual(float(Restored['MarginPercent']), 0.0, places=2)
+            self._Put({'VideoCompliance': [{'ResolutionCategory': '480p', 'Multiplier': 1.75}]})
+            After = self._Get()['VideoCompliance']
+            After480 = next((R for R in After if R['ResolutionCategory'] == '480p'), None)
+            self.assertAlmostEqual(float(After480['Multiplier']), 1.75, places=2)
         finally:
-            self._Put({'Adequacy': {
-                'Enabled': bool(Original['Enabled']),
-                'MarginPercent': float(Original['MarginPercent']),
-            }})
+            self._Put({'VideoCompliance': [{'ResolutionCategory': '480p', 'Multiplier': OriginalMultiplier}]})
 
     def test_confidence_knobs_round_trip(self):
         Original = self._Get()['Confidence']
