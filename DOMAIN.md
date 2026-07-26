@@ -136,42 +136,6 @@ Consequences:
 
 Historical damage (2026-07-24): running `deploy-baremetal-worker.py` on dot + wakko flipped `dot-worker-{2,3,4}` and `wakko-worker-{2,3,4}` from Paused to Online because the DELETE nuked operator state and RestoreWorkerStatus captured post-COALESCE 'Online' as the Original. Same run caused four systemd processes on each host to all claim WorkerName='{host}-worker-1' because `_ClaimPrefixedWorkerName` returned a slot name without atomically writing the row, so all four processes read empty state and picked slot 1.
 
-## 2026-07-25 -- Workers MUST be drained before deploy
-
-Question: What must be true before a worker's WorkerService process restarts as part of a deploy?
-
-Answer: **A worker MUST have `ActiveJobs=0` before its process restarts.** Killing an encoder mid-flight loses the work, produces `.inprogress` file orphans, corrupts audio-normalization scratch dirs, and forces a full re-encode next admission. Drain is not optional.
-
-Drain contract:
-- Deploy sets `Workers.Status='Paused'` for every worker it intends to restart. The worker's own claim loop MUST honor Paused and stop claiming new work at the next poll.
-- Deploy waits until `ActiveJobs` count for the paused worker reaches 0 before touching the process.
-- Drain wait has an upper bound (currently `DRAIN_TIMEOUT_SEC = 1800` = 30 minutes). Deploy MUST NOT exceed this without operator interruption; on exceed, deploy either aborts OR forces a supervised kill with explicit `--force-drain` flag from the operator. It does NOT silently `SIGTERM` mid-encode.
-- Drain applies to EVERY deploy path: `deploy-fleet.py` (canonical), `deploy-baremetal-worker.py`, `deploy-linux-worker.py`, `deploy-windows-worker.py`. Each script's entry point verifies drain BEFORE code sync + restart. No shortcut path exists.
-
-Consequences:
-- The `--no-drain` flag on `deploy-fleet.py` is EMERGENCY-only and must log to `DeployHistory.ErrorMessage` with the operator-supplied reason.
-- Any script or skill that restarts a worker without checking `ActiveJobs=0` is a bug.
-- Every deploy path is contract-test-locked against this invariant (`Tests/Contract/TestDeployMustDrain.py`).
-
-## 2026-07-25 -- Workers MUST be up-to-date before coming back Online
-
-Question: When can a worker's `Workers.Status` return to `'Online'` after a deploy?
-
-Answer: **Only when the worker's registered `Workers.Version` matches the deploy target SHA AND `LastHeartbeat` is fresh (< 60s).** A worker that has restarted but is still on the old SHA MUST remain `Paused` until it registers on the new SHA.
-
-Version-freshness contract:
-- Deploy captures target SHA at entry, stores in `DeployHistory.NewSha`.
-- After restart, deploy polls `Workers.Version` per host with a bounded timeout (`POLL_TIMEOUT_SEC = 300` = 5 minutes).
-- `RestoreWorkerStatus` only sets `Status` back to the operator's pre-drain intent for workers that have reached `Version = TargetSha[:8]` AND `LastHeartbeat < 60s`.
-- Workers that fail the version-match check within the poll window stay `Paused`. Deploy exits with `Outcome='TIMEOUT'` and names the stragglers.
-- Operator's original `Status` intent (Online vs Paused) is preserved through the drain-deploy-restore cycle. If pre-drain was Online AND post-restart version-matches, worker returns to Online. If pre-drain was Paused, worker stays Paused.
-
-Consequences:
-- No worker is ever Online while running old code. Split-SHA fleet is a bug the deploy catches.
-- If deploy times out, workers stay Paused (safe default). Operator investigates the straggler.
-- The version bump + status flip happen as a single logical step per worker, not fleet-wide -- one worker on new SHA, one on old, is transient but never Online-old + Online-new simultaneously.
-- Every deploy path is contract-test-locked against this invariant (`Tests/Contract/TestDeployVersionGate.py`).
-
 ## 2026-07-25 -- Worker identity is deploy-assigned, not runtime-derived
 
 Question: How does a WorkerService process learn its `WorkerName`?
@@ -206,16 +170,32 @@ Consequences:
 - Any `Claim*` function that omits `BuildInflightCapPredicate` for its JobType is a bug.
 - Contract test: `Tests/Contract/TestClaimAuthority.py::TestTranscodeConcurrencyCapLive` proves refusal at cap boundary.
 
-## 2026-07-25 -- All workers must be on the most recent build
+## 2026-07-25 -- All workers must be on the most recent build (close-the-gap workflow)
 
-Question: What version of the code may a worker be running?
+Question: What version of the code may a worker be running, and how does deploy safely converge the fleet without losing operator state or in-flight work?
 
-Answer: **Every worker in the fleet MUST be on the current HEAD build. No version drift.**
+Answer: **Every worker MUST be on the current HEAD build. Closing the fleet-drift gap is deploy's job, MUST NOT kill in-flight encodes, and MUST restore each worker's pre-deploy state end-to-end.**
 
-- `Workers.Version` for every row with `Status IN ('Online','Paused')` AND fresh `LastHeartbeat` MUST equal the repo HEAD SHA.
-- Drift between hosts (some on old SHA, some on new) is a bug the deploy is responsible for closing. Not "eventually consistent" -- deploy exits non-zero if it can't converge every named host.
-- Deploy is the only sanctioned path to close the gap. No hand-editing `Workers.Version`. No skipping a host because it's "fine as-is."
-- If a host can't be updated (offline, unreachable, hardware fault), the deploy names the straggler and the operator either fixes it or removes it from the fleet.
+Invariant:
+- `Workers.Version` for every row with `Status IN ('Online','Paused')` AND fresh `LastHeartbeat` MUST equal the repo HEAD SHA. Drift = bug. Deploy is the only sanctioned path to close the gap.
+- No hand-editing `Workers.Version`. No skipping a host because it's "fine as-is." No `eventually consistent`; deploy exits non-zero if a named host can't converge.
+
+Close-the-gap workflow (mandatory, single logical operation):
+
+1. **Capture per-worker pre-state.** For every worker with `Status IN ('Online','Paused')` AND fresh `LastHeartbeat`, record `(Status, TranscodeEnabled, QualityTestEnabled, RemuxEnabled, ScanEnabled, in-flight ActiveJobs count)`. This snapshot is the target end-state for step 4.
+2. **Drain workers with in-flight work FIRST.** For every worker with `in-flight ActiveJobs > 0`, set `Status='Paused'` (its claim loop stops on next poll) and wait until `ActiveJobs = 0`. Bounded by `DRAIN_TIMEOUT_SEC = 1800` (30 min). Deploy MUST NOT silently `SIGKILL` a running encode; killing mid-flight loses the work, produces `.inprogress` orphans, corrupts audio-normalization scratch dirs, and forces a full re-encode. If drain exceeds the timeout, deploy either aborts OR requires explicit operator `--force-drain` with the reason logged to `DeployHistory.ErrorMessage`.
+3. **Deploy source + restart every host.** Per-host script under fleet orchestrator. Each host converges to HEAD SHA or exits non-zero naming the straggler.
+4. **Restore per-worker pre-state.** After each restarted worker registers with `Version = HEAD` AND `LastHeartbeat < 60s`, write back its captured `(Status, capability flags)`. A worker that was Online + Encoding pre-deploy returns to Online with capabilities enabled and starts claiming again. A worker that was Paused stays Paused. `RestoreWorkerStatus` MUST NOT default any operator-owned column; missing state is fail-loud, not silently defaulted (see 2026-07-24 idempotence entry).
+5. **Bounded post-restart version-gate.** Deploy polls `Workers.Version` per host with `POLL_TIMEOUT_SEC = 300` (5 min). Workers that fail version-match within the poll window stay `Paused`; deploy exits `Outcome='TIMEOUT'` naming the stragglers. No worker is ever `Online` while running old code -- split-SHA fleet is the bug this workflow catches.
+
+Rule violation shapes (all bugs, all contract-test-locked):
+- Deploy that leaves a subset of workers on old SHA = bug. Split-SHA fleet is never a valid end-state.
+- Deploy that kills in-flight encodes without draining = bug. `--no-drain` on `deploy-fleet.py` is EMERGENCY-only and must log to `DeployHistory.ErrorMessage` with the operator-supplied reason.
+- Deploy that "restores" all workers to Online regardless of pre-state = bug. Operator's Paused intent is preserved.
+- Any hand-editing of `Workers.Version` = bug. Deploy is the only path.
+- Any deploy script or skill that restarts a worker without checking `ActiveJobs = 0` = bug.
+
+Contract tests: `Tests/Contract/TestDeployMustDrain.py` (step 2) + `Tests/Contract/TestDeployVersionGate.py` (step 5). Every deploy path (`deploy-fleet.py`, `deploy-baremetal-worker.py`, `deploy-linux-worker.py`, `deploy-windows-worker.py`) is locked against the same invariants -- no shortcut path exists.
 
 ## 2026-07-25 -- Deploy requires a committed + pushed + up-to-date branch
 
