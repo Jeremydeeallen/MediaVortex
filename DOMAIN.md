@@ -9,7 +9,19 @@ Rules:
 - Any code, rule, or table that answers the same question differently = refactor. This doc is the ratchet.
 - Cross-check every new directive against this doc BEFORE opening.
 
-## 2026-07-25 -- Who owns what (meta-rule)
+## Table of Contents
+
+- [Meta](#meta) -- how domain decisions are made
+- [Pipeline](#pipeline) -- what operations MediaVortex performs
+- [Workers](#workers) -- how workers are identified and how much they run
+- [Deploy](#deploy) -- how deploys converge the fleet without losing state
+- [Compliance](#compliance) -- what qualifies a file for which operator
+
+---
+
+## Meta
+
+### 2026-07-25 -- Who owns what (meta-rule)
 
 Question: Who decides domain questions, and who implements them?
 
@@ -22,7 +34,9 @@ Answer: **Operator owns the WHAT and the WHY. Claude owns the HOW.**
 
 ---
 
-## 2026-07-23 -- Pipeline operators
+## Pipeline
+
+### 2026-07-23 -- Pipeline operators
 
 Question: What operations does MediaVortex perform on a media file?
 
@@ -46,7 +60,9 @@ ELSE                                -> Skip
 
 Consequence: any proposed feature that doesn't map to one of the four operators or the five-branch decision = refuse. Non-destructive archive of source (`MediaFilesArchive`) always. Jellyfin notify on any change to a served file.
 
-## 2026-07-23 -- Definition of "efficiently transcoded"
+*Note: the "video codec not in allowlist" branch is superseded by the 2026-07-26 compliance entry (Compliance section). See [Video compliance is bitrate-driven](#2026-07-26----video-compliance-is-bitrate-driven-codec-allowlist-retired).*
+
+### 2026-07-23 -- Definition of "efficiently transcoded"
 
 Question: When is a file "efficiently transcoded" so we should not re-encode?
 
@@ -60,7 +76,9 @@ Consequences:
 - Files with an assigned profile whose SourceKbps exceeds the target enter the Transcode operator via the standard compliance path.
 - This decision RETIRES the codec-blind `bpp` gate and the total-bitrate `SizeMB/DurationMinutes` proxy. Both were removed in favor of the direct SourceKbps-vs-TargetKbps comparison.
 
-## 2026-07-23 -- Transcode job boundary
+*Refined by 2026-07-26 (Compliance section): the compliance threshold applies a per-resolution multiplier over Tier 1 target, not the bare Tier 1 target. This entry defines the base concept; the multiplier tunes strictness. See [Video compliance is bitrate-driven](#2026-07-26----video-compliance-is-bitrate-driven-codec-allowlist-retired).*
+
+### 2026-07-23 -- Transcode job boundary
 
 Question: When does a Transcode job END?
 
@@ -85,7 +103,13 @@ Consequences:
 
 Historical note: commit `40cce5db` (2026-07-21, "Success semantic tightened to end-to-end pipeline") introduced a design that held `Success = NULL` through the entire pipeline including downstream stages. That commit ALSO added a `Success IS NULL` refusal in `AddToQualityTestQueue`, blocking the very seam the flow doc defines. Domain answered here supersedes that commit's design choice. Transcode ends at ffmpeg. Period.
 
-## 2026-07-24 -- Worker identity and multi-instance-per-host
+---
+
+## Workers
+
+### 2026-07-24 -- Worker identity and multi-instance-per-host
+
+*Superseded by 2026-07-25 "Worker identity is deploy-assigned, not runtime-derived." The invariant (distinct WorkerName per process, ties to MaxConcurrentJobs + claim gates) still stands; the runtime slot-claim mechanism it described (advisory-lock + heartbeat-driven reclamation) is retired.*
 
 Question: How are worker identities assigned when a single host runs multiple worker instances?
 
@@ -101,7 +125,7 @@ Consequences:
 - If four systemd units start simultaneously on a host with no existing worker rows, they claim `{host}-worker-1`, `{host}-worker-2`, `{host}-worker-3`, `{host}-worker-4` -- one each. Collision-into-same-slot is a bug.
 - WorkerName ties directly to the `MaxConcurrentJobs` semaphore, the claim queries, and every ownership check. Two processes with the same name = ownership invariant broken = concurrent claims on the same work.
 
-## 2026-07-24 -- Worker responsibilities (DDD context)
+### 2026-07-24 -- Worker responsibilities (DDD context)
 
 Question: What does a Worker OWN and DO?
 
@@ -117,7 +141,45 @@ Consequences:
 - Any code path that flips Status from Paused to Online without the operator explicitly asking (GUI action, CLI flag, WorkerService fresh-slot INSERT) is a bug.
 - Any code path that resets MaxConcurrentJobs, QualityTestEnabled, TranscodeEnabled, etc. via a mass UPDATE is a bug.
 
-## 2026-07-24 -- Deploy is idempotent, never destructive
+### 2026-07-25 -- Worker identity is deploy-assigned, not runtime-derived
+
+Question: How does a WorkerService process learn its `WorkerName`?
+
+Answer: **`MEDIAVORTEX_WORKER_NAME` is the sole source. Deploy writes it. WorkerService reads it. Fail-loud if unset.**
+
+- Bare-metal: systemd `EnvironmentFile=/etc/mediavortex/instance-%i.env` loads one file per instance. Deploy writes one file per slot with `MEDIAVORTEX_WORKER_NAME=<friendly>-worker-<N>`.
+- Docker: compose sets `MEDIAVORTEX_WORKER_NAME` per service.
+- Windows (I9): environment variable set by the launcher script.
+- `WorkerService.Main._ResolveWorkerName` raises when the env var is missing. No `MEDIAVORTEX_WORKER_PREFIX`, no advisory-lock slot race, no `socket.gethostname()` fallback, no heartbeat-staleness reclaim.
+
+Consequences:
+- Runtime identity races (multiple processes computing the same slot at boot) are impossible by construction.
+- Second process accidentally spawned for the same `MEDIAVORTEX_WORKER_NAME` still exists but cannot exceed the per-worker concurrency cap (see next entry).
+- Any code path that derives `WorkerName` from anything other than the env var is a bug.
+
+Historical damage (2026-07-25): 4 wakko processes + 2 dot processes all claimed the same WorkerName post-Deco-DHCP reboot. `_ClaimPrefixedWorkerName` (retired) read stale heartbeats under a race window and all returned slot 1. `Workers.MaxConcurrentJobs=1` was violated N-way per host. Root cause: identity was computed, not assigned.
+
+### 2026-07-25 -- Per-worker concurrency lives in the DB, not in code
+
+Question: What prevents a worker from exceeding `Workers.MaxConcurrentJobs`?
+
+Answer: **The claim SQL. `Core.Database.WorkerCapabilityPredicate.BuildInflightCapPredicate(WorkerName, JobType)` emits a WHERE-clause fragment that refuses claim when `<in-flight count for this worker> >= <cap column>`.**
+
+- Transcode: `TranscodeAttempts` where `Success IS NULL AND WorkerName=?` compared to `Workers.MaxConcurrentJobs`.
+- QualityTest: `QualityTestingQueue` where `Status='Running' AND ClaimedBy=?` compared to `Workers.MaxConcurrentQualityTestJobs`.
+- The DB is the authority. Client-side `WorkerLoopService.SlotSemaphore` remains as a rate-limit only (prevents local thread explosion in the happy path); it is not the invariant enforcer.
+
+Consequences:
+- A misdeployed second process for the same `WorkerName` (which shouldn't happen post the identity fix, but belt-and-suspenders) cannot claim beyond the cap. The SECOND concurrent claim's SQL sees count == cap and returns 0 rows.
+- Adjusting concurrency is a DB update, not a code change (per `feedback_no_hardcoded_values`).
+- Any `Claim*` function that omits `BuildInflightCapPredicate` for its JobType is a bug.
+- Contract test: `Tests/Contract/TestClaimAuthority.py::TestTranscodeConcurrencyCapLive` proves refusal at cap boundary.
+
+---
+
+## Deploy
+
+### 2026-07-24 -- Deploy is idempotent, never destructive
 
 Question: What can a deploy script do to the Workers table?
 
@@ -136,41 +198,7 @@ Consequences:
 
 Historical damage (2026-07-24): running `deploy-baremetal-worker.py` on dot + wakko flipped `dot-worker-{2,3,4}` and `wakko-worker-{2,3,4}` from Paused to Online because the DELETE nuked operator state and RestoreWorkerStatus captured post-COALESCE 'Online' as the Original. Same run caused four systemd processes on each host to all claim WorkerName='{host}-worker-1' because `_ClaimPrefixedWorkerName` returned a slot name without atomically writing the row, so all four processes read empty state and picked slot 1.
 
-## 2026-07-25 -- Worker identity is deploy-assigned, not runtime-derived
-
-Question: How does a WorkerService process learn its `WorkerName`?
-
-Answer: **`MEDIAVORTEX_WORKER_NAME` is the sole source. Deploy writes it. WorkerService reads it. Fail-loud if unset.**
-
-- Bare-metal: systemd `EnvironmentFile=/etc/mediavortex/instance-%i.env` loads one file per instance. Deploy writes one file per slot with `MEDIAVORTEX_WORKER_NAME=<friendly>-worker-<N>`.
-- Docker: compose sets `MEDIAVORTEX_WORKER_NAME` per service.
-- Windows (I9): environment variable set by the launcher script.
-- `WorkerService.Main._ResolveWorkerName` raises when the env var is missing. No `MEDIAVORTEX_WORKER_PREFIX`, no advisory-lock slot race, no `socket.gethostname()` fallback, no heartbeat-staleness reclaim.
-
-Consequences:
-- Runtime identity races (multiple processes computing the same slot at boot) are impossible by construction.
-- Second process accidentally spawned for the same `MEDIAVORTEX_WORKER_NAME` still exists but cannot exceed the per-worker concurrency cap (see next entry).
-- Any code path that derives `WorkerName` from anything other than the env var is a bug.
-
-Historical damage (2026-07-25): 4 wakko processes + 2 dot processes all claimed the same WorkerName post-Deco-DHCP reboot. `_ClaimPrefixedWorkerName` (retired) read stale heartbeats under a race window and all returned slot 1. `Workers.MaxConcurrentJobs=1` was violated N-way per host. Root cause: identity was computed, not assigned.
-
-## 2026-07-25 -- Per-worker concurrency lives in the DB, not in code
-
-Question: What prevents a worker from exceeding `Workers.MaxConcurrentJobs`?
-
-Answer: **The claim SQL. `Core.Database.WorkerCapabilityPredicate.BuildInflightCapPredicate(WorkerName, JobType)` emits a WHERE-clause fragment that refuses claim when `<in-flight count for this worker> >= <cap column>`.**
-
-- Transcode: `TranscodeAttempts` where `Success IS NULL AND WorkerName=?` compared to `Workers.MaxConcurrentJobs`.
-- QualityTest: `QualityTestingQueue` where `Status='Running' AND ClaimedBy=?` compared to `Workers.MaxConcurrentQualityTestJobs`.
-- The DB is the authority. Client-side `WorkerLoopService.SlotSemaphore` remains as a rate-limit only (prevents local thread explosion in the happy path); it is not the invariant enforcer.
-
-Consequences:
-- A misdeployed second process for the same `WorkerName` (which shouldn't happen post the identity fix, but belt-and-suspenders) cannot claim beyond the cap. The SECOND concurrent claim's SQL sees count == cap and returns 0 rows.
-- Adjusting concurrency is a DB update, not a code change (per `feedback_no_hardcoded_values`).
-- Any `Claim*` function that omits `BuildInflightCapPredicate` for its JobType is a bug.
-- Contract test: `Tests/Contract/TestClaimAuthority.py::TestTranscodeConcurrencyCapLive` proves refusal at cap boundary.
-
-## 2026-07-25 -- All workers must be on the most recent build (close-the-gap workflow)
+### 2026-07-25 -- All workers must be on the most recent build (close-the-gap workflow)
 
 Question: What version of the code may a worker be running, and how does deploy safely converge the fleet without losing operator state or in-flight work?
 
@@ -197,7 +225,9 @@ Rule violation shapes (all bugs, all contract-test-locked):
 
 Contract tests: `Tests/Contract/TestDeployMustDrain.py` (step 2) + `Tests/Contract/TestDeployVersionGate.py` (step 5). Every deploy path (`deploy-fleet.py`, `deploy-baremetal-worker.py`, `deploy-linux-worker.py`, `deploy-windows-worker.py`) is locked against the same invariants -- no shortcut path exists.
 
-## 2026-07-25 -- Deploy requires a committed + pushed + up-to-date branch
+*Refined by 2026-07-26 "Fleet-on-HEAD applies only to worker-affecting commits" (below): docs / web-only / test / tooling commits do not require worker redeploy.*
+
+### 2026-07-25 -- Deploy requires a committed + pushed + up-to-date branch
 
 Question: What state must the source tree be in before running a deploy?
 
@@ -208,3 +238,114 @@ Answer: **`git status --porcelain` MUST be empty AND local `HEAD` MUST equal `or
 - No behind-main deploys. Local MUST NOT lag `origin/main`.
 - Fleet + per-host deploy entry-points fail-loud when either check fails. The message names the offending files or the SHA delta.
 - No override flag. The bar is absolute -- if a deploy needs to happen mid-work, commit the work first.
+
+### 2026-07-26 -- Fleet-on-HEAD applies only to worker-affecting commits
+
+Question: Does every new commit require a fleet redeploy, or only commits that change worker runtime?
+
+Answer: **Only commits that touch worker-runtime code require a fleet redeploy. Docs, web-only, tests, and deploy-tooling commits do not create drift under the fleet-on-HEAD rule.**
+
+- Worker-runtime paths (worker imports at runtime OR ships in the container/venv):
+  - `WorkerService/`
+  - `Features/`
+  - `Core/`
+  - `Services/`
+  - `Repositories/`
+  - `Composition/`
+  - `WorkerService/requirements.txt` (venv content)
+  - `StartWorker.py`, `StartMediaVortex.py`, `StartParallelWorkers.py` (launchers)
+  - `deploy/baremetal/mediavortex-worker@.service` (systemd invocation)
+  - `deploy/Dockerfile` (image content)
+  - `deploy/compose-templates/*.yml` (compose sets runtime env vars)
+- Non-worker paths (no redeploy needed):
+  - `*.md` (all docs, `DOMAIN.md`, `CLAUDE.md`, `ARCHITECTURE.md`, `GLOSSARY.md`)
+  - `.claude/` (rules, directives, standards, hooks)
+  - `WebService/`, `Templates/`, `Static/`
+  - `Tests/`
+  - `Scripts/`
+  - `deploy/deploy-*.py` (dev-host tooling)
+  - `deploy/SyncSource.py`
+  - `.gitignore`, `.deployignore`
+
+Consequences:
+- The fleet-on-HEAD invariant becomes: `Workers.Version` must equal the SHA of the most recent commit that touched a worker-runtime path.
+- Deploy-fleet's version-gate polls that SHA, not raw HEAD.
+- A commit that only touches non-worker paths advances HEAD without triggering fleet drift.
+- The list above is authoritative. Adding a new top-level directory means updating this entry BEFORE the first commit that touches it.
+
+---
+
+## Compliance
+
+### 2026-07-26 -- Video compliance is bitrate-driven (codec allowlist retired)
+
+Question: What makes a file's video stream "compliant" (i.e. not needing Transcode)?
+
+Answer: **Bitrate compared against the profile's Tier 1 target for the file's resolution, multiplied by a per-resolution tunable multiplier. Codec is not a compliance signal.**
+
+- `SourceKbps <= Tier1TargetKbps(Resolution) * ComplianceMultiplier(Resolution)` -> video-compliant.
+- Above that threshold -> video-non-compliant -> Transcode operator.
+- Container non-compliance still routes to Remux. Audio non-compliance still routes to AudioFix. Video-compliant files fall through to those operators when their other columns are non-compliant, exactly as the pipeline-operators entry describes.
+
+Codec allowlist retired:
+- The prior "video codec not in allowlist -> Transcode" branch (from 2026-07-23 Pipeline Operators, and the historical `VideoComplianceRules.acceptablevideocodecscsv` singleton) is superseded. Codec is orthogonal to whether re-encoding is worthwhile.
+- Rationale: a modern codec (h264/hevc/av1) at a wasteful bitrate should still be re-encoded. A legacy codec (mpeg4/wmv3/msmpeg4v3) at an already-compact bitrate should be left alone.
+- Truly-unplayable codec edge cases are handled downstream: the container-remux path forces stream-copy into mp4; incompatible codecs fail the copy and land in the operator queue for manual handling. The `acceptablevideocodecscsv` compliance signal is dead code and will be removed in the compliance-multiplier implementation directive.
+
+Per-resolution multiplier defaults (operator-tunable via `/settings` GUI):
+
+| Resolution | Multiplier | Effective floor at Tier 1 default |
+|---|---|---|
+| 480p | 1.5x | 600 kbps (Tier 1 = 400) |
+| 720p | 2.0x | 1800 kbps (Tier 1 = 900) |
+| 1080p | 2.0x | 3600 kbps (Tier 1 = 1800) |
+| 2160p | 3.0x | 12000 kbps (Tier 1 = 4000) |
+
+Rationale for per-resolution differences:
+- 480p: SD content is well-served at low bitrates; 1.5x already covers typical 500-1500 kbps streaming SD.
+- 720p / 1080p: 2.0x covers 1500-3000 / 3000-8000 kbps typical HD streaming without over-flagging.
+- 2160p: 4K industry norm is 15000-25000 kbps streaming, 50000+ for UHD Blu-ray. 2.0x (8000 kbps floor) would treat below-industry-norm 4K as compliant. 3.0x (12000 kbps floor) matches operator's quality bar for 4K content.
+
+Consequences:
+- Values live in a dedicated per-resolution DB table. Operator adjusts via `/settings` GUI. No code change to retune.
+- The Compliance evaluator reads the multiplier fresh per call (db-authority; no cache).
+- Any code path that reads `VideoComplianceRules.acceptablevideocodecscsv` for compliance decisions is a bug pending the implementation directive that removes the column.
+- Reclassification of existing MediaFiles rows against the new threshold is a data-only operation, not a code change.
+
+---
+
+## Open Domain Questions (2026-07-26)
+
+Claude needs operator answers before implementation can proceed. All four questions relate to work already in-flight this session.
+
+### Q1: Codec compliance tail policy
+
+The retirement of `VideoComplianceRules.acceptablevideocodecscsv` leaves 34 files (0.07% of library) on truly-legacy codecs (wmv3=17, msmpeg4v3=13, wmv2=2, vp9=1, vc1=1). Under the new bitrate-only rule, they will be compliance-evaluated by bitrate alone.
+
+Options:
+- **(a) Kill the allowlist entirely.** Trust bitrate + container-remux path to catch unplayable edge cases. Operator overrides remain available.
+- **(b) Keep a small "playability blocklist"** in a new tiny table (e.g. `UnsupportedVideoCodecs`) with 4-5 entries. These force Transcode regardless of bitrate.
+- **(c) Something else** you'd rather.
+
+### Q2: All operator knobs editable via GUI -- domain rule or design principle?
+
+You said this session: "all knobs should be editable via GUI in the settings." Is this a DOMAIN RULE ("operator MUST be able to tune X via GUI, never SQL or code") -- in which case any new operator-facing DB knob without a GUI is a bug -- or a design principle (preferred but not enforced)?
+
+Options:
+- **(a) Domain rule.** Add a rule entry. Contract test can grep for new operator-facing tables/columns without a matching `/settings` handler.
+- **(b) Design principle only.** No enforcement; taste + code review.
+
+### Q3: Reclassify authorization after multiplier lands
+
+Multipliers going live re-derives ~30k MediaFiles rows currently in `WorkBucket='Transcode'`. Some will drop to Compliant/Remux/AudioFix. How does the recompute happen?
+
+Options:
+- **(a) One-shot script.** Run manually post-migration; script exits with row-count deltas. Operator sees changes before workers act.
+- **(b) Automatic during deploy.** Migration includes an `UPDATE MediaFiles SET WorkBucket = ...` recompute. Deploy converges data + code together.
+- **(c) Background scanner adoption.** Next scanner tick re-derives incrementally. Slow convergence but no operator action needed.
+
+### Q4: Worker-affecting paths -- authoritative list correct?
+
+The 2026-07-26 "Fleet-on-HEAD applies only to worker-affecting commits" entry (Deploy section) lists paths. Is that list complete + correct? Anything missing / anything wrongly included?
+
+Once these four answers are recorded here, the code work (compliance multiplier feature + reclassify sweep) can proceed in a fresh session without re-litigating any domain question.
