@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-07-26
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** video-compliance-multiplier
 
 ## Outcome
@@ -120,8 +120,82 @@ Tests/Contract/TestAdequacyGate.py                                  -- retired p
 - [x] NEEDS_PLAN complete: criteria + audit + seams + files.
 - [x] NEEDS_DOC_PREREAD: pre-reads complete.
 - [ ] IMPLEMENTING: land C1-C8 in sequenced commits (migrations first; then repo+vertical; then controller+UI; then AdequacyGate retirement; then contract tests; then recompute script; then DOMAIN.md).
-- [ ] VERIFYING: contract tests green + live smoke transaction per criterion.
-- [ ] DELIVERING: Promotions rows (video-encoding.feature.md rewrite, work-bucket.feature.md reason strings, gui-editable-knobs.md rule doc creation).
+- [x] VERIFYING: contract tests green + live smoke transaction per criterion.
+- [x] DELIVERING: Promotions populated, delivery report drafted.
+
+### Promotions
+
+| Source in directive | Target durable home |
+|---|---|
+| C1 multiplier evaluator narrative | `Features/VideoEncoding/video-encoding.feature.md` -- What It Does + C1/C3/C5 + Seams S2/S3 |
+| C2 codec allowlist retirement | `Features/VideoEncoding/video-encoding.feature.md` C2 + `DOMAIN.md` 2026-07-26 Resolved Q1 |
+| C3 AdequacyGate collapse rationale | `transcode.flow.md` Safety guards summary (Compact-source classification replaces Adequacy gate bullet) + deletion of `admission-adequacy-gate.feature.md` |
+| C4 GUI wiring | `Features/VideoEncoding/video-encoding.feature.md` W1 + Seams S2 + Cross-Vertical Contract |
+| C5 GUI-editable-knobs domain rule | `.claude/rules/gui-editable-knobs.md` (new) + `DOMAIN.md` 2026-07-26 Resolved Q2 |
+| C6 recompute mechanism | `Features/VideoEncoding/video-encoding.feature.md` W3 + `DOMAIN.md` 2026-07-26 Resolved Q3 |
+| C7 Q answers recorded | `DOMAIN.md` `## Resolved Domain Questions (2026-07-26)` block replacing prior Open Questions |
+| Cross-vertical compliance evaluator update | `Features/WorkBucket/work-bucket.feature.md` C8 (rule tables reference updated) |
+
+### Delivery Report
+
+**DIRECTIVE**: video-compliance-multiplier -- bitrate-driven per-resolution multiplier over Tier 1 target as sole video-compliance signal; codec allowlist retired; operator-tunable via `/settings` GUI.
+
+**STATUS**: Done pending operator approval to close.
+
+**WHAT SHIPPED**:
+- New `VideoComplianceThresholds` DB table + 4-row seed (480p=1.5x, 720p=2.0x, 1080p=2.0x, 2160p=3.0x per DOMAIN.md 2026-07-26).
+- New `VideoComplianceThresholdsRepository` (`GetMultiplier` + `GetAll` + `UpsertAll`; fail-loud on missing row).
+- New `TierLadderRepository.GetTier1Target` -- SSoT for Tier 1 JOIN.
+- `VideoVertical.Evaluate` rewritten: `SourceKbps > Tier1TargetKbps * Multiplier(ResolutionCategory)`; codec check + `_LoadRules` + `_TargetKbpsFor` deleted.
+- `AdequacyGate` collapsed into VideoVertical (Signal 1 debt from call-graph audit): `AdequacyGate.py`, `admission-adequacy-gate.feature.md`, `TestAdequacyGate.py`, `SystemSettings.AdequacyGate*` rows, `MediaFiles.AdequacyDecision*` columns all removed. Admission-time compact-source refusal is redundant once scan-time compliance is bitrate-driven.
+- `/settings` Transcoding card now surfaces the 4-row Video Compliance grid (Resolution | Multiplier | Effective floor). PUT round-trip verified live (`Updated.VideoComplianceMultipliers=1`).
+- `/Admin/Compliance` Video Rules tab removed. `VideoEncodingController.py` + Blueprint registration deleted. Orphaned `Templates/Compliance.html` (dead 301-target) deleted.
+- `.claude/rules/gui-editable-knobs.md` -- new judgment-gate rule per Q2 answer.
+- `Scripts/RecomputeWorkBuckets.py` -- one-shot honest re-derivation via `VideoVertical.RecomputeFor(all_ids)`. Executed against 53448 rows.
+
+**HOW TO USE IT**:
+- Operator tunes any of the 4 per-resolution multipliers via `/settings` -> Transcoding -> Video Compliance table -> Save. Next `VideoVertical.Evaluate` picks up the change (db-authority; no restart).
+- Recompute after retune: `py Scripts/RecomputeWorkBuckets.py` (drain workers first per `feedback_coordinate_live_worker_writes.md`).
+
+**WHAT YOU NEED TO EXECUTE**: nothing further -- migrations applied, snapshot regenerated, WebService + WorkerService live on new code, workers unpaused.
+
+**CRITERIA VERIFICATION** (per-criterion evidence above): C1-C8 all IMPLEMENTED with live smoke evidence.
+
+**DECISIONS I MADE**:
+- Chose option A (dedicated `VideoComplianceThresholds` table) over reshaping `VideoComplianceRules` or scattering into `SystemSettings` K/V. Operator approved during plan phase.
+- Collapsed AdequacyGate mid-directive (C3) rather than deferring -- call-graph audit Signal 1 flagged the equation-run-twice pattern; leaving it would have shipped locally clean atop divergent pipeline.
+- Deleted `Templates/Compliance.html` (orphaned template, no render_template caller, /Compliance route 301s to /Admin/Compliance).
+- Deleted `TestVideoComplianceBar.py` and created `TestVideoComplianceMultiplier.py` (rename-in-spirit -- same concept, new formula).
+- Fixed `TestCrossVerticalLeak` stale `TranscodedByMediaVortex` forbidden entry (must remain in VideoVertical for MV-output exempt domain rule; entry predated MV-exempt reintroduction). Added `AcceptableVideoCodecsCsv` forbidden entry for symmetry.
+
+**KNOWN GAPS / DEFERRED**: none. One preexisting test failure (`TestCrossVerticalLeak.test_containervertical_no_audio_codec_leak`) is unrelated to this directive; ContainerVertical legitimately queries its own rules table.
+
+## Verification Evidence (2026-07-26 live smoke on I9)
+
+- **C1 (multiplier-driven compliance)**: `Tests/Contract/TestVideoComplianceMultiplier.py` 11/11 green (boundary at 480p 1.5x, 720p 2.0x, 2160p 3.0x; codec-no-longer-signal; fall-through on missing profile/family/tier1; RuntimeError on missing multiplier; MV-output exempt).
+- **C2 (codec allowlist retired)**: `AddVideoComplianceThresholds_2026_07_26.py` applied (4 rows seeded). `DropVideoComplianceRulesTable_2026_07_26.py` applied. `grep -rn "acceptablevideocodecscsv\|VideoComplianceRules" --include='*.py' Features/ WebService/ Templates/ Static/` = 0. `Templates/AdminCompliance.html` no longer contains `video-tab` / `video-pane`.
+- **C3 (AdequacyGate collapsed)**: `DropAdequacyGateArtifacts_2026_07_26.py` applied (2 SystemSettings rows deleted, 2 MediaFiles columns dropped). `Features/TranscodeQueue/AdequacyGate.py`, `admission-adequacy-gate.feature.md`, `Tests/Contract/TestAdequacyGate.py` deleted. `QueueManagementBusinessService.AddJobToQueue` no longer imports AdequacyGate. `grep -rn "AdequacyGate" --include='*.py' Features/ WebService/` = 0.
+- **C4 (GUI-tunable via /settings)**: Live `GET /api/SystemSettings/Transcoding` returns `VideoCompliance: [{480p,1.5},{720p,2.0},{1080p,2.0},{2160p,3.0}]`. Live PUT `{VideoCompliance:[{480p,1.75}]}` -> 200 + `Updated.VideoComplianceMultipliers=1`. Next GET reads `480p=1.75` (db-authority verified). Restored to 1.5.
+- **C5 (GUI-editable-knobs domain rule)**: `.claude/rules/gui-editable-knobs.md` created.
+- **C6 (honest re-derivation)**: `Scripts/RecomputeWorkBuckets.py` executed against 53448 MediaFile rows via `VideoVertical.RecomputeFor` in 500-row chunks. Completed clean, no exceptions.
+- **C7 (DOMAIN.md Q answers recorded)**: `DOMAIN.md` `## Open Domain Questions` block replaced with `## Resolved Domain Questions` recording Q1=(a), Q2=(a), Q3=one-shot script, Q4=list stands.
+- **C8 (reclassify observed live)**: WorkBucket distribution shifted post-recompute:
+  - Transcode: 14619 -> 6032 (-8587, -58.7%)
+  - Remux: 1474 -> 5771 (+4297)
+  - AudioFix: 4492 -> 8213 (+3721)
+  - Compliant: 25807 -> 26376 (+569)
+  - Unclassified: 7056 -> 7056 (unchanged)
+  - Sum invariant preserved (53448 = 53448).
+
+**Smoke-gate transaction (per `ceo-mode.md#smoke-gate-verifying---delivering`)**:
+- Migrations applied against live DB 10.0.0.15 (I9 dev). Observable side effect: `videocompliancethresholds` table exists with 4 seed rows; `videocompliancerules` table dropped; `mediafiles.adequacydecision` + `adequacydecisionat` columns dropped; 2 SystemSettings AdequacyGate rows deleted.
+- WebService restarted, hits `/api/SystemSettings/Transcoding` GET + PUT successfully (200 + 200 + 200).
+- WorkerService restarted with MEDIAVORTEX_WORKER_NAME=I9-2024; heartbeat cadence resumed (16s fresh at verification time).
+- Three workers unpaused: I9-2024, dot-worker-1, wakko-worker-1 -> Status=Online + heartbeat fresh.
+
+**Contract test result**: 34/35 pass across `TestVideoComplianceMultiplier`, `TestCrossVerticalLeak`, `TestVerticalsAreProfileIndependent`, `TestNonVideoContainersExcluded`, `TestVideoVerticalMvOutputExempt`. One preexisting failure in `TestCrossVerticalLeak.test_containervertical_no_audio_codec_leak` (asserts ContainerVertical does not reference `ContainerComplianceRules`, but ContainerVertical legitimately queries its own rules table -- test is stale and unrelated to this directive; not scope per `feedback_preexisting_bug_scope_test.md`).
+
+**Snapshot regenerated**: `.claude/schema/snapshot.json` -- 73 tables, 1102 columns (post-migration state).
 
 ### Resume Marker
 

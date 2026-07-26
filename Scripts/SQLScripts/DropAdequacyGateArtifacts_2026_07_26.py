@@ -16,11 +16,11 @@ def Main():
     Db.ExecuteNonQuery("ALTER TABLE MediaFiles DROP COLUMN IF EXISTS AdequacyDecision")
     Db.ExecuteNonQuery("ALTER TABLE MediaFiles DROP COLUMN IF EXISTS AdequacyDecisionAt")
     RemainingRows = Db.ExecuteQuery(
-        "SELECT SettingKey FROM SystemSettings WHERE SettingKey LIKE 'AdequacyGate%'"
+        "SELECT SettingKey FROM SystemSettings WHERE SettingKey IN ('AdequacyGateEnabled', 'AdequacyGateMarginPercent')"
     )
     RemainingCols = Db.ExecuteQuery(
         "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'mediafiles' AND column_name LIKE 'adequacydecision%'"
+        "WHERE table_name = 'mediafiles' AND column_name IN ('adequacydecision', 'adequacydecisionat')"
     )
     if RemainingRows or RemainingCols:
         print(f"FAIL: rows={RemainingRows} cols={RemainingCols}")

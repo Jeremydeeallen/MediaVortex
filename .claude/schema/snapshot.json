@@ -1060,6 +1060,58 @@
       "is_nullable": "YES"
     }
   },
+  "deployhistory": {
+    "completedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "elapsedseconds": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "errormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "hostsattempted": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "hostssucceeded": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "newsha": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "outcome": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "priorsha": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "startedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
   "failurebudgetconfig": {
     "id": {
       "data_type": "integer",
@@ -1316,16 +1368,6 @@
     }
   },
   "mediafiles": {
-    "adequacydecision": {
-      "data_type": "text",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
-    "adequacydecisionat": {
-      "data_type": "timestamp without time zone",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
     "admissiondeferreason": {
       "data_type": "character varying",
       "is_generated": "NEVER",
@@ -5350,12 +5392,7 @@
       "is_nullable": "YES"
     }
   },
-  "videocompliancerules": {
-    "acceptablevideocodecscsv": {
-      "data_type": "text",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
-    },
+  "videocompliancethresholds": {
     "id": {
       "data_type": "integer",
       "is_generated": "NEVER",
@@ -5364,7 +5401,17 @@
     "lastupdated": {
       "data_type": "timestamp without time zone",
       "is_generated": "NEVER",
-      "is_nullable": "YES"
+      "is_nullable": "NO"
+    },
+    "multiplier": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "resolutioncategory": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
     }
   },
   "vmafconfidencestats": {
