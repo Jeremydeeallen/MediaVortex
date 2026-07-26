@@ -26,6 +26,8 @@ Video compliance decision is bitrate-driven per DOMAIN.md 2026-07-26 "Video comp
 
 **C8. Reclassify sweep observed live.** Post-deploy `SELECT WorkBucket, COUNT(*) FROM MediaFiles GROUP BY WorkBucket` shows `Transcode` count dropped significantly; `Remux` + `AudioFix` grew. `/Work/Transcode` UI shrinks; `/Work/Remux` + `/Work/Audio` grow.
 
+**C9. Claim query encoder-gate mode-aware.** Discovered during VERIFYING: `TranscodeQueueRepository.ClaimNextPendingJob` had universal AV1 codec gate `p.codec='av1' AND (nvenc OR qsv)` that fired for Remux + AudioFix rows too. Stream-copy modes don't re-encode video -- profile.codec is irrelevant. All 298 Pending Remux rows dead-lettered because operator's only RemuxEnabled worker (larry) is CPU-only. Fix: gate the AV1 check on `pm.RequiresProfileGates` (True only for Transcode mode). Change is one SQL fragment in `Features/TranscodeQueue/TranscodeQueueRepository.py::ClaimNextPendingJob`. Verifiable: after I9 restart + larry container redeploy, larry claims a Pending Remux row within one poll cycle.
+
 ## Call-Graph Audit
 
 Per `.claude/rules/call-graph-audit.md`.
@@ -91,6 +93,7 @@ Templates/Settings.html                                             -- Video Com
 Templates/AdminCompliance.html                                      -- remove Video Rules tab
 Static/settings.js                                                  -- form handler for new subsection; remove AdequacyGate handlers
 Features/TranscodeQueue/QueueManagementBusinessService.py           -- delete AdequacyGate branch in AddJobToQueue
+Features/TranscodeQueue/TranscodeQueueRepository.py                 -- C9 mid-verify fix: gate AV1 encoder check on pm.RequiresProfileGates
 Features/WorkBucket/work-bucket.feature.md                          -- update C7 reason strings; reference multiplier rule
 Tests/Contract/TestVideoComplianceBar.py                            -- rewrite for multiplier fixtures
 Tests/Contract/TestVerticalsAreProfileIndependent.py                -- drop AcceptableVideoCodecsCsv mock; add Multiplier mock
@@ -196,6 +199,12 @@ Tests/Contract/TestAdequacyGate.py                                  -- retired p
 **Contract test result**: 34/35 pass across `TestVideoComplianceMultiplier`, `TestCrossVerticalLeak`, `TestVerticalsAreProfileIndependent`, `TestNonVideoContainersExcluded`, `TestVideoVerticalMvOutputExempt`. One preexisting failure in `TestCrossVerticalLeak.test_containervertical_no_audio_codec_leak` (asserts ContainerVertical does not reference `ContainerComplianceRules`, but ContainerVertical legitimately queries its own rules table -- test is stale and unrelated to this directive; not scope per `feedback_preexisting_bug_scope_test.md`).
 
 **Snapshot regenerated**: `.claude/schema/snapshot.json` -- 73 tables, 1102 columns (post-migration state).
+
+**C9 evidence** (claim gate mode-aware fix, added mid-VERIFY):
+- Symptom: 298 Pending Remux rows dead-lettered. Only larry-worker-1 has `RemuxEnabled=TRUE`; larry has no NVENC/QSV; all 298 rows carry AV1-profile files; universal AV1 codec gate refused larry.
+- Fix: `Features/TranscodeQueue/TranscodeQueueRepository.py::ClaimNextPendingJob` -- gate the AV1 encoder check behind `NOT pm.RequiresProfileGates` (True only for Transcode mode, per `ProcessingModes` seed). Stream-copy modes (Remux/AudioFix/Quick/SubtitleFix) bypass the encoder-capability check because they don't re-encode video.
+- Dry-run SQL against 10.0.0.15 with larry-worker-1 identity + new WHERE clause returns 3 claimable Remux rows (e.g. Law & Order SVU S23E09 -- QueueId 155916). Pre-fix returned 0.
+- I9 WebService + WorkerService restarted on new source. Larry Docker container (LXC 218 on Proxmox larry, 10.0.0.42) requires `deploy/deploy-*.py` redeploy to pick up the fix; operator territory per operational limits.
 
 ### Resume Marker
 
