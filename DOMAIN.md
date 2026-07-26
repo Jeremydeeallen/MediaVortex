@@ -312,6 +312,28 @@ Consequences:
 - Any code path that reads `VideoComplianceRules.acceptablevideocodecscsv` for compliance decisions is a bug pending the implementation directive that removes the column.
 - Reclassification of existing MediaFiles rows against the new threshold is a data-only operation, not a code change.
 
+Operator-visible effect (what changes in the UI):
+
+- `/Work/Transcode` = candidates that need FULL re-encode (video + audio + container). List shrinks -- files whose video is already at/below the multiplier floor stop appearing here.
+- `/Work/Remux` = candidates that need container change (typically mkv/avi -> mp4), stream-copy video, re-encode audio. List grows -- compact-video files with wrong container land here.
+- `/Work/Audio` = candidates that need only audio work (normalization, downmix, codec change). List grows -- compact-video, correct-container files with audio issues land here.
+- `/Work/Compliant` = files already meeting the bar. Browse/audit only, no admit action. List grows.
+- `/Queue` = admitted work (rows in `TranscodeQueue` awaiting workers). Count only shifts when operator admits differently because the candidate lists are cleaner.
+
+Concrete example (from the 2026-07-25 live sample):
+
+- 80 MB Ed Edd n Eddy episode (msmpeg4v3, avi, 480p ~800 kbps source):
+  - Before: `/Work/Transcode` -- flagged on codec-allowlist miss even though video is compact.
+  - After: `/Work/Remux` -- video is under the 1.5x floor (600 kbps @ 480p); container needs avi -> mp4; audio (mp3) needs re-encode.
+- 80 MB Pup Named Scooby-Doo (hevc, mkv, 480p at 481 kbps):
+  - Before: `/Work/Transcode` -- flagged because 481 > Tier 1 target of 400.
+  - After: `/Work/Remux` -- 481 is well under the 1.5x floor (600); container needs mkv -> mp4.
+- 1080p movie at 4200 kbps (h264, mkv):
+  - Before: `/Work/Transcode` -- 4200 > Tier 1 of 1800.
+  - After: `/Work/Transcode` -- 4200 > 2.0x floor of 3600. Still worth re-encoding. Unchanged.
+
+Bottom line: fewer expensive full re-encodes, more cheap Remux + AudioFix operations. Files already at compact bitrates stop being flagged for work that wouldn't save meaningful space.
+
 ---
 
 ## Open Domain Questions (2026-07-26)
