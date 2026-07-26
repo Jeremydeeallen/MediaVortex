@@ -166,11 +166,22 @@ def _LaunchWorker():
         print(f"[FAIL] WorkerService entry not found at {WorkerEntry}")
         return 2
 
+    # directive: transcode-flow-canonical | # see claim-authority.md
+    Env = os.environ.copy()
+    if not Env.get("MEDIAVORTEX_WORKER_NAME"):
+        # allow: Windows COMPUTERNAME is the deploy-assigned WorkerName by operator convention (per inventory.toml, e.g. I9-2024). This launcher is the deploy-time assignment site; WorkerService itself never derives.
+        ComputerName = Env.get("COMPUTERNAME", "").strip()
+        if not ComputerName:
+            print("[FAIL] MEDIAVORTEX_WORKER_NAME unset AND COMPUTERNAME unset -- cannot assign WorkerName. See .claude/rules/claim-authority.md.")
+            return 2
+        Env["MEDIAVORTEX_WORKER_NAME"] = ComputerName
+        print(f"  [OK]   MEDIAVORTEX_WORKER_NAME={ComputerName} (from COMPUTERNAME)")
+
     PythonExe = _ResolveWorkerPython()
     print(f"Launching WorkerService: {PythonExe} {WorkerEntry}")
     print("=" * 50)
     try:
-        Result = subprocess.run([PythonExe, str(WorkerEntry)], cwd=str(RootDirectory))
+        Result = subprocess.run([PythonExe, str(WorkerEntry)], cwd=str(RootDirectory), env=Env)
     except KeyboardInterrupt:
         print("\nReceived KeyboardInterrupt; worker shutting down.")
         return 130

@@ -260,7 +260,7 @@ The deploy verifies the worker reaches Online. The per-step behavior that produc
 | Step | Owner doc | What it produces |
 |---|---|---|
 | DB connect | `WorkerService.feature.md` crit 1, 7 | psycopg2 pool to `10.0.0.15:5432` |
-| Worker identity | -- | `WorkerName = socket.gethostname()` from compose `hostname:` |
+| Worker identity | `.claude/rules/claim-authority.md` | `WorkerName = os.environ['MEDIAVORTEX_WORKER_NAME']`; compose sets per service. Fail-loud if unset. |
 | Register worker | `WorkerService.feature.md` crit 9 | UPSERT into `Workers`; FFmpegPath resolved via `_ResolveBundledOrPathBinary` |
 | Register share mappings | -- | UPSERT `WorkerShareMappings` from `MEDIAVORTEX_SHARE_MAPPINGS` |
 | Mount validation | `worker-lifecycle.feature.md` crit 20, 21 | Each storage mount checked exists, non-empty, not local-fs |

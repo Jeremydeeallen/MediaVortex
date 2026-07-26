@@ -127,7 +127,7 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 ```
 
-Per-instance identity: `deploy-baremetal-worker.py::StepInstallSystemdUnit` writes one `/etc/mediavortex/instance-<N>.env` per slot with `MEDIAVORTEX_WORKER_NAME=<friendly>-worker-<N>`. Systemd's `%i` substitution selects the right env file per instance. `WorkerService.Main._ResolveWorkerName` reads `MEDIAVORTEX_WORKER_NAME` and fail-louds when unset -- no prefix env, no advisory-lock slot claim, no hostname fallback. See `.claude/rules/claim-authority.md#worker-identity-is-deterministic-deploy-assigned`.
+Per-instance identity: `deploy-baremetal-worker.py::StepInstallSystemdUnit` writes one `/etc/mediavortex/instance-<N>.env` per slot with `MEDIAVORTEX_WORKER_NAME=<friendly>-worker-<N>`. Systemd's `%i` substitution selects the right env file per instance. `WorkerService.Main._ResolveWorkerName` reads `MEDIAVORTEX_WORKER_NAME` and fail-louds when unset. See `.claude/rules/claim-authority.md#worker-identity-is-deterministic-deploy-assigned`.
 
 Apply per slot:
 ```bash

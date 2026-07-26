@@ -458,7 +458,35 @@ Every item tagged (a) or (b) per `call-graph-audit.md` Signal 4. Default (a) = b
 - [x] REOPENED IMPLEMENTING: Reset 33 (C33 classification completeness -- profile-independent verticals + Compliant/Unclassified buckets + self-heal subsystem deleted; docs-first per operator mandate)
 - [ ] VERIFYING: Reset 33 -- core criteria (a-f, l-q) shipped in commit 9adcf50e; operator flagged criteria gap 2026-07-22 (cross-vertical doc claims + closed-directive anchor sweep + dead-code sweep + bucket ProcessingMode validity + UI adapter 5-branch coverage). Sharpened C33g-C33k added. Sweep in progress.
 - [x] REOPENED IMPLEMENTING: Reset 34 (C34 non-video containers never enter Transcode -- audio-only scope predicate + vertical short-circuits + CommandComposer NonVideoSourceError guard + reclassify 251 mp3 rows).
+- [x] REOPENED IMPLEMENTING: Reset 35 (C41 deterministic worker identity + DB-authoritative concurrency + git-preflight gate on deploy-fleet).
+- [x] VERIFYING: Reset 35 -- commit b5b9a3a6 (C41 core) + 356943c5 (DOMAIN gates) + bc0d4ee5 (gitignore cleanup) pushed. TestClaimAuthority 22/22 + TestDeployIdempotenceInvariants 12/12 green. Live: `py deploy/deploy-fleet.py --hosts dot,wakko --no-drain --skip-local` succeeded; dot-1..4 + wakko-1..4 all on Version=bc0d4ee5, fresh HBs; I9-2024 restarted on bc0d4ee5. Zero duplicate ProcessIds per WorkerName. 4 DOMAIN.md entries recorded (identity deploy-assigned + per-worker concurrency DB-authoritative + fleet on HEAD + deploy requires committed+pushed).
 
+
+### Reset 35 -- C41 deterministic worker identity + DB-authoritative concurrency
+
+**Origin:** 2026-07-25 recurring "N processes claim same WorkerName -> N-way MaxConcurrentJobs violation" incident. Root cause: runtime slot-race in retired `_ClaimPrefixedWorkerName`. Post-Deco-DHCP reboot, 4 wakko processes read stale heartbeats within the advisory-lock window and all returned slot 1. `Workers.MaxConcurrentJobs=1` violated N-way per host. Prior patches (f67536b1 atomic INSERT-inside-lock, Reset 26 naive-UTC TZ fix, deploy-side aging + serialization) treated symptoms; identity was still computed at runtime.
+
+**Shape.** Identity is deploy-assigned via `MEDIAVORTEX_WORKER_NAME`. Systemd `EnvironmentFile=/etc/mediavortex/instance-%i.env` (one file per instance, written by deploy) selects per systemd instance. Docker compose sets it per service. `_ResolveWorkerName` fail-louds if unset -- no prefix, no advisory-lock slot claim, no hostname fallback. Per-worker concurrency (`Workers.MaxConcurrentJobs`) lives in the DB via `BuildInflightCapPredicate` -- claim SQL refuses when in-flight count == cap. Client-side semaphore remains as rate-limit only.
+
+**Files touched.**
+- `WorkerService/Main.py` -- delete `_ClaimPrefixedWorkerName` + `EscapeLikePattern` + `socket` imports; `_ResolveWorkerName` becomes fail-loud env read.
+- `Core/Database/WorkerCapabilityPredicate.py` -- add `BuildInflightCapPredicate(WorkerName, JobType)` + `_INFLIGHT_SHAPE` whitelist.
+- `Features/TranscodeQueue/TranscodeQueueRepository.py` -- `ClaimNextPendingJob` adds InflightFragment.
+- `Features/QualityTesting/QualityTestRepository.py` -- `ClaimQualityTestJob` adds InflightFragment.
+- `deploy/baremetal/mediavortex-worker@.service` -- EnvironmentFile now instance-%i.env.
+- `deploy/deploy-baremetal-worker.py` -- `StepInstallSystemdUnit` writes per-instance env files; `StepAgeSlotHeartbeats` DELETED; `StepStartInstances` drops sleep-3.
+- `deploy/compose-templates/larry.yml` -- MEDIAVORTEX_WORKER_NAME per service.
+- `deploy/deploy-fleet.py` -- pre-deploy gate refuses dirty tree or HEAD != origin/main.
+- `StartParallelWorkers.py` -- launches each child with explicit MEDIAVORTEX_WORKER_NAME.
+- `.claude/rules/claim-authority.md` -- adds worker-identity + per-worker concurrency sections.
+- `deploy/worker-deploy.feature.md` C17 -- rewritten.
+- `deploy/worker-deploy-baremetal.flow.md` ST4 -- rewritten.
+- `DOMAIN.md` -- 4 entries (identity, concurrency, fleet-on-HEAD, deploy requires clean+pushed).
+- `.gitignore` -- untrack startup.log.out + ignore root-level screenshots.
+- `Tests/Contract/TestClaimAuthority.py` -- TestInflightCapPredicateHelper (3 tests) + TestTranscodeConcurrencyCapLive (live-DB refusal at cap boundary).
+- `Tests/Contract/TestDeployIdempotenceInvariants.py` -- old atomic-reserve test REPLACED with TestDeterministicWorkerIdentity (grep-fences).
+
+**Exit gate:** contract tests green; grep of retired symbols in production tree = 0; live deploy of dot + wakko lands both fleets on HEAD SHA; `SELECT COUNT(DISTINCT ProcessId)` per WorkerName = 1 post-restart under load.
 
 ### Reset 34 -- C34 non-video containers excluded
 
@@ -796,6 +824,14 @@ Populated incrementally per step.
 ### Verification
 
 Closed-criteria evidence (C0a, C0b, C1-C20, C22, C23, C24, C25, C27, C28 -- all IMPLEMENTED) archived at `.claude/directives/closed/2026-07-03-transcode-flow-canonical-archive.md`. Contract-test regression totals + follow-ups filed at VERIFYING also archived.
+
+- **C41. Deterministic worker identity + DB-authoritative per-worker concurrency. IMPLEMENTED (2026-07-25).**
+  - **Part A (identity):** `_ClaimPrefixedWorkerName` retired from `WorkerService/Main.py`. `_ResolveWorkerName` fail-louds on missing `MEDIAVORTEX_WORKER_NAME`. Bare-metal systemd unit uses `EnvironmentFile=/etc/mediavortex/instance-%i.env` (deploy writes one file per instance). Docker `larry.yml` sets env per service. `StartMediaVortex.py` + `StartWorker.py` set env from `COMPUTERNAME` when unset (Windows convention). `StartParallelWorkers.py` composes explicit `MEDIAVORTEX_WORKER_NAME=<prefix>-worker-<N>` per child. `deploy/baremetal/mediavortex-worker@.service` + `deploy/deploy-baremetal-worker.py` StepInstallSystemdUnit rewritten (per-instance env files). `StepAgeSlotHeartbeats` DELETED. `StepStartInstances` sleep-3 serialization DELETED.
+  - **Part B (concurrency):** `Core/Database/WorkerCapabilityPredicate.BuildInflightCapPredicate(WorkerName, JobType)` shipped. `TranscodeQueueRepository.ClaimNextPendingJob` + `QualityTestRepository.ClaimQualityTestJob` gate on it.
+  - **DOMAIN.md:** 4 entries recorded 2026-07-25 (identity deploy-assigned + per-worker concurrency DB-authoritative + fleet on HEAD + deploy requires committed+pushed).
+  - **Enforcement gate:** `deploy/deploy-fleet.py` refuses when `git status --porcelain` non-empty OR `HEAD != origin/main`. No override.
+  - **Tests:** `TestClaimAuthority.py::TestInflightCapPredicateHelper` (3) + `TestTranscodeConcurrencyCapLive` (1) PASS. `TestDeployIdempotenceInvariants.py::TestDeterministicWorkerIdentity` (6 grep-fences: `_ClaimPrefixedWorkerName` retired, `MEDIAVORTEX_WORKER_PREFIX` retired, `worker-prefix.env` writes retired, `StepAgeSlotHeartbeats` retired, `socket.gethostname()` gone from WorkerService, systemd unit references per-instance env file) PASS. Combined: 22 + 12 = 34/34.
+  - **Live smoke:** `py deploy/deploy-fleet.py --hosts dot,wakko --no-drain --skip-local` on 2026-07-25. Both fleets landed on Version=bc0d4ee5. Zero duplicate ProcessIds per WorkerName. Fleet-script's polling scope for `--hosts` filter reports spurious TIMEOUT on larry-1..4 (they weren't targeted) -- follow-up bug, not a C41 regression. Wait for user to un-pause worker-1s to see concurrency-cap under load.
 
 **Pending verification (open):**
 

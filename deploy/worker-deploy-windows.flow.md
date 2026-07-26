@@ -282,7 +282,7 @@ Expected first-run sequence (visible in stdout / `Logs` table):
 
 1. `SetWindowsWorkerUncPaths.py` writes/refreshes `StorageRootResolutions` for this worker with the SMB UNCs
 2. `_VerifyRequiredPaths()` reads `StorageRootResolutions.AbsolutePath` and confirms each UNC is reachable via `os.path.exists()`
-3. `_RegisterAndLoadWorkerConfig()` resolves `FFmpegPath` from `FFmpegMaster\bin\ffmpeg.exe` (project-bundled) and UPSERTs the `Workers` row with `WorkerName = <hostname>`, `Status='Online'`, `LastHeartbeat=NOW()`
+3. `_RegisterAndLoadWorkerConfig()` resolves `FFmpegPath` from `FFmpegMaster\bin\ffmpeg.exe` (project-bundled) and UPSERTs the `Workers` row with `WorkerName = os.environ['MEDIAVORTEX_WORKER_NAME']` (set by `StartWorker.py` / `StartMediaVortex.py` from `COMPUTERNAME` by operator convention -- e.g. `I9-2024`), `Status='Online'`, `LastHeartbeat=NOW()`. See `.claude/rules/claim-authority.md`.
 4. Health, status, and capability polling threads start
 5. `MainLoop` blocks on `ShutdownEvent`
 6. Within ~60 s the capability poller picks up `TranscodeEnabled=true` (default for new rows) and the transcode loop begins claiming jobs

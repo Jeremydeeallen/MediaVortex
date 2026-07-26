@@ -151,7 +151,18 @@ def main():
     for Tab in TabCommands[1:]:
         WtCmd += f" ; new-tab {Tab}"
 
-    subprocess.Popen(WtCmd)
+    # directive: transcode-flow-canonical | # see claim-authority.md
+    # allow: Windows COMPUTERNAME is the deploy-assigned WorkerName by operator convention (per inventory.toml); this launcher is the deploy-time assignment site
+    Env = os.environ.copy()
+    if not Env.get("MEDIAVORTEX_WORKER_NAME"):
+        ComputerName = Env.get("COMPUTERNAME", "").strip()
+        if not ComputerName:
+            print("  [FAIL] MEDIAVORTEX_WORKER_NAME unset AND COMPUTERNAME unset -- cannot assign WorkerName. See .claude/rules/claim-authority.md.")
+            sys.exit(2)
+        Env["MEDIAVORTEX_WORKER_NAME"] = ComputerName
+        print(f"  [OK]   MEDIAVORTEX_WORKER_NAME={ComputerName} (from COMPUTERNAME)")
+
+    subprocess.Popen(WtCmd, env=Env)
     for Service in Services:
         print(f"  Launched {Service['Name']}")
 
