@@ -14,17 +14,13 @@ class DispositionDispatcher:
     TERMINAL_DISPOSITIONS = ('Reject', 'Requeue')
     VALID_DISPOSITIONS = ('Pending', 'Replace', 'Reject', 'Requeue')
 
-    # directive: transcode-flow-canonical | # see transcode.ST7
+    # directive: verify-signal-cleanup
     def __init__(self, Decider, GateConfigRepository, AttemptCleanupService, DatabaseService,
-                 RetranscodeDecider=None, AdjustmentRegistry=None, RetryBudgetService=None,
-                 RequeueScheduler=None, RetainInprogressPolicy=None):
-        """Inject core dependencies plus optional Phase-2 strategies, Requeue scheduler (BUG-0079), and retain-inprogress policy."""
+                 RetryBudgetService=None, RequeueScheduler=None, RetainInprogressPolicy=None):
         self.Decider = Decider
         self.GateConfigRepository = GateConfigRepository
         self.AttemptCleanupService = AttemptCleanupService
         self.DatabaseService = DatabaseService
-        self.RetranscodeDecider = RetranscodeDecider
-        self.AdjustmentRegistry = AdjustmentRegistry
         self.RetryBudgetService = RetryBudgetService
         self.RequeueScheduler = RequeueScheduler
         from Features.QualityTesting.Disposition.RetainInprogressPolicy import RetainInprogressPolicy as _DefaultPolicy

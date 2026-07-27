@@ -26,9 +26,7 @@ from Features.QualityTesting.Disposition.DispositionDispatcher import Dispositio
 from Features.QualityTesting.Disposition.PostTranscodeDispositionDecider import PostTranscodeDispositionDecider
 from Features.QualityTesting.Disposition.AttemptCleanupService import AttemptCleanupService
 from Features.QualityTesting.Disposition.RetryBudgetService import RetryBudgetService
-from Features.QualityTesting.Disposition.RetranscodeDecider import RetranscodeDecider
 from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
-from Features.TranscodeJob.Adjustments.AdjustmentRegistry import AdjustmentRegistry
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
@@ -651,7 +649,7 @@ class ProcessTranscodeQueueService:
                 f"StreamCopy checksum verified on TranscodeAttempt {TranscodeAttemptId}: MD5={SourceMd5}",
                 "ProcessTranscodeQueueService", "_VerifyStreamCopyChecksum",
             )
-            return {'Success': True, 'Vmaf': 100.0, 'ErrorMessage': None}
+            return {'Success': True, 'Vmaf': None, 'ErrorMessage': None}
         except Exception as Ex:
             LoggingService.LogException(
                 f"StreamCopy checksum verify failed on TranscodeAttempt {TranscodeAttemptId}",
@@ -895,33 +893,7 @@ class ProcessTranscodeQueueService:
                 LoggingService.LogDebug(f"No CRF override found. Tried keys: CRFOverride_{normalizedPath}, CRFOverride_{fileName}, CRFOverride_{normalizedPath[0] if ':' in normalizedPath else ''}:{normalizedPath.split(':', 1)[1].lstrip('/').replace('/', '') if ':' in normalizedPath else ''}",
                                       "ProcessTranscodeQueueService", "GetTranscodingSettings")
 
-            # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C10
-            if not overrideApplied:
-                Decider = RetranscodeDecider(AttemptRepository=self.DatabaseManager)
-                _, previousAttempt = Decider.Decide(Job.MediaFileId)
-
-                if previousAttempt:
-                    previousCRF = previousAttempt.get('Quality')
-                    vmafScore = previousAttempt.get('VMAF')
-
-                    if previousCRF and vmafScore is not None and vmafScore < 80:
-                        Calculator = AdjustmentRegistry().Get('cq')
-                        Overrides = Calculator.Calculate(
-                            PreviousAttempt={'Quality': previousCRF, 'VMAF': vmafScore},
-                            ProfileSettings=ProfileSettings,
-                            GateThreshold=80.0,
-                        )
-                        adjustedCRF = Overrides.CRF
-                        currentCRF = ProfileSettings.get('Quality')
-
-                        if adjustedCRF:
-                            finalCRF = min(adjustedCRF, currentCRF)
-                            ProfileSettings['Quality'] = finalCRF
-
-                            logMessage = f"CRF selection for {Job.FilePath}: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Calculated CRF={adjustedCRF}, Profile CRF={currentCRF}, Selected CRF={finalCRF} (minimum)"
-                            LoggingService.LogInfo(logMessage, "ProcessTranscodeQueueService", "GetTranscodingSettings")
-
-            # Log final CRF value that will be used (for debugging)
+            # directive: verify-signal-cleanup
             finalCRF = ProfileSettings.get('Quality')
             if overrideApplied:
                 LoggingService.LogInfo(f"Final CRF for {Job.FilePath}: {finalCRF} (from override)",

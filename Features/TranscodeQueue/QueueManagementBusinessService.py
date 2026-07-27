@@ -117,17 +117,12 @@ class QueueManagementBusinessService:
             successfullyTranscodedPaths = {R.get('FilePath', '') for R in _SuccessRows}
             LoggingService.LogInfo(f"Found {len(successfullyTranscodedPaths)} already successfully transcoded files", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
 
-            # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C10
-            from Features.QualityTesting.Disposition.RetranscodeDecider import RetranscodeDecider
-            from Features.TranscodeJob.Adjustments.AdjustmentRegistry import AdjustmentRegistry
-            retranscodeDecider = RetranscodeDecider(AttemptRepository=self.DatabaseManager)
-            adjustmentRegistry = AdjustmentRegistry()
-
+            # directive: verify-signal-cleanup
             itemsAdded = 0
             itemsSkipped = 0
             itemsSkippedDueToResolution = 0
-            itemsSkippedDueToQuality = 0  # Track files skipped because VMAF >= 80
-            itemsSkippedDueToAudio = 0  # Track files skipped because no English audio found
+            itemsSkippedDueToQuality = 0
+            itemsSkippedDueToAudio = 0
             # Per-reason counters for the marginal-savings gate (criterion 16).
             gateCounts = {'Upscale': 0, 'MarginalSavings': 0, 'MissingProfile': 0, 'MissingEstimate': 0}
             # Load admission config once -- shared across all rows in this run.
@@ -140,56 +135,11 @@ class QueueManagementBusinessService:
                     itemsSkipped += 1
                     continue
 
-                # Check if file was previously transcoded - if so, check VMAF for retranscode decision
+                # directive: verify-signal-cleanup -- skip if already successfully transcoded
                 if mediaFile.FilePath in successfullyTranscodedPaths:
-                    # Check if file should be retranscoded based on VMAF
-                    shouldRetranscode, previousAttempt = retranscodeDecider.Decide(mediaFile.Id)
-
-                    if not shouldRetranscode:
-                        # VMAF >= 80, quality already acceptable - skip retranscode
-                        itemsSkipped += 1
-                        itemsSkippedDueToQuality += 1
-                        LoggingService.LogInfo(f"Skipping {mediaFile.FileName}: Quality already acceptable (VMAF >= 80)", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
-                        continue
-
-                    # VMAF < 80, check if CRF adjustment would fail
-                    if previousAttempt:
-                        previousCRF = previousAttempt.get('Quality')
-                        vmafScore = previousAttempt.get('VMAF')
-
-                        if previousCRF and vmafScore is not None and vmafScore < 80:
-                            # Calculate what the adjusted CRF would be
-                            adjustedCRF = adjustmentRegistry.Get('cq').Calculate(
-                                PreviousAttempt={'Quality': previousCRF, 'VMAF': vmafScore},
-                                ProfileSettings={}, GateThreshold=80.0,
-                            ).CRF
-
-                            # Validate adjustment
-                            minCRF = 15
-                            if adjustedCRF < minCRF:
-                                # Cannot adjust further - log critical error and skip
-                                errorMsg = f"Cannot adjust CRF further for {mediaFile.FileName}: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Adjusted CRF={adjustedCRF} would be below minimum {minCRF}"
-
-                                # Extract directory for ProblemFiles
-                                directory = ntpath.dirname(mediaFile.FilePath)  # canonical display
-
-                                # Log to ProblemFiles
-                                problemFileId = self.Repository.AddProblemFile(
-                                    mediaFile.FilePath,
-                                    "CRF_Adjustment_Failed",
-                                    f"CRF adjustment failed: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Calculated CRF={adjustedCRF} is below minimum threshold (15). Quality threshold unreachable."
-                                )
-
-                                if problemFileId:
-                                    LoggingService.LogError(f"Logged CRF adjustment failure to ProblemFiles (ID: {problemFileId}): {errorMsg}",
-                                                          "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
-
-                                itemsSkipped += 1
-                                continue
-
-                    # VMAF < 80 and CRF adjustment is valid - allow retranscode by continuing to add to queue
-                    LoggingService.LogInfo(f"File {mediaFile.FileName} will be retranscoded: Previous VMAF < 80", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
-                # else: File not in successfullyTranscodedPaths, proceed with normal queue addition
+                    itemsSkipped += 1
+                    itemsSkippedDueToQuality += 1
+                    continue
 
                 # Marginal-savings gate (replaces ShouldSkipDueToResolution -- see
                 # marginal-savings-gate.feature.md). Resolution filtering is
@@ -2035,42 +1985,7 @@ class QueueManagementBusinessService:
                         LoggingService.LogInfo(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                         return {"Success": False, "ErrorMessage": errorMsg, "CanOverride": True, "FailureCapReached": True}
 
-                # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C10
-                from Features.QualityTesting.Disposition.RetranscodeDecider import RetranscodeDecider
-                from Features.TranscodeJob.Adjustments.AdjustmentRegistry import AdjustmentRegistry
-                retranscodeDecider = RetranscodeDecider(AttemptRepository=self.DatabaseManager)
-                adjustmentRegistry = AdjustmentRegistry()
-                shouldRetranscode, previousAttempt = retranscodeDecider.Decide(mediaFile.Id)
-
-                if not shouldRetranscode:
-                    if not ForceAdd:
-                        skipMsg = f"Quality already acceptable (VMAF >= 80), skipping retranscode for {mediaFile.FileName}"
-                        LoggingService.LogInfo(skipMsg, "QueueManagementBusinessService", "AddJobToQueue")
-                        return {"Success": True, "Skipped": True, "Message": "Quality already acceptable, skipping retranscode", "FileName": mediaFile.FileName}
-                    LoggingService.LogWarning(f"Force adding {mediaFile.FileName} despite VMAF>=80 on latest attempt (VMAF gate overridden)", "QueueManagementBusinessService", "AddJobToQueue")
-
-                if previousAttempt:
-                    previousCRF = previousAttempt.get('Quality')
-                    vmafScore = previousAttempt.get('VMAF')
-
-                    if previousCRF and vmafScore is not None and vmafScore < 80:
-                        adjustedCRF = adjustmentRegistry.Get('cq').Calculate(
-                            PreviousAttempt={'Quality': previousCRF, 'VMAF': vmafScore},
-                            ProfileSettings={}, GateThreshold=80.0,
-                        ).CRF
-
-                        minCRF = 15
-                        if adjustedCRF < minCRF:
-                            errorMsg = f"Cannot adjust CRF further for {mediaFile.FileName}: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Adjusted CRF={adjustedCRF} would be below minimum {minCRF}"
-                            directory = ntpath.dirname(mediaFile.FilePath)  # canonical display
-                            problemFileId = self.Repository.AddProblemFile(
-                                mediaFile.FilePath,
-                                "CRF_Adjustment_Failed",
-                                f"CRF adjustment failed: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Calculated CRF={adjustedCRF} is below minimum threshold (15). Quality threshold unreachable."
-                            )
-                            if problemFileId:
-                                LoggingService.LogError(f"Logged CRF adjustment failure to ProblemFiles (ID: {problemFileId}): {errorMsg}", "QueueManagementBusinessService", "AddJobToQueue")
-                            return {"Success": False, "ErrorMessage": errorMsg}
+                # directive: verify-signal-cleanup
 
             if mediaFile.AssignedProfile:
                 queueItem = self.CreateQueueItemFromMediaFileWithProfile(mediaFile)

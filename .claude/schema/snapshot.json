@@ -2354,11 +2354,6 @@
       "is_generated": "NEVER",
       "is_nullable": "NO"
     },
-    "retranscodevmafthreshold": {
-      "data_type": "integer",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
-    },
     "sigmamargin": {
       "data_type": "numeric",
       "is_generated": "NEVER",

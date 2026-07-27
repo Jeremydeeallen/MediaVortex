@@ -371,12 +371,12 @@ ST8 has one orchestration body (`QualityTestingBusinessService.ProcessQualityTes
 
 | Strategy | Verify method | Score domain | Written to |
 |---|---|---|---|
-| Reencode (`TranscodeJobStrategy`) | `libvmaf` on transcoded vs source | `0.0-100.0` float (perceptual score) | `TranscodeAttempts.VMAF` |
-| StreamCopy (`RemuxJobStrategy`, `AudioFixJobStrategy`, `SubtitleFixJobStrategy`, `Quick` alias) | Video-stream checksum comparison (`-c:v copy` is bit-identical by construction) | `100.0` on match / `0.0` on mismatch | `TranscodeAttempts.VMAF` (semantically overloaded per C6: verify-score, not perceptual metric) |
+| Reencode (`TranscodeJobStrategy`) | `libvmaf` on transcoded vs source | `0.0-100.0` float (perceptual score) | `TranscodeAttempts.Vmaf` |
+| StreamCopy (`RemuxJobStrategy`, `AudioFixJobStrategy`, `SubtitleFixJobStrategy`, `Quick` alias) | Video-stream MD5 checksum comparison (`-c:v copy` is bit-identical by construction) | `Success=TRUE` on match / `Success=FALSE` on mismatch | `TranscodeAttempts.Vmaf IS NULL` (not a VMAF measurement -- see DOMAIN.md 2026-07-26) |
 
-The `VMAF` column is semantically overloaded per `transcode-flow-canonical` C6 decision (no new schema column; alternative deferred to a VMAF-skip Verification-Policy follow-up directive). Consumers reading `TranscodeAttempts.VMAF` must treat it as a Strategy-agnostic verify-score in `[0,100]`.
+Per DOMAIN.md 2026-07-26, `TranscodeAttempts.Vmaf` holds a real VMAF score or NULL. Stream-copy checksum-verified attempts write `Vmaf=NULL`. Outcome signal lives in `(Success, Disposition)` -- downstream decision logic reads those columns, never `Vmaf` as a proxy for pass/fail.
 
-Adding a new Strategy verify path is one `Strategy.Verify()` implementation + one Registry.Register line. The disposition decision is Strategy-blind: `DecidePostTranscodeDisposition` reads `VMAF` + thresholds and returns Replace/Requeue/Reject regardless of how the score was computed.
+Adding a new Strategy verify path is one `Strategy.Verify()` implementation + one Registry.Register line. The disposition decision reads `(Success, QualityTestRequired, Vmaf)`: stream-copy attempts arrive with `QualityTestRequired=FALSE` and exit at `Disposition='Replace' Reason='QualityTestNotRequired'` without touching the Vmaf branch.
 
 ---
 

@@ -105,6 +105,27 @@ Historical note: commit `40cce5db` (2026-07-21, "Success semantic tightened to e
 
 ---
 
+### 2026-07-26 -- Vmaf column is truthful; outcome lives in Success + Disposition
+
+Question: What does `TranscodeAttempts.Vmaf` hold, and where does the "did this attempt pass?" signal live?
+
+Answer: **`Vmaf` holds a real VMAF score or NULL. Nothing else. No sentinels. Outcome signal lives in `(Success, Disposition)` -- never in an overloaded quality-score column.**
+
+- Stream-copy modes (`Remux`, `AudioFix`, `SubtitleFix`, `Quick`) are verified by MD5 checksum, not VMAF. Their attempts land with `Vmaf IS NULL`.
+- Only real VMAF measurements populate `Vmaf`. A checksum-passed stream-copy is NOT a VMAF measurement.
+- Downstream code that wants to know "did this attempt pass?" reads `Success` (ffmpeg exit) and `Disposition` (`Replace` / `Reject` / `Requeue` / `Pending`). It does NOT read `Vmaf` as a proxy for outcome.
+- Analytics queries (`AVG(Vmaf)`, `WHERE Vmaf >= 80`) get real signal because `Vmaf` is dense-with-truth for the modes that measure it and NULL for the modes that don't.
+
+Consequences:
+- `_VerifyStreamCopyChecksum` returns `Vmaf=None` on match (not `100.0` sentinel).
+- Any code path that gates on `Vmaf` and needs to work for stream-copy modes is wrong-column: it must read `Success + Disposition` instead.
+- Retry-budget accounting counts prior `Disposition='Requeue'` outcomes, not prior `Vmaf < threshold` measurements.
+- The historical `Vmaf=100.0` sentinel rows for stream-copy modes are legacy against this rule. Backfilling them to NULL is a data-honesty fix.
+
+Historical note: sentinel introduced because `RetranscodeDecider.Decide` was reading `Vmaf >= 80` as the pass signal, and stream-copy paths needed to route around it. Both the sentinel and the RetranscodeDecider VMAF gate are legacy against this domain rule; RetranscodeDecider is bypassed by `ForceAdd=True` on every prod admission path (`QueueAdmissionAppService`, `DispositionDispatcher._MaybeScheduleRequeue`) as of BUG-0078 fix and is retired by directive `verify-signal-cleanup` (2026-07-26).
+
+---
+
 ## Workers
 
 ### 2026-07-24 -- Worker identity and multi-instance-per-host
