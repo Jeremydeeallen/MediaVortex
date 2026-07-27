@@ -34,6 +34,56 @@ Answer: **Operator owns the WHAT and the WHY. Claude owns the HOW.**
 
 ---
 
+### 2026-07-27 -- Architectural principles: KISS, DDD, DRY, SOLID
+
+Question: Which principles govern every architectural decision?
+
+Answer: **KISS, DDD, DRY, SOLID apply to every directive. Not aspirational -- enforced.**
+
+Reason: repeated drift into overcomplication (allowlist scope creep, three-defense stacking, DDD scaffolding without payoff) forced the operator to invoke these principles orally in individual directives. Codifying here so every future directive inherits them without re-invocation.
+
+**KISS != minimal code.** KISS = minimal ESSENTIAL complexity. Deferring correct structure to save time now, then paying 3x later for bolt-on features = false economy, not KISS. The KISS-correct answer is the shape that costs the least across the whole lifecycle, not the shape that lands in the fewest lines today.
+
+**Four-question test** applied to every data-shape / abstraction decision:
+
+| Question | Blob / minimal wins | Normalize / explicit wins |
+|---|---|---|
+| Can I express what I need to READ in one line of SQL? | Yes (read whole blob) | No (SELECT WHERE on fields) |
+| Does this data have its own lifecycle (created / updated / queried independently of parent)? | No | Yes |
+| Will there be >1 row of this per parent, ever? | No | Yes |
+| Do I need to know WHEN or BY WHAT it was produced? | No | Yes |
+
+- 4/4 "normalize wins" -> normalize IS the KISS-correct answer.
+- 4/4 "blob wins" -> blob IS the KISS-correct answer.
+- Mixed answers -> revisit the concept boundary; may be two aggregates masquerading as one.
+
+**Over-normalization signals (avoid):**
+
+- 3+ JOINs for a common read
+- FK CASCADE chains
+- Junction tables for what should be enum columns
+- Repository interfaces for things with one implementation
+- Value objects wrapping single primitives with no invariants
+- Application-service layers over one-line CRUD calls
+
+**Under-normalization signals (avoid):**
+
+- WHERE clause with `->>` or `LIKE '%...%'` on JSONB fields for common queries
+- Same field embedded in N tables (DRY violation)
+- Mode-branching in orchestration (SOLID Open/Closed violation -- see `.claude/rules/call-graph-audit.md` signal 2)
+- Feature flag that removes call-graph nodes when off (`call-graph-audit.md` signal 5)
+- One class doing detection + persistence + orchestration (SRP violation)
+
+**Directive-time enforcement:**
+
+Every directive doc must include one of:
+- (a) explicit statement "no architectural principle traded" in the outcome section, OR
+- (b) named principle traded + why + what mitigates it (KNOWN DEBT in `## Out of Scope`)
+
+Silent trade-offs are refused. `.claude/rules/call-graph-audit.md` five-signal check at NEEDS_STANDARDS_REVIEW is the mechanical enforcement for DDD+SOLID; KISS+DRY are judgment gates the reviewer applies at plan review.
+
+---
+
 ## Pipeline
 
 ### 2026-07-23 -- Pipeline operators
