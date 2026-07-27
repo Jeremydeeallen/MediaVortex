@@ -2,7 +2,7 @@
 
 **Slug:** audio-language-detection
 **Set:** 2026-07-27 (post-rollback replan; parent stack: deploy-worker-identity-invariants)
-**Status:** Active -- phase: NEEDS_STANDARDS_REVIEW
+**Status:** Active -- phase: IMPLEMENTING
 
 ## Outcome
 
@@ -141,7 +141,41 @@ Then Online workers to prior states.
 
 ## Call-Graph Audit
 
-_(populated during NEEDS_STANDARDS_REVIEW -- 5 signals per `.claude/rules/call-graph-audit.md`)_
+Five signals per `.claude/rules/call-graph-audit.md`. All clean.
+
+**Signal 1 -- Multiple flow docs for one conceptual operation.**
+No new flow doc. `LanguageWorker` is a standalone per-file operation (single stage: detect -> [maybe stamp] -> next). Not pipeline-shaped. Extends existing `WorkerService.flow.md` capability lifecycle as one of four peer capabilities (Transcode / QT / Scan / Language). `audio-normalization.flow.md` per-encode pipeline is untouched -- language detection is orthogonal.
+
+**Signal 2 -- Mode-branching at the orchestration level.**
+- `WorkerService/Main._ApplyCapabilities` gets a new start/stop branch for `LanguageEnabled`, following the identical pattern used for Transcode / QT / Scan. Capability lifecycle, not pipeline mode-branch.
+- `LanguageWorker._ProcessOne` has one code path per file: detect -> conditional stamp -> next. No mode enum switch.
+- `MediaProbeBusinessService.ProbeFile` (called from stamp path) is unchanged.
+Result: no violations.
+
+**Signal 3 -- Shared output columns sparsely populated.**
+- `MediaFileLanguageDetections` new table -- single writer (`MediaFileLanguageDetectionsRepository.Insert` called from `LanguageEnrichmentService.EnrichAndStamp`). Not mode-sparse.
+- `MediaFiles.AudioLanguages` -- written by `MediaProbeBusinessService._ExecuteProbe` (existing, all probe paths). Language stamp path just triggers a re-probe; same writer. Not mode-sparse.
+- `Workers.LanguageEnabled` -- read fresh per claim by `BuildClaimPredicate`. Written by operator via `POST /api/TeamStatus/Workers/<name>/Capability`. No sparse write.
+- `ActiveJobs` -- LanguageService writes its own rows (ServiceName='LanguageService'), TranscodeService writes its own (ServiceName='TranscodeService'). Shared schema, mode-partitioned by ServiceName. Not mode-sparse within a partition.
+Result: no violations.
+
+**Signal 4 -- OOS clause ambiguity.**
+Every Non-Goal categorized (a) explicit-and-final:
+- No allowlist -- prior misfeature, will not exist in any form.
+- No auto rebucket of Compliant files -- excluded by design; language detection touches only its own outputs.
+- No `_SpawnAudioBackfill` integration -- excluded.
+- No `/Compliance` or `/AudioNormalization` UI -- excluded.
+- No `LanguageFailureReason` column -- detection row presence is the sole "tried" marker.
+- No `MetadataOnly` ProcessingMode -- LanguageWorker is a peer capability, not a queue mode.
+- Legacy `AudioStreamLanguageDetectionsJson` column -- superseded by normalized table per DOMAIN.md 2026-07-27 four-question test; column will be dropped in migration.
+Result: no ambiguity.
+
+**Signal 5 -- Config-driven call-graph shape.**
+Design constraint (mechanically enforced in implementation): `LanguageWorker` MUST be registered unconditionally in `WorkerService/Main.py`. Config gates DATA at claim time, not code paths at boot.
+- `Workers.LanguageEnabled=FALSE` -> `BuildClaimPredicate` EXISTS clause returns no rows -> `_FetchBatch` returns [] -> worker sleeps until next poll. Same functions called, different data.
+- `SystemSettings.MinDetectionConfidence` threshold -> `EnrichAndStamp` conditional branch decides stamp vs no-stamp on the SAME detected-language value. Same functions called, different branch on numeric threshold.
+- No feature flag removes a node from the call graph.
+Result: no violation, provided the unconditional-registration rule is honored in `_StartLanguageCapability`.
 
 ## Verification
 
