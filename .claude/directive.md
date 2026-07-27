@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-07-26
-**Status:** Active -- phase: VERIFYING
+**Status:** Active -- phase: DELIVERING
 **Slug:** verify-signal-cleanup
 
 ## Outcome
@@ -139,10 +139,56 @@ Tests/Pipeline/_backup/                                             (whole direc
 - [ ] VERIFYING: contract tests green + one live Remux + one live Transcode + verify tier escalation still works.
 - [ ] DELIVERING: Promotions rows.
 
-### Resume Marker
+### Promotions
 
-**Next step:** operator green-light on plan. If green, advance to NEEDS_DOC_PREREAD.
+| Source | Target durable home |
+|---|---|
+| C1 sentinel-writer fix | code lives in `Features/TranscodeJob/ProcessTranscodeQueueService.py::_VerifyStreamCopyChecksum`; policy in `DOMAIN.md` 2026-07-26 |
+| C2-C4 RetranscodeDecider + CRF adjust retirement | code deletions permanent; `Features/QualityTesting/Disposition/disposition.feature.md` updated (W5/C3/C4/S5/S6 dropped) |
+| C4 RetryBudgetService Disposition-count | code lives in `Features/QualityTesting/Disposition/RetryBudgetService.py`; contract in `disposition.feature.md` C3 |
+| C5 dead knobs + flags | schema drop lands in migration; Python mirror deletion permanent |
+| C7 doc rewrites | `transcode.flow.md` ST8 + `disposition.feature.md` reflect new reality |
+| C8 stale fixtures | `Tests/Pipeline/_backup/` gone |
 
-**Phase:** NEEDS_PLAN
+### Verification Evidence
 
-**Prior directive** (closed 2026-07-26): `.claude/directives/closed/2026-07-26-video-compliance-multiplier-closed.md`.
+- **C1**: 17 sentinel rows nullified by `NullifyStreamCopyVmafSentinels_2026_07_26.py`. Post-run `SELECT COUNT(*) FROM TranscodeAttempts WHERE ProcessingMode IN ('Remux','AudioFix','SubtitleFix','Quick') AND Vmaf IS NOT NULL` = 0. `_VerifyStreamCopyChecksum` returns `Vmaf=None`.
+- **C2**: `grep -rn "RetranscodeDecider" Features/ Tests/ WebService/` = 0 hits.
+- **C3**: `grep -rn "AdjustmentRegistry\|CrfAdjustment" Features/ Tests/ WebService/` = 0 hits.
+- **C4**: `TestRetryBudgetService.py` 7/7 green. `TestDispositionDispatcher.py` 11/11 green. `TestPostTranscodeDisposition.py` 13/13 green.
+- **C5**: `grep -rn "RetranscodeVmafThreshold\|RequiresVmaf" Features/ WebService/ Tests/` = 0 hits. `DropRetranscodeVmafThreshold_2026_07_26.py` applied twice (temp re-add + final drop for larry deploy window). Schema snapshot: 73 tables, 1101 columns.
+- **C6**: 17 rows nullified live.
+- **C7**: `transcode.flow.md` ST8 + `disposition.feature.md` W5/C3/C4/S5/S6/Files updated.
+- **C8**: `Tests/Pipeline/_backup/` gone.
+- **C9**: Fleet redeploy verified: larry (all 4), dot (all 4), wakko (all 4), I9 all on SHA `d56a2f9c`. Zero dropped-column errors in logs post-final-drop.
+
+### Delivery Report
+
+**DIRECTIVE**: verify-signal-cleanup -- Vmaf column truthful; outcome signal in Success+Disposition; retire RetranscodeDecider + CRF adjustment + dead flags.
+
+**STATUS**: Done pending operator close approval.
+
+**WHAT SHIPPED**:
+- DOMAIN.md 2026-07-26 rule: Vmaf column truthful; Success+Disposition is the outcome signal.
+- Sentinel writer retired: `_VerifyStreamCopyChecksum` returns Vmaf=None (was 100.0).
+- 4 code files + 4 test files deleted + `Tests/Pipeline/_backup/` (297 stale fixtures).
+- Column `PostTranscodeGateConfig.RetranscodeVmafThreshold` dropped.
+- 17 historical sentinel rows backfilled to NULL.
+- Doc drift purged: `transcode.flow.md` ST8, `disposition.feature.md` W5/C3/C4/S5/S6.
+- Net line diff: -367 (289 added / 656 deleted).
+
+**HOW TO USE IT**:
+- Operators reading TranscodeAttempts.Vmaf column can trust it (real VMAF or NULL, no sentinels).
+- Downstream code that gates on outcome reads Success + Disposition.
+- Adding a new stream-copy strategy: implement `Verify()` returning `Vmaf=None`; DispositionDispatcher already handles the QualityTestNotRequired path.
+
+**WHAT YOU NEED TO EXECUTE**: nothing. Fleet all on `d56a2f9c`; column drop live; workers claiming per normal.
+
+**DECISIONS I MADE**:
+- Chose Disposition-count in RetryBudgetService over any hybrid Vmaf+Disposition read. One column per concept.
+- Rebuilt tests instead of patching; smaller + focused on new signal.
+- Temp column re-add + drop dance to protect larry's in-flight Remux during the deploy window.
+
+**KNOWN GAPS / DEFERRED**: none.
+
+**Phase:** DELIVERING
