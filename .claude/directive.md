@@ -2,11 +2,11 @@
 
 **Slug:** audio-language-detection
 **Set:** 2026-07-27 (post-rollback replan; parent stack: deploy-worker-identity-invariants)
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: NEEDS_STANDARDS_REVIEW
 
 ## Outcome
 
-Standalone per-worker background service detects the audio-language of MediaFiles whose `AudioLanguages` is NULL or `und`, records the Whisper result in `MediaFiles.AudioStreamLanguageDetectionsJson`, and -- when the detection is English with sufficient confidence -- stamps the container language tag via `ffmpeg -c copy`, atomic-replaces the file, and refreshes `MediaFiles.AudioLanguages` via re-probe. Runs fleet-wide, opt-in per worker. Isolated from AudioVertical / compliance / transcode queue / audio-fix pipeline.
+Standalone per-worker background service detects the audio-language of MediaFiles whose `AudioLanguages` is NULL or `und`, records the Whisper result in `MediaFiles.MediaFileLanguageDetections (normalized table replacing legacy AudioStreamLanguageDetectionsJson JSONB column; see 2026-07-27 four-question test in DOMAIN.md)`, and -- when the detection is English with sufficient confidence -- stamps the container language tag via `ffmpeg -c copy`, atomic-replaces the file, and refreshes `MediaFiles.AudioLanguages` via re-probe. Runs fleet-wide, opt-in per worker. Isolated from AudioVertical / compliance / transcode queue / audio-fix pipeline.
 
 ## Domain Decisions (locked; operator-owned)
 
@@ -18,7 +18,7 @@ Ordered scope-first, behavior next, rollout last.
 
 ### Behavior
 - **D3.** Per-file flow: whisper detect -> write result to DB -> if English + confident, stamp container language tag + refresh `MediaFiles.AudioLanguages` via re-probe -> next file.
-- **D4.** One shot per file. `MediaFiles.AudioStreamLanguageDetectionsJson IS NOT NULL` is the "tried" marker. Never auto-retried. Operator clears the row to retry.
+- **D4.** One shot per file. Presence of any row in `MediaFileLanguageDetections` for a MediaFileId is the "tried" marker. Never auto-retried. Operator deletes rows to retry.
 - **D5.** English + sufficient confidence -> stamp container so the audio system picks it up.
 - **D6.** Language detection touches ONLY its own DB columns and the container file. NO interaction with AudioVertical / compliance recompute / transcode queue / WorkBucket / audio-fix.
 
@@ -44,7 +44,7 @@ C1. **Thread-safe backend selection.** Backend construction resolves to the work
 
 C2. **One backend across fleet.** `faster-whisper` runs on every host including I9. `WhisperFfmpegBackend` retired. Verifiable: `grep -rn WhisperFfmpegBackend Features/ WorkerService/ Tests/` returns 0 post-implementation; import raises ImportError.
 
-C3. **One shot per file.** Worker query: `WHERE AudioStreamLanguageDetectionsJson IS NULL AND <capability gate>`. Files with existing detection row are never re-processed. Contract test asserts.
+C3. **One shot per file.** Worker query: `WHERE NOT EXISTS (SELECT 1 FROM MediaFileLanguageDetections d WHERE d.MediaFileId = mf.Id) AND <capability gate>`. Files with any detection row are never re-processed. Contract test asserts.
 
 C4. **Stamp-on-English.** When detected language in {`en`, `eng`} AND confidence >= `SystemSettings.MinDetectionConfidence` (default 0.85, read fresh per attempt), worker runs `ffmpeg -c copy -metadata:s:a:N language=eng`, atomic-replaces file via `os.replace`, calls `MediaProbeBusinessService.ProbeFile(Force=True)` which refreshes `MediaFiles.AudioLanguages`. Below threshold OR non-English: detection row written, file untouched. Contract test covers all three branches.
 
@@ -64,7 +64,7 @@ Canary log recorded in this doc's Verification section before promotion.
 
 C10. **Rollback documented before phase A.** This directive contains a `## Rollback` section listing exact SQL + git SHA before any code lands. Verified below.
 
-C11. **DOMAIN.md carries the architectural-principles decision.** New Meta entry dated 2026-07-27 records the KISS/DDD/DRY/SOLID mandate + four-question test. Serves as the framework this directive uses to justify JSONB-vs-normalize choice for `AudioStreamLanguageDetectionsJson` (or its normalized successor). Verifiable: `grep "Architectural principles" DOMAIN.md` returns one hit.
+C11. **DOMAIN.md carries the architectural-principles decision.** New Meta entry dated 2026-07-27 records the KISS/DDD/DRY/SOLID mandate + four-question test. Serves as the framework this directive uses to justify JSONB-vs-normalize choice for `MediaFileLanguageDetections (normalized table replacing legacy AudioStreamLanguageDetectionsJson JSONB column; see 2026-07-27 four-question test in DOMAIN.md)` (or its normalized successor). Verifiable: `grep "Architectural principles" DOMAIN.md` returns one hit.
 
 ## Contract tests (written FIRST, all failing before implementation)
 
@@ -83,7 +83,8 @@ C11. **DOMAIN.md carries the architectural-principles decision.** New Meta entry
 
 | File | Role |
 |---|---|
-| `Scripts/SQLScripts/AddLanguageDetectionColumns_2026_07_27.py` | NEW: migration -- Workers.LanguageEnabled + SystemSettings.MinDetectionConfidence; idempotent (IF NOT EXISTS, ON CONFLICT DO NOTHING). |
+| `Scripts/SQLScripts/AddLanguageDetectionSchema_2026_07_27.py` | NEW: migration -- `MediaFileLanguageDetections` table (composite PK MediaFileId+StreamIndex, columns Language TEXT NOT NULL, Confidence NUMERIC(5,4) NOT NULL, DetectedAt TIMESTAMPTZ DEFAULT NOW(), BackendName TEXT NOT NULL) + `Workers.LanguageEnabled` + `SystemSettings.MinDetectionConfidence`; idempotent. |
+| `Features/AudioNormalization/Repositories/MediaFileLanguageDetectionsRepository.py` | NEW: `Insert(MediaFileId, StreamIndex, Language, Confidence, BackendName)`, `ExistsForMediaFile(MediaFileId)`, `GetByMediaFile(MediaFileId)`. |
 | `Features/AudioNormalization/Services/FasterWhisperBackend.py` | NEW: pip-native detection backend (CTranslate2). Single Detect(LocalFilePath, StreamIndex, DurationSeconds) contract. |
 | `Features/AudioNormalization/Services/LanguageEnrichmentService.py` | EDIT: retire WhisperFfmpegBackend, use only FasterWhisperBackend. Add EnrichAndStamp(MediaFileId, LocalFilePath). Backend construction remains here but is invoked LAZILY from LanguageWorker. |
 | `Features/AudioNormalization/Services/WhisperFfmpegBackend.py` | DELETE per C2 |
