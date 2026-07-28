@@ -15,7 +15,7 @@ from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepos
 ACTIVE_JOB_INSERT_SQL = (
     "INSERT INTO ActiveJobs (ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName, "
     "Status, StartedAt, Phase, PhaseTransitionedAt) "
-    "VALUES ('LanguageService', 'Language', %s, %s, %s, %s, 'Running', NOW(), 'Detect', NOW()) "
+    "VALUES ('LanguageService', 'Language', %s, %s, %s, %s, 'Running', NOW(), 'Setup', NOW()) "
     "RETURNING Id"
 )
 ACTIVE_JOB_DELETE_SQL = "DELETE FROM ActiveJobs WHERE Id = %s"
