@@ -16,5 +16,6 @@ class DashboardSnapshot:
     BadgeState: Dict[str, int] = field(default_factory=dict)
     HungAttempts: List[Dict[str, Any]] = field(default_factory=list)
     ActiveQualityTests: List[Dict[str, Any]] = field(default_factory=list)
+    ActiveLanguageJobs: List[Dict[str, Any]] = field(default_factory=list)
     StaleProgressThresholdSec: int = 15
     HeartbeatStaleThresholdSec: int = 300

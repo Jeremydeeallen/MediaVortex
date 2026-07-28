@@ -61,6 +61,14 @@ class WorkerContext:
         return getattr(_ThreadLocal, 'Context', None)
 
     @classmethod
+    # directive: audio-language-detection
+    def TryCurrentOrTemplate(cls) -> Optional['WorkerContext']:
+        Ctx = getattr(_ThreadLocal, 'Context', None)
+        if Ctx is not None:
+            return Ctx
+        return _Template
+
+    @classmethod
     # directive: transcode-flow-canonical
     def Reset(cls):
         global _Template

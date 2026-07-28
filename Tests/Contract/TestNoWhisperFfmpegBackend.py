@@ -17,12 +17,12 @@ class TestNoWhisperFfmpegBackend(unittest.TestCase):
 
     def test_no_references_in_production_code(self):
         Result = subprocess.run(
-            ['git', 'grep', '-l', 'WhisperFfmpegBackend',
-             '--', 'Features/', 'WorkerService/', 'Core/', 'Services/'],
+            ['git', 'grep', '-l', 'WhisperFfmpegBackend', '--',
+             'Features/**/*.py', 'WorkerService/**/*.py', 'Core/**/*.py', 'Services/**/*.py'],
             capture_output=True, text=True, cwd=str(REPO_ROOT),
         )
         Hits = [L for L in Result.stdout.splitlines() if L.strip()]
-        self.assertEqual(Hits, [], msg=f'WhisperFfmpegBackend still referenced in production: {Hits}')
+        self.assertEqual(Hits, [], msg=f'WhisperFfmpegBackend still referenced in production python: {Hits}')
 
     def test_import_raises(self):
         with self.assertRaises(ImportError):

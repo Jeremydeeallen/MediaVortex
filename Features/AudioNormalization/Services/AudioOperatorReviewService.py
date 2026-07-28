@@ -159,9 +159,8 @@ class AudioOperatorReviewService:
         )
         return {'Marked': len(Ids), 'Ids': Ids}
 
-    # directive: audio-vertical-converge-to-zero | # see directive.md Z1
+    # directive: audio-language-detection
     def BulkClearSpeechEnrichmentCache(self, Reason=REASON_AWAITING_SPEECH_ENRICHMENT):
-        """Clear AudioStreamLanguageDetectionsJson so LanguageEnrichmentService re-runs Whisper detection on next pass."""
         if Reason not in REVIEW_REASONS:
             raise ValueError(f"Reason must be one of {REVIEW_REASONS}; got {Reason!r}")
         Db = DatabaseService()
@@ -171,9 +170,11 @@ class AudioOperatorReviewService:
         if not Ids:
             return {'Cleared': 0, 'Ids': []}
         Db.ExecuteNonQuery(
-            "UPDATE MediaFiles "
-            "SET AudioStreamLanguageDetectionsJson = NULL, AdmissionDeferReason = NULL "
-            "WHERE AdmissionDeferReason = %s",
+            "DELETE FROM MediaFileLanguageDetections WHERE MediaFileId = ANY(%s)",
+            (Ids,),
+        )
+        Db.ExecuteNonQuery(
+            "UPDATE MediaFiles SET AdmissionDeferReason = NULL WHERE AdmissionDeferReason = %s",
             (Reason,),
         )
         return {'Cleared': len(Ids), 'Ids': Ids}

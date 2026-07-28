@@ -119,8 +119,16 @@ class AudioFilterEmitter:
         if AudioStreams is None:
             AudioStreams = [{'index': 0, 'tags': {}, 'disposition': {}}]
         EffectiveDefault = LibraryDefault or _GetField(Policy, 'LanguageDefault')
-        SpeechCache = _GetField(MediaFile, 'AudioStreamLanguageDetectionsJson')
+        SpeechCache = None
         EnableSpeech = bool(_GetField(Policy, 'EnableSpeechLanguageDetection'))
+        if EnableSpeech:
+            try:
+                from Features.AudioNormalization.Repositories.MediaFileLanguageDetectionsRepository import MediaFileLanguageDetectionsRepository
+                Mid = _GetField(MediaFile, 'Id') or _GetField(MediaFile, 'MediaFileId')
+                if Mid is not None:
+                    SpeechCache = MediaFileLanguageDetectionsRepository().GetDetectionsMap(int(Mid))
+            except Exception:
+                SpeechCache = None
         Detection = self.LanguageDetector.Detect(
             AudioStreams,
             LibraryDefault=EffectiveDefault,

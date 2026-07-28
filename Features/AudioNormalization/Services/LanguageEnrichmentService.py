@@ -1,223 +1,182 @@
-import json
 import os
 import subprocess
-import tempfile
-from typing import List, Optional
 
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
-from Core.Path.LocalPath import LocalBasename, LocalExists
+from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalExists, LocalJoin, LocalSplitExt
+
+from Features.AudioNormalization.Repositories.MediaFileLanguageDetectionsRepository import MediaFileLanguageDetectionsRepository
+from Features.AudioNormalization.Services.AudioStreamProbe import AudioStreamProbe
+from Features.AudioNormalization.Services.FasterWhisperBackend import FasterWhisperBackend
+from Features.AudioNormalization.Services.LanguageEnrichmentError import LanguageEnrichmentError
 
 
-WRITE_CACHE_SQL = (
-    "UPDATE MediaFiles SET AudioStreamLanguageDetectionsJson = %s::jsonb WHERE Id = %s"
-)
+ISO639_1_TO_2 = {
+    'en': 'eng', 'es': 'spa', 'fr': 'fra', 'de': 'deu', 'it': 'ita',
+    'pt': 'por', 'ja': 'jpn', 'zh': 'zho', 'ko': 'kor', 'ru': 'rus',
+    'ar': 'ara', 'hi': 'hin', 'nl': 'nld', 'sv': 'swe', 'no': 'nor',
+    'da': 'dan', 'fi': 'fin', 'pl': 'pol', 'tr': 'tur', 'th': 'tha',
+    'vi': 'vie', 'id': 'ind', 'he': 'heb', 'cs': 'ces', 'el': 'ell',
+    'hu': 'hun', 'ro': 'ron', 'uk': 'ukr', 'ca': 'cat', 'bg': 'bul',
+}
 
 
-LOAD_CACHE_SQL = (
-    "SELECT AudioStreamLanguageDetectionsJson FROM MediaFiles WHERE Id = %s"
-)
+def NormalizeIso639(Code):
+    if not Code:
+        return ''
+    C = Code.strip().lower()
+    if len(C) == 2:
+        return ISO639_1_TO_2.get(C, C)
+    return C
 
 
-WHISPER_MODEL_SETTING = 'WhisperModelPath'
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+ENGLISH_CODES = ('en', 'eng')
 
 
-# directive: audio-vertical-compliance-and-activity | # see audio-normalization.C19
-def _ResolveWhisperModelPath():
-    """Read SystemSettings.WhisperModelPath fresh per call (db-is-authority); None when unset."""
-    try:
-        from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
-        Value = SystemSettingsRepository().GetSystemSetting(WHISPER_MODEL_SETTING) or ''
-        return Value.strip() or None
-    except Exception:
-        return None
-
-
-# directive: audio-vertical-compliance-and-activity | # see audio-normalization.C19
+# directive: audio-language-detection
 class _StubLanguageIdBackend:
-    """Fallback backend when no Whisper model is configured; returns 'und' confidence 0."""
 
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C19
+    NAME = 'stub'
+
     def Detect(self, LocalFilePath, StreamIndex, DurationSeconds=60):
-        """Stub: returns 'und' confidence 0.0."""
         return {'Language': 'und', 'Confidence': 0.0}
 
 
-# directive: audio-vertical-compliance-and-activity | # see audio-normalization.C19
-class WhisperFfmpegBackend:
-    """Real backend: invokes ffmpeg's --enable-whisper filter on first DurationSeconds of audio, parses detected language."""
-
-    DEFAULT_TIMEOUT_SECONDS = 120
-
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C19
-    def __init__(self, FFmpegPath=None, ModelPath=None, TimeoutSeconds=None):
-        """Bind to specific ffmpeg + model paths; ModelPath defaults to SystemSettings.WhisperModelPath."""
-        self._FFmpegPath = FFmpegPath
-        self._ModelPath = ModelPath or _ResolveWhisperModelPath()
-        self._Timeout = TimeoutSeconds or self.DEFAULT_TIMEOUT_SECONDS
-
-    # directive: audio-vertical-compliance-and-activity | # see audio-normalization.C19
-    def _ResolveFFmpegPath(self):
-        """Return the bound override or the WorkerContext value; None when neither available."""
-        if self._FFmpegPath:
-            return self._FFmpegPath
-        try:
-            from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.TryCurrent()
-            if Ctx and Ctx.FFmpegPath:
-                return Ctx.FFmpegPath
-        except Exception:
-            pass
-        return None
-
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.L3
-    def IsAvailable(self):
-        """True when ffmpeg + a model file are resolvable + the model exists on the worker's local FS."""
-        return bool(self._ResolveFFmpegPath() and self._ModelPath and LocalExists(self._ModelPath))
-
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.L3
-    def Detect(self, LocalFilePath, StreamIndex, DurationSeconds=60):
-        """Run ffmpeg whisper filter to transcribe first DurationSeconds, then langdetect on transcript text."""
-        Fp = self._ResolveFFmpegPath()
-        if not Fp or not self._ModelPath:
-            return {'Language': 'und', 'Confidence': 0.0, 'Error': 'whisper_backend_unavailable'}
-        ModelArg = self._ModelPathForFilter(self._ModelPath)
-        if ModelArg is None:
-            return {'Language': 'und', 'Confidence': 0.0, 'Error': 'model_path_not_under_repo_root'}
-        NullSink = 'NUL' if os.name == 'nt' else '/dev/null'
-        Fd, OutLocalPath = tempfile.mkstemp(prefix='whisper_', suffix='.jsonl', dir=REPO_ROOT)
-        os.close(Fd)
-        OutBasename = LocalBasename(OutLocalPath)
-        Cmd = [
-            Fp, '-hide_banner', '-nostdin',
-            '-t', str(int(DurationSeconds)),
-            '-i', LocalFilePath,
-            '-map', f'0:a:{StreamIndex}',
-            '-af', f'whisper=model={ModelArg}:queue=10:destination={OutBasename}:format=json',
-            '-f', 'null', NullSink,
-        ]
-        try:
-            subprocess.run(
-                Cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                timeout=self._Timeout, check=False, cwd=REPO_ROOT,
-            )
-            return self._LangDetectFromTranscript(OutLocalPath)
-        except (subprocess.TimeoutExpired, FileNotFoundError) as Ex:
-            return {'Language': 'und', 'Confidence': 0.0, 'Error': type(Ex).__name__}
-        finally:
-            try:
-                os.remove(OutLocalPath)
-            except OSError:
-                pass
-
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.L3
-    def _ModelPathForFilter(self, ModelLocalPath):
-        """Return a forward-slashed relative-to-REPO_ROOT path so ffmpeg filter syntax has no drive-letter colon."""
-        try:
-            Rel = os.path.relpath(ModelLocalPath, REPO_ROOT)
-        except ValueError:
-            return None
-        if Rel.startswith('..'):
-            return None
-        return Rel.replace('\\', '/')
-
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.L3
-    def _LangDetectFromTranscript(self, TranscriptLocalPath):
-        """Assemble whisper JSON-line transcript text and pass to langdetect; return {Language, Confidence}."""
-        if not LocalExists(TranscriptLocalPath):
-            return {'Language': 'und', 'Confidence': 0.0, 'Error': 'transcript_not_produced'}
-        Segments = []
-        with open(TranscriptLocalPath, 'r', encoding='utf-8', errors='replace') as F:
-            for Line in F:
-                Line = Line.strip()
-                if not Line:
-                    continue
-                try:
-                    Obj = json.loads(Line)
-                except ValueError:
-                    continue
-                Text = (Obj.get('text') or '').strip()
-                if Text and not Text.startswith('['):
-                    Segments.append(Text)
-        Transcript = ' '.join(Segments).strip()
-        if len(Transcript) < 20:
-            return {'Language': 'und', 'Confidence': 0.0, 'Error': 'transcript_too_short'}
-        try:
-            from langdetect import detect_langs, DetectorFactory
-            DetectorFactory.seed = 0
-            Ranked = detect_langs(Transcript)
-        except Exception as Ex:
-            return {'Language': 'und', 'Confidence': 0.0, 'Error': type(Ex).__name__}
-        if not Ranked:
-            return {'Language': 'und', 'Confidence': 0.0, 'Error': 'langdetect_returned_empty'}
-        Top = Ranked[0]
-        return {'Language': str(Top.lang).lower(), 'Confidence': float(Top.prob)}
-
-
-# directive: audio-vertical-compliance-and-activity | # see audio-normalization.C19
+# directive: audio-language-detection
 def _DefaultBackend():
-    """Pick WhisperFfmpegBackend when available, otherwise the stub."""
-    Candidate = WhisperFfmpegBackend()
-    return Candidate if Candidate.IsAvailable() else _StubLanguageIdBackend()
+    try:
+        Faster = FasterWhisperBackend()
+        if Faster.IsAvailable():
+            return Faster
+    except Exception as Ex:
+        LoggingService.LogWarning(
+            f"FasterWhisperBackend.IsAvailable raised {type(Ex).__name__}: {Ex}",
+            'LanguageEnrichmentService', '_DefaultBackend',
+        )
+    return _StubLanguageIdBackend()
 
 
-# directive: perfect-audio-vertical | # see perfect-audio-vertical.C19
+# directive: audio-language-detection
 class LanguageEnrichmentService:
-    """Schedule + cache speech-language detections per MediaFile; backend pluggable for Whisper integration."""
 
-    # directive: perfect-audio-vertical | # see audio-normalization.C19
-    def __init__(self, Backend=None):
-        """Inject a language-ID backend; default picks WhisperFfmpegBackend when a model is configured, else stub."""
+    def __init__(self, Backend=None, Detections=None):
         self.Backend = Backend or _DefaultBackend()
+        self.Detections = Detections or MediaFileLanguageDetectionsRepository()
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C19
-    def GetCached(self, MediaFileId):
-        """Return cached AudioStreamLanguageDetectionsJson for a MediaFile or None."""
-        Rows = DatabaseService().ExecuteQuery(LOAD_CACHE_SQL, (MediaFileId,))
-        if not Rows:
-            return None
-        Cache = Rows[0].get('audiostreamlanguagedetectionsjson')
-        if Cache is None:
-            return None
-        if isinstance(Cache, str):
-            try:
-                return json.loads(Cache)
-            except (ValueError, TypeError):
-                return None
-        return Cache
+    def GetDetectionsMap(self, MediaFileId):
+        return self.Detections.GetDetectionsMap(MediaFileId)
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C19
+    def HasDetections(self, MediaFileId):
+        return self.Detections.ExistsForMediaFile(MediaFileId)
+
     def Enrich(self, MediaFileId, LocalFilePath, StreamIndices=(0,)):
-        """Run the backend for every requested stream; persist cache; return the cache dict."""
-        Cached = self.GetCached(MediaFileId) or {}
+        BackendName = getattr(self.Backend, 'NAME', type(self.Backend).__name__)
+        Existing = self.GetDetectionsMap(MediaFileId)
         for Idx in StreamIndices:
-            if str(Idx) in Cached or Idx in Cached:
+            if str(Idx) in Existing:
                 continue
             try:
                 Result = self.Backend.Detect(LocalFilePath, Idx)
-                Cached[str(Idx)] = Result
+                self._PersistDetection(MediaFileId, Idx, Result, BackendName)
+                Existing[str(Idx)] = {
+                    'Language': str(Result.get('Language') or 'und').lower(),
+                    'Confidence': float(Result.get('Confidence') or 0.0),
+                }
             except Exception as Ex:
                 LoggingService.LogException(
                     f"LanguageEnrichment.Detect failed for MediaFileId={MediaFileId} stream={Idx}",
                     Ex, "LanguageEnrichmentService", "Enrich",
                 )
-                Cached[str(Idx)] = {'Language': 'und', 'Confidence': 0.0, 'Error': str(Ex)}
+        return Existing
 
+    def _PersistDetection(self, MediaFileId, StreamIndex, Result, BackendName):
+        Lang = str(Result.get('Language') or 'und').strip().lower()
+        Conf = float(Result.get('Confidence') or 0.0)
+        self.Detections.Insert(MediaFileId, StreamIndex, Lang, Conf, BackendName)
+
+    def EnrichAndStamp(self, MediaFileId, LocalFilePath):
+        Streams = AudioStreamProbe().Probe(LocalFilePath)
+        if not Streams:
+            raise LanguageEnrichmentError(MediaFileId, 'no_audio_streams')
+        StreamIndices = tuple(range(len(Streams)))
+        Detections = self.Enrich(MediaFileId, LocalFilePath, StreamIndices)
+        MinConfidence = self._ResolveMinConfidence()
+        Stamps = self._DecideStamps(Streams, Detections, MinConfidence)
+        if not Stamps:
+            return {'Stamped': False, 'Reason': 'no_english_or_low_confidence', 'Detections': Detections}
+        return self._StampContainer(MediaFileId, LocalFilePath, Stamps, Detections)
+
+    def _DecideStamps(self, Streams, Detections, MinConfidence):
+        Stamps = []
+        for Idx in range(len(Streams)):
+            D = Detections.get(str(Idx)) or {}
+            Lang = str(D.get('Language') or '').lower()
+            Conf = float(D.get('Confidence') or 0.0)
+            if Lang not in ENGLISH_CODES:
+                continue
+            if Conf < MinConfidence:
+                continue
+            SourceLang = NormalizeIso639((Streams[Idx].get('tags') or {}).get('language'))
+            if SourceLang == 'eng':
+                continue
+            Stamps.append((Idx, 'eng'))
+        return Stamps
+
+    def _StampContainer(self, MediaFileId, LocalFilePath, Stamps, Detections):
+        FfmpegPath = self._ResolveFFmpegPath()
+        if not FfmpegPath:
+            raise LanguageEnrichmentError(MediaFileId, 'ffmpeg_path_unresolved')
+        OrigDir = LocalDirname(LocalFilePath)
+        BaseName, Ext = LocalSplitExt(LocalBasename(LocalFilePath))
+        InProgressPath = LocalJoin(OrigDir, f'{BaseName}.langfix.inprogress{Ext}')
+        Cmd = [FfmpegPath, '-hide_banner', '-nostdin', '-i', LocalFilePath, '-map', '0', '-c', 'copy']
+        for Idx, Lang in Stamps:
+            Cmd += [f'-metadata:s:a:{Idx}', f'language={Lang}']
+        Cmd += ['-y', InProgressPath]
         try:
-            DatabaseService().ExecuteNonQuery(WRITE_CACHE_SQL, (json.dumps(Cached), MediaFileId))
+            Result = subprocess.run(Cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300, check=False)
+        except (subprocess.TimeoutExpired, FileNotFoundError) as Ex:
+            self._SafeUnlink(InProgressPath)
+            raise LanguageEnrichmentError(MediaFileId, 'ffmpeg_subprocess_error', Detail=type(Ex).__name__)
+        if Result.returncode != 0:
+            Stderr = (Result.stderr or b'').decode('utf-8', errors='replace')[:400]
+            self._SafeUnlink(InProgressPath)
+            raise LanguageEnrichmentError(MediaFileId, 'ffmpeg_returncode_nonzero', Detail=f"rc={Result.returncode} stderr={Stderr}")
+        try:
+            os.replace(InProgressPath, LocalFilePath)
+        except OSError as Ex:
+            self._SafeUnlink(InProgressPath)
+            raise LanguageEnrichmentError(MediaFileId, 'file_replace_failed', Detail=str(Ex))
+        try:
+            from Features.MediaProbe.MediaProbeBusinessService import MediaProbeBusinessService
+            Reprobe = MediaProbeBusinessService().ProbeFile(MediaFileId, Force=True)
         except Exception as Ex:
-            LoggingService.LogException(
-                f"LanguageEnrichment.Enrich persist failed for MediaFileId={MediaFileId}",
-                Ex, "LanguageEnrichmentService", "Enrich",
-            )
-        return Cached
+            raise LanguageEnrichmentError(MediaFileId, 'reprobe_failed', Detail=str(Ex))
+        return {'Stamped': True, 'StampedStreams': Stamps, 'Detections': Detections, 'ReprobeResult': Reprobe}
 
-    # directive: perfect-audio-vertical | # see perfect-audio-vertical.C19
-    def HasCacheForAllStreams(self, MediaFileId, StreamIndices):
-        """True when every requested stream has a cached detection; admission skips enrichment."""
-        Cached = self.GetCached(MediaFileId) or {}
-        for Idx in StreamIndices:
-            if str(Idx) not in Cached and Idx not in Cached:
-                return False
-        return True
+    def _ResolveMinConfidence(self):
+        Override = getattr(self, '_MinConfidenceOverride', None)
+        if Override is not None:
+            return float(Override)
+        try:
+            from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+            Val = SystemSettingsRepository().GetSystemSetting('MinDetectionConfidence')
+            return float(Val) if Val else 0.85
+        except Exception:
+            return 0.85
+
+    def _ResolveFFmpegPath(self):
+        try:
+            from Core.WorkerContext import WorkerContext
+            Ctx = WorkerContext.TryCurrent()
+            if Ctx and getattr(Ctx, 'FFmpegPath', None):
+                return Ctx.FFmpegPath
+        except Exception:
+            pass
+        return None
+
+    def _SafeUnlink(self, Path):
+        try:
+            os.remove(Path)
+        except OSError:
+            pass

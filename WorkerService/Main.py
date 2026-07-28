@@ -118,12 +118,14 @@ class WorkerServiceApp:
         self.TranscodeService = None
         self.QualityTestService = None
         self.ContinuousScanService = None
+        self.LanguageWorker = None
 
         # Current capabilities and status from DB
         self.TranscodeEnabled = False
         self.QualityTestEnabled = False
         self.RemuxEnabled = False
         self.ScanEnabled = False
+        self.LanguageEnabled = False
         self.WorkerStatus = "Paused"
 
         # Concurrency slot cap read from Workers.MaxConcurrentJobs (single source of truth)
@@ -279,7 +281,7 @@ class WorkerServiceApp:
         """Read capability flags + MaxConcurrentJobs from Workers table. Single query, single source of truth."""
         try:
             Query = (
-                "SELECT TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, Status, "
+                "SELECT TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, LanguageEnabled, Status, "
                 "MaxConcurrentJobs, MaxConcurrentQualityTestJobs "
                 "FROM Workers WHERE WorkerName = %s"
             )
@@ -290,6 +292,7 @@ class WorkerServiceApp:
                 self.QualityTestEnabled = bool(Row.get('QualityTestEnabled', False))
                 self.RemuxEnabled = bool(Row.get('RemuxEnabled', True))
                 self.ScanEnabled = bool(Row.get('ScanEnabled', False))
+                self.LanguageEnabled = bool(Row.get('LanguageEnabled', False))
                 self.WorkerStatus = Row.get('Status', 'Paused') or 'Paused'
                 RawMax = Row.get('MaxConcurrentJobs')
                 RawQualityTest = Row.get('MaxConcurrentQualityTestJobs')
@@ -301,6 +304,7 @@ class WorkerServiceApp:
                 self.QualityTestEnabled = False
                 self.RemuxEnabled = True
                 self.ScanEnabled = False
+                self.LanguageEnabled = False
                 self.WorkerStatus = "Paused"
                 self.CurrentTranscodeConcurrency = 1
                 self.CurrentQualityTestConcurrency = 2
@@ -473,6 +477,27 @@ class WorkerServiceApp:
             LoggingService.LogInfo("Scan capability stopped", "WorkerService", "_StopScanCapability")
         except Exception as e:
             LoggingService.LogException("Error stopping scan capability", e, "WorkerService", "_StopScanCapability")
+
+    # directive: audio-language-detection
+    def _StartLanguageCapability(self):
+        if self.LanguageWorker is not None:
+            return
+        try:
+            from WorkerService.LanguageWorker import LanguageWorker
+            self.LanguageWorker = LanguageWorker(self.WorkerName)
+            self.LanguageWorker.Start()
+        except Exception as e:
+            LoggingService.LogException("Error starting language capability", e, "WorkerService", "_StartLanguageCapability")
+
+    # directive: audio-language-detection
+    def _StopLanguageCapability(self):
+        if self.LanguageWorker is None:
+            return
+        try:
+            self.LanguageWorker.Stop()
+            self.LanguageWorker = None
+        except Exception as e:
+            LoggingService.LogException("Error stopping language capability", e, "WorkerService", "_StopLanguageCapability")
 
     # --- Mount validation ---
 
@@ -717,6 +742,7 @@ class WorkerServiceApp:
                 self.TranscodeService is not None
                 or self.QualityTestService is not None
                 or self.ContinuousScanService is not None
+                or self.LanguageWorker is not None
             )
             if AnyRunning:
                 LoggingService.LogInfo(
@@ -741,6 +767,11 @@ class WorkerServiceApp:
             self._StartScanCapability()
         elif not self.ScanEnabled and self.ContinuousScanService is not None:
             self._StopScanCapability()
+
+        if self.LanguageEnabled and self.LanguageWorker is None:
+            self._StartLanguageCapability()
+        elif not self.LanguageEnabled and self.LanguageWorker is not None:
+            self._StopLanguageCapability()
 
     # --- Polling threads ---
 
@@ -951,6 +982,8 @@ class WorkerServiceApp:
             threading.Thread(target=self._StopQualityTestCapability, daemon=True, name="StopQualityTest").start()
         if self.ContinuousScanService is not None:
             self._StopScanCapability()
+        if self.LanguageWorker is not None:
+            self._StopLanguageCapability()
 
     def _LoadCapabilityPollingInterval(self) -> int:
         """Read CapabilityPollingIntervalSec from SystemSettings. Default 15."""

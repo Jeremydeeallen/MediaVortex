@@ -58,6 +58,7 @@ class DashboardSnapshotService:
         BadgeState = self._BuildBadgeState(ActiveJobs)
         HungAttempts = self._BuildHungAttempts()
         ActiveQualityTests = self._BuildActiveQualityTests()
+        ActiveLanguageJobs = self._BuildActiveLanguageJobs()
         return DashboardSnapshot(
             Workers=Workers,
             ActiveJobs=ActiveJobs,
@@ -66,9 +67,32 @@ class DashboardSnapshotService:
             BadgeState=BadgeState,
             HungAttempts=HungAttempts,
             ActiveQualityTests=ActiveQualityTests,
+            ActiveLanguageJobs=ActiveLanguageJobs,
             StaleProgressThresholdSec=self.StaleSec,
             HeartbeatStaleThresholdSec=self.HeartSec,
         )
+
+    # directive: audio-language-detection
+    def _BuildActiveLanguageJobs(self) -> List[Dict]:
+        Rows = self.Db.ExecuteQuery(
+            "SELECT aj.Id AS AjId, aj.WorkerName, aj.StartedAt, aj.QueueId AS MediaFileId, "
+            "mf.FileName, mf.RelativePath, "
+            "EXTRACT(EPOCH FROM (NOW() - aj.StartedAt))::int AS ElapsedSec "
+            "FROM ActiveJobs aj "
+            "LEFT JOIN MediaFiles mf ON mf.Id = aj.QueueId "
+            "WHERE aj.ServiceName = 'LanguageService' AND aj.Status = 'Running' "
+            "ORDER BY aj.StartedAt ASC"
+        )
+        Out = []
+        for R in (Rows or []):
+            Out.append({
+                'MediaFileId': int(R['MediaFileId']) if R.get('MediaFileId') is not None else None,
+                'FileName': R.get('FileName') or (R.get('RelativePath') or '').split('/')[-1],
+                'WorkerName': R.get('WorkerName'),
+                'StartedAt': R.get('StartedAt'),
+                'ElapsedSec': int(R.get('ElapsedSec') or 0),
+            })
+        return Out
 
     # directive: transcode-worker-unification | # see activity.C5
     def _BuildActiveQualityTests(self):

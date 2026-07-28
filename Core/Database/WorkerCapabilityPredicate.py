@@ -31,10 +31,11 @@ _ALLOWED_CAPABILITIES = frozenset({
     "QualityTestEnabled",
     "RemuxEnabled",
     "ScanEnabled",
-    "AcceptsInterlaced",  # routing flag, not pure capability, but uses same pattern
-    "nvenccapable",  # hardware encoder flag; lowercase matches actual Workers column name
-    "qsvcapable",  # Intel QSV hardware encoder flag (av1_qsv profiles); parallels nvenccapable
-})  # see transcode.ST6
+    "LanguageEnabled",
+    "AcceptsInterlaced",
+    "nvenccapable",
+    "qsvcapable",
+})
 
 
 def BuildClaimPredicate(WorkerName: str, Capability: str) -> Tuple[str, tuple]:
