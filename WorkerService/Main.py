@@ -1028,6 +1028,7 @@ class WorkerServiceApp:
                 OldQualityTest = self.QualityTestEnabled
                 OldScan = self.ScanEnabled
                 OldRemux = self.RemuxEnabled
+                OldLanguage = self.LanguageEnabled
                 OldMaxConcurrent = self.CurrentTranscodeConcurrency
                 OldQualityTestConcurrency = self.CurrentQualityTestConcurrency
 
@@ -1036,12 +1037,14 @@ class WorkerServiceApp:
                 if (OldTranscode != self.TranscodeEnabled or
                         OldQualityTest != self.QualityTestEnabled or
                         OldRemux != self.RemuxEnabled or
-                        OldScan != self.ScanEnabled):
+                        OldScan != self.ScanEnabled or
+                        OldLanguage != self.LanguageEnabled):
                     LoggingService.LogInfo(
                         f"Capabilities changed: Transcode={OldTranscode}->{self.TranscodeEnabled}, "
                         f"QualityTest={OldQualityTest}->{self.QualityTestEnabled}, "
                         f"Remux={OldRemux}->{self.RemuxEnabled}, "
-                        f"Scan={OldScan}->{self.ScanEnabled}",
+                        f"Scan={OldScan}->{self.ScanEnabled}, "
+                        f"Language={OldLanguage}->{self.LanguageEnabled}",
                         "WorkerService", "_CapabilityPollingLoop"
                     )
                     self._ApplyCapabilities()
