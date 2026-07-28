@@ -2,7 +2,7 @@
 
 **Slug:** audio-language-detection
 **Set:** 2026-07-27 (post-rollback replan; parent stack: deploy-worker-identity-invariants)
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 
 ## Outcome
 
@@ -179,8 +179,18 @@ Result: no violation, provided the unconditional-registration rule is honored in
 
 ## Verification
 
-_(populated at each phase gate)_
+- **Phase A (contract tests):** commit 92c7f151. 8/8 tests written, all failed at import as expected (implementation modules did not yet exist).
+- **Phase B (migration):** commit b9994866. Ran twice, idempotent (second run no-op). `MediaFileLanguageDetections` table + `Workers.LanguageEnabled DEFAULT FALSE` + `SystemSettings.MinDetectionConfidence=0.85` + legacy JSONB column dropped. Snapshot regen at b7513b37.
+- **Phase C-E (backend + worker + UI):** commit b9994866 + 40d15d37 (capability-poll change-detection fix) + 77b56d42 (Phase enum fix). 18/18 contract tests green.
+- **Phase F (fleet deploy):** commit b7513b37 + 40d15d37 + 77b56d42 -> 13/13 workers on final SHA 77b56d42; faster-whisper installed on every host (docker image bake + baremetal venv pip).
+- **Phase G (canary):** larry-worker-1 alone (after I9 flipped LanguageEnabled=FALSE at 01:06:32 UTC). Detections landing at real Whisper confidence (0.9755, 0.9800 English). Zero CreateActiveJob errors after Phase enum fix. Backend logged as FasterWhisperBackend on both I9 and larry-1 -- fleet backend parity confirmed.
+- **Phase H (rest of fleet):** 10 workers (I9 + 4 larry + 4 dot + wakko-1) with LanguageEnabled=TRUE. wakko-2/3/4 stay Paused per memory `feedback_wakko_only_worker_1_online.md`.
+- **C4 branches verified live:** English + confident -> stamped + `AudioLanguages='eng'` (MediaFile 34772 -- Pokémon S15E08); non-English confident -> not stamped (34774 Hindi 0.9856); low-confidence English -> not stamped (61537 en 0.7599).
+- **C6 ActiveJobs lifecycle:** Phase enum fix `77b56d42` -- INSERT with Phase='Setup' succeeds. Logged INFO "LanguageWorker started for..." + "backend resolved: FasterWhisperBackend" on both workers post-restart.
+- **Throughput:** 20 detections in first 5 min from larry-1 alone (single worker rate). Fleet-wide expected ~10 files/sec at steady state.
 
 ## Promotions
 
-_(populated at DELIVERING -- move durable content from this directive to `audio-language-detection.feature.md`)_
+- Domain decisions D1-D9 -> DOMAIN.md architectural-principles entry (2026-07-27) already committed at db68caba.
+- Contract for FasterWhisperBackend + LanguageWorker + LanguageEnrichmentService.EnrichAndStamp + MediaFileLanguageDetections table shape -> `Features/AudioNormalization/audio-language-detection.feature.md` (this directive's Phase I output).
+- Cross-vertical contract update (audio-normalization.feature.md line 230 no longer names AudioStreamLanguageDetectionsJson column; MediaFileLanguageDetections table is the new write target of LanguageEnrichmentService.Enrich).
