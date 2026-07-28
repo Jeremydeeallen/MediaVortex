@@ -1367,6 +1367,38 @@
       "is_nullable": "YES"
     }
   },
+  "mediafilelanguagedetections": {
+    "backendname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "confidence": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "detectedat": {
+      "data_type": "timestamp with time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "language": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "mediafileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "streamindex": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
   "mediafiles": {
     "admissiondeferreason": {
       "data_type": "character varying",
@@ -1450,11 +1482,6 @@
     },
     "audiosamplerate": {
       "data_type": "bigint",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
-    "audiostreamlanguagedetectionsjson": {
-      "data_type": "jsonb",
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
@@ -5509,6 +5536,11 @@
     },
     "id": {
       "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "languageenabled": {
+      "data_type": "boolean",
       "is_generated": "NEVER",
       "is_nullable": "NO"
     },
