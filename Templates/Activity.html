@@ -65,7 +65,8 @@
       <h6 class="mb-0"><i class="fas fa-language me-2"></i>Active Language Detections <span id="ActiveLangCount" class="text-muted small"></span></h6>
     </div>
     <div class="card-body p-0">
-      <div id="NoActiveLang" class="text-muted py-3 px-3"><em>No active language detections</em></div>
+      <div id="LangSummary" class="p-3 small"></div>
+      <div id="NoActiveLang" class="text-muted px-3 pb-3 small d-none"><em>No detection in flight this instant.</em></div>
       <div id="ActiveLangWrapper" class="d-none">
         <table class="activity-tbl">
           <thead><tr>
@@ -193,6 +194,34 @@ function RenderActiveQualityTests(Tests) {
   }).join('');
 }
 
+function FormatLastCompletedMT(IsoString) {
+  if (!IsoString) return 'never';
+  var d = new Date(IsoString);
+  if (isNaN(d.getTime())) return 'never';
+  var AgeSec = Math.max(0, (Date.now() - d.getTime()) / 1000);
+  var Ago;
+  if (AgeSec < 60) Ago = Math.round(AgeSec) + 's ago';
+  else if (AgeSec < 3600) Ago = Math.round(AgeSec / 60) + 'm ago';
+  else Ago = Math.round(AgeSec / 3600) + 'h ago';
+  var MT = d.toLocaleString('en-US', { timeZone: 'America/Denver', hour12: false });
+  return MT + ' (' + Ago + ')';
+}
+
+function RenderLanguageSummary(S) {
+  var El = document.getElementById('LangSummary');
+  if (!El) return;
+  if (!S || !S.ActiveWorkers || S.ActiveWorkers.length === 0) {
+    El.innerHTML = '<span class="text-muted"><em>Language detection off on all workers.</em></span>';
+    return;
+  }
+  var Rate = S.Detected10m + ' in last 10 min';
+  var Last = 'last: ' + FormatLastCompletedMT(S.LastCompletedAt);
+  var Workers = S.ActiveWorkers.length + ' worker(s): ' + S.ActiveWorkers.join(', ');
+  var Pending = 'pending: ' + (S.Pending != null ? S.Pending.toLocaleString() : '?');
+  El.innerHTML = '<div><strong>' + Rate + '</strong> &middot; ' + Last + '</div>' +
+                 '<div class="text-muted mt-1">' + Workers + ' &middot; ' + Pending + '</div>';
+}
+
 function RenderActiveLanguageJobs(Jobs) {
   var Body = document.getElementById('ActiveLangBody');
   var Wrapper = document.getElementById('ActiveLangWrapper');
@@ -281,6 +310,7 @@ function RenderSnapshot(Data) {
   if (!Data) return;
   RenderActiveJobs(Data.ActiveJobs || []);
   RenderActiveQualityTests(Data.ActiveQualityTests || []);
+  RenderLanguageSummary(Data.LanguageSummary || null);
   RenderActiveLanguageJobs(Data.ActiveLanguageJobs || []);
   RenderActiveScans(Data.ActiveScans || []);
   RenderQueueCounts(Data.QueueCounts || {});

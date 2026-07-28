@@ -59,6 +59,7 @@ class DashboardSnapshotService:
         HungAttempts = self._BuildHungAttempts()
         ActiveQualityTests = self._BuildActiveQualityTests()
         ActiveLanguageJobs = self._BuildActiveLanguageJobs()
+        LanguageSummary = self._BuildLanguageSummary()
         return DashboardSnapshot(
             Workers=Workers,
             ActiveJobs=ActiveJobs,
@@ -68,9 +69,31 @@ class DashboardSnapshotService:
             HungAttempts=HungAttempts,
             ActiveQualityTests=ActiveQualityTests,
             ActiveLanguageJobs=ActiveLanguageJobs,
+            LanguageSummary=LanguageSummary,
             StaleProgressThresholdSec=self.StaleSec,
             HeartbeatStaleThresholdSec=self.HeartSec,
         )
+
+    # directive: audio-language-detection
+    def _BuildLanguageSummary(self):
+        Rows = self.Db.ExecuteQuery(
+            "SELECT "
+            "  (SELECT COUNT(*) FROM MediaFileLanguageDetections WHERE DetectedAt > NOW() - INTERVAL '10 minutes') AS Detected10m, "
+            "  (SELECT MAX(DetectedAt) FROM MediaFileLanguageDetections) AS LastCompletedAt, "
+            "  (SELECT COUNT(*) FROM MediaFiles WHERE (AudioLanguages IS NULL OR 'und' = ANY(string_to_array(LOWER(AudioLanguages),','))) "
+            "     AND NOT EXISTS (SELECT 1 FROM MediaFileLanguageDetections d WHERE d.MediaFileId=Id) "
+            "     AND StorageRootId IS NOT NULL AND RelativePath IS NOT NULL) AS Pending"
+        )
+        Workers = self.Db.ExecuteQuery(
+            "SELECT WorkerName FROM Workers WHERE LanguageEnabled = TRUE AND Status = 'Online' ORDER BY WorkerName"
+        )
+        Row = (Rows or [{}])[0]
+        return {
+            'Detected10m': int(Row.get('detected10m') or 0),
+            'LastCompletedAt': Row.get('lastcompletedat'),
+            'Pending': int(Row.get('pending') or 0),
+            'ActiveWorkers': [r.get('WorkerName') or r.get('workername') for r in (Workers or [])],
+        }
 
     # directive: audio-language-detection
     def _BuildActiveLanguageJobs(self) -> List[Dict]:
