@@ -1,0 +1,57 @@
+# see .claude/rules/worker-deploy-drain.md
+import os
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+class TestDeployPerWorkerDrain(unittest.TestCase):
+
+    def test_C1_rule_file_exists(self):
+        RulePath = ROOT / ".claude" / "rules" / "worker-deploy-drain.md"
+        self.assertTrue(RulePath.exists(), f"rule missing: {RulePath}")
+        Content = RulePath.read_text(encoding="utf-8")
+        self.assertIn("D1.", Content)
+        self.assertIn("D2.", Content)
+        self.assertIn("D3.", Content)
+        self.assertIn("D4.", Content)
+        self.assertIn("D5.", Content)
+        self.assertIn("pause -> drain -> deploy -> back Online", Content)
+
+    def test_C2_no_optout_flags_in_deploy_tree(self):
+        Hits = []
+        DeployDir = ROOT / "deploy"
+        for FilePath in DeployDir.rglob("*.py"):
+            Text = FilePath.read_text(encoding="utf-8", errors="ignore")
+            for Bad in ("--no-drain", "no_drain", "--skip-drain", "skip_drain"):
+                if Bad in Text:
+                    Hits.append(f"{FilePath.name}: {Bad}")
+        self.assertEqual(Hits, [], f"opt-out flags found: {Hits}")
+
+    def test_C3_feature_doc_reflects_golden_standard(self):
+        DocPath = ROOT / "deploy" / "worker-deploy.feature.md"
+        self.assertTrue(DocPath.exists())
+        Content = DocPath.read_text(encoding="utf-8")
+        self.assertIn("deploy-worker.py", Content)
+        self.assertIn("pause -> drain -> deploy -> back Online", Content)
+        self.assertNotIn("--no-drain", Content)
+
+    def test_C4_deploy_worker_help_exits_zero_and_names_no_bypass(self):
+        Script = ROOT / "deploy" / "deploy-worker.py"
+        self.assertTrue(Script.exists())
+        R = subprocess.run(
+            [sys.executable, str(Script), "--help"],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(R.returncode, 0, f"stderr={R.stderr}")
+        Help = R.stdout.lower()
+        for Bad in ("--no-drain", "--skip-drain", "--force"):
+            self.assertNotIn(Bad, Help, f"help mentions bypass flag: {Bad}")
+
+
+if __name__ == "__main__":
+    unittest.main()

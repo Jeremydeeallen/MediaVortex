@@ -251,6 +251,8 @@ def main():
     Parser.add_argument("--count", type=int, default=None)
     Parser.add_argument("--torch-variant", default=None, choices=list(TorchIndexByVariant.keys()))
     Parser.add_argument("--inventory", type=Path, default=DefaultInventoryToml)
+    Parser.add_argument("--sync-only", action="store_true",
+                        help="Sync source + install deps + install systemd unit; skip stop/start/verify. Used by deploy-worker.py per-service driver.")
     Args = Parser.parse_args()
 
     Friendly, Ip, User, InventoryCount = _ResolveTarget(Args.target, Args.inventory, Args.user)
@@ -273,8 +275,9 @@ def main():
         return 2
     if not StepEnsureFfmpeg(Target):
         return 2
-    if not StepStopSystemdUnits(Target, Count):
-        return 2
+    if not Args.sync_only:
+        if not StepStopSystemdUnits(Target, Count):
+            return 2
     if not StepSyncSource(Target):
         return 2
     if not StepStampVersion(Target):
@@ -285,6 +288,10 @@ def main():
         return 2
     if not StepInstallSystemdUnit(Target, Friendly, Count):
         return 2
+    if Args.sync_only:
+        print()
+        print(f"[OK] --sync-only complete on {Friendly}; per-service restart handled by deploy-worker.py")
+        return 0
     if not StepStopContainersAndClearDb(Target, Friendly):
         return 2
     if not StepStartInstances(Target, Friendly, Count):

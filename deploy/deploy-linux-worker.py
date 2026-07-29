@@ -543,6 +543,8 @@ def Main(Argv: Optional[list] = None) -> int:
                         help="Assume source is already on target at /tmp/mediavortex-build.")
     Parser.add_argument("--skip-build", action="store_true",
                         help="Skip docker build (image already present).")
+    Parser.add_argument("--build-only", action="store_true",
+                        help="Sync + build + push compose; skip 'docker compose up' and post-up verification. Used by deploy-worker.py per-service driver.")
     Args = Parser.parse_args(Argv)
 
     try:
@@ -609,6 +611,11 @@ def Main(Argv: Optional[list] = None) -> int:
         return 2
     _Status(5, Total, "push compose", "OK",
             f"compose-templates/{Friendly}.yml -> /opt/mediavortex/docker-compose.yml")
+
+    if Args.build_only:
+        _Status(6, Total, "docker compose up", "SKIPPED", "--build-only")
+        print("\n--build-only: image + compose pushed; per-service recreate handled by deploy-worker.py.")
+        return 0
 
     if not StepComposeUp(Target):
         _Status(6, Total, "docker compose up", "FAILED")
