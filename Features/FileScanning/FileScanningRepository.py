@@ -86,6 +86,27 @@ class FileScanningRepository(BaseRepository):
             LoggingService.LogException("Error querying running scans", e, "FileScanningRepository", "GetRunningScans")
             return []
 
+    # directive: scan-new-subtrees-first
+    def GetKnownLevel1SubdirNames(self, StorageRootId: int, RootFolderRelPath: str) -> set:
+        """Lowercased level-1 subdir names known to DB under this RootFolder."""
+        Prefix = (RootFolderRelPath or "").strip('/')
+        if not Prefix:
+            Query = (
+                "SELECT DISTINCT LOWER(split_part(RelativePath, '/', 1)) AS L1 "
+                "FROM MediaFiles "
+                "WHERE StorageRootId = %s AND RelativePath IS NOT NULL AND RelativePath <> ''"
+            )
+            Rows = self.ExecuteQuery(Query, (StorageRootId,))
+        else:
+            Escaped = EscapeLikePattern(Prefix)
+            Query = (
+                "SELECT DISTINCT LOWER(split_part(substring(RelativePath, %s), '/', 1)) AS L1 "
+                "FROM MediaFiles "
+                "WHERE StorageRootId = %s AND RelativePath LIKE %s ESCAPE '!'"
+            )
+            Rows = self.ExecuteQuery(Query, (len(Prefix) + 2, StorageRootId, Escaped + '/%'))
+        return {R['L1'] for R in (Rows or []) if R.get('L1')}
+
     # ─── Root Folder Methods ───────────────────────────────────────────
 
     # directive: path-perfect-implementation | # see path-storage.S1

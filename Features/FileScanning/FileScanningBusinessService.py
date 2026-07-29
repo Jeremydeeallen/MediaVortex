@@ -723,6 +723,69 @@ class FileScanningBusinessService:
             'FileScanningBusinessService', '_RunSizeSurvey'
         )
 
+    # directive: scan-new-subtrees-first
+    def _SortNewSubtreesFirst(self, LocalMediaFiles, LocalRootPath, RootFolder, CanonicalRootPath):
+        """Reorder scan output so files under DB-unknown level-1 subdirs come first."""
+        DiskDirs = {}
+        try:
+            with os.scandir(LocalRootPath) as It:
+                for E in It:
+                    try:
+                        if E.is_dir(follow_symlinks=False):
+                            if self.FileManager.ShouldExcludeDirectory(E.path):
+                                continue
+                            DiskDirs[E.name.lower()] = E.name
+                    except OSError:
+                        continue
+        except OSError as Ex:
+            LoggingService.LogWarning(
+                f"_SortNewSubtreesFirst: os.scandir failed on {LocalRootPath}: {Ex}",
+                'FileScanningBusinessService', '_SortNewSubtreesFirst'
+            )
+            return LocalMediaFiles
+
+        if not DiskDirs:
+            return LocalMediaFiles
+
+        try:
+            Known = self.Repository.GetKnownLevel1SubdirNames(
+                RootFolder.StorageRootId, RootFolder.RelativePath or ""
+            )
+        except Exception as Ex:
+            LoggingService.LogException(
+                "GetKnownLevel1SubdirNames failed; skipping reorder",
+                Ex, 'FileScanningBusinessService', '_SortNewSubtreesFirst'
+            )
+            return LocalMediaFiles
+
+        NewLower = set(DiskDirs.keys()) - Known
+        if not NewLower:
+            LoggingService.LogInfo(
+                f"Scan for {CanonicalRootPath}: no new subtrees",
+                'FileScanningBusinessService', '_SortNewSubtreesFirst'
+            )
+            return LocalMediaFiles
+
+        NewOriginal = sorted(DiskDirs[K] for K in NewLower)
+        LoggingService.LogInfo(
+            f"Scan for {CanonicalRootPath}: {len(NewOriginal)} new subtree(s) prioritized: [{', '.join(NewOriginal)}]",
+            'FileScanningBusinessService', '_SortNewSubtreesFirst'
+        )
+
+        RootPrefix = LocalRootPath if LocalRootPath.endswith((os.sep, '/')) else LocalRootPath + os.sep
+
+        def _Level1Lower(LocalPath):
+            if not LocalPath.startswith(RootPrefix):
+                return ""
+            Rem = LocalPath[len(RootPrefix):]
+            for Sep in (os.sep, '/'):
+                Idx = Rem.find(Sep)
+                if Idx != -1:
+                    return Rem[:Idx].lower()
+            return Rem.lower()
+
+        return sorted(LocalMediaFiles, key=lambda P: 0 if _Level1Lower(P) in NewLower else 1)
+
     def CleanupCompletedJobs(self):
         """Clean up old completed scan jobs."""
         try:
@@ -790,11 +853,14 @@ class FileScanningBusinessService:
             except Exception as SurveyEx:
                 LoggingService.LogException("SizeSurvey failed -- continuing to full scan", SurveyEx, 'PerformScan', 'FileScanningBusinessService')
 
-            # Step 3: Walk the LOCAL path; convert results back to canonical
-            # for DB storage so MediaFiles.FilePath stays portable across hosts.
             self.ScanProgress = 30.0
             self._SetPhase(self.CurrentJobId, 'Walking')
             LocalMediaFiles = self.FileManager.ScanDirectory(LocalRootPath, Recursive)
+            # directive: scan-new-subtrees-first
+            if Recursive and LocalMediaFiles:
+                LocalMediaFiles = self._SortNewSubtreesFirst(
+                    LocalMediaFiles, LocalRootPath, RootFolder, RootFolderPath
+                )
             MediaFiles = [self._ToCanonicalPath(p) for p in LocalMediaFiles]
             self.ScanResults.TotalFilesFound = len(MediaFiles)
             self.ScanResults.RootFolderId = RootFolder.Id
