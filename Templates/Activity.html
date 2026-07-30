@@ -218,7 +218,15 @@ function RenderLanguageSummary(S) {
   var Last = 'last: ' + FormatLastCompletedMT(S.LastCompletedAt);
   var Workers = S.ActiveWorkers.length + ' worker(s): ' + S.ActiveWorkers.join(', ');
   var Pending = 'pending: ' + (S.Pending != null ? S.Pending.toLocaleString() : '?');
+  var Success = (S.Successful10m != null && S.Attempts10m != null)
+    ? (S.Successful10m + '/' + S.Attempts10m + ' successful (' + (S.SuccessPct10m != null ? S.SuccessPct10m : 0) + '%)')
+    : '';
+  var Breakdown = (S.NoAudioDeleted10m != null || S.OtherErrors10m != null)
+    ? ('no-audio deleted: ' + (S.NoAudioDeleted10m || 0) + ' &middot; other errors: ' + (S.OtherErrors10m || 0))
+    : '';
   El.innerHTML = '<div><strong>' + Rate + '</strong> &middot; ' + Last + '</div>' +
+                 (Success ? '<div class="mt-1"><strong>' + Success + '</strong></div>' : '') +
+                 (Breakdown ? '<div class="text-muted small">' + Breakdown + '</div>' : '') +
                  '<div class="text-muted mt-1">' + Workers + ' &middot; ' + Pending + '</div>';
 }
 

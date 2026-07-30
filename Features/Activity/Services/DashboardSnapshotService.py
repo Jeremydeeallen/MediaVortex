@@ -74,22 +74,41 @@ class DashboardSnapshotService:
             HeartbeatStaleThresholdSec=self.HeartSec,
         )
 
-    # directive: audio-language-detection
+    # directive: audio-language-detection | # directive: language-worker-progress-invariant
     def _BuildLanguageSummary(self):
+        from Core.Database.DatabaseService import EscapeLikePattern
+        NoAudioNeedle = '%' + EscapeLikePattern('no_audio_streams') + '%'
         Rows = self.Db.ExecuteQuery(
             "SELECT "
             "  (SELECT COUNT(*) FROM MediaFileLanguageDetections WHERE DetectedAt > NOW() - INTERVAL '10 minutes') AS Detected10m, "
+            "  (SELECT COUNT(DISTINCT MediaFileId) FROM MediaFileLanguageDetections WHERE DetectedAt > NOW() - INTERVAL '10 minutes') AS Successful10m, "
             "  (SELECT MAX(DetectedAt) FROM MediaFileLanguageDetections) AS LastCompletedAt, "
             "  (SELECT COUNT(*) FROM MediaFiles WHERE (AudioLanguages IS NULL OR 'und' = ANY(string_to_array(LOWER(AudioLanguages),','))) "
             "     AND NOT EXISTS (SELECT 1 FROM MediaFileLanguageDetections d WHERE d.MediaFileId=Id) "
-            "     AND StorageRootId IS NOT NULL AND RelativePath IS NOT NULL) AS Pending"
+            "     AND StorageRootId IS NOT NULL AND RelativePath IS NOT NULL) AS Pending, "
+            "  (SELECT COUNT(DISTINCT substring(Message from 'MediaFileId=([0-9]+)')) "
+            "     FROM Logs WHERE FunctionName='NoAudioResolver' AND LogLevel='INFO' AND Timestamp > NOW() - INTERVAL '10 minutes') AS NoAudioDeleted10m, "
+            "  (SELECT COUNT(DISTINCT substring(Message from 'MediaFileId=([0-9]+)')) "
+            "     FROM Logs WHERE FunctionName='LanguageWorker' AND LogLevel IN ('WARNING','ERROR') "
+            "     AND Message NOT LIKE %s ESCAPE '!' AND Timestamp > NOW() - INTERVAL '10 minutes') AS OtherErrors10m",
+            (NoAudioNeedle,),
         )
         Workers = self.Db.ExecuteQuery(
             "SELECT WorkerName FROM Workers WHERE LanguageEnabled = TRUE AND Status = 'Online' ORDER BY WorkerName"
         )
         Row = (Rows or [{}])[0]
+        Successful = int(Row.get('successful10m') or 0)
+        NoAudio = int(Row.get('noaudiodeleted10m') or 0)
+        OtherErr = int(Row.get('othererrors10m') or 0)
+        Attempts = Successful + NoAudio + OtherErr
+        Pct = round(100.0 * Successful / Attempts, 1) if Attempts > 0 else 0.0
         return {
             'Detected10m': int(Row.get('detected10m') or 0),
+            'Successful10m': Successful,
+            'NoAudioDeleted10m': NoAudio,
+            'OtherErrors10m': OtherErr,
+            'Attempts10m': Attempts,
+            'SuccessPct10m': Pct,
             'LastCompletedAt': Row.get('lastcompletedat'),
             'Pending': int(Row.get('pending') or 0),
             'ActiveWorkers': [r.get('WorkerName') or r.get('workername') for r in (Workers or [])],

@@ -32,6 +32,8 @@ C7. Activity UI. `/Activity` renders "Active Language Detections" (File / Worker
 
 C8. `Workers.LanguageEnabled` defaults FALSE. Migration is idempotent. `Tests/Contract/TestLanguageEnabledDefault.py`.
 
+C10. Activity page 10-min success rate. `_BuildLanguageSummary` returns `Successful10m`, `NoAudioDeleted10m`, `OtherErrors10m`, `Attempts10m`, `SuccessPct10m` (Successful / Attempts * 100, 0 when Attempts=0). `/Activity` "Active Language Detections" card renders `<successful>/<attempts> successful (<pct>%)` with a per-outcome breakdown line. Live-verified 2026-07-30 -- API `/api/Activity/Snapshot` returned `SuccessPct10m=87.5` (7/8) post WebService restart.
+
 C9. Progress invariant on `no_audio_streams`. When `EnrichAndStamp` raises `LanguageEnrichmentError('no_audio_streams')`, `LanguageWorker._ProcessOne` routes the MediaFileId to `NoAudioResolver.Resolve` which (a) issues Sonarr `EpisodeSearch` (`media_tv` root) or Radarr `MoviesSearch` (`movies` root) via `SystemSettings.SonarrUrl/SonarrApiKey/RadarrUrl/RadarrApiKey`, deleting the matching episodefile/moviefile first; (b) `os.remove` on the local file; (c) `MediaFilesRepository.DeleteMediaFileCascade(MediaFileId)` clears `TranscodeAttempts` + its children (`QualityTestResults`, `QualityTestingQueue`, `MediaFilesArchive`), `TranscodeFiles`, `FailureBudgetResets`, `ActiveJobs`, then the `MediaFiles` row. Files that raised `no_audio_streams` never re-appear in `_FetchBatch`. Verifiable: `Tests/Contract/TestNoAudioResolver.py` (routing + ordering + env fail-loud) + `Tests/Contract/TestLanguageWorkerProgressInvariant.py` (routing at worker layer).
 
 ## Domain Decisions

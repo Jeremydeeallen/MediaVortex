@@ -44,6 +44,8 @@ C6. Live smoke on larry: (a) detections/10min > 0; (b) known audioless MediaFile
 
 C7. `py -m pytest Tests/Contract/TestNoAudioResolver.py Tests/Contract/TestLanguageWorkerProgressInvariant.py` exits 0.
 
+C10. **Activity page shows 10-min success rate.** `/Activity` "Active Language Detections" card renders `<successful>/<attempts> successful in last 10 min (<pct>%)`. `_BuildLanguageSummary` returns extra fields: `Successful10m` (distinct MediaFileIds in MediaFileLanguageDetections last 10 min), `NoAudioDeleted10m` (distinct MediaFileIds in Logs.FunctionName='NoAudioResolver' INFO last 10 min), `OtherErrors10m` (distinct MediaFileIds in Logs.FunctionName='LanguageWorker' WARNING/ERROR excluding no_audio_streams last 10 min), `Attempts10m` (sum), `SuccessPct10m` (Successful/Attempts*100, 0 if Attempts=0). WebService restart verified visible on `/Activity`.
+
 ## Call-Graph Audit
 
 - No parallel flow docs. Mode-branch on StorageRoot.name = data-driven (legit). No new shared columns. Preexisting hardcoded creds in `Scripts/ArrRedownloadBadDialogBoost.py` = OOS category (b). No config toggle changes graph shape.
@@ -64,6 +66,7 @@ Promoted -- see `Features/AudioNormalization/audio-language-detection.feature.md
 |---|---|
 | C9 no-audio resolution invariant | `Features/AudioNormalization/audio-language-detection.feature.md` Success Criteria |
 | Seam row: LanguageWorker -> NoAudioResolver | `Features/AudioNormalization/audio-language-detection.feature.md` Seams table |
+| C10 Activity page 10-min success rate | `Features/AudioNormalization/audio-language-detection.feature.md` Success Criteria |
 
 ## Progress
 
@@ -74,6 +77,7 @@ Promoted -- see `Features/AudioNormalization/audio-language-detection.feature.md
 - [x] IMPLEMENTING: `TestNoAudioResolver.py` (10) + `TestLanguageWorkerProgressInvariant.py` (3) = 13/13 green
 - [x] VERIFYING: contract tests 13/13; deploy larry-worker-2/3/4 (worker-1 blocked by unrelated ffmpeg tag drift, unpaused on old code); live smoke -- 86 detections + 50 NoAudioResolver INFO events in 10 min post-deploy; 10/10 audioless MediaFileIds gone
 - [x] DELIVERING: C9 + seams S6+S7 promoted into `audio-language-detection.feature.md`
+- [x] REOPENED 2026-07-30: C10 Activity 10-min success rate -- `_BuildLanguageSummary` extended, `Templates/Activity.html RenderLanguageSummary` extended, WebService restarted, operator confirmed UI.
 
 ## Delivery Report
 
