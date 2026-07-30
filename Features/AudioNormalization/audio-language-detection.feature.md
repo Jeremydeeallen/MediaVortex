@@ -32,6 +32,8 @@ C7. Activity UI. `/Activity` renders "Active Language Detections" (File / Worker
 
 C8. `Workers.LanguageEnabled` defaults FALSE. Migration is idempotent. `Tests/Contract/TestLanguageEnabledDefault.py`.
 
+C9. Progress invariant on `no_audio_streams`. When `EnrichAndStamp` raises `LanguageEnrichmentError('no_audio_streams')`, `LanguageWorker._ProcessOne` routes the MediaFileId to `NoAudioResolver.Resolve` which (a) issues Sonarr `EpisodeSearch` (`media_tv` root) or Radarr `MoviesSearch` (`movies` root) via `SystemSettings.SonarrUrl/SonarrApiKey/RadarrUrl/RadarrApiKey`, deleting the matching episodefile/moviefile first; (b) `os.remove` on the local file; (c) `MediaFilesRepository.DeleteMediaFileCascade(MediaFileId)` clears `TranscodeAttempts` + its children (`QualityTestResults`, `QualityTestingQueue`, `MediaFilesArchive`), `TranscodeFiles`, `FailureBudgetResets`, `ActiveJobs`, then the `MediaFiles` row. Files that raised `no_audio_streams` never re-appear in `_FetchBatch`. Verifiable: `Tests/Contract/TestNoAudioResolver.py` (routing + ordering + env fail-loud) + `Tests/Contract/TestLanguageWorkerProgressInvariant.py` (routing at worker layer).
+
 ## Domain Decisions
 
 Recorded in `.claude/directives/closed/2026-07-27-audio-language-detection.md` and DOMAIN.md 2026-07-27 architectural-principles entry.
@@ -45,6 +47,8 @@ Recorded in `.claude/directives/closed/2026-07-27-audio-language-detection.md` a
 | S3 | LanguageWorker -> ActiveJobs | `_CreateActiveJob` | `INSERT ... Phase='Setup'` | Row visible in `_BuildActiveLanguageJobs` | contract test C6 + activejobs_phase_enum |
 | S4 | Snapshot -> template | `_BuildActiveLanguageJobs` list | `[{MediaFileId, FileName, WorkerName, ElapsedSec, StartedAt}, ...]` | `Templates/Activity.html RenderActiveLanguageJobs` | live-verified on `/Activity` |
 | S5 | Fleet capability toggle | `Workers.LanguageEnabled` column | boolean | `BuildClaimPredicate('LanguageEnabled')` gates every LanguageWorker claim; capability-poll starts/stops loop | contract test C1; live-verified capability-poll fix at 40d15d37 |
+| S6 | LanguageWorker -> NoAudioResolver | `_ProcessOne` catches Reason='no_audio_streams' | `Resolve(MediaFileId: int, LocalFilePath: str)` | Sonarr/Radarr regrab + disk remove + `DeleteMediaFileCascade`; MediaFile no longer re-selected | contract test C9 (TestNoAudioResolver + TestLanguageWorkerProgressInvariant) |
+| S7 | NoAudioResolver -> Sonarr/Radarr HTTP | `_Regrab` per StorageRoots.name | `DELETE /api/v3/episodefile\|moviefile/<id>` + `POST /api/v3/command` | HTTP 200/201/202 = success | contract test C9 (mocked); live-verified 2026-07-30 via Logs `NoAudioResolver: ... regrab=sonarr-ok:epFileId=...` |
 
 ## Cross-Vertical Contract
 

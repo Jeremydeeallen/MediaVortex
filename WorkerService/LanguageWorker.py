@@ -9,6 +9,7 @@ from Core.Path import Worker as CoreWorker
 from Core.Path.LocalPath import LocalExists
 from Features.AudioNormalization.Services.LanguageEnrichmentError import LanguageEnrichmentError
 from Features.AudioNormalization.Services.LanguageEnrichmentService import LanguageEnrichmentService
+from Features.AudioNormalization.Services.NoAudioResolver import NoAudioResolver
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 
 
@@ -27,12 +28,14 @@ class LanguageWorker:
     DEFAULT_BATCH_SIZE = 50
     DEFAULT_POLL_INTERVAL_SEC = 60
 
-    def __init__(self, WorkerName, Service=None, SettingsRepo=None, Db=None):
+    def __init__(self, WorkerName, Service=None, SettingsRepo=None, Db=None, Resolver=None):
         self.WorkerName = WorkerName
         self._ServiceOverride = Service
         self.Service = Service
         self.SettingsRepo = SettingsRepo or SystemSettingsRepository()
         self.Db = Db or DatabaseService()
+        self._ResolverOverride = Resolver
+        self.Resolver = Resolver
         self.IsRunning = False
         self.StopEvent = threading.Event()
         self._Thread = None
@@ -135,10 +138,13 @@ class LanguageWorker:
         try:
             self.Service.EnrichAndStamp(MediaFileId, LocalFilePath)
         except LanguageEnrichmentError as Ex:
-            LoggingService.LogWarning(
-                f"LanguageWorker: EnrichAndStamp raised MediaFileId={MediaFileId} reason={Ex.Reason}",
-                'LanguageWorker', '_ProcessOne',
-            )
+            if Ex.Reason == 'no_audio_streams':
+                self._ResolveNoAudio(MediaFileId, LocalFilePath)
+            else:
+                LoggingService.LogWarning(
+                    f"LanguageWorker: EnrichAndStamp raised MediaFileId={MediaFileId} reason={Ex.Reason}",
+                    'LanguageWorker', '_ProcessOne',
+                )
         except Exception as Ex:
             LoggingService.LogException(
                 f"LanguageWorker: unhandled failure MediaFileId={MediaFileId}",
@@ -147,6 +153,18 @@ class LanguageWorker:
         finally:
             if ActiveJobId is not None:
                 self._DeleteActiveJob(ActiveJobId)
+
+    # directive: language-worker-progress-invariant
+    def _ResolveNoAudio(self, MediaFileId, LocalFilePath):
+        if self.Resolver is None:
+            self.Resolver = NoAudioResolver()
+        try:
+            self.Resolver.Resolve(MediaFileId, LocalFilePath)
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"LanguageWorker: NoAudioResolver.Resolve failed MediaFileId={MediaFileId}",
+                Ex, 'LanguageWorker', '_ResolveNoAudio',
+            )
 
     def _CreateActiveJob(self, MediaFileId):
         try:
