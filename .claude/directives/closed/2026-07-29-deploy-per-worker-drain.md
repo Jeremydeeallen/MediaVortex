@@ -17,6 +17,7 @@ Every worker service deploy follows the same shape: pause -> drain -> deploy -> 
 - **D3.** Every service treated identically.
 - **D4.** Per-service sequence: pause -> drain (no more active jobs) -> deploy -> back Online.
 - **D5.** Only DB touch is `Workers.Status` (pause via existing pause feature; set Online after deploy). No other DB writes for the worker.
+- **D6.** Each step in the per-service sequence is timed. Elapsed for that step is printed to stdout live as the step completes. Final line prints the total elapsed from pause-start to back-Online.
 
 ## Definitions
 
@@ -56,6 +57,8 @@ C6. **Contract test.** `Tests/Contract/TestDeployPerWorkerDrain.py` asserts:
 
 C7. **Smoke on larry.** Run `py deploy/deploy-worker.py larry-worker-3`. Confirm: worker flips Paused -> Online, ActiveJobs stayed 0 throughout, no writes to Workers columns other than Status (verify via before/after column diff), sibling workers (1/2/4) untouched.
 
+C20. **Timings per step, live.** `deploy-worker.py` prints each step's elapsed on the same line the step completes (e.g. `[1/6] pause: larry-worker-3 (0.1s)`). Final line: `=== OK <name> back Online in <total>s (pause=X, drain=Y, deploy=Z, verify=W) ===`. Timings visible to operator running the tool live AND captured in stdout for fleet loop consumption. Contract test asserts the total-timing pattern in `--help`-safe form.
+
 ## Call-Graph Audit
 
 - Flow docs touching deploy: `deploy/worker-deploy-linux.flow.md`, `deploy/worker-deploy-baremetal.flow.md`, `deploy/worker-deploy-windows.flow.md`. Three shape-specific flow docs are legitimate (D3 applies uniformly across shapes; the shapes themselves differ enough to warrant separate docs). No merge.
@@ -90,9 +93,10 @@ C7. **Smoke on larry.** Run `py deploy/deploy-worker.py larry-worker-3`. Confirm
 
 | Source (directive) | Target |
 |---|---|
-| D1-D5 + drained defn + forbidden list | `.claude/rules/worker-deploy-drain.md` (auto-loaded) |
+| D1-D6 + drained defn + forbidden list | `.claude/rules/worker-deploy-drain.md` (auto-loaded) |
 | Per-service Surface + retrofit | `deploy/worker-deploy.feature.md` (updated Surface + C1-C19 IDs) |
-| Contract test | `Tests/Contract/TestDeployPerWorkerDrain.py` (4/4 green) |
+| Contract test | `Tests/Contract/TestDeployPerWorkerDrain.py` (5/5 green) |
+| Per-step timing instrumentation | `deploy/deploy-worker.py` (D6 -- live stdout + total line) |
 
 ## Progress
 
@@ -106,3 +110,5 @@ C7. **Smoke on larry.** Run `py deploy/deploy-worker.py larry-worker-3`. Confirm
 - [x] VERIFYING: contract test 4/4 green
 - [x] VERIFYING: smoke on larry-worker-3 -- worker deployed to 9183303f while siblings 1/2/4 stayed Online on 09ccfa65 (per-service isolation proven)
 - [x] DELIVERING: promoted content into worker-deploy.feature.md + rule file
+- [x] REOPENED 2026-07-29: D6 added -- per-step timings printed live + total on completion (deploy-worker.py instrumented, contract test 5/5 green)
+- [x] REOPENED 2026-07-30: larry fleet drift -- workers 2/3/4 stranded on 09ccfa65/9183303f after abandoned deploy-fleet.py run (DeployHistory Id=14 Outcome=RUNNING orphan). Redeployed larry-worker-2/3/4 via `py deploy/deploy-worker.py <name>`; all four now on HEAD 5031f2f6 Online. Marked 3 stale DeployHistory RUNNING rows (Ids 3/5/14) ABANDONED. Per-service driver proved out on drift-recovery use case.

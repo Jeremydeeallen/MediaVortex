@@ -52,17 +52,21 @@ def _BaremetalUnitFromWorkerName(Wn: str) -> str:
     return f"mediavortex-worker@{M.group(1)}.service"
 
 
-def PauseWorker(Db, WorkerName: str) -> None:
-    print(f"[1/6] pause: {WorkerName}")
+def PauseWorker(Db, WorkerName: str) -> float:
+    T0 = time.time()
     Db.ExecuteNonQuery(
         "UPDATE Workers SET Status='Paused' WHERE WorkerName=%s AND Status<>'Paused'",
         (WorkerName,),
     )
+    Elapsed = time.time() - T0
+    print(f"[1/6] pause: {WorkerName} ({Elapsed:.1f}s)", flush=True)
+    return Elapsed
 
 
-def DrainWorker(Db, WorkerName: str) -> bool:
-    print(f"[2/6] drain: {WorkerName} (timeout {DrainTimeoutSec}s)")
-    Deadline = time.time() + DrainTimeoutSec
+def DrainWorker(Db, WorkerName: str) -> tuple:
+    T0 = time.time()
+    print(f"[2/6] drain: {WorkerName} (timeout {DrainTimeoutSec}s)", flush=True)
+    Deadline = T0 + DrainTimeoutSec
     while time.time() < Deadline:
         ActiveJobs = Db.ExecuteQuery(
             "SELECT COUNT(*) AS N FROM ActiveJobs WHERE WorkerName=%s",
@@ -74,13 +78,15 @@ def DrainWorker(Db, WorkerName: str) -> bool:
             (WorkerName,),
         )[0]["N"]
         if ActiveJobs == 0 and ScanBusy == 0:
-            print("       drained: ActiveJobs=0, ScanJobs=0")
-            return True
-        Elapsed = int(DrainTimeoutSec - (Deadline - time.time()))
-        print(f"       waiting: ActiveJobs={ActiveJobs} ScanBusy={ScanBusy} ({Elapsed}s elapsed)")
+            Elapsed = time.time() - T0
+            print(f"       drained: ActiveJobs=0, ScanJobs=0 ({Elapsed:.1f}s)", flush=True)
+            return (True, Elapsed)
+        Waited = int(time.time() - T0)
+        print(f"       waiting: ActiveJobs={ActiveJobs} ScanBusy={ScanBusy} ({Waited}s elapsed)", flush=True)
         time.sleep(DrainPollSec)
-    print("[FAIL] drain budget exceeded")
-    return False
+    Elapsed = time.time() - T0
+    print(f"[FAIL] drain budget exceeded ({Elapsed:.1f}s)", flush=True)
+    return (False, Elapsed)
 
 
 def _LinuxDockerHost(Host: str) -> bool:
@@ -106,57 +112,71 @@ def _ResolveInventory(Host: str):
     return Friendly, Ip, User
 
 
-def DeployLinuxDocker(WorkerName: str, Host: str, Sha: str) -> bool:
-    print(f"[3/6] deploy backend: linux-docker (host={Host})")
+def DeployLinuxDocker(WorkerName: str, Host: str, Sha: str) -> tuple:
+    T0 = time.time()
+    print(f"[3/6] deploy backend: linux-docker (host={Host})", flush=True)
     _, Ip, User = _ResolveInventory(Host)
     Target = f"{User}@{Ip}"
 
-    print("       source sync + image build via deploy-linux-worker.py --build-only")
+    print("       source sync + image build via deploy-linux-worker.py --build-only", flush=True)
     R = subprocess.run(
         [sys.executable, str(MediaVortexRoot / "deploy" / "deploy-linux-worker.py"),
          Host, "--build-only"],
         cwd=str(MediaVortexRoot),
     )
     if R.returncode != 0:
-        print(f"[FAIL] build-only prep for {Host}")
-        return False
+        Elapsed = time.time() - T0
+        print(f"[FAIL] build-only prep for {Host} ({Elapsed:.1f}s)", flush=True)
+        return (False, Elapsed)
 
     Svc = _ComposeServiceFromWorkerName(WorkerName)
-    print(f"[4/6] recreate service: {Svc}")
+    print(f"[4/6] recreate service: {Svc}", flush=True)
+    T1 = time.time()
     Cmd = f"cd /opt/mediavortex && docker compose up -d --no-deps --force-recreate {Svc}"
     R = subprocess.run(["ssh", *SshOpts, Target, Cmd], timeout=180)
-    return R.returncode == 0
+    Elapsed = time.time() - T0
+    RecreateElapsed = time.time() - T1
+    print(f"       recreate done ({RecreateElapsed:.1f}s); backend total ({Elapsed:.1f}s)", flush=True)
+    return (R.returncode == 0, Elapsed)
 
 
-def DeployBaremetal(WorkerName: str, Host: str, Sha: str) -> bool:
-    print(f"[3/6] deploy backend: baremetal (host={Host})")
+def DeployBaremetal(WorkerName: str, Host: str, Sha: str) -> tuple:
+    T0 = time.time()
+    print(f"[3/6] deploy backend: baremetal (host={Host})", flush=True)
     _, Ip, User = _ResolveInventory(Host)
     Target = f"{User}@{Ip}"
 
-    print("       source rsync via deploy-baremetal-worker.py --sync-only")
+    print("       source rsync via deploy-baremetal-worker.py --sync-only", flush=True)
     R = subprocess.run(
         [sys.executable, str(MediaVortexRoot / "deploy" / "deploy-baremetal-worker.py"),
          Host, "--sync-only"],
         cwd=str(MediaVortexRoot),
     )
     if R.returncode != 0:
-        print(f"[FAIL] sync-only prep for {Host}")
-        return False
+        Elapsed = time.time() - T0
+        print(f"[FAIL] sync-only prep for {Host} ({Elapsed:.1f}s)", flush=True)
+        return (False, Elapsed)
 
     Unit = _BaremetalUnitFromWorkerName(WorkerName)
-    print(f"[4/6] restart systemd unit: {Unit}")
+    print(f"[4/6] restart systemd unit: {Unit}", flush=True)
+    T1 = time.time()
     R = subprocess.run(["ssh", *SshOpts, Target, f"systemctl restart {Unit}"], timeout=60)
-    return R.returncode == 0
+    Elapsed = time.time() - T0
+    RestartElapsed = time.time() - T1
+    print(f"       restart done ({RestartElapsed:.1f}s); backend total ({Elapsed:.1f}s)", flush=True)
+    return (R.returncode == 0, Elapsed)
 
 
-def DeployWindowsLocal(WorkerName: str, Sha: str) -> bool:
-    print(f"[3/6] deploy backend: windows-local ({WorkerName})")
+def DeployWindowsLocal(WorkerName: str, Sha: str) -> tuple:
+    T0 = time.time()
+    print(f"[3/6] deploy backend: windows-local ({WorkerName})", flush=True)
     import os as _os
     try:
         import psutil
     except ImportError:
-        print("[FAIL] psutil not installed")
-        return False
+        Elapsed = time.time() - T0
+        print(f"[FAIL] psutil not installed ({Elapsed:.1f}s)", flush=True)
+        return (False, Elapsed)
     Killed = 0
     for P in psutil.process_iter(["pid", "cmdline"]):
         try:
@@ -170,7 +190,7 @@ def DeployWindowsLocal(WorkerName: str, Sha: str) -> bool:
                 Killed += 1
         except Exception:
             pass
-    print(f"       terminated {Killed} WorkerService process(es)")
+    print(f"       terminated {Killed} WorkerService process(es)", flush=True)
 
     WorkerPy = MediaVortexRoot / "WorkerService" / "venv" / "Scripts" / "python.exe"
     Main = MediaVortexRoot / "WorkerService" / "Main.py"
@@ -179,7 +199,7 @@ def DeployWindowsLocal(WorkerName: str, Sha: str) -> bool:
     if _os.name == "nt":
         CreationFlags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
     Fh = open(LogFile, "ab", buffering=0)
-    print("[4/6] start WorkerService (detached)")
+    print("[4/6] start WorkerService (detached)", flush=True)
     subprocess.Popen(
         [str(WorkerPy), str(Main)],
         cwd=str(MediaVortexRoot),
@@ -188,12 +208,15 @@ def DeployWindowsLocal(WorkerName: str, Sha: str) -> bool:
         close_fds=True,
         start_new_session=(_os.name != "nt"),
     )
-    return True
+    Elapsed = time.time() - T0
+    print(f"       backend total ({Elapsed:.1f}s)", flush=True)
+    return (True, Elapsed)
 
 
-def VerifyWorker(Db, WorkerName: str, Sha: str) -> bool:
-    print(f"[5/6] verify: Version~={Sha[:8]}, heartbeat<60s")
-    Deadline = time.time() + VerifyTimeoutSec
+def VerifyWorker(Db, WorkerName: str, Sha: str) -> tuple:
+    T0 = time.time()
+    print(f"[5/6] verify: Version~={Sha[:8]}, heartbeat<60s", flush=True)
+    Deadline = T0 + VerifyTimeoutSec
     while time.time() < Deadline:
         Rows = Db.ExecuteQuery(
             "SELECT COALESCE(Version,'') AS Version, "
@@ -202,25 +225,31 @@ def VerifyWorker(Db, WorkerName: str, Sha: str) -> bool:
             (WorkerName,),
         )
         if not Rows:
-            print(f"[FAIL] worker {WorkerName} not found")
-            return False
+            Elapsed = time.time() - T0
+            print(f"[FAIL] worker {WorkerName} not found ({Elapsed:.1f}s)", flush=True)
+            return (False, Elapsed)
         R = Rows[0]
         if (R["Version"] or "").startswith(Sha[:8]) and (R["hb_age"] or 999) < 60:
-            print(f"       ok: Version={R['Version'][:8]} hb_age={R['hb_age']}s")
-            return True
-        Elapsed = int(VerifyTimeoutSec - (Deadline - time.time()))
-        print(f"       waiting: Version={(R['Version'] or 'NONE')[:8]} hb_age={R['hb_age']}s ({Elapsed}s elapsed)")
+            Elapsed = time.time() - T0
+            print(f"       ok: Version={R['Version'][:8]} hb_age={R['hb_age']}s ({Elapsed:.1f}s)", flush=True)
+            return (True, Elapsed)
+        Waited = int(time.time() - T0)
+        print(f"       waiting: Version={(R['Version'] or 'NONE')[:8]} hb_age={R['hb_age']}s ({Waited}s elapsed)", flush=True)
         time.sleep(VerifyPollSec)
-    print("[FAIL] verify timeout")
-    return False
+    Elapsed = time.time() - T0
+    print(f"[FAIL] verify timeout ({Elapsed:.1f}s)", flush=True)
+    return (False, Elapsed)
 
 
-def OnlineWorker(Db, WorkerName: str) -> None:
-    print(f"[6/6] online: {WorkerName}")
+def OnlineWorker(Db, WorkerName: str) -> float:
+    T0 = time.time()
     Db.ExecuteNonQuery(
         "UPDATE Workers SET Status='Online' WHERE WorkerName=%s",
         (WorkerName,),
     )
+    Elapsed = time.time() - T0
+    print(f"[6/6] online: {WorkerName} ({Elapsed:.1f}s)", flush=True)
+    return Elapsed
 
 
 def DeployOne(WorkerName: str, Sha: str) -> int:
@@ -237,28 +266,37 @@ def DeployOne(WorkerName: str, Sha: str) -> int:
     Platform = (Rows[0].get("Platform") or "").lower()
     Host = _HostFromWorkerName(WorkerName)
 
-    print(f"=== deploy-worker {WorkerName} (Platform={Platform}, Host={Host}, Sha={Sha[:8]}) ===")
+    print(f"=== deploy-worker {WorkerName} (Platform={Platform}, Host={Host}, Sha={Sha[:8]}) ===", flush=True)
+    TStart = time.time()
 
-    PauseWorker(Db, WorkerName)
-    if not DrainWorker(Db, WorkerName):
+    TPause = PauseWorker(Db, WorkerName)
+    Drained, TDrain = DrainWorker(Db, WorkerName)
+    if not Drained:
         return 3
 
     if _WindowsLocal(Host):
-        Ok = DeployWindowsLocal(WorkerName, Sha)
+        Ok, TDeploy = DeployWindowsLocal(WorkerName, Sha)
     elif _LinuxDockerHost(Host):
-        Ok = DeployLinuxDocker(WorkerName, Host, Sha)
+        Ok, TDeploy = DeployLinuxDocker(WorkerName, Host, Sha)
     else:
-        Ok = DeployBaremetal(WorkerName, Host, Sha)
+        Ok, TDeploy = DeployBaremetal(WorkerName, Host, Sha)
     if not Ok:
-        print("[FAIL] backend deploy failed; leaving Status=Paused")
+        print("[FAIL] backend deploy failed; leaving Status=Paused", flush=True)
         return 4
 
-    if not VerifyWorker(Db, WorkerName, Sha):
-        print("[FAIL] verify failed; leaving Status=Paused")
+    Ok, TVerify = VerifyWorker(Db, WorkerName, Sha)
+    if not Ok:
+        print("[FAIL] verify failed; leaving Status=Paused", flush=True)
         return 5
 
-    OnlineWorker(Db, WorkerName)
-    print(f"=== OK {WorkerName} ===")
+    TOnline = OnlineWorker(Db, WorkerName)
+    TTotal = time.time() - TStart
+    print(
+        f"=== OK {WorkerName} back Online in {TTotal:.1f}s "
+        f"(pause={TPause:.1f}s, drain={TDrain:.1f}s, deploy={TDeploy:.1f}s, "
+        f"verify={TVerify:.1f}s, online={TOnline:.1f}s) ===",
+        flush=True,
+    )
     return 0
 
 

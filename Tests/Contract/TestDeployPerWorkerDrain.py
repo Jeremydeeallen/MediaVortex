@@ -15,12 +15,15 @@ class TestDeployPerWorkerDrain(unittest.TestCase):
         RulePath = ROOT / ".claude" / "rules" / "worker-deploy-drain.md"
         self.assertTrue(RulePath.exists(), f"rule missing: {RulePath}")
         Content = RulePath.read_text(encoding="utf-8")
-        self.assertIn("D1.", Content)
-        self.assertIn("D2.", Content)
-        self.assertIn("D3.", Content)
-        self.assertIn("D4.", Content)
-        self.assertIn("D5.", Content)
+        for D in ("D1.", "D2.", "D3.", "D4.", "D5.", "D6."):
+            self.assertIn(D, Content, f"rule missing {D}")
         self.assertIn("pause -> drain -> deploy -> back Online", Content)
+
+    def test_C20_deploy_worker_source_prints_step_timings(self):
+        Src = (ROOT / "deploy" / "deploy-worker.py").read_text(encoding="utf-8")
+        for Marker in ("[1/6] pause:", "[2/6] drain:", "[5/6] verify:", "[6/6] online:", "back Online in"):
+            self.assertIn(Marker, Src, f"deploy-worker.py missing timing marker: {Marker!r}")
+        self.assertIn("flush=True", Src)
 
     def test_C2_no_optout_flags_in_deploy_tree(self):
         Hits = []

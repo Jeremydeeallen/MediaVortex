@@ -9,6 +9,7 @@ Every worker service deploy follows the same shape. No opt-out, no batch shortcu
 - **D3.** Every service treated identically.
 - **D4.** Per-service sequence: pause -> drain -> deploy -> back Online (drained means no more active jobs).
 - **D5.** Only DB touch is `Workers.Status` (pause via existing pause feature; set Online after deploy). No other DB writes for the worker.
+- **D6.** Each step is timed. Elapsed for that step prints to stdout live. Final line prints total elapsed pause-start to back-Online.
 
 ## Definitions
 
