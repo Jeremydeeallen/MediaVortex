@@ -14,9 +14,9 @@ py deploy/deploy-linux-worker.py <target>
 
 ## Host Inventory
 
-| Friendly | Hostname | IP | Host Type | CPU | Workers | Compose template |
-|---|---|---|---|---|---|---|
-| larry | mediavortex-workers (CT 218) | 10.0.0.42 | LXC on Proxmox larry | 2x Xeon, 64 threads | `larry-worker-1..4` (16 threads each) | `compose-templates/larry.yml` |
+No active hosts. Larry (`mediavortex-workers` CT 218, 10.0.0.42) migrated to the
+bare-metal deploy flow 2026-07-31 -- native systemd + host venv, no docker.
+See `worker-deploy-baremetal.flow.md`.
 
 When adding a new Docker-on-Linux worker host:
 1. Add the host to `infrastructure/terraform/inventory.toml` (friendly name, hostname, primary IP, ssh_user). Mount specifications live in the same entry: `bind_mounts` for LXC, `fstab_mounts` for bare-metal. **`inventory.toml` is the single source of truth -- never hardcode mount paths in compose templates or scripts.**

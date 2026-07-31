@@ -20,7 +20,9 @@ py deploy/deploy-baremetal-worker.py <target>
 
 | Friendly | Hostname | IP | Host Type | CPU | GPU | Workers |
 |---|---|---|---|---|---|---|
-| wakko | client-b450m-01 | 10.0.0.230 | bare-metal (Linux Mint 22.3 Zena / Ubuntu 24.04 base) | Ryzen 7 3700X, 8C/16T | Intel Arc B580 (Battlemage) | `wakko-worker-1..4` (4 threads each) |
+| wakko | client-b450m-01 | 10.0.0.230 | bare-metal (Linux Mint 22.3 Zena / Ubuntu 24.04 base) | Ryzen 7 3700X, 8C/16T | Intel Arc B580 (Battlemage) | `wakko-worker-1..2` |
+| dot | client-z490v-01 | 10.0.0.193 | bare-metal (Linux Mint 22.3 / Ubuntu 24.04 base) | i9-10850K, 10C/20T | NVIDIA RTX 4060 (AD107) | `dot-worker-1..2` |
+| mediavortex-workers | mediavortex-workers (CT 218) | 10.0.0.42 | LXC on Proxmox larry | Xeon (32 threads allocated) | none (CPU-only transcode) | `mediavortex-workers-worker-1..4` |
 
 When adding a new bare-metal Linux worker host:
 
