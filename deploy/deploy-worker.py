@@ -97,7 +97,7 @@ def _LoadBaremetalDeployModule():
 
 def _ResolveInventory(Host: str):
     Mod = _LoadBaremetalDeployModule()
-    Friendly, Ip, User = Mod._ResolveTarget(Host, Mod.DefaultInventoryToml, None)
+    Friendly, Ip, User, _Count = Mod._ResolveTarget(Host, Mod.DefaultInventoryToml, None)
     return Friendly, Ip, User
 
 
