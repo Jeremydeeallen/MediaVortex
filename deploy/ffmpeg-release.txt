@@ -1,2 +1,2 @@
-TAG=autobuild-2026-07-14-13-19
-ASSET=ffmpeg-n8.1.2-22-g94138f6973-linux64-gpl-8.1.tar.xz
+TAG=autobuild-2026-07-31-14-10
+ASSET=ffmpeg-n8.1.2-34-g9b6c8969e0-linux64-gpl-8.1.tar.xz
