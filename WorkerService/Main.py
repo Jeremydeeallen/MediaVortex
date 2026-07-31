@@ -153,8 +153,8 @@ class WorkerServiceApp:
         if not Name or not Name.strip():
             raise RuntimeError(
                 "MEDIAVORTEX_WORKER_NAME is unset. WorkerName MUST be deploy-assigned. "
-                "Bare-metal: systemd EnvironmentFile=/etc/mediavortex/instance-%i.env. "
-                "Docker: compose environment MEDIAVORTEX_WORKER_NAME=<name>. "
+                "Bare-metal Linux: systemd EnvironmentFile=/etc/mediavortex/instance-%i.env. "
+                "Windows: Task Scheduler task environment. "
                 "Prefix-claim, hostname fallback, and slot advisory-lock are retired. "
                 "See .claude/rules/claim-authority.md."
             )

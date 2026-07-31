@@ -286,6 +286,6 @@ This feature was filed as a `/n` PIVOT while the parent `audio-completion` work 
 
 Stack order at filing time:
 ```
-worker-versioning            (parent, unmodified)
+version-on-deploy            (parent, unmodified)
 media-tabs-and-loudness      (this feature)
 ```

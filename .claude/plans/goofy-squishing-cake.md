@@ -53,8 +53,7 @@ Workers become general-purpose. Each worker can enable/disable: transcoding, VMA
 
 ### Files to modify
 - `WebService/Main.py:84-124` -- remove ContinuousScanService initialization and auto-start. Web service keeps FileScanningController for on-demand API scans only.
-- `deploy/Dockerfile:37` -- change ENTRYPOINT from `TranscodeService/Main.py` to `WorkerService/Main.py`
-- `deploy/docker-compose.yml` -- update service definition
+- `deploy/baremetal/mediavortex-worker@.service` -- ExecStart points at `WorkerService/Main.py`
 - `Features/ServiceControl/ServiceLifecycleManager.py:22-41` -- add WorkerService to SERVICES dict
 - `StartMediaVortex.py` -- start WebService + WorkerService instead of WebService + TranscodeService
 
@@ -132,6 +131,6 @@ All `JOIN ... ON filepath = filepath` become `JOIN ... ON MediaFileId = Id`. All
 ## Rollback Strategy
 
 - **Phase 1**: Remove `WorkerContext.Initialize()` calls from entry points. FFmpegService falls back to SystemSettings. Zero risk.
-- **Phase 2**: Revert Dockerfile ENTRYPOINT to `TranscodeService/Main.py`. Old entry points untouched in codebase. Rebuild containers.
+- **Phase 2**: Revert systemd unit ExecStart to `TranscodeService/Main.py`. Old entry points untouched in codebase. Restart units.
 - **Phase 3**: MediaFileId columns are nullable and harmless. Revert code to use filepath JOINs. Drop FK constraints if added. No data loss.
 - **Nuclear**: Revert to `pre-architecture-redesign` git tag.

@@ -69,7 +69,7 @@
 ## Infrastructure
 
 - **CT 203** -- Proxmox LXC container hosting PostgreSQL 16 at `10.0.0.15:5432`. DB / user / password all `mediavortex`. Source: `CLAUDE.md#database`.
-- **CT 218 (Larry)** -- Proxmox LXC container hosting Docker + 8 worker containers. `pct exec 218 -- docker exec mediavortex-worker-N-1 ...`. Source: memory `reference_worker_containers_on_larry`.
+- **CT 218 (Larry)** -- Proxmox LXC container hosting 4 systemd `mediavortex-worker@N.service` instances. `ssh root@larry "pct exec 218 -- systemctl status mediavortex-worker@N.service"`.
 - **DatabaseService** -- `Core/Database/DatabaseService.py`. `ExecuteQuery` for SELECT (returns `list[CaseInsensitiveDict]`); `ExecuteNonQuery` for INSERT/UPDATE/DELETE (auto-commits). Source: `CLAUDE.md#key-patterns`.
 - **I9** -- dev workstation. Reads `C:\Code\MediaVortex` source tree directly on restart -- no redeploy. Owns full WebService/WorkerService start/stop/restart authority per operator. Source: memory `feedback_i9_worker_is_active_codebase`, `feedback_user_starts_webservice`.
 - **Jellyfin** -- downstream media server. Post-replace notification via `/Library/Media/Updated` (204 = queued; ~60s coalescing window). Source: memory `reference_jellyfin_notify_api`.

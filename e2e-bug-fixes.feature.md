@@ -240,9 +240,9 @@ Not fixed in this directive. See scope note above.
 
 ### C12 -- `FFprobePath was NULL on worker init` (stale-pyc cite)
 
-**Root cause:** Exact warning string does not exist in the current source tree. Container is running stale bytecode per BUG-0085 (`Docker build-cache leaks pre-Reset-9 .pyc into worker containers`). The self-heal path in `ProcessTranscodeQueueService.__init__:73-99` already discovers + persists paths + LogInfo on success; no live code path emits the exact WARN.
-**Fix:** Not a code change in e2e-bug-fixes. Verify affected workers: `docker exec <worker> find /opt/mediavortex -name __pycache__ -exec rm -rf {} +; docker compose restart worker-N`. Cite BUG-0085 for durable fix.
-**Ripple:** BUG-0085 durable Dockerfile fix is a separate directive.
+**Root cause:** Exact warning string does not exist in the current source tree. Historically caused by BUG-0085 stale-bytecode from container build cache; retired by baremetal migration (2026-07-31) — platform no longer exposes the failure mode. The self-heal path in `ProcessTranscodeQueueService.__init__:73-99` already discovers + persists paths + LogInfo on success; no live code path emits the exact WARN.
+**Fix:** No action needed; BUG-0085 is resolved by platform change.
+**Ripple:** None.
 
 ### C13 -- FFmpeg version banner logged at ERROR
 
@@ -299,11 +299,11 @@ Caller update: `ProcessTranscodeQueueService.HandleTranscodingResult` (or wherev
 
 ### C17 -- SchemaChecker snapshot missing
 
-**Files:** `Scripts/Migration/GenerateSchemaSnapshot.py` (source) + `.claude/schema/snapshot.json` (artifact) + `deploy/Dockerfile` (Linux worker container image)
-**Root cause:** Snapshot artifact not present at `/opt/mediavortex/.claude/schema/snapshot.json` in the Linux worker container. Either not copied by `deploy/Dockerfile`, or the file is git-ignored and never generated on the build host.
+**Files:** `Scripts/Migration/GenerateSchemaSnapshot.py` (source) + `.claude/schema/snapshot.json` (artifact) + `deploy/deploy-baremetal-worker.py` (bare-metal Linux ship step)
+**Root cause:** Snapshot artifact not present at `/opt/mediavortex/src/.claude/schema/snapshot.json` on the Linux worker host. Either not shipped by `StepShipSchemaSnapshot` in `deploy-baremetal-worker.py`, or the file is git-ignored and never generated on the build host.
 **Fix (investigate first, then choose):**
-- If snapshot IS in git: check `deploy/Dockerfile` `COPY` step covers `.claude/schema/` prefix. Likely one glob change.
-- If snapshot is NOT in git: run `py Scripts/Migration/GenerateSchemaSnapshot.py` at deploy time as a prebuild step in `deploy/deploy-linux-worker.py`; add snapshot regeneration to the deploy pipeline. Prefer this: snapshot then reflects the actual schema at deploy, not a stale checked-in copy.
+- If snapshot IS in git: confirm `StepShipSchemaSnapshot` in `deploy-baremetal-worker.py` covers `.claude/schema/` prefix during rsync.
+- If snapshot is NOT in git: run `py Scripts/Migration/GenerateSchemaSnapshot.py` at deploy time as a pre-sync step; add snapshot regeneration to the deploy pipeline. Prefer this: snapshot then reflects the actual schema at deploy, not a stale checked-in copy.
 **Note:** Presence of this snapshot would have caught C4 pre-deploy. Fix C17 has compounding value.
 **Ripple:** None on the Windows path.
 

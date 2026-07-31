@@ -218,8 +218,7 @@ Question: How does a WorkerService process learn its `WorkerName`?
 
 Answer: **`MEDIAVORTEX_WORKER_NAME` is the sole source. Deploy writes it. WorkerService reads it. Fail-loud if unset.**
 
-- Bare-metal: systemd `EnvironmentFile=/etc/mediavortex/instance-%i.env` loads one file per instance. Deploy writes one file per slot with `MEDIAVORTEX_WORKER_NAME=<friendly>-worker-<N>`.
-- Docker: compose sets `MEDIAVORTEX_WORKER_NAME` per service.
+- Bare-metal Linux: systemd `EnvironmentFile=/etc/mediavortex/instance-%i.env` loads one file per instance. Deploy writes one file per slot with `MEDIAVORTEX_WORKER_NAME=<friendly>-worker-<N>`.
 - Windows (I9): environment variable set by the launcher script.
 - `WorkerService.Main._ResolveWorkerName` raises when the env var is missing. No `MEDIAVORTEX_WORKER_PREFIX`, no advisory-lock slot race, no `socket.gethostname()` fallback, no heartbeat-staleness reclaim.
 
@@ -326,8 +325,7 @@ Answer: **Only commits that touch worker-runtime code require a fleet redeploy. 
   - `WorkerService/requirements.txt` (venv content)
   - `StartWorker.py`, `StartMediaVortex.py`, `StartParallelWorkers.py` (launchers)
   - `deploy/baremetal/mediavortex-worker@.service` (systemd invocation)
-  - `deploy/Dockerfile` (image content)
-  - `deploy/compose-templates/*.yml` (compose sets runtime env vars)
+  - `deploy/baremetal/worker.env.template` (systemd env-file template per instance)
 - Non-worker paths (no redeploy needed):
   - `*.md` (all docs, `DOMAIN.md`, `CLAUDE.md`, `ARCHITECTURE.md`, `GLOSSARY.md`)
   - `.claude/` (rules, directives, standards, hooks)

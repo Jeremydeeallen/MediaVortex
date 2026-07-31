@@ -61,7 +61,7 @@ curl http://localhost:9100/metrics | head -10
        instance_name: '<mac-hostname>'
        role: 'ai-workstation'
    ```
-5. Restart Prometheus: `docker restart sphinxteslamate-prometheus-1`
+5. Restart Prometheus (on its host).
 6. Verify: `curl -s 'http://localhost:9090/api/v1/targets' | grep <MAC_IP>`
 
 ### Notes:

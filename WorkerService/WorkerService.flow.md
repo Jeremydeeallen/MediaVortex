@@ -54,7 +54,7 @@ Each worker stamps `Workers.Version` (and `BuildInfo` when available) at registr
 The worker never resolves the version live (no `git rev-parse HEAD`, no environment lookup), so the displayed value cannot drift past the code the process actually loaded at startup.
 
 **Who writes `VERSION` + `BUILD_INFO`:**
-- **Linux (Docker):** `deploy/deploy-linux-worker.py` passes `--build-arg COMMIT_SHA=<dev HEAD>`; `deploy/Dockerfile` writes both files into `/opt/mediavortex/` at image build time.
+- **Bare-metal Linux:** `deploy/deploy-baremetal-worker.py` `StepStampVersion` writes both files to `/opt/mediavortex/src/` on the target via SSH after each rsync.
 - **Windows native:** `deploy/deploy-windows-worker.py` step 5 (`StepStampVersion`) writes both files to `C:\Code\MediaVortex\` on the target via SSH/PowerShell. `StartWorker.py` also runs `Scripts/StampVersion.py` at every launch as belt-and-suspenders, so an operator restart picks up the local HEAD even without re-running the full deploy.
 
 Both deploy scripts assert, after restart, that `Workers.Version` equals the SHA they just stamped. Mismatch fails the deploy with exit code 3.
@@ -124,7 +124,7 @@ The endpoint validates the column name against the allowlist `{TranscodeEnabled,
 
 | Step | Function | What It Does |
 |------|----------|--------------|
-| 1. Signal received | `SignalHandler()` | Catches SIGTERM (Docker stop) or SIGINT (Ctrl+C) |
+| 1. Signal received | `SignalHandler()` | Catches SIGTERM (systemctl stop) or SIGINT (Ctrl+C) |
 | 2. Kill FFmpeg | iterates `VideoTranscoding.ActiveProcesses` | `proc.kill()` for each active FFmpeg subprocess |
 | 3. Update DB | `UpdateServiceStatus()` + `UpdateWorkerStatus()` | Sets ServiceStatus=Stopped, Workers.Status=Offline |
 | 4. Release DB pool | `DatabaseService._pool.closeall()` | Closes all idle psycopg2 connections so they don't linger after `os._exit` bypasses atexit. Required to prevent connection leaks during crash-restart loops. |
@@ -132,9 +132,9 @@ The endpoint validates the column name against the allowlist `{TranscodeEnabled,
 
 Queue items left in Running state by this worker are reset to Pending on next startup by crash recovery.
 
-## Crash Recovery (PID 1 self-kill guard)
+## Crash Recovery (self-kill guard)
 
-`Features/ServiceControl/CrashRecoveryService.RecoverServiceJobs()` walks ActiveJobs left over from a prior run and tries to kill any still-running OS process referenced by `ActiveJobs.ProcessId`. In Docker, every Python entrypoint is PID 1 -- so a naive recorded-PID match always finds the new container's own process. Pre-2026-05-08 the worker would SIGTERM itself during recovery, exit cleanly via SignalHandler, and Docker's `restart: unless-stopped` would loop forever.
+`Features/ServiceControl/CrashRecoveryService.RecoverServiceJobs()` walks ActiveJobs left over from a prior run and tries to kill any still-running OS process referenced by `ActiveJobs.ProcessId`. PID reuse after a systemd restart can make a stale recorded ProcessId match the new WorkerService process. Pre-2026-05-08 the worker would SIGTERM itself during recovery, exit cleanly via SignalHandler, and the systemd `Restart=always` policy would loop forever.
 
 The guard:
 

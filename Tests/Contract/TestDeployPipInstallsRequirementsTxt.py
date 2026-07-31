@@ -38,7 +38,7 @@ class TestDeployPipInstallsRequirementsTxt(unittest.TestCase):
         for P in DEPLOY_DIR.rglob('*'):
             if not P.is_file():
                 continue
-            if P.suffix in ('.py',) or P.name == 'Dockerfile':
+            if P.suffix in ('.py',):
                 Offenders.extend(_AuditFile(P))
         for P in STARTUP_FILES:
             if P.exists():

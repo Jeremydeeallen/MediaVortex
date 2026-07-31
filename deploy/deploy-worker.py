@@ -38,13 +38,6 @@ def _HostFromWorkerName(Wn: str) -> str:
     return Wn
 
 
-def _ComposeServiceFromWorkerName(Wn: str) -> str:
-    M = re.match(r"^[A-Za-z0-9]+-(worker-\d+)$", Wn)
-    if not M:
-        raise ValueError(f"cannot derive compose service from {Wn!r}")
-    return M.group(1)
-
-
 def _BaremetalUnitFromWorkerName(Wn: str) -> str:
     M = re.match(r"^[A-Za-z0-9]+-worker-(\d+)$", Wn)
     if not M:
@@ -89,55 +82,23 @@ def DrainWorker(Db, WorkerName: str) -> tuple:
     return (False, Elapsed)
 
 
-def _LinuxDockerHost(Host: str) -> bool:
-    return (MediaVortexRoot / "deploy" / "compose-templates" / f"{Host}.yml").exists()
-
-
 def _WindowsLocal(Host: str) -> bool:
     return Host.upper().startswith("I9")
 
 
-def _LoadLinuxDeployModule():
+def _LoadBaremetalDeployModule():
     from importlib.util import spec_from_file_location, module_from_spec
-    LinuxDeploy = MediaVortexRoot / "deploy" / "deploy-linux-worker.py"
-    Spec = spec_from_file_location("_ld", str(LinuxDeploy))
+    BaremetalDeploy = MediaVortexRoot / "deploy" / "deploy-baremetal-worker.py"
+    Spec = spec_from_file_location("_bd", str(BaremetalDeploy))
     Mod = module_from_spec(Spec)
     Spec.loader.exec_module(Mod)
     return Mod
 
 
 def _ResolveInventory(Host: str):
-    Mod = _LoadLinuxDeployModule()
+    Mod = _LoadBaremetalDeployModule()
     Friendly, Ip, User = Mod._ResolveTarget(Host, Mod.DefaultInventoryToml, None)
     return Friendly, Ip, User
-
-
-def DeployLinuxDocker(WorkerName: str, Host: str, Sha: str) -> tuple:
-    T0 = time.time()
-    print(f"[3/6] deploy backend: linux-docker (host={Host})", flush=True)
-    _, Ip, User = _ResolveInventory(Host)
-    Target = f"{User}@{Ip}"
-
-    print("       source sync + image build via deploy-linux-worker.py --build-only", flush=True)
-    R = subprocess.run(
-        [sys.executable, str(MediaVortexRoot / "deploy" / "deploy-linux-worker.py"),
-         Host, "--build-only"],
-        cwd=str(MediaVortexRoot),
-    )
-    if R.returncode != 0:
-        Elapsed = time.time() - T0
-        print(f"[FAIL] build-only prep for {Host} ({Elapsed:.1f}s)", flush=True)
-        return (False, Elapsed)
-
-    Svc = _ComposeServiceFromWorkerName(WorkerName)
-    print(f"[4/6] recreate service: {Svc}", flush=True)
-    T1 = time.time()
-    Cmd = f"cd /opt/mediavortex && docker compose up -d --no-deps --force-recreate {Svc}"
-    R = subprocess.run(["ssh", *SshOpts, Target, Cmd], timeout=180)
-    Elapsed = time.time() - T0
-    RecreateElapsed = time.time() - T1
-    print(f"       recreate done ({RecreateElapsed:.1f}s); backend total ({Elapsed:.1f}s)", flush=True)
-    return (R.returncode == 0, Elapsed)
 
 
 def DeployBaremetal(WorkerName: str, Host: str, Sha: str) -> tuple:
@@ -276,8 +237,6 @@ def DeployOne(WorkerName: str, Sha: str) -> int:
 
     if _WindowsLocal(Host):
         Ok, TDeploy = DeployWindowsLocal(WorkerName, Sha)
-    elif _LinuxDockerHost(Host):
-        Ok, TDeploy = DeployLinuxDocker(WorkerName, Host, Sha)
     else:
         Ok, TDeploy = DeployBaremetal(WorkerName, Host, Sha)
     if not Ok:

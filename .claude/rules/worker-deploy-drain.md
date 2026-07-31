@@ -13,7 +13,7 @@ Every worker service deploy follows the same shape. No opt-out, no batch shortcu
 
 ## Definitions
 
-**Service** = one row in `Workers`. `larry-worker-1` and `larry-worker-2` are two independent services on one docker host; each drained + deployed + brought back Online individually. Sharing a container image is a build-time concern; runtime treatment is per-service.
+**Service** = one row in `Workers`. `larry-worker-1` and `larry-worker-2` are two independent systemd units on one host; each drained + deployed + brought back Online individually. Sharing a source tree is an install-time concern; runtime treatment is per-service.
 
 **Drained** =
 - `Workers.Status = 'Paused'` AND

@@ -951,3 +951,12 @@ The pipeline had TWO fallbacks stacked: (1) Strategy classifier silently demoted
 
 ---
 
+### [BUG-0085] container build-cache leaked stale bytecode into worker containers | resolved: 2026-07-31
+**Date:** 2026-07-04 -> Closed 2026-07-31 by directive `docker-purge`. | **Area:** deploy (retired platform)
+
+**Resolution:** Platform migration to bare-metal Linux eliminated the failure mode. Bare-metal deploy rsyncs source directly + restarts systemd units; no image layer, no `__pycache__` survival across deploys. Directive `docker-purge` deleted the container build path entirely (2026-07-31).
+
+**What broke (historical):** After a container-based worker deploy rebuilt + started, the on-disk `.py` sources reflected HEAD but the `__pycache__/*.pyc` files carried pre-cutover bytecode from a cached image layer. Python's source-mtime staleness check missed the discrepancy (mtimes were forged to match by an earlier build step), so the long-lived WorkerService process imported stale `.pyc`. Manifested as transcode attempts emitting retired disposition values that violated CHECK constraints; rows stranded with `Success=TRUE + Disposition=None`.
+
+---
+

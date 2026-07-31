@@ -2,7 +2,7 @@
 
 **Slug:** worker-deploy-windows
 
-Deploys a MediaVortex `WorkerService` instance natively on a Windows host (not Docker). Counterpart to `worker-deploy-linux.flow.md` (Docker on Linux -- covers LXC and bare-metal). Both deployment models coexist; this flow covers the Windows-native path used by I9-2024.
+Deploys a MediaVortex `WorkerService` instance natively on a Windows host. Counterpart to `worker-deploy-baremetal.flow.md` (bare-metal Linux -- covers all Linux hosts). This flow covers the Windows-native path used by I9-2024.
 
 ## Entry Point
 
@@ -115,7 +115,7 @@ This whole sequence takes about 30 seconds end-to-end and is idempotent. Use thi
 - Re-deploying after a host rebuild
 - Recovering from corrupted venv or stale env vars
 
-For Linux containerized workers (which scale via `docker compose`), use `worker-deploy-linux.flow.md` instead.
+For Linux workers, use `worker-deploy-baremetal.flow.md` instead.
 
 ## Deploy Sequence (Quick Reference)
 

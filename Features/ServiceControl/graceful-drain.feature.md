@@ -7,7 +7,7 @@
 Replaces the prior "kill mid-flight FFmpeg subprocesses on SIGTERM" behavior with a graceful drain across the three shutdown paths a worker can encounter:
 
 - **Operator flips `Workers.Status` to a non-Online value** -- `_CapabilityPollingLoop` already calls `_StopAllCapabilities()` which signals each running operation to stop at its next safe boundary and waits via `ProcessingThread.join(timeout=7200)`.
-- **Operating system / docker compose sends SIGTERM** -- `SignalHandler` now runs the same `_StopAllCapabilities()` path and polls until every capability handle clears (or 30-minute budget exceeded). FFmpeg subprocesses are NOT killed -- they finish their encode.
+- **systemctl / OS sends SIGTERM** -- `SignalHandler` now runs the same `_StopAllCapabilities()` path and polls until every capability handle clears (or 30-minute budget exceeded). FFmpeg subprocesses are NOT killed -- they finish their encode.
 - **`deploy/deploy-fleet.py` restarts workers** -- script flips `Workers.Status='Paused'` on every target worker FIRST, waits for `ActiveJobs` to clear per worker (30-minute budget), THEN runs the deploy. After deploy, restores pre-deploy Status. `--no-drain` flag for emergency-immediate behavior.
 
 ## Surface
@@ -19,7 +19,7 @@ Replaces the prior "kill mid-flight FFmpeg subprocesses on SIGTERM" behavior wit
 ## Success Criteria
 
 1. SIGTERM to a WorkerService with an in-flight transcode / VMAF / remux / scan does NOT kill the FFmpeg subprocess. The encode completes naturally; the worker exits cleanly after.
-2. `docker compose recreate` (the primary path the linux deploy script uses) waits up to the compose-template's `stop_grace_period` (30 min) before SIGKILLing. SignalHandler's 30-min drain budget fits inside this.
+2. `systemctl restart mediavortex-worker@N.service` (the primary path baremetal deploy uses) sends SIGTERM and waits `TimeoutStopSec` (30 min in unit file) before SIGKILL. SignalHandler's 30-min drain budget fits inside this.
 3. `py deploy/deploy-fleet.py` runs `DrainWorkers` BEFORE the per-host deploy. Each target worker is flipped to `Status='Paused'`, then polled for ActiveJobs to clear. Workers that finish drain are deployed; workers that exceed the 30-min budget cause a warning and the deploy proceeds anyway (operator-visible).
 4. After deploy completes, every worker's `Status` is restored to its pre-drain value. Workers that were already Paused before drain stay Paused.
 5. `--no-drain` skips DrainWorkers entirely and falls through to the prior immediate-restart behavior. Used only when in-flight work is acceptable to lose (e.g. corrupted-image deploy that needs to land now).

@@ -16,7 +16,7 @@ Self-hosted media library transcoder. Discovery builds `MediaFiles` rows. Three 
 | WorkerService | Unified worker. Capabilities per row in `Workers` (`TranscodeEnabled` / `QualityTestEnabled` / `ScanEnabled`). |
 | PostgreSQL 16 | Single source of truth. LXC CT 203. No boot-cached config (`db-is-authority`). |
 | FFmpeg / FFprobe | Per-worker binaries. |
-| Larry LXC 218 | Docker host, 8 worker containers. |
+| Larry LXC 218 | Bare-metal Linux host, 4 systemd worker instances. |
 | I9 | Dev workstation; reads source tree directly on restart. |
 
 ## Job Types

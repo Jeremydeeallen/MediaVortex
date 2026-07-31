@@ -62,11 +62,7 @@ class CrashRecoveryService:
 
                 LoggingService.LogInfo(f"Processing job {job_id} (PID: {process_id}, QueueId: {queue_id})", "CrashRecoveryService", "RecoverServiceJobs")
 
-                # Check if the process is still running.
-                # Skip the live-process check when the recorded PID matches our own PID:
-                # in Docker containers Python runs as PID 1, so a stale ActiveJobs row from a
-                # prior container instance always points back at the new process and would
-                # cause crash recovery to terminate itself.
+                # see workerservice.C10 -- self-kill guard: skip live-process check when recorded PID matches own PID
                 own_pid = os.getpid()
                 if process_id and process_id == own_pid:
                     process_exists = False

@@ -1,14 +1,4 @@
-"""Add Version + BuildInfo columns to Workers table.
-
-`Version` (nullable VARCHAR(64)): the git commit SHA the worker process
-was built / started from. NULL renders as "unknown" in the UI.
-
-`BuildInfo` (nullable TEXT): the full /opt/mediavortex/BUILD_INFO file
-contents (commit, built_at, built_by lines) for Docker workers, or NULL
-for non-Docker workers without the file.
-
-Idempotent -- safe to run multiple times.
-"""
+# see version-on-deploy.C4 -- adds Version + BuildInfo columns to Workers; idempotent
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))

@@ -169,7 +169,7 @@ C17. Line-count subtraction target: `SaveMediaFile` (97 lines) + `_UpdateMediaFi
 3. **Pause fleet at DB level.** `UPDATE Workers SET Status='Paused' WHERE WorkerName LIKE '%worker%'`. Existing poll loop reads flag; no new claims.
 4. **Wait for running attempts to complete** or hit safe checkpoint. Poll `ActiveJobs` until empty.
 5. **Stop I9 services.** WebService + WorkerService. Verify zero MediaVortex python procs (memory rule: verify count==2 not >2 for a single worker, count==0 when stopped).
-6. **Stop remote containers.** dot/wakko/larry — `docker stop mediavortex-worker-N-1` per host.
+6. **Stop remote workers.** dot/wakko/larry — `ssh root@<host> "systemctl stop mediavortex-worker@N.service"` per host (or `pct exec 218 -- systemctl stop ...` for larry LXC).
 7. **DB snapshot.** `pg_dump` on 10.0.0.15 as rollback insurance.
 
 ### Schema migrations (idempotent, run offline for safety)

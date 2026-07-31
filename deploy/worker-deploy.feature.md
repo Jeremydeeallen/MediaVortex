@@ -4,7 +4,7 @@
 
 ## What It Does
 
-Brings up a new host as a MediaVortex worker. One command per shape, idempotent, fail-loud. An operator who has never deployed a worker before reads `deploy/bringup.md`, picks the shape (LXC-Docker, bare-metal-Docker, bare-metal Linux, or Windows), runs one command, and within five minutes has a `Workers` row in Status='Online' with a fresh heartbeat.
+Brings up a new host as a MediaVortex worker. One command per shape, idempotent, fail-loud. An operator who has never deployed a worker before reads `deploy/bringup.md`, picks the shape (bare-metal Linux or Windows), runs one command, and within five minutes has a `Workers` row in Status='Online' with a fresh heartbeat.
 
 Deploy contract only. Runtime invariants (FFmpeg path, crash recovery, signal handling, source pre-checks) live in `WorkerService/worker-lifecycle.feature.md`.
 
@@ -12,14 +12,13 @@ Deploy contract only. Runtime invariants (FFmpeg path, crash recovery, signal ha
 
 - `deploy/deploy-worker.py <WorkerName>` -- **canonical operator entry per service.** Golden-standard sequence: pause -> drain -> deploy -> back Online for one Workers row. Enforced by `.claude/rules/worker-deploy-drain.md`. No opt-out flags.
 - `deploy/deploy-fleet.py [--workers <list>]` -- thin loop over live workers, invokes `deploy-worker.py` per service. Parallel across services (D2). No aggregate pause of a host.
-- `deploy/deploy-linux-worker.py <target> [--build-only]` -- Docker on Linux image-build backend. Sync source + build container image + push compose. With `--build-only`: skip `docker compose up`. Called by `deploy-worker.py` for per-service container recreation.
 - `deploy/deploy-baremetal-worker.py <target> [--sync-only]` -- Bare-metal Linux backend. Installs WorkerService + Python deps; systemd unit-per-slot. With `--sync-only`: rsync source, skip unit restart. Torch variant auto-detected.
 - `deploy/deploy-windows-worker.py <target>` -- Task Scheduler + SMB on Windows (I9-2024).
-- **Code updates on I9-2024 (Windows worker)** -- WorkerService runs from the `C:\Code\MediaVortex` source tree; stop + restart to apply changes, no re-deploy needed. Linux-Docker workers require `deploy-linux-worker.py <target>` per change because Docker bakes the source into the container image. Bare-metal Linux workers apply code changes via `deploy-baremetal-worker.py <target>` which rsyncs source + restarts the systemd units.
+- **Code updates on I9-2024 (Windows worker)** -- WorkerService runs from the `C:\Code\MediaVortex` source tree; stop + restart to apply changes, no re-deploy needed. Bare-metal Linux workers apply code changes via `deploy-baremetal-worker.py <target>` which rsyncs source + restarts the systemd units.
 - `deploy/bringup.md` -- one-page runbook picks the shape and points at the right command.
-- `deploy/worker-deploy-{linux,baremetal,windows}.flow.md` -- per-shape flow docs with parity sections.
+- `deploy/worker-deploy-{baremetal,windows}.flow.md` -- per-shape flow docs with parity sections.
 
-LXC provisioning (Proxmox `pct create`, NFS mounts, Docker install) is owned by `infrastructure/terraform/mediavortex-workers/`. Bare-metal Docker host bootstrap (`nfs-common` + Docker CE + `/etc/fstab` managed block) is owned by `infrastructure/terraform/mediavortex-bare-metal-bootstrap.py`. Bare-metal Linux host bootstrap (systemd, XPU driver, Level Zero runtime, mounts) is owned by `infrastructure/terraform/mediavortex-baremetal-linux-bootstrap.py`.
+Bare-metal Linux host bootstrap (systemd, XPU driver, Level Zero runtime, mounts) is owned by `infrastructure/terraform/mediavortex-baremetal-linux-bootstrap.py`.
 
 The `infrastructure` repo is the **single source of truth** for host inventory and mount specs.
 
@@ -27,15 +26,15 @@ The `infrastructure` repo is the **single source of truth** for host inventory a
 
 ### Operator experience
 
-C1. **One entry per shape.** `deploy/deploy-linux-worker.py` (Docker), `deploy/deploy-baremetal-worker.py` (bare-metal Linux), and `deploy/deploy-windows-worker.py` exist. Each accepts one positional target with zero required flags.
+C1. **One entry per shape.** `deploy/deploy-baremetal-worker.py` (bare-metal Linux) and `deploy/deploy-windows-worker.py` exist. Each accepts one positional target with zero required flags.
 
 C2. **Five-minute cold bring-up.** On a prerequisites-satisfied host the deploy exits 0 within five minutes and the host has a `Workers` row with `Status IN ('Online', 'Paused')`, non-NULL `FFmpegPath`, `LastHeartbeat` under 60 seconds old, and `MountValidationError IS NULL`.
 
 C3. **Ninety-second code-only redeploy.** A second invocation after a code change reaches `Status='Online'` with fresh `LastHeartbeat` under 90 seconds.
 
-C4. **Idempotent.** The deploy script converges to the target end-state regardless of prior state. Two consecutive runs both exit 0. **Idempotent means N=1000 -- if any long-lived resource (docker build cache, log files, temp files) grows without bound across runs and can starve future runs, the deploy owns pruning it.** Disk-quota-exceeded from an accumulating docker build cache is a deploy failure, not an operator-maintenance failure.
+C4. **Idempotent.** The deploy script converges to the target end-state regardless of prior state. Two consecutive runs both exit 0. **Idempotent means N=1000 -- if any long-lived resource (log files, temp files, venv caches) grows without bound across runs and can starve future runs, the deploy owns pruning it.** Disk-quota-exceeded from accumulating deploy artifacts is a deploy failure, not an operator-maintenance failure.
 
-C4a. **Deploy owns disk hygiene.** Every deploy script prunes any long-lived resource it created on the target that would otherwise accumulate. Docker-on-Linux prunes docker build cache + dangling images before build. Bare-metal Linux prunes stale venv caches + apt caches after install. Every deploy pre-flights a minimum-free-space check post-prune and fails loud if the target is still starved (means non-deploy artifacts filled the disk -- operator investigates). Docs/alerts monitor only; never PREVENT starvation. Prevention is the deploy's job.
+C4a. **Deploy owns disk hygiene.** Every deploy script prunes any long-lived resource it created on the target that would otherwise accumulate. Bare-metal Linux prunes stale venv caches + apt caches after install. Every deploy pre-flights a minimum-free-space check post-prune and fails loud if the target is still starved (means non-deploy artifacts filled the disk -- operator investigates). Docs/alerts monitor only; never PREVENT starvation. Prevention is the deploy's job.
 
 C5. **Pre-flight fails fast.** Missing prerequisites cause non-zero exit within 30 seconds naming the failing check and a one-line remediation hint.
 
@@ -43,7 +42,7 @@ C6. **Verification fails the deploy.** No `Workers` row within the bring-up budg
 
 ### Conventions
 
-C7. **Worker name convention sourced from inventory.toml.** Multi-worker Linux hosts register as `<friendly>-worker-N` lowercase (`larry-worker-1..8`, `wakko-worker-1..4`, `dot-worker-1..4`). Single-worker Windows hosts register as the inventory `name` value (`I9-2024`). Docker path applies to LXC hosts only; bare-metal hosts use `deploy-baremetal-worker.py`.
+C7. **Worker name convention sourced from inventory.toml.** Multi-worker Linux hosts register as `<friendly>-worker-N` lowercase (`larry-worker-1..8`, `wakko-worker-1..4`, `dot-worker-1..4`). Single-worker Windows hosts register as the inventory `name` value (`I9-2024`). All Linux hosts use `deploy-baremetal-worker.py`.
 
 C8. **No credential leak.** SMB/NFS/DB credentials are read from Vaultwarden via `infrastructure/terraform/secrets.py` and passed via SSH stdin or environment variables. Grep of any deploy script for a literal credential value returns zero hits.
 
@@ -51,7 +50,7 @@ C8. **No credential leak.** SMB/NFS/DB credentials are read from Vaultwarden via
 
 C9. **One bring-up runbook.** `deploy/bringup.md` answers "I want to add host X" in fewer than 50 lines: pick shape, check prerequisites, run command, verify.
 
-C10. **Three flow docs with parity sections.** Each of `deploy/worker-deploy-{linux,baremetal,windows}.flow.md` contains: Host Inventory, Pre-Flight Checks, Build and Deploy, Post-Deploy Verification, Troubleshooting. Additional shape-specific sections are permitted.
+C10. **Two flow docs with parity sections.** Each of `deploy/worker-deploy-{baremetal,windows}.flow.md` contains: Host Inventory, Pre-Flight Checks, Build and Deploy, Post-Deploy Verification, Troubleshooting. Additional shape-specific sections are permitted.
 
 C11. **Docs match reality.** Each flow doc's Host Inventory table lists every host currently registered for that shape in the `Workers` table.
 
@@ -64,7 +63,7 @@ C13. **I9 file writes never return EINVAL.** FFmpeg invocations on I9-2024 (tran
 C14. **[BUG-0064] Deploy split is clean.**
     - **I9 local services have no deploy path.** WebService + local WorkerService start from their respective venvs. Start command brings WebService online FIRST, then WorkerService, after detecting + stopping any running instance.
     - **Remote-worker deploys are independent.** No fleet orchestration blocks host A on host B's heartbeat.
-    - **One entry script per shape.** LXC-Docker, bare-metal-Docker, bare-metal Linux, and Windows-SMB each have their own strategy; no copy-paste between shapes.
+    - **One entry script per shape.** Bare-metal Linux and Windows-SMB each have their own strategy; no copy-paste between shapes.
 
 ### Idempotence + operator state (DOMAIN.md 2026-07-24)
 
@@ -72,7 +71,7 @@ C15. **No destructive DELETE on Workers.** No deploy script may execute `DELETE 
 
 C16. **No Status coalesce to Online.** No deploy script (or its helpers in `deploy-fleet.py`) may treat missing/NULL `Status` as `Online`. `COALESCE(Status, 'Online')` is forbidden. A missing `Status` for a captured live worker is a fail-loud condition -- the deploy exits non-zero rather than default any operator-owned column. Verifiable: `grep -rn "COALESCE.*Status.*Online" deploy/` returns 0.
 
-C17. **Worker identity is deterministic and deploy-assigned.** `WorkerName` is set at deploy time via `MEDIAVORTEX_WORKER_NAME`. Bare-metal: systemd `EnvironmentFile=/etc/mediavortex/instance-%i.env` loads one file per instance, each writing `MEDIAVORTEX_WORKER_NAME=<friendly>-worker-<N>`. Docker: compose sets `MEDIAVORTEX_WORKER_NAME` per service. `WorkerService.Main._ResolveWorkerName` fail-louds if the env var is unset. Per-worker concurrency (`Workers.MaxConcurrentJobs`) is DB-enforced at claim time via `Core.Database.WorkerCapabilityPredicate.BuildInflightCapPredicate` — a second process accidentally sharing a WorkerName cannot exceed the cap because the DB refuses the second concurrent claim. Verifiable: `Tests/Contract/TestDeployIdempotenceInvariants.py::TestDeterministicWorkerIdentity` (grep-fences enforce the retirement). Live: `SELECT COUNT(DISTINCT ProcessId) FROM ActiveJobs WHERE WorkerName = ? AND Status = 'Running'` = 1 per WorkerName.
+C17. **Worker identity is deterministic and deploy-assigned.** `WorkerName` is set at deploy time via `MEDIAVORTEX_WORKER_NAME`. Bare-metal: systemd `EnvironmentFile=/etc/mediavortex/instance-%i.env` loads one file per instance, each writing `MEDIAVORTEX_WORKER_NAME=<friendly>-worker-<N>`. Windows: Task Scheduler sets `MEDIAVORTEX_WORKER_NAME` in the task environment. `WorkerService.Main._ResolveWorkerName` fail-louds if the env var is unset. Per-worker concurrency (`Workers.MaxConcurrentJobs`) is DB-enforced at claim time via `Core.Database.WorkerCapabilityPredicate.BuildInflightCapPredicate` — a second process accidentally sharing a WorkerName cannot exceed the cap because the DB refuses the second concurrent claim. Verifiable: `Tests/Contract/TestDeployIdempotenceInvariants.py::TestDeterministicWorkerIdentity` (grep-fences enforce the retirement). Live: `SELECT COUNT(DISTINCT ProcessId) FROM ActiveJobs WHERE WorkerName = ? AND Status = 'Running'` = 1 per WorkerName.
 
 C18. **Deploy scripts UPSERT deploy-owned columns only.** RegisterWorker's ON CONFLICT DO UPDATE clause enumerates ONLY deploy-owned columns (`Platform`, `FFmpegPath`, `FFprobePath`, `ShareMountPrefix`, `MaxCpuThreads`, `Version`, `BuildInfo`, `LastHeartbeat`). Operator-owned columns are absent from the ON CONFLICT UPDATE clause. Verifiable: grep the RegisterWorker SQL for any operator-owned column name in its UPDATE list returns 0.
 
@@ -90,19 +89,14 @@ COMPLETE
 
 ```
 deploy/worker-deploy.feature.md
-deploy/worker-deploy-linux.flow.md
 deploy/worker-deploy-baremetal.flow.md
 deploy/worker-deploy-windows.flow.md
 deploy/bringup.md
-deploy/deploy-linux-worker.py
 deploy/deploy-baremetal-worker.py
 deploy/deploy-windows-worker.py
 deploy/Register-WorkerTask.ps1
-deploy/Dockerfile
-deploy/compose-templates/larry.yml
 deploy/baremetal/
 deploy/SyncSource.py
-deploy/.deployignore
 ```
 
 `StartWorker.py`, `WorkerService/Main.py`, `Services/FFmpegService.py`, and worker runtime invariants are owned by `WorkerService/worker-lifecycle.feature.md`.
@@ -111,18 +105,13 @@ deploy/.deployignore
 
 - `deploy/worker-deploy.feature.md` -- this doc (operator-experience criteria)
 - `deploy/bringup.md` -- one-page runbook covering all shapes (criterion 9)
-- `deploy/worker-deploy-linux.flow.md` -- Docker on Linux flow (Larry LXC only)
-- `deploy/worker-deploy-baremetal.flow.md` -- Bare-metal Linux flow (Wakko / Intel Arc + dot / NVIDIA / no containers)
+- `deploy/worker-deploy-baremetal.flow.md` -- Bare-metal Linux flow (all Linux hosts: larry LXC + wakko / Intel Arc + dot / NVIDIA)
 - `deploy/worker-deploy-windows.flow.md` -- Task Scheduler + SMB flow (I9-2024)
-- `deploy/deploy-linux-worker.py` -- Docker-on-Linux entry
 - `deploy/deploy-baremetal-worker.py` -- bare-metal Linux entry
 - `deploy/deploy-windows-worker.py` -- Windows entry
 - `deploy/Register-WorkerTask.ps1` -- Windows Task Scheduler registration
-- `deploy/Dockerfile` -- worker container image (used by Docker-on-Linux hosts only)
-- `deploy/compose-templates/<friendly>.yml` -- per-host compose file for Docker-on-Linux hosts
 - `deploy/baremetal/` -- systemd unit template + install scripts for bare-metal Linux hosts
-- `deploy/SyncSource.py` -- tar-over-ssh source sync with `.deployignore` filtering
-- `deploy/.deployignore` -- exclusion patterns for source sync
+- `deploy/SyncSource.py` -- tar-over-ssh source sync
 
 ## References
 
@@ -133,6 +122,5 @@ The `infrastructure` repo (`https://github.com/TheAdroitDBA/infrastructure`) is 
 - `infrastructure/docs/features/windows-worker-deploy.md` -- host-side enrollment (Windows)
 - `infrastructure/terraform/inventory.toml` -- friendly-host to IP + mounts; consumed by every deploy + bootstrap
 - `infrastructure/terraform/mediavortex-workers/` -- LXC provisioning for Larry CT 218
-- `infrastructure/terraform/mediavortex-bare-metal-bootstrap.py` -- Docker-on-bare-metal prereq bootstrap
 - `infrastructure/terraform/mediavortex-baremetal-linux-bootstrap.py` -- bare-metal Linux prereq bootstrap (Intel XPU driver, Level Zero runtime, systemd)
 - `infrastructure/terraform/secrets.py` -- Vaultwarden credential access

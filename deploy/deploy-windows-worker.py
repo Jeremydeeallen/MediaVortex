@@ -274,12 +274,6 @@ def _ResolveLocalHeadSha() -> str:
 
 
 def StepStampVersion(Target: str, Sha: str) -> bool:
-    """Write VERSION + BUILD_INFO into C:\\Code\\MediaVortex on the target.
-
-    Uses the same artifact shape as Scripts/StampVersion.py and the Linux
-    Dockerfile, so WorkerService.Main._ResolveWorkerVersion has one reader.
-    Idempotent: re-running with the same Sha produces identical files.
-    """
     if not Sha:
         print("    refusing to stamp: dev-workstation HEAD did not resolve")
         return False

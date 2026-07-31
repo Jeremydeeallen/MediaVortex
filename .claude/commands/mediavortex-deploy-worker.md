@@ -1,6 +1,6 @@
-﻿---
-description: Deploy a MediaVortex WorkerService. Two scripts -- one for Linux (LXC or bare-metal Docker) and one for Windows (Task Scheduler + SMB). See deploy/bringup.md for shape selection.
-argument-hint: <linux|windows> <target-host-or-ip>
+---
+description: Deploy a MediaVortex WorkerService. Two scripts -- one for bare-metal Linux (all Linux hosts) and one for Windows (Task Scheduler + SMB). See deploy/bringup.md for shape selection.
+argument-hint: <baremetal|windows> <target-host-or-ip>
 ---
 
 Deploy a MediaVortex worker. Do NOT improvise -- the deploy steps live in the flow docs and have been hardened through real incidents. Follow them.
@@ -11,16 +11,10 @@ Deploy a MediaVortex worker. Do NOT improvise -- the deploy steps live in the fl
 
 3. Pick the deploy path based on `$ARGUMENTS`:
 
-   - **`linux`** (Docker on Linux -- LXC):
-     - Flow doc: `deploy/worker-deploy-linux.flow.md`
-     - Entry script: `deploy/deploy-linux-worker.py <target>` (idempotent; reads SSH user / compose path / mount config from `infrastructure/terraform/inventory.toml`)
-     - Targets today: NONE. Larry migrated to the `baremetal` path 2026-07-31.
-     - Source sync uses tar-over-ssh with `.deployignore` (NOT blind `scp -r`).
-
    - **`baremetal`** (native systemd + host venv on Linux — physical hosts AND LXC containers):
      - Flow doc: `deploy/worker-deploy-baremetal.flow.md`
      - Entry script: `deploy/deploy-baremetal-worker.py <target>` (idempotent; torch variant auto-detected: cu124 / xpu / cpu)
-     - Targets today: Wakko (10.0.0.230, Intel Arc B580), dot (10.0.0.193, NVIDIA RTX 4060), mediavortex-workers (10.0.0.42, CT 218 LXC on Larry, CPU-only).
+     - Targets today: larry (10.0.0.42, CT 218 LXC, CPU-only), wakko (10.0.0.230, Intel Arc B580), dot (10.0.0.193, NVIDIA RTX 4060).
 
    - **`windows`** (native, Task Scheduler):
      - Flow doc: `deploy/worker-deploy-windows.flow.md` (covers prerequisites, SMB credential caching, storage path resolutions, and troubleshooting)
@@ -39,6 +33,6 @@ Deploy a MediaVortex worker. Do NOT improvise -- the deploy steps live in the fl
 
 - Bring-up runbook (start here): `deploy/bringup.md`
 - Feature doc (success criteria, status, progress): `deploy/worker-deploy.feature.md`
-- Linux flow (LXC + bare-metal): `deploy/worker-deploy-linux.flow.md`
+- Bare-metal Linux flow: `deploy/worker-deploy-baremetal.flow.md`
 - Windows flow: `deploy/worker-deploy-windows.flow.md`
 - Known issues that touch deploy: `memory/KNOWN-ISSUES.md` (search for "path storage", "FFmpeg path")

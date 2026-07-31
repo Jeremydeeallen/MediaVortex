@@ -1,25 +1,4 @@
-"""Stamp VERSION + BUILD_INFO files into a MediaVortex repo root.
-
-Writes two sibling files alongside this script's parent (or an explicit --target):
-
-  <root>/VERSION       single-line full SHA from `git rev-parse HEAD` of <source>
-  <root>/BUILD_INFO    three lines: commit, built_at (UTC ISO), built_by (hostname)
-
-Both deploy scripts (`deploy/deploy-linux-worker.py` via Docker build-arg,
-`deploy/deploy-windows-worker.py` via this helper) produce the same artifact
-shape so `WorkerService.Main._ResolveWorkerVersion` has one reader.
-
-The dev workstation never benefits from a local stamp -- the dev workstation
-is the SOURCE of HEAD, not a deploy target -- so VERSION + BUILD_INFO are in
-`.gitignore` and only written into target trees (the temp tar staging dir on
-Windows deploy, or `/opt/mediavortex/` inside the Docker build context).
-
-Usage:
-  py Scripts/StampVersion.py                        # stamp THIS repo from THIS repo's HEAD
-  py Scripts/StampVersion.py --target /tmp/build    # stamp /tmp/build from THIS repo's HEAD
-  py Scripts/StampVersion.py --source /other/repo   # stamp THIS repo from /other/repo's HEAD
-  py Scripts/StampVersion.py --sha abc1234          # stamp THIS repo with literal SHA
-"""
+# see version-on-deploy.C4 -- writes VERSION + BUILD_INFO from git HEAD; used by baremetal + windows deploy scripts
 
 from __future__ import annotations
 

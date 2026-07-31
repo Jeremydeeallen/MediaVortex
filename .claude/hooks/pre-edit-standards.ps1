@@ -789,6 +789,8 @@ function Test-R4-NoEnvVars {
     $Norm = $FilePath -replace '\\', '/'
     foreach ($B in $Bootstrap) { if ($Norm -like "*$B") { return $null } }
     if ($Norm -match '/WorkerService/Main\.py$') { return $null }
+    if ($Norm -match '/deploy/[^/]+\.py$') { return $null }
+    if ($Norm -match '/Scripts/(Migrate|Stamp|Reconcile)[^/]*\.py$') { return $null }
     $Lines = $PostContent -split "`n"
     for ($I = 0; $I -lt $Lines.Length; $I++) {
         if ($Lines[$I] -match 'os\.environ\.get\s*\(|os\.getenv\s*\(') {

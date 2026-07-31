@@ -91,7 +91,7 @@ Is the source file on a network share (SMB/NFS)?
 - Single 1Gbps link to NAS: ~90 MB/s shared across all read+write operations
 - SMB Multichannel with 2x 1Gbps links: ~180 MB/s aggregate, traffic splits automatically
 - 10GbE link: ~1000 MB/s, removes network as a constraint for most workloads
-- Docker workers accessing NAS via host's NIC share the host's total bandwidth
+- Multiple worker instances on one host share the host's total NIC bandwidth
 
 **What to check:**
 ```powershell
@@ -99,7 +99,7 @@ Is the source file on a network share (SMB/NFS)?
 Get-NetAdapter | Select-Object Name, LinkSpeed, Status
 Get-SmbMultichannelConnection | Select-Object ServerName, ClientLinkSpeed, ServerLinkSpeed
 
-# Linux (Docker host) -- NIC speed
+# Linux worker host -- NIC speed
 ethtool eth0 | grep Speed
 cat /proc/net/dev  # TX/RX bytes for throughput over time
 ```
@@ -187,6 +187,6 @@ After remediation, re-run the Stage 1 baseline query and compare to pre-change n
 | Worker | Hardware | NIC | Storage Path | Known Constraints |
 |--------|----------|-----|-------------|-------------------|
 | I9-2024 | i9, 32 threads | Intel X540-T2 2x1Gbps | \\10.0.0.43\srv\nfs-media-_tv (porky NFS) | Network I/O -- 2Gbps aggregate, shared read+write |
-| larry-worker-1..4 | Docker on 10.0.0.42 (LXC 218) | Host NIC (1Gbps presumed) | NFS mount via Docker volume | Network I/O -- 4 containers share 1 NIC |
+| larry-worker-1..4 | Bare-metal Linux on 10.0.0.42 (LXC 218 systemd) | Host NIC (1Gbps presumed) | NFS mount | Network I/O -- 4 instances share 1 NIC |
 | wakko-worker-1..4 | Bare-metal Linux on 10.0.0.230 (Ryzen 7 3700X + Intel Arc B580) | Host NIC | NFS mount native | Intel Arc XPU demucs |
 | dot-worker-1..4 | Bare-metal Linux on 10.0.0.193 (i9-10850K + NVIDIA RTX 4060) | Host NIC | NFS mount native | NVENC encode |

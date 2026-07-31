@@ -64,11 +64,11 @@ def _DetectTorchVariant(Target: str) -> str:
 
 
 def StepPreflight(Target: str, Friendly: str) -> bool:
-    R = _Ssh(Target, "which python3.12 && which docker || which podman; test -d /mnt/media_tv && echo mounts_ok", Timeout=10)
+    R = _Ssh(Target, "which python3.12 && test -d /mnt/media_tv && echo mounts_ok", Timeout=10)
     if "mounts_ok" not in (R.stdout or ""):
-        _Status(1, 13, "preflight", "FAILED", f"missing /mnt/media_tv on {Friendly}")
+        _Status(1, 13, "preflight", "FAILED", f"missing python3.12 or /mnt/media_tv on {Friendly}")
         return False
-    _Status(1, 13, "preflight", "OK", f"python3.12 + docker + mounts present on {Friendly}")
+    _Status(1, 13, "preflight", "OK", f"python3.12 + mounts present on {Friendly}")
     return True
 
 
@@ -114,12 +114,6 @@ def StepEnsureFfmpeg(Target: str) -> bool:
     R = _Ssh(Target, "test -x /usr/local/bin/ffmpeg && echo FFMPEG_OK", Timeout=10)
     if "FFMPEG_OK" in (R.stdout or ""):
         _Status(3, 13, "ensure ffmpeg", "SKIPPED", "already at /usr/local/bin/ffmpeg")
-        return True
-    R = _Ssh(Target, "docker ps --filter 'ancestor=mediavortex-worker:latest' --format '{{.Names}}' | head -1", Timeout=10)
-    Ctr = (R.stdout or "").strip()
-    if Ctr:
-        _Ssh(Target, f"docker cp {Ctr}:/usr/local/bin/ffmpeg /usr/local/bin/ffmpeg && docker cp {Ctr}:/usr/local/bin/ffprobe /usr/local/bin/ffprobe && chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe", Timeout=30)
-        _Status(3, 13, "ensure ffmpeg", "OK", f"copied from container {Ctr}")
         return True
     _Ssh(Target, "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg > /dev/null && ln -sf $(which ffmpeg) /usr/local/bin/ffmpeg && ln -sf $(which ffprobe) /usr/local/bin/ffprobe", Timeout=300)
     _Status(3, 13, "ensure ffmpeg", "OK", "apt install ffmpeg")
@@ -195,16 +189,6 @@ def StepInstallSystemdUnit(Target: str, Friendly: str, Count: int) -> bool:
     return True
 
 
-# directive: deploy-worker-identity-invariants | # see worker-deploy.C15
-def StepStopContainersAndClearDb(Target: str, Friendly: str) -> bool:
-    R = _Ssh(Target, "docker ps -a --filter 'name=mediavortex-worker-' --format '{{.Names}}' | head -20", Timeout=10)
-    Names = [N for N in (R.stdout or "").splitlines() if N.strip()]
-    if Names:
-        _Ssh(Target, "cd /opt/mediavortex && docker compose down --timeout 30 2>&1 | tail -3", Timeout=120)
-    _Status(10, 13, "stop containers", "OK", f"stopped {len(Names)} container(s); Workers rows preserved (operator state)")
-    return True
-
-
 # directive: transcode-flow-canonical | # see claim-authority.md
 def StepStartInstances(Target: str, Friendly: str, Count: int) -> bool:
     """Start each systemd instance. Serialization not required: WorkerName is deploy-assigned, no advisory-claim race."""
@@ -226,7 +210,7 @@ def StepVerify(Target: str, Friendly: str, Count: int) -> bool:
     return len(Lines) >= Count
 
 
-# directive: transcode-flow-canonical -- bare-metal deploy reconciles Workers.{nvenccapable,qsvcapable} same as docker path
+# directive: transcode-flow-canonical -- bare-metal deploy reconciles Workers.{nvenccapable,qsvcapable}
 def StepReconcileCapabilities(Target: str, Friendly: str) -> bool:
     ScriptsDir = MediaVortexRoot / "Scripts"
     Prefix = f"{Friendly}-worker"
@@ -256,10 +240,6 @@ def main():
     Args = Parser.parse_args()
 
     Friendly, Ip, User, InventoryCount = _ResolveTarget(Args.target, Args.inventory, Args.user)
-    ComposeTemplate = MediaVortexRoot / "deploy" / "compose-templates" / f"{Friendly}.yml"
-    if ComposeTemplate.exists():
-        print(f"[FAIL] {Friendly} is a docker/LXC host (compose template present at {ComposeTemplate}). Use deploy-linux-worker.py, or invoke deploy-fleet.py --hosts {Friendly} which routes by backend.")
-        return 1
     Count = Args.count or InventoryCount
     Target = f"{User}@{Ip}"
     print("=" * 60)
@@ -292,8 +272,6 @@ def main():
         print()
         print(f"[OK] --sync-only complete on {Friendly}; per-service restart handled by deploy-worker.py")
         return 0
-    if not StepStopContainersAndClearDb(Target, Friendly):
-        return 2
     if not StepStartInstances(Target, Friendly, Count):
         return 3
     if not StepReconcileCapabilities(Target, Friendly):

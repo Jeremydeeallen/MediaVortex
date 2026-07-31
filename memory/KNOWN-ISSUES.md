@@ -4,30 +4,6 @@
 
 ### deploy
 
-### [BUG-0085] Docker build-cache leaks pre-Reset-9 `.pyc` into worker containers; long-lived Python process serves stale bytecode
-**Date:** 2026-07-04 | **Area:** deploy / worker-containers | **Supersedes:** BUG-0084 (row 41107 stranded shape had the same root cause)
-
-**What breaks:** After `py deploy/deploy-linux-worker.py <host>` rebuilds + starts a worker container, the on-disk `.py` sources reflect HEAD but the `__pycache__/*.pyc` files carry pre-Reset-9 bytecode from a cached image layer. Python's source-mtime staleness check misses the discrepancy (mtimes were forged to match by an earlier build step), so the long-lived WorkerService process imports stale `.pyc` and behaves as pre-cutover code. Fresh `python3 -c "..."` invocations via `docker exec` return correct behavior; only the persistent process is affected.
-
-**Repro:** 2026-07-04 dot-worker-1 post-deploy:
-- Container source at HEAD 5c2540a; `Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.py::Decide()` returns `Action='Replace'` on Reject/NoSavings inputs.
-- Container `.pyc` at `/opt/mediavortex/Features/QualityTesting/Disposition/__pycache__/PostTranscodeDispositionDecider.cpython-312.pyc` (compiled 20:03 UTC) returns pre-Reset-9 `Action='BypassReplace'` when loaded by the worker process.
-- Attempt 41125 (MFID 809 Breaking Bad S01E03 Remux) emitted retired `Disposition='BypassReplace'` -> `transcodeattempts_disposition_enum` CHECK rejected -> row stranded with `Success=TRUE + Disposition=None`.
-- Remediation confirmed: `docker exec <container> find /opt/mediavortex -name __pycache__ -exec rm -rf {} +; docker compose restart worker-N`. Attempt 41126 emitted correct `Reject/NoSavings`.
-
-**Related residue:** row 41107 (MFID 5374 Phineas & Ferb S04E23 StreamCopy) 2026-07-04 15:26 has the same stranded shape (Success=TRUE + Disposition=None + AudioPolicyResolved/Json/AudioTracksEmittedJson=NULL). Previously theorized as StreamCopy checksum-mismatch (BUG-0084); root cause is BUG-0085 stale-pyc on the container that produced it. Backfilled at DELIVERING (transcode-flow-canonical) from sibling row 41108 to unblock C5 audit.
-
-**First place to look:**
-- `deploy/compose-templates/<host>.yml` + `deploy/Dockerfile` -- does `COPY . .` overwrite `.pyc` too, or does `.dockerignore` skip `__pycache__` only during context copy (letting the cached layer's `.pyc` survive)?
-- `deploy/deploy-linux-worker.py` -- build step should force `--no-cache` OR the Dockerfile should carry `RUN find /opt/mediavortex -name __pycache__ -type d -exec rm -rf {} +` after the source copy.
-- Container `docker compose exec worker-N python3 -c "import importlib.util; s = importlib.util.spec_from_file_location('x', '/opt/mediavortex/Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.py'); print(s.origin)"` -- confirms which file the interpreter would load; the `__pycache__` sibling tells you what got resolved instead.
-
-**Proposed criterion:** "Post-deploy verification: for every deployed worker container, `docker compose exec worker-N python3 -c 'from Features.QualityTesting.Disposition.PostTranscodeDispositionDecider import PostTranscodeDispositionDecider; import inspect; print(inspect.getsourcefile(PostTranscodeDispositionDecider))'` and `stat -c %Y` on the returned path both match the value returned by `git log -1 --format=%ct HEAD -- <that file>`. Zero `.pyc` older than the corresponding `.py` after deploy. Deploy script fails loudly if either invariant is violated (no silent stale-code shipping)."
-
-**Fix with:** `/t BUG-0085`.
-
----
-
 ### disposition
 
 ### [BUG-0079] Requeue disposition never enqueues a new TranscodeQueue row; .inprogress orphans on disk
@@ -132,7 +108,7 @@ Detector fires -> HandleJobFailure marks attempt failed -> re-set queue row to P
 - 17:35 StuckJobDetector fires "no frame advance for 5.1 min", marks TranscodeAttempts.Id=41037 Success=False. Old Demucs (PID 29) keeps running.
 - Same worker re-claims 144640, spawns Demucs (PID 59) alongside PID 29.
 - 17:40 detector fires again, marks 41038 failed, Demucs PID 89 spawns alongside 29 and 59.
-- Confirmed via `ssh root@10.0.0.230 "docker exec mediavortex-worker-1-1 sh -c 'ps -ef'"` -- three concurrent `demucs.separate` procs.
+- Confirmed via `ssh root@10.0.0.230 "ps -ef | grep demucs"` -- three concurrent `demucs.separate` procs.
 - External `kill -9 29 59 89` reaped the demucs procs; JobProcessor advanced to ffmpeg stage; two av1_qsv ffmpeg parent+child pairs spawned racing for the same output path.
 
 **Evidence:**
@@ -352,13 +328,13 @@ The principle: each pick decision must either (a) be a single explicit rule with
 ### [BUG-0064] Deploy story not cleanly documented -- I9 local-vs-remote split missing; remote-worker deploy has inter-worker dependencies; two scripts where one SOLID script belongs
 **Date:** 2026-06-23 | **Area:** deploy
 
-**What breaks:** The deploy contract conflates two fundamentally different operations: (a) bringing remote worker hosts (Linux Docker / Windows SMB) online, and (b) cycling local I9 WebService + WorkerService processes that run directly from the live source tree. Today both go through the deploy/ surface, references to "deploy I9" exist in flow docs + bringup, and there's no single operator-facing script that captures the policy. Three concrete acceptance criteria from operator:
+**What breaks:** The deploy contract conflates two fundamentally different operations: (a) bringing remote worker hosts (bare-metal Linux / Windows SMB) online, and (b) cycling local I9 WebService + WorkerService processes that run directly from the live source tree. Today both go through the deploy/ surface, references to "deploy I9" exist in flow docs + bringup, and there's no single operator-facing script that captures the policy. Three concrete acceptance criteria from operator:
 
-1. **Local I9 services have NO deploy.** They are the active codebase -- code changes apply on restart. Operator-facing command starts both services from their respective venvs (`venv/` for the worker, `WebService/venv/` for the WebService -- see memory `feedback_webservice_venv_drift.md`), **WebService ALWAYS first online**, and **must check for any running WorkerService process on I9 and stop it before starting a new one** (see memory `feedback_one_i9_worker_instance.md` + `feedback_worker_restart_protocol.md`). No SyncSource, no Task Scheduler registration, no Docker.
+1. **Local I9 services have NO deploy.** They are the active codebase -- code changes apply on restart. Operator-facing command starts both services from their respective venvs (`venv/` for the worker, `WebService/venv/` for the WebService -- see memory `feedback_webservice_venv_drift.md`), **WebService ALWAYS first online**, and **must check for any running WorkerService process on I9 and stop it before starting a new one** (see memory `feedback_one_i9_worker_instance.md` + `feedback_worker_restart_protocol.md`). No SyncSource, no Task Scheduler registration.
 
-2. **Remote worker deploys are independent.** Deploying larry/wakko/dot or any future host MUST NOT depend on the state of any other worker. Today `deploy-fleet.py`-style orchestration and shared compose templates create cross-worker dependencies (one host's deploy can stall waiting on another's heartbeat or share a build context). Each remote deploy is a self-contained unit; failure on host A does not block or roll back host B.
+2. **Remote worker deploys are independent.** Deploying larry/wakko/dot or any future host MUST NOT depend on the state of any other worker. Today `deploy-fleet.py`-style orchestration creates cross-worker dependencies (one host's deploy can stall waiting on another's heartbeat). Each remote deploy is a self-contained unit; failure on host A does not block or roll back host B.
 
-3. **Single SOLID deploy script.** Today there are two scripts (`deploy-linux-worker.py` + `deploy-windows-worker.py`) plus a fleet wrapper plus a register-task PS1. Collapse to ONE entry-point script with a Strategy pattern per host shape (LXC-Docker / bare-metal-Docker / Windows-SMB / I9-local). SRP: per-shape strategy owns its bring-up steps; the entry script owns CLI parsing + inventory lookup + verification polling only. Constructor-DI throughout. 100% clean code -- no scripts-shaped-as-bash-pipelines, no shared mutable state, no copy-paste between OS branches.
+3. **Single SOLID deploy script.** Today there are two scripts (`deploy-baremetal-worker.py` + `deploy-windows-worker.py`) plus a fleet wrapper plus a register-task PS1. Collapse to ONE entry-point script with a Strategy pattern per host shape (bare-metal Linux / Windows-SMB / I9-local). SRP: per-shape strategy owns its bring-up steps; the entry script owns CLI parsing + inventory lookup + verification polling only. Constructor-DI throughout. 100% clean code -- no scripts-shaped-as-bash-pipelines, no shared mutable state, no copy-paste between OS branches.
 
 **Violates:** `deploy/worker-deploy.feature.md` criterion 14 (added with this entry). Also touches:
 - `feature-docs.md` / `flow-docs.md` -- the I9-local-vs-remote split must be reflected in feature + flow contracts
@@ -368,9 +344,9 @@ The principle: each pick decision must either (a) be a single explicit rule with
 - `deploy/worker-deploy.feature.md` lines 16-17 -- the "Code updates on I9-2024" paragraph today is informal prose; it needs to become a hard contract (no deploy path, just start/stop)
 - `deploy/deploy-windows-worker.py` -- this exists today and registers a Windows Task Scheduler task; if I9 is local-only it shouldn't be running through this path
 - `deploy/bringup.md` -- the runbook should route I9 to a local start command, not a deploy
-- `deploy/deploy-linux-worker.py` + `deploy/deploy-fleet.py` (if it exists) -- audit for inter-worker dependencies
+- `deploy/deploy-baremetal-worker.py` + `deploy/deploy-fleet.py` (if it exists) -- audit for inter-worker dependencies
 - `StartMediaVortex.py` -- already exists as the local lifecycle entry point; the I9-local "deploy" probably collapses into this
-- The three host-shape strategies that need to exist: LXC-Docker (larry), bare-metal Linux (wakko, dot), Windows-SMB (I9), and the I9-local NO-OP
+- The two host-shape strategies that need to exist: bare-metal Linux (larry, wakko, dot), Windows-SMB (I9), and the I9-local NO-OP
 
 **Fix with:** `/t BUG-0064`.
 
@@ -1035,7 +1011,7 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 ### [BUG-0033] Linux worker deploy flow doc incomplete -- no post-deploy verification, FFmpeg path troubleshooting, or automation parity with Windows
 **Date:** 2026-05-13
 
-**What breaks:** `deploy/worker-deploy.flow.md` ends at `docker compose up -d` with only an optional SVT-AV1 encoder check and a Workers table query. Does not document: post-deploy health checks confirming FFmpeg/FFprobe paths resolve inside the container, the full container-started-to-operational sequence, troubleshooting when FFmpeg path resolution fails, or what additional operator actions differ between first deploy vs code-only redeploy. An operator following this doc alone would not know how to diagnose "worker registered but can't find FFmpeg" without reading source code. The Windows deploy path (`deploy/windows-worker.flow.md` + `deploy-windows-worker.py`) has full post-deploy verification and single-command automation; Linux has neither.
+**What breaks:** `deploy/worker-deploy.flow.md` ends at `systemctl start mediavortex-worker@N` with only an optional SVT-AV1 encoder check and a Workers table query. Does not document: post-deploy health checks confirming FFmpeg/FFprobe paths resolve on the host, the full unit-started-to-operational sequence, troubleshooting when FFmpeg path resolution fails, or what additional operator actions differ between first deploy vs code-only redeploy. An operator following this doc alone would not know how to diagnose "worker registered but can't find FFmpeg" without reading source code. The Windows deploy path (`deploy/windows-worker.flow.md` + `deploy-windows-worker.py`) has full post-deploy verification and single-command automation; Linux has neither.
 
 **Violates:** `deploy/worker-deploy.feature.md` criterion 20 (added with this entry).
 
@@ -1382,7 +1358,7 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 - [x] All WHERE/JOIN reads switched from FilePath to MediaFileId (Phase 3b Step 1)
 - [x] FilePath removed from INSERT/UPDATE statements for TranscodeAttempts, TranscodeFiles, ProblemFiles (Phase 3b Step 2)
 - [x] NOT NULL constraint dropped from FilePath on TranscodeAttempts, TranscodeFiles, ProblemFiles (was blocking INSERTs)
-- [x] Deploy verification -- workers Online and heartbeating (root cause: CrashRecoveryService killed itself because Python is PID 1 in Docker and the recorded ProcessId from a prior crash matched the new container's own PID; also bumped postgres max_connections 30->200 and added pool closeall() before os._exit() to stop connection-leak death spiral)
+- [x] Deploy verification -- workers Online and heartbeating (root cause: CrashRecoveryService killed itself because a stale ActiveJobs ProcessId from a prior crash matched the new WorkerService PID after a systemd restart; also bumped postgres max_connections 30->200 and added pool closeall() before os._exit() to stop connection-leak death spiral)
 - [ ] Run RenameFilePathColumns.py to soft-rename columns (Phase 3b Step 4)
 - [ ] Drop FilePath_Deprecated columns (Phase 4 -- point of no return)
 

@@ -46,7 +46,7 @@ This is the ONLY cross-worker terminal write in the system. Every other worker-o
 
 ## Worker identity is deterministic (deploy-assigned)
 
-`WorkerName` is assigned at deploy time via `MEDIAVORTEX_WORKER_NAME` env var. Bare-metal: systemd `EnvironmentFile=/etc/mediavortex/instance-%i.env` sets one file per instance (deploy writes them). Docker: compose sets `MEDIAVORTEX_WORKER_NAME` per service. Runtime slot-claim, advisory locks, heartbeat-staleness reclaim, prefix env vars, and `socket.gethostname()` fallbacks are forbidden. `WorkerService.Main._ResolveWorkerName` fail-louds when the env var is missing -- no derivation from any other source.
+`WorkerName` is assigned at deploy time via `MEDIAVORTEX_WORKER_NAME` env var. Bare-metal Linux: systemd `EnvironmentFile=/etc/mediavortex/instance-%i.env` sets one file per instance (deploy writes them). Windows: Task Scheduler sets `MEDIAVORTEX_WORKER_NAME` in the task environment. Runtime slot-claim, advisory locks, heartbeat-staleness reclaim, prefix env vars, and `socket.gethostname()` fallbacks are forbidden. `WorkerService.Main._ResolveWorkerName` fail-louds when the env var is missing -- no derivation from any other source.
 
 Reason (2026-07-25 recurring incident): runtime slot-claim races produced N processes with identical WorkerName, each holding a `BoundedSemaphore(MaxConcurrentJobs=1)`, each claiming one job = N concurrent per WorkerName. Root class: identity was computed, not assigned. Deterministic assignment closes the class.
 

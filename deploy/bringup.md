@@ -6,26 +6,20 @@ Pick the shape, check prerequisites, run one command, verify.
 
 | The host runs... | Use |
 |---|---|
-| Linux under Docker (LXC, bare-metal server) | `deploy-linux-worker.py` -- see `worker-deploy-linux.flow.md` |
-| Bare-metal Linux, no containers (Intel Arc / Xe workstation) | `deploy-baremetal-worker.py` -- see `worker-deploy-baremetal.flow.md` |
+| Bare-metal Linux (LXC container, physical Linux workstation) | `deploy-baremetal-worker.py` -- see `worker-deploy-baremetal.flow.md` |
 | Windows 10/11 -- native via Task Scheduler | `deploy-windows-worker.py` -- see `worker-deploy-windows.flow.md` |
 
 ## 2. Prerequisites (one-time per host)
 
 The `infrastructure` repo (`https://github.com/TheAdroitDBA/infrastructure`) is the **single source of truth** for host inventory, mount specifications, and bootstrap automation. Edit `infrastructure/terraform/inventory.toml` first; the steps below consume it.
 
-**Linux under Docker** -- host in `inventory.toml`; compose template at `deploy/compose-templates/<friendly>.yml`; root SSH from dev workstation; DB reachable on `10.0.0.15:5432`. Bringup by host shape:
-
-- **LXC (Larry CT 218)**: provisioned by `infrastructure/terraform/mediavortex-workers/`, which reads `bind_mounts` from `inventory.toml`. `terraform apply` installs rootfs, mounts, Docker, NFS.
-
-**Bare-metal Linux (Wakko / Intel Arc + dot / NVIDIA)** -- host in `inventory.toml`; root SSH; DB reachable on `10.0.0.15:5432`. Run `py infrastructure/terraform/mediavortex-baremetal-linux-bootstrap.py --host <friendly>` first. Installs `nfs-common`, Python 3.12, GPU runtime (Intel Level Zero for Arc, NVIDIA driver + nvidia-container-toolkit for RTX), reconciles `/etc/fstab` from `fstab_mounts`, drops the systemd template unit at `/etc/systemd/system/mediavortex-worker@.service`.
+**Bare-metal Linux (larry LXC 218 / wakko / Intel Arc + dot / NVIDIA)** -- host in `inventory.toml`; root SSH; DB reachable on `10.0.0.15:5432`. Run `py infrastructure/terraform/mediavortex-baremetal-linux-bootstrap.py --host <friendly>` first. Installs `nfs-common`, Python 3.12, GPU runtime (Intel Level Zero for Arc, NVIDIA driver for RTX), reconciles `/etc/fstab` from `fstab_mounts`, drops the systemd template unit at `/etc/systemd/system/mediavortex-worker@.service`.
 
 **Windows** -- see `worker-deploy-windows.flow.md` for the full prereq list (OpenSSH Server, Python 3.12+, SMB credential caching, Vaultwarden references).
 
 ## 3. Run the deploy
 
 ```bash
-py deploy/deploy-linux-worker.py <friendly-or-ip>     # Docker on Linux
 py deploy/deploy-baremetal-worker.py <friendly-or-ip> # Bare-metal Linux
 py deploy/deploy-windows-worker.py <ip>               # Windows
 ```
@@ -43,7 +37,7 @@ The script names the failing check and a one-line remediation hint. Open the flo
 ## References
 
 - Contract: `deploy/worker-deploy.feature.md`
-- Flows: `deploy/worker-deploy-{linux,baremetal,windows}.flow.md`
+- Flows: `deploy/worker-deploy-{baremetal,windows}.flow.md`
 - Inventory: `infrastructure/terraform/inventory.toml`
 - Vault: `infrastructure/terraform/secrets.py`
 - Known issues: `memory/KNOWN-ISSUES.md`

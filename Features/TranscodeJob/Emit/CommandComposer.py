@@ -74,7 +74,7 @@ class CommandComposer:
             '-metadata', f'"mediavortex_ts={Ts}"',
         ]
 
-    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C25 -- baremetal ships to /opt/mediavortex/src, Docker/Windows use different roots; check all known locations.
+    # directive: e2e-bug-fixes | # see e2e-bug-fixes.C25 -- baremetal ships to /opt/mediavortex/src, Windows uses repo root; check all known locations.
     def _ReadCommitShaOnce(self) -> str:
         try:
             Candidates = [
