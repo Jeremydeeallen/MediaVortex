@@ -1,5 +1,6 @@
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -18,6 +19,10 @@ from Features.AudioNormalization.Services.DemucsDaemonProtocol import (
 
 class DemucsDaemonUnavailableError(RuntimeError):
     """Daemon subprocess failed to start or exited unexpectedly."""
+
+
+# directive: audio-preencode-progress -- tqdm line shape verified 2026-07-30: ` 17%|<bar>| 5.85/35.099... [00:01<00:09, 2.96seconds/s]`. Universal-newline mode splits Demucs' '\r'-terminated updates into readline() lines.
+_TQDM_LINE_RE = re.compile(r"^\s*(\d+)%\|.*?\|\s*([\d.]+)\s*/\s*([\d.]+)\b")
 
 
 # directive: transcode-flow-canonical -- process-singleton amortizes model load + XPU compile across every job the worker handles
@@ -39,7 +44,7 @@ def GetOrStartDaemon(PythonExe=None, StartTimeoutSec=180):
 class DemucsDaemonClient:
     """Owns the long-lived Demucs subprocess for one WorkerService instance."""
 
-    # directive: transcode-flow-canonical -- IsolateReadTimeoutSec caps blocking read so a hung daemon does not deadlock the WorkerService thread
+    # directive: audio-preencode-progress -- IsolateReadTimeoutSec caps blocking read so a hung daemon does not deadlock the WorkerService thread; ProgressCallback receives per-tqdm-tick (percent, done, total) from stderr line parser during an active IsolateVocals call
     def __init__(self, PythonExe=None, StartTimeoutSec=180, IsolateReadTimeoutSec=1800):
         self._PythonExe = PythonExe or sys.executable
         self._StartTimeoutSec = StartTimeoutSec
@@ -48,6 +53,8 @@ class DemucsDaemonClient:
         self._Lock = threading.Lock()
         self._StdoutQueue = None
         self._ReaderThread = None
+        self._ProgressCallback = None
+        self._LastStderrLine = ""
 
     def Start(self):
         with self._Lock:
@@ -86,15 +93,22 @@ class DemucsDaemonClient:
         finally:
             self._StdoutQueue.put(None)
 
-    # directive: transcode-flow-canonical -- drain stderr into rolling in-memory buffer so full pipe buffer never blocks the daemon; last 4KB kept for post-crash diagnostic
+    # directive: audio-preencode-progress -- readline() over text-mode pipe: universal-newline translation maps demucs tqdm's '\r' updates to '\n'-terminated lines. Parse each line: tqdm ticks fire ProgressCallback; non-tqdm lines are retained as _LastStderrLine for post-crash diagnostic. Pipe-buffer safety preserved because every read consumes bytes; only per-line state is retained.
     def _StderrDrainLoop(self):
-        self._StderrTail = []
         try:
-            for Chunk in iter(lambda: self._Proc.stderr.read(4096), ''):
-                self._StderrTail.append(Chunk)
-                if sum(len(C) for C in self._StderrTail) > 4096:
-                    Combined = ''.join(self._StderrTail)[-4096:]
-                    self._StderrTail = [Combined]
+            for Line in iter(self._Proc.stderr.readline, ''):
+                Stripped = Line.rstrip()
+                Match = _TQDM_LINE_RE.match(Stripped)
+                if Match:
+                    Callback = self._ProgressCallback
+                    if Callback is not None:
+                        try:
+                            Callback(int(Match.group(1)), float(Match.group(2)), float(Match.group(3)))
+                        # fail-loud-ok: progress callback errors must not kill the daemon drain thread; failure surfaces via missing progress rows, not a crashed daemon
+                        except Exception:
+                            pass
+                elif Stripped:
+                    self._LastStderrLine = Stripped[-500:]
         except (ValueError, OSError):
             pass
 
@@ -118,7 +132,8 @@ class DemucsDaemonClient:
                 return True
         return False
 
-    def IsolateVocals(self, InputWavPath, OutputDir, ModelName='htdemucs'):
+    # directive: audio-preencode-progress -- ProgressCallback receives (percent, done, total) per tqdm tick from the daemon's stderr line parser; cleared in finally so ticks from one request cannot leak into another
+    def IsolateVocals(self, InputWavPath, OutputDir, ModelName='htdemucs', ProgressCallback=None):
         with self._Lock:
             if self._Proc is None or self._Proc.poll() is not None:
                 raise DemucsDaemonUnavailableError('Demucs daemon not running; call Start() first or restart on crash')
@@ -128,22 +143,26 @@ class DemucsDaemonClient:
                 OutputDir=OutputDir,
                 ModelName=ModelName,
             )
-            self._Proc.stdin.write(EncodeRequest(Req) + '\n')
-            self._Proc.stdin.flush()
+            self._ProgressCallback = ProgressCallback
             try:
-                ResponseLine = self._ReadLineWithDeadline(self._IsolateReadTimeoutSec)
-            except DemucsDaemonUnavailableError:
-                self._Kill()
-                raise
-            if not ResponseLine or not ResponseLine.strip():
-                StderrTail = ''.join(getattr(self, '_StderrTail', []))[-1000:]
-                self._Kill()
-                raise DemucsDaemonUnavailableError(f'Demucs daemon closed stdout unexpectedly. Stderr tail: {StderrTail}')
-            Resp: IsolateResponse = DecodeResponse(ResponseLine.strip())
-            if Resp.RequestId != Req.RequestId:
-                self._Kill()
-                raise DemucsDaemonUnavailableError(f'Response request-id mismatch: expected {Req.RequestId}, got {Resp.RequestId}')
-            return Resp
+                self._Proc.stdin.write(EncodeRequest(Req) + '\n')
+                self._Proc.stdin.flush()
+                try:
+                    ResponseLine = self._ReadLineWithDeadline(self._IsolateReadTimeoutSec)
+                except DemucsDaemonUnavailableError:
+                    self._Kill()
+                    raise
+                if not ResponseLine or not ResponseLine.strip():
+                    StderrTail = self._LastStderrLine
+                    self._Kill()
+                    raise DemucsDaemonUnavailableError(f'Demucs daemon closed stdout unexpectedly. Stderr tail: {StderrTail}')
+                Resp: IsolateResponse = DecodeResponse(ResponseLine.strip())
+                if Resp.RequestId != Req.RequestId:
+                    self._Kill()
+                    raise DemucsDaemonUnavailableError(f'Response request-id mismatch: expected {Req.RequestId}, got {Resp.RequestId}')
+                return Resp
+            finally:
+                self._ProgressCallback = None
 
     # directive: transcode-flow-canonical -- deadline read via reader-thread queue; cross-platform (Windows select() rejects pipe fds); returns '' on daemon exit, raises on wall-clock timeout
     def _ReadLineWithDeadline(self, TimeoutSec):

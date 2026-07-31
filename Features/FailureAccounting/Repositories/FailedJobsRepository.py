@@ -52,6 +52,8 @@ class FailedJobsRepository(BaseRepository):
             "  SELECT ta.MediaFileId, "
             "         COUNT(*) AS fail_count, "
             "         MAX(ta.AttemptDate) AS last_attempt, "
+            "         MIN(ta.AttemptDate) AS first_attempt, "
+            "         MAX(ta.CompletedDate) AS last_completed, "
             "         (ARRAY_AGG(ta.ErrorMessage ORDER BY ta.AttemptDate DESC))[1] AS last_error, "
             "         (ARRAY_AGG(ta.WorkerName ORDER BY ta.AttemptDate DESC))[1] AS last_worker "
             "    FROM TranscodeAttempts ta "
@@ -64,7 +66,8 @@ class FailedJobsRepository(BaseRepository):
             "   GROUP BY ta.MediaFileId"
             ") "
             "SELECT mf.Id AS MediaFileId, mf.FileName, COALESCE(mf.RelativePath, '') AS FilePath, "
-            "       r.fail_count, r.last_error, r.last_attempt, mf.AssignedProfile, r.last_worker, "
+            "       r.fail_count, r.last_error, r.last_attempt, r.first_attempt, r.last_completed, "
+            "       mf.AssignedProfile, r.last_worker, "
             "       mf.SizeMB, mf.LastFailureResetAt "
             "  FROM ranked r "
             "  JOIN MediaFiles mf ON mf.Id = r.MediaFileId "
@@ -75,6 +78,12 @@ class FailedJobsRepository(BaseRepository):
         )
         Params.extend([int(Limit), int(Offset)])
         Rows = self.ExecuteQuery(Query, tuple(Params))
+        from Core.DateTimeHelpers import FormatDuration
+        def _DurationStr(First, Last, Completed):
+            End = Completed if Completed is not None else Last
+            if First is None or End is None or End == First:
+                return None
+            return FormatDuration((End - First).total_seconds())
         return [
             FailedJobRow(
                 MediaFileId=int(R['MediaFileId']),
@@ -87,6 +96,7 @@ class FailedJobsRepository(BaseRepository):
                 LastWorkerName=R.get('last_worker'),
                 SizeMB=float(R['SizeMB']) if R.get('SizeMB') is not None else None,
                 LastFailureResetAt=R.get('LastFailureResetAt'),
+                Duration=_DurationStr(R.get('first_attempt'), R.get('last_attempt'), R.get('last_completed')),
             )
             for R in Rows
         ]

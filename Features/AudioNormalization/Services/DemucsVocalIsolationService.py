@@ -12,6 +12,43 @@ from Core.Path.LocalPath import LocalExists, LocalJoin
 DEMUCS_MODEL_NAME = "htdemucs"
 SILENCE_FLOOR_DBFS = -120.0
 
+# directive: audio-preencode-progress -- shared streaming ffmpeg runner: spawns Popen, parses "Duration: HH:MM:SS.xx" and "time=HH:MM:SS.xx" from stderr, invokes ProgressCallback(percent) per tick. Returns full stderr on completion for downstream JSON extraction. Kept next to the loudnorm callers because those are its only consumers.
+_FF_DUR_RE = re.compile(r"Duration:\s+(\d+):(\d+):(\d+)\.(\d+)")
+_FF_TIME_RE = re.compile(r"\btime=(\d+):(\d+):(\d+)\.(\d+)")
+
+
+def _ParseHms(H, M, S, Cs):
+    return int(H) * 3600 + int(M) * 60 + int(S) + int(Cs) / 100.0
+
+
+def _RunFfmpegStreaming(Cmd, ProgressCallback):
+    Proc = subprocess.Popen(Cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, bufsize=1)
+    StderrChunks = []
+    TotalSec = None
+    LastPct = -1
+    for Line in iter(Proc.stderr.readline, ''):
+        StderrChunks.append(Line)
+        if TotalSec is None:
+            DurMatch = _FF_DUR_RE.search(Line)
+            if DurMatch:
+                TotalSec = _ParseHms(*DurMatch.groups())
+        TimeMatch = _FF_TIME_RE.search(Line)
+        if TimeMatch and TotalSec and TotalSec > 0 and ProgressCallback is not None:
+            DoneSec = _ParseHms(*TimeMatch.groups())
+            Pct = min(99, int(100.0 * DoneSec / TotalSec))
+            if Pct != LastPct:
+                LastPct = Pct
+                try:
+                    ProgressCallback(Pct)
+                # fail-loud-ok: progress callback errors must not abort the ffmpeg subprocess; measurement still completes and returns stderr
+                except Exception:
+                    pass
+    RC = Proc.wait(timeout=1800)
+    Stderr = ''.join(StderrChunks)
+    if RC != 0:
+        raise RuntimeError(f"ffmpeg measurement exit {RC}: {Stderr[-500:]}")
+    return Stderr
+
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
 class DemucsIsolationResult:
@@ -34,14 +71,15 @@ class DemucsVocalIsolationService:
         self.ModelName = ModelName
         self._Daemon = Daemon
 
-    def IsolateVocals(self, StereoInputWavPath, OutputDir):
+    # directive: audio-preencode-progress -- ProgressCallback forwarded to daemon: fires (percent, done_sec, total_sec) per tqdm tick from Demucs subprocess stderr
+    def IsolateVocals(self, StereoInputWavPath, OutputDir, ProgressCallback=None):
         os.makedirs(OutputDir, exist_ok=True)
         LoggingService.LogInfo(
             f"Demucs isolating {StereoInputWavPath} -> {OutputDir} (via daemon)",
             "DemucsVocalIsolationService", "IsolateVocals",
         )
         Daemon = self._GetDaemon()
-        Resp = Daemon.IsolateVocals(StereoInputWavPath, OutputDir, ModelName=self.ModelName)
+        Resp = Daemon.IsolateVocals(StereoInputWavPath, OutputDir, ModelName=self.ModelName, ProgressCallback=ProgressCallback)
         if not Resp.Success:
             raise RuntimeError(f"demucs daemon isolation failed: {Resp.ErrorMessage}")
         VocalsPath = Resp.VocalsWavPath
@@ -91,13 +129,16 @@ class DemucsVocalIsolationService:
         IsolationResult.PremixWavPath = OutputWavPath
         return IsolationResult
 
-    # directive: transcode-flow-canonical
-    def MeasureSourceLoudnorm(self, SourcePath, TargetLufs, TargetLra, TargetTruePeakDbtp):
+    # directive: audio-preencode-progress -- ffmpeg's single-pass loudnorm measurement can take 30-90s on a 24-min file; stream stderr, parse Duration + time= ticks, invoke ProgressCallback so /Activity shows live percent instead of 60s of frozen 0%. Drops `-nostats` so ffmpeg emits progress.
+    def MeasureSourceLoudnorm(self, SourcePath, TargetLufs, TargetLra, TargetTruePeakDbtp, ProgressCallback=None):
         Filter = f"loudnorm=I={float(TargetLufs):.2f}:LRA={float(TargetLra):.2f}:TP={float(TargetTruePeakDbtp):.2f}:print_format=json"
-        Result = subprocess.run(
-            [self.FfmpegPath, "-hide_banner", "-nostats", "-i", SourcePath, "-map", "0:a:0", "-af", Filter, "-f", "null", "-"],
-            capture_output=True, text=True, timeout=1800,
+        StderrText = _RunFfmpegStreaming(
+            [self.FfmpegPath, "-hide_banner", "-i", SourcePath, "-map", "0:a:0", "-af", Filter, "-f", "null", "-"],
+            ProgressCallback,
         )
+        class _R: pass
+        Result = _R()
+        Result.stderr = StderrText
         Match = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", Result.stderr, re.DOTALL)
         if not Match:
             LoggingService.LogWarning(
@@ -120,14 +161,16 @@ class DemucsVocalIsolationService:
             )
             return None, None, None, None
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C14
-    def MeasurePremixLoudnorm(self, WavPath, TargetLufs, TargetLra, TargetTruePeakDbtp):
-        """Measure premix loudness with ffmpeg's loudnorm analysis pass; return (I, LRA, TP, thresh) or all-None on parse failure."""
+    # directive: audio-preencode-progress -- premix loudnorm measurement streams ffmpeg time= per second; drop -nostats. Same shape as MeasureSourceLoudnorm.
+    def MeasurePremixLoudnorm(self, WavPath, TargetLufs, TargetLra, TargetTruePeakDbtp, ProgressCallback=None):
         Filter = f"loudnorm=I={float(TargetLufs):.2f}:LRA={float(TargetLra):.2f}:TP={float(TargetTruePeakDbtp):.2f}:print_format=json"
-        Result = subprocess.run(
-            [self.FfmpegPath, "-hide_banner", "-nostats", "-i", WavPath, "-af", Filter, "-f", "null", "-"],
-            capture_output=True, text=True, timeout=900,
+        StderrText = _RunFfmpegStreaming(
+            [self.FfmpegPath, "-hide_banner", "-i", WavPath, "-af", Filter, "-f", "null", "-"],
+            ProgressCallback,
         )
+        class _R: pass
+        Result = _R()
+        Result.stderr = StderrText
         Match = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", Result.stderr, re.DOTALL)
         if not Match:
             LoggingService.LogWarning(

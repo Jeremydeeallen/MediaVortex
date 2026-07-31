@@ -50,6 +50,7 @@ def ListCappedJobs():
                     'LastWorkerName': R.LastWorkerName,
                     'SizeMB': R.SizeMB,
                     'LastFailureResetAt': R.LastFailureResetAt.isoformat() if R.LastFailureResetAt else None,
+                    'Duration': R.Duration,
                 }
                 for R in Rows
             ],

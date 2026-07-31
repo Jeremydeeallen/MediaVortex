@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
 from Core.Database.DatabaseService import DatabaseService
+from Core.DateTimeHelpers import AsAwareUtc, FormatDuration
 from Features.Activity.Models.ActiveJobRow import ActiveJobRow
 from Features.Activity.Models.WorkerTile import WorkerTile
 from Features.Activity.Models.DashboardSnapshot import DashboardSnapshot
@@ -242,6 +243,7 @@ class DashboardSnapshotService:
             "ORDER BY aj.StartedAt ASC"
         )
         Out: List[ActiveJobRow] = []
+        Now = datetime.now(timezone.utc)
         for R in Rows:
             RawAttemptId = R.get('AttemptId')
             if RawAttemptId is None:
@@ -252,6 +254,10 @@ class DashboardSnapshotService:
             SizeBytes = R.get('SizeBytes')
             TargetKbps = R.get('TargetVideoKbps')
             EstSavings = _EstimateSavings(SizeBytes, R.get('SourceVideoKbps'), TargetKbps)
+            ClaimedAt = R.get('StartedAt')
+            ElapsedStr = None
+            if ClaimedAt is not None:
+                ElapsedStr = FormatDuration((Now - AsAwareUtc(ClaimedAt)).total_seconds())
             Out.append(ActiveJobRow(
                 AttemptId=AttemptId,
                 MediaFileId=int(R['MediaFileId']) if R.get('MediaFileId') is not None else None,
@@ -273,6 +279,7 @@ class DashboardSnapshotService:
                 TargetCodec=R.get('TargetCodec'),
                 EstimatedSavingsBytes=EstSavings,
                 CurrentPhase=R.get('CurrentPhase'),
+                Elapsed=ElapsedStr,
             ))
         return Out
 

@@ -18,3 +18,5 @@ class FailedJobRow:
     LastWorkerName: Optional[str]
     SizeMB: Optional[float] = field(default=None)
     LastFailureResetAt: Optional[datetime] = field(default=None)
+    # directive: audio-preencode-progress -- pickup-to-delivery clock time for this MediaFile's failure window (MAX(AttemptDate) - MIN(AttemptDate) across the counted failures), formatted hh:mm:ss (HHH:MM:SS at >= 100 hours). None when < 2 attempts to span.
+    Duration: Optional[str] = field(default=None)

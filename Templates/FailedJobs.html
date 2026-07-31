@@ -251,6 +251,7 @@ const InitFailedJobsTable = () => {
         new ColumnDefinition({ Key: 'FailureCount', Header: 'Failures', Sortable: true, CellRendererName: 'FailedCount', Align: 'right', Width: '90px' }),
         new ColumnDefinition({ Key: 'LastErrorMessage', Header: 'Last error', CellRendererName: 'FailedError' }),
         new ColumnDefinition({ Key: 'LastAttemptDate', Header: 'Last attempt', Sortable: true, CellRendererName: 'FailedDate', Width: '160px' }),
+        new ColumnDefinition({ Key: 'Duration', Header: 'Duration', Align: 'right', Width: '110px' }),
         new ColumnDefinition({ Key: 'AssignedProfile', Header: 'Profile', Sortable: true, Width: '140px' }),
         new ColumnDefinition({ Key: 'LastWorkerName', Header: 'Last worker', Width: '140px' }),
         new ColumnDefinition({ Key: '__Reset', Header: 'Action', CellRendererName: 'FailedReset', Align: 'right', Width: '90px' }),

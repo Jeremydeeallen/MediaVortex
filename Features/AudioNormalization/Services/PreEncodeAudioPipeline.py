@@ -23,24 +23,30 @@ class PreEncodeAudioPipeline:
         self._RulesRepo = RulesRepo or AudioComplianceRulesRepository()
         self._Report = ProgressReporter or (lambda Phase, Percent, Info: None)
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C34
+    # directive: audio-preencode-progress -- every substep emits start (0%) + end (100%) rows via ProgressReporter -> TranscodeProgress. Demucs additionally receives per-tqdm-tick callback from the daemon so its progress is visible in real time (>= 1 Hz on real workloads).
     def Run(self, SourceFilePath, JobId):
         ScratchDir = LocalJoin(self.ScratchRoot, f"mv_audio_{JobId}")
         try:
             R = self._RulesRepo.GetRules()
-            self._Report('source.measure', 0.0, 'Measuring source loudness for Track 0 linear loudnorm')
+            self._Report('SourceMeasure', 0.0, 'Measuring source loudness for Track 0 linear loudnorm')
             SrcTargetTp = float(R['TargetTruePeakDbtp']) - float(R['SampleLimitHeadroomDb'])
+            SourceMeasureCallback = lambda Pct: self._Report('SourceMeasure', float(Pct), 'ffmpeg scanning source')
             SourceI, SourceLra, SourceTp, SourceThresh = self.DemucsService.MeasureSourceLoudnorm(
                 SourceFilePath,
                 TargetLufs=R['TargetIntegratedLufs'],
                 TargetLra=R.get('SourceMeasureTargetLra', 7.0),
                 TargetTruePeakDbtp=SrcTargetTp,
+                ProgressCallback=SourceMeasureCallback,
             )
-            self._Report('demucs.downmix', 0.0, 'Extracting stereo downmix for Demucs')
+            self._Report('SourceMeasure', 100.0, 'Source loudness measured')
+            self._Report('Downmix', 0.0, 'Extracting stereo downmix for Demucs')
             DownmixWavPath = self._ExtractStereoDownmix(SourceFilePath, ScratchDir)
-            self._Report('demucs.isolate', 0.0, f'Isolating vocals ({self.DemucsService.ModelName} via daemon)')
-            Isolation = self.DemucsService.IsolateVocals(DownmixWavPath, ScratchDir)
-            self._Report('demucs.premix', 0.0, 'Mixing boosted vocals + attenuated instrumental')
+            self._Report('Downmix', 100.0, 'Stereo downmix ready')
+            self._Report('Demucs', 0.0, f'Isolating vocals ({self.DemucsService.ModelName} via daemon)')
+            DemucsCallback = lambda Pct, DoneSec, TotalSec: self._Report('Demucs', float(Pct), f'{DoneSec:.1f}s / {TotalSec:.1f}s')
+            Isolation = self.DemucsService.IsolateVocals(DownmixWavPath, ScratchDir, ProgressCallback=DemucsCallback)
+            self._Report('Demucs', 100.0, 'Vocals isolated')
+            self._Report('Premix', 0.0, 'Mixing boosted vocals + attenuated instrumental')
             PremixWavPath = LocalJoin(ScratchDir, "dialog_boost_premix.wav")
             self.DemucsService.MixBoostedPremix(
                 Isolation, PremixWavPath,
@@ -52,14 +58,18 @@ class PreEncodeAudioPipeline:
                 DynaudnormFrameLen=R['PremixDynaudnormFrameLen'],
                 DynaudnormGaussSize=R['PremixDynaudnormGaussSize'],
             )
-            self._Report('demucs.measure', 0.0, 'Measuring premix loudness for two-pass linear loudnorm')
+            self._Report('Premix', 100.0, 'Premix WAV ready')
+            self._Report('LoudnormMeasure', 0.0, 'Measuring premix loudness for two-pass linear loudnorm')
             EffectiveTp = float(R['TargetTruePeakDbtp']) - float(R['SampleLimitHeadroomDb'])
+            LoudnormCallback = lambda Pct: self._Report('LoudnormMeasure', float(Pct), 'ffmpeg scanning premix')
             PremixI, PremixLra, PremixTp, PremixThresh = self.DemucsService.MeasurePremixLoudnorm(
                 PremixWavPath,
                 TargetLufs=R['DialogBoostTargetLufs'],
                 TargetLra=R['DialogBoostTargetLra'],
                 TargetTruePeakDbtp=EffectiveTp,
+                ProgressCallback=LoudnormCallback,
             )
+            self._Report('LoudnormMeasure', 100.0, 'Premix loudness measured')
             return {
                 'DemucsPremixPath': PremixWavPath,
                 'VocalsRmsDbfs': Isolation.VocalsRmsDbfs,

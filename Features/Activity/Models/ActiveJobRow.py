@@ -29,3 +29,5 @@ class ActiveJobRow:
     EstimatedSavingsBytes: Optional[int] = None
     # directive: audio-dialog-boost-real | # see audio-normalization.C34
     CurrentPhase: Optional[str] = None
+    # directive: audio-preencode-progress -- pickup-to-now clock time formatted hh:mm:ss (or HHH:MM:SS at >= 100 hours). Server-computed per snapshot poll; client renders verbatim.
+    Elapsed: Optional[str] = None

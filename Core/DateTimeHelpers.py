@@ -26,6 +26,19 @@ def AsAwareUtc(Dt: Optional[datetime]) -> Optional[datetime]:
     return Dt if Dt.tzinfo is not None else Dt.replace(tzinfo=timezone.utc)
 
 
+# directive: audio-preencode-progress -- shared duration formatter for /Activity Elapsed + /FailedJobs Duration cells. Renders hh:mm:ss up to 99:59:59, then HHH:MM:SS at >= 100 hours (no day/year rollover, no leading zero pad beyond three digits).
+def FormatDuration(TotalSeconds: Optional[float]) -> Optional[str]:
+    if TotalSeconds is None:
+        return None
+    Total = int(max(0.0, float(TotalSeconds)))
+    Hours = Total // 3600
+    Minutes = (Total % 3600) // 60
+    Seconds = Total % 60
+    if Hours >= 100:
+        return f"{Hours}:{Minutes:02d}:{Seconds:02d}"
+    return f"{Hours:02d}:{Minutes:02d}:{Seconds:02d}"
+
+
 def ToUtcIsoZ(Dt: Optional[datetime]) -> Optional[str]:
     """Serialize a datetime as ISO-8601 with the explicit `Z` suffix.
 

@@ -39,6 +39,8 @@ C6. **SharedTable renderer.** Both tables are rendered by SharedTable (`Static/j
 
 C7. **Graceful degradation.** If `/api/Activity/Snapshot` errors or times out, the page renders an empty Active Jobs table with a "no live work" message rather than blank. No raw error text to the operator.
 
+C8. **Phase + Progress + Elapsed cells populated during pre-encode.** Active Jobs table has separate `Phase`, `Progress`, and `Elapsed` columns. During pre-encode the `Phase` cell shows one of `SourceMeasure` / `Downmix` / `Demucs` / `LoudnormMeasure` / `Premix` (styled `.text-info`); Progress cell shows the numeric % from that substep (>= 1 Hz during Demucs). `Elapsed` renders pickup-to-now clock time formatted `hh:mm:ss` (or `HHH:MM:SS` when hours >= 100), server-computed from `TranscodeAttempts.AttemptDate` -> `NOW()` per snapshot. Redundant phase-in-progress-cell rendering is refused (double render). Verifiable: DOM inspection during live Demucs shows Phase cell = `Demucs`, Progress cell = e.g. `42%`, Elapsed cell increments ~5s between polls; `Core.DateTimeHelpers.FormatDuration` is the shared formatter (unit-tested by `Tests/Contract/TestDurationFormatter.py`).
+
 ## Seams
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
