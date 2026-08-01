@@ -1,0 +1,38 @@
+# see probe-worker-decoupled -- SyncSource.py exclusion patterns; keep the tar-over-ssh source stream small.
+# One glob per line, # = comment. Matches basename OR path segment.
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# Python venvs (host-venv is provisioned on target; source-tree venvs never ship)
+venv
+WebService/venv
+WorkerService/venv
+
+# Compiled bytecode + caches
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# IDE / editor
+.vscode
+.idea
+.claude
+
+# Historical data + DB backups (huge, never needed on worker)
+Reports
+Scripts/SQLScripts/backups
+
+# JavaScript / node
+node_modules
+
+# Local dev artifacts
+*.log
+*.tmp
+VERSION
+BUILD_INFO
