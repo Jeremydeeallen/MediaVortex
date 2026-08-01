@@ -1101,7 +1101,7 @@ class FileScanningBusinessService:
         """Extract show, season, and episode information from filename."""
         try:
             # Remove file extension
-            NameWithoutExt = Path(FileName).stem
+            NameWithoutExt = PyPath(FileName).stem
 
             ShowInfo = {
                 'ShowName': '',
