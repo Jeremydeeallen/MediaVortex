@@ -484,7 +484,6 @@ class WebServiceApp:
         from Features.Optimization.OptimizationController import OptimizationBlueprint
         from Features.ClipBuilder.ClipBuilderController import ClipBuilderBlueprint
         from Features.TeamStatus.TeamStatusController import TeamStatusBlueprint
-        from Features.MediaProbe.MediaProbeController import MediaProbeBlueprint
         from Features.FailureTracking.FailureTrackingController import FailureTrackingBlueprint
         from Features.AudioNormalization.Controllers.AudioCompletionController import AudioCompletionBlueprint
         from Features.AudioNormalization.AudioNormalizationController import BuildBlueprint as BuildAudioNormalizationBlueprint
@@ -517,7 +516,6 @@ class WebServiceApp:
         self.App.register_blueprint(OptimizationBlueprint)
         self.App.register_blueprint(ClipBuilderBlueprint)
         self.App.register_blueprint(TeamStatusBlueprint)
-        self.App.register_blueprint(MediaProbeBlueprint)
         self.App.register_blueprint(FailureTrackingBlueprint, url_prefix='/api/FailureTracking')
         # directive: failure-accounting | # see failure-accounting.C8
         self.App.register_blueprint(FailedJobsBlueprint)

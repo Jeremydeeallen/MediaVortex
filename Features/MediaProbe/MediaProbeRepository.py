@@ -52,70 +52,7 @@ class MediaProbeRepository(BaseRepository):
 
     # ─── Query Methods ─────────────────────────────────────────────────
 
-    # directive: path-schema-migration | # see path.S8
-    def GetFilesNeedingProbe(self, RootFolderId: Optional[int] = None, MaxFailures: int = 3) -> List[MediaFileModel]:
-        """Files that need FFprobe metadata; optionally filtered by RootFolderId (typed-pair filter on StorageRootId + RelativePath prefix)."""
-        try:
-            Conditions = [
-                "(NeedsReprobe = TRUE OR Resolution IS NULL OR TotalFrames IS NULL OR AudioCodec IS NULL)",
-                "COALESCE(FFprobeFailureCount, 0) < %s"
-            ]
-            Params: List[Any] = [MaxFailures]
-
-            if RootFolderId is not None:
-                RootRows = self.ExecuteQuery(
-                    "SELECT StorageRootId, RelativePath FROM RootFolders WHERE Id = %s",
-                    (RootFolderId,),
-                )
-                if not RootRows or RootRows[0]['StorageRootId'] is None:
-                    return []
-                RfStorageRootId = RootRows[0]['StorageRootId']
-                RfRelativePath = RootRows[0]['RelativePath'] or ''
-                Conditions.append("StorageRootId = %s AND LEFT(RelativePath, %s) = %s")
-                Params.extend([RfStorageRootId, len(RfRelativePath), RfRelativePath])
-
-            WhereClause = " AND ".join(Conditions)
-            Query = (
-                "SELECT " + self._MEDIA_FILE_SELECT_COLS + " FROM MediaFiles WHERE "
-                + WhereClause
-                + " ORDER BY COALESCE(LastFFprobeAttemptDate, '1970-01-01') ASC"
-            )
-            Rows = self.ExecuteQuery(Query, tuple(Params))
-            return [self._MapRowToMediaFile(Row) for Row in Rows]
-
-        except Exception as Ex:
-            LoggingService.LogException("Error getting files needing probe", Ex, "MediaProbeRepository", "GetFilesNeedingProbe")
-            return []
-
-    # directive: path-schema-migration | # see path.S8
-    def GetFilesNeedingProbeCount(self, RootFolderId: Optional[int] = None, MaxFailures: int = 3) -> int:
-        """Count of files matching GetFilesNeedingProbe; typed-pair filter on StorageRootId + RelativePath prefix when RootFolderId is set."""
-        try:
-            Conditions = [
-                "(NeedsReprobe = TRUE OR Resolution IS NULL OR TotalFrames IS NULL OR AudioCodec IS NULL)",
-                "COALESCE(FFprobeFailureCount, 0) < %s",
-            ]
-            Params: List[Any] = [MaxFailures]
-            if RootFolderId is not None:
-                RootRows = self.ExecuteQuery(
-                    "SELECT StorageRootId, RelativePath FROM RootFolders WHERE Id = %s",
-                    (RootFolderId,),
-                )
-                if not RootRows or RootRows[0]['StorageRootId'] is None:
-                    return 0
-                RfStorageRootId = RootRows[0]['StorageRootId']
-                RfRelativePath = RootRows[0]['RelativePath'] or ''
-                Conditions.append("StorageRootId = %s AND LEFT(RelativePath, %s) = %s")
-                Params.extend([RfStorageRootId, len(RfRelativePath), RfRelativePath])
-            WhereClause = " AND ".join(Conditions)
-            Rows = self.ExecuteQuery(
-                "SELECT COUNT(*) AS N FROM MediaFiles WHERE " + WhereClause,
-                tuple(Params),
-            )
-            return int(Rows[0]['N']) if Rows else 0
-        except Exception as Ex:
-            LoggingService.LogException("Error counting files needing probe", Ex, "MediaProbeRepository", "GetFilesNeedingProbeCount")
-            return 0
+    # directive: probe-worker-decoupled -- GetFilesNeedingProbe + GetFilesNeedingProbeCount retired. ProbeWorker inlines its own SKIP-LOCKED fetch in WorkerService/ProbeWorker.py._FetchBatch. No callers of these repository methods remain.
 
     def GetPermanentlyFailedFiles(self, MaxFailures: int = 3) -> List[MediaFileModel]:
         """Get files that have exceeded the max failure threshold."""
