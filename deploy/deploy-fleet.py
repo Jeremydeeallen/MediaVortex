@@ -1,5 +1,6 @@
 # see .claude/rules/worker-deploy-drain.md
 import argparse
+import datetime as _dt
 import re
 import subprocess
 import sys
@@ -43,8 +44,10 @@ def LiveWorkers(Db) -> list:
 
 
 def DeployWorker(WorkerName: str) -> tuple:
-    # directive: orphan-generators-stop -- stream child stdout line-by-line, prefixed with worker name so parallel-across-hosts output stays legible in the invoking terminal.
+    # directive: orphan-generators-stop -- stream child stdout line-by-line, prefixed with worker name; capture start/stop for the final summary table.
     Script = str(ROOT / "deploy" / "deploy-worker.py")
+    StartTs = _dt.datetime.now()
+    print(f"[{WorkerName}] START {StartTs.strftime('%H:%M:%S')}", flush=True)
     Proc = subprocess.Popen(
         [sys.executable, "-u", Script, WorkerName],
         cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
@@ -58,8 +61,11 @@ def DeployWorker(WorkerName: str) -> tuple:
         if len(LastLines) > 3:
             LastLines.pop(0)
     Proc.wait()
+    EndTs = _dt.datetime.now()
+    Elapsed = (EndTs - StartTs).total_seconds()
+    print(f"[{WorkerName}] END {EndTs.strftime('%H:%M:%S')} (elapsed {Elapsed:.1f}s, rc={Proc.returncode})", flush=True)
     Tail = "\n        ".join(LastLines)
-    return (WorkerName, Proc.returncode, Tail)
+    return (WorkerName, Proc.returncode, Tail, StartTs, EndTs, Elapsed)
 
 
 def DeployHostSerial(HostName: str, WorkerNames: list) -> list:
@@ -152,13 +158,21 @@ def Main() -> int:
 
     AnyFail = False
     OkNames = []
-    for Wn, Rc, Tail in sorted(Results, key=lambda x: x[0]):
+    print()
+    print("=" * 76)
+    print(f"{'Worker':<32} {'Started':<10} {'Finished':<10} {'Elapsed':>10} {'Result':<8}")
+    print("-" * 76)
+    for Wn, Rc, Tail, StartTs, EndTs, Elapsed in sorted(Results, key=lambda x: x[0]):
+        Result = "OK" if Rc == 0 else f"FAIL rc={Rc}"
+        print(f"{Wn:<32} {StartTs.strftime('%H:%M:%S'):<10} {EndTs.strftime('%H:%M:%S'):<10} {Elapsed:>9.1f}s {Result:<8}")
         if Rc == 0:
-            print(f"   [OK]   {Wn}")
             OkNames.append(Wn)
         else:
             AnyFail = True
-            print(f"   [FAIL] {Wn} rc={Rc}\n        {Tail}")
+    print("=" * 76)
+    for Wn, Rc, Tail, _S, _E, _El in sorted(Results, key=lambda x: x[0]):
+        if Rc != 0:
+            print(f"   [FAIL tail] {Wn}\n        {Tail}")
 
     if AnyFail:
         _FinishHist('PARTIAL', AllNames, OkNames, 'per-worker failures during deploy')
