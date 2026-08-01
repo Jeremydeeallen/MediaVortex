@@ -27,36 +27,22 @@ class OnDemandIngestRepository:
     # ---- Claim (atomic, single TX) ----
 
     def ClaimNextPendingScanRequest(self, WorkerName: str) -> Optional[dict]:
-        self.Db.ExecuteNonQuery(
+        Rows = self.Db.ExecuteReturning(
             "UPDATE OnDemandScanRequests SET Status='Claimed', ClaimedBy=%s, ClaimedAt=NOW() "
             "WHERE Id = (SELECT Id FROM OnDemandScanRequests WHERE Status='Pending' "
             "ORDER BY RequestedAt ASC FOR UPDATE SKIP LOCKED LIMIT 1) "
-            "RETURNING Id",
+            "RETURNING Id, StorageRootId, RelativePath",
             (WorkerName,),
-        )
-        Rid = self.Db.GetLastInsertId()
-        if not Rid:
-            return None
-        Rows = self.Db.ExecuteQuery(
-            "SELECT Id, StorageRootId, RelativePath FROM OnDemandScanRequests WHERE Id=%s",
-            (Rid,),
         )
         return Rows[0] if Rows else None
 
     def ClaimNextPendingProbeRequest(self, WorkerName: str) -> Optional[dict]:
-        self.Db.ExecuteNonQuery(
+        Rows = self.Db.ExecuteReturning(
             "UPDATE OnDemandProbeRequests SET Status='Claimed', ClaimedBy=%s, ClaimedAt=NOW() "
             "WHERE Id = (SELECT Id FROM OnDemandProbeRequests WHERE Status='Pending' "
             "ORDER BY RequestedAt ASC FOR UPDATE SKIP LOCKED LIMIT 1) "
-            "RETURNING Id",
+            "RETURNING Id, StorageRootId, RelativePath",
             (WorkerName,),
-        )
-        Rid = self.Db.GetLastInsertId()
-        if not Rid:
-            return None
-        Rows = self.Db.ExecuteQuery(
-            "SELECT Id, StorageRootId, RelativePath FROM OnDemandProbeRequests WHERE Id=%s",
-            (Rid,),
         )
         return Rows[0] if Rows else None
 

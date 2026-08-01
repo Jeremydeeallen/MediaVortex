@@ -258,6 +258,28 @@ class DatabaseService:
         finally:
             self.CloseConnection(connection)
 
+    def ExecuteReturning(self, query: str, parameters: tuple = ()) -> list:
+        """Execute INSERT/UPDATE/DELETE ... RETURNING atomically. Row fetch happens on the same connection as the write, so no shared-state race with LastInsertId across worker threads."""
+        connection = self.GetConnection()
+        try:
+            cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute(query, parameters)
+            rows = cursor.fetchall() if cursor.description is not None else []
+            connection.commit()
+            preferred_names = _parse_select_columns(query)
+            result = []
+            for row in rows:
+                d = CaseInsensitiveDict(row)
+                for name in preferred_names:
+                    d.set_preferred_key(name)
+                result.append(d)
+            return result
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            self.CloseConnection(connection)
+
     def GetLastInsertId(self) -> int:
         """Get the ID of the last inserted row (set by RETURNING clause)."""
         try:
