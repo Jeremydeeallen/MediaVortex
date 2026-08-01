@@ -360,15 +360,26 @@ class MediaFilesRepository(BaseRepository):
         rows = self.DatabaseService.ExecuteQuery(query, (P.StorageRootId, likePattern))
         return [self._MapRowToMediaFile(r) for r in rows]
 
-    # directive: path-schema-migration | # see path.S8
+    # directive: scan-broken-restore | # see path.S8
     def GetMediaFilesByRootFolderId(self, RootFolderId: int) -> List[MediaFileModel]:
-        """All MediaFiles for a RootFolders row by Id."""
         rfRows = self.DatabaseService.ExecuteQuery(
-            "SELECT RootFolder FROM RootFolders WHERE Id = %s", (RootFolderId,)
+            "SELECT StorageRootId, RelativePath FROM RootFolders WHERE Id = %s", (RootFolderId,)
         )
         if not rfRows:
             return []
-        return self.GetMediaFilesByRootFolder(rfRows[0]['RootFolder'])
+        StorageRootId = rfRows[0]['StorageRootId']
+        RelativePath = rfRows[0]['RelativePath'] or ''
+        if StorageRootId is None:
+            return []
+        prefix = RelativePath.rstrip('/').rstrip('\\')
+        escaped = EscapeLikePattern(prefix)
+        likePattern = f"{escaped}%" if not prefix else f"{escaped}/%"
+        query = (
+            f"SELECT {_FULL_SELECT_COLS} FROM MediaFiles "
+            "WHERE StorageRootId = %s AND RelativePath LIKE %s ESCAPE '!'"
+        )
+        rows = self.DatabaseService.ExecuteQuery(query, (StorageRootId, likePattern))
+        return [self._MapRowToMediaFile(r) for r in rows]
 
     # directive: path-schema-migration | # see path.S8
     def UpdateMediaFilesProfileByRootFolder(self, RootFolderPath: str, ProfileId: int) -> int:

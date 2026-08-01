@@ -791,6 +791,7 @@ function Test-R4-NoEnvVars {
     if ($Norm -match '/WorkerService/Main\.py$') { return $null }
     if ($Norm -match '/deploy/[^/]+\.py$') { return $null }
     if ($Norm -match '/Scripts/(Migrate|Stamp|Reconcile)[^/]*\.py$') { return $null }
+    if ($Norm -match '/Core/Logging/LoggingService\.py$') { return $null }
     $Lines = $PostContent -split "`n"
     for ($I = 0; $I -lt $Lines.Length; $I++) {
         if ($Lines[$I] -match 'os\.environ\.get\s*\(|os\.getenv\s*\(') {

@@ -1191,7 +1191,7 @@ class FileScanningBusinessService:
         """
         Index: Dict[tuple, List[MediaFileModel]] = {}
         try:
-            DatabaseFiles = self.Repository.GetMediaFilesByRootFolderId(RootFolderId)
+            DatabaseFiles = self.MediaFilesRepository.GetMediaFilesByRootFolderId(RootFolderId)
             for DbFile in DatabaseFiles:
                 if not DbFile.FileName:
                     continue
@@ -1225,7 +1225,7 @@ class FileScanningBusinessService:
             if Index is not None:
                 Candidates = Index.get((FileShowInfo['ShowName'].lower(), FileShowInfo['Season'], FileShowInfo['Episode']), [])
             else:
-                Candidates = self.Repository.GetMediaFilesByRootFolderId(RootFolderId)
+                Candidates = self.MediaFilesRepository.GetMediaFilesByRootFolderId(RootFolderId)
 
             for DbFile in Candidates:
                 if Index is None:
@@ -1479,7 +1479,7 @@ class FileScanningBusinessService:
         """Get media files, optionally filtered by root folder."""
         try:
             if RootFolderPath:
-                return self.Repository.GetMediaFilesByRootFolder(RootFolderPath)
+                return self.MediaFilesRepository.GetMediaFilesByRootFolder(RootFolderPath)
             else:
                 return self.Repository.GetAllMediaFiles()
         except Exception as e:
@@ -1926,7 +1926,7 @@ class FileScanningBusinessService:
                 return {'Success': False, 'ErrorMessage': 'Root folder not found'}
             # directive: path-class-perfection | # see path.C23
             _RfDisplay = str(RootFolder.Path) if RootFolder.Path is not None else ''
-            DatabaseFiles = self.Repository.GetMediaFilesByRootFolder(_RfDisplay)
+            DatabaseFiles = self.MediaFilesRepository.GetMediaFilesByRootFolder(_RfDisplay)
 
             MaxFiles = self._GetMoveDetectionMaxFiles()
             MoveDetectionEnabled = len(DatabaseFiles) <= MaxFiles
@@ -2034,7 +2034,7 @@ class FileScanningBusinessService:
 
                 # directive: path-class-perfection | # see path.C23
                 _RfDisplayCM = str(RootFolder.Path) if RootFolder.Path is not None else ''
-                DatabaseFiles = self.Repository.GetMediaFilesByRootFolder(_RfDisplayCM)
+                DatabaseFiles = self.MediaFilesRepository.GetMediaFilesByRootFolder(_RfDisplayCM)
                 LoggingService.LogInfo(f"Checking {len(DatabaseFiles)} database files for root folder: {_RfDisplayCM}", 'CleanupMissingFiles', 'FileScanningBusinessService')
             else:
                 # Get all files in database
@@ -2155,7 +2155,7 @@ class FileScanningBusinessService:
 
                 # directive: path-class-perfection | # see path.C23
                 _RfDisplayDM = str(RootFolder.Path) if RootFolder.Path is not None else ''
-                DatabaseFiles = self.Repository.GetMediaFilesByRootFolder(_RfDisplayDM)
+                DatabaseFiles = self.MediaFilesRepository.GetMediaFilesByRootFolder(_RfDisplayDM)
                 LoggingService.LogInfo(f"Checking {len(DatabaseFiles)} files in root folder: {_RfDisplayDM}", 'DetectMovedFiles', 'FileScanningBusinessService')
             else:
                 DatabaseFiles = self.Repository.GetAllMediaFiles()
@@ -2327,7 +2327,7 @@ class FileScanningBusinessService:
             # Get files that need metadata extraction
             # Filter by root folder if RootFolderId is provided, otherwise get all files
             if RootFolderId is not None:
-                FilesNeedingMetadata = self.Repository.GetMediaFilesByRootFolderId(RootFolderId)
+                FilesNeedingMetadata = self.MediaFilesRepository.GetMediaFilesByRootFolderId(RootFolderId)
                 LoggingService.LogInfo(f"Found {len(FilesNeedingMetadata)} files for RootFolderId: {RootFolderId}", 'ExtractMetadataForExistingFiles', 'FileScanningBusinessService')
             else:
                 FilesNeedingMetadata = self.Repository.GetAllMediaFiles()

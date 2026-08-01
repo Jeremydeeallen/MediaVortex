@@ -63,21 +63,16 @@ class MediaProbeRepository(BaseRepository):
             Params: List[Any] = [MaxFailures]
 
             if RootFolderId is not None:
-                RootQuery = "SELECT RootFolder FROM RootFolders WHERE Id = %s"
-                RootRows = self.ExecuteQuery(RootQuery, (RootFolderId,))
-                if not RootRows:
+                RootRows = self.ExecuteQuery(
+                    "SELECT StorageRootId, RelativePath FROM RootFolders WHERE Id = %s",
+                    (RootFolderId,),
+                )
+                if not RootRows or RootRows[0]['StorageRootId'] is None:
                     return []
-                RootPath = RootRows[0]['RootFolder']
-                try:
-                    Parsed = Path.FromLegacyString(RootPath, GetStorageRoots())
-                except PathError:
-                    LoggingService.LogWarning(
-                        "GetFilesNeedingProbe: RootFolder did not match any StorageRoot prefix: " + str(RootPath),
-                        "MediaProbeRepository", "GetFilesNeedingProbe",
-                    )
-                    return []
+                RfStorageRootId = RootRows[0]['StorageRootId']
+                RfRelativePath = RootRows[0]['RelativePath'] or ''
                 Conditions.append("StorageRootId = %s AND LEFT(RelativePath, %s) = %s")
-                Params.extend([Parsed.StorageRootId, len(Parsed.RelativePath), Parsed.RelativePath])
+                Params.extend([RfStorageRootId, len(RfRelativePath), RfRelativePath])
 
             WhereClause = " AND ".join(Conditions)
             Query = (
@@ -102,20 +97,16 @@ class MediaProbeRepository(BaseRepository):
             ]
             Params: List[Any] = [MaxFailures]
             if RootFolderId is not None:
-                RootRows = self.ExecuteQuery("SELECT RootFolder FROM RootFolders WHERE Id = %s", (RootFolderId,))
-                if not RootRows:
+                RootRows = self.ExecuteQuery(
+                    "SELECT StorageRootId, RelativePath FROM RootFolders WHERE Id = %s",
+                    (RootFolderId,),
+                )
+                if not RootRows or RootRows[0]['StorageRootId'] is None:
                     return 0
-                RootPath = RootRows[0]['RootFolder']
-                try:
-                    Parsed = Path.FromLegacyString(RootPath, GetStorageRoots())
-                except PathError:
-                    LoggingService.LogWarning(
-                        "GetFilesNeedingProbeCount: RootFolder did not match any StorageRoot prefix: " + str(RootPath),
-                        "MediaProbeRepository", "GetFilesNeedingProbeCount",
-                    )
-                    return 0
+                RfStorageRootId = RootRows[0]['StorageRootId']
+                RfRelativePath = RootRows[0]['RelativePath'] or ''
                 Conditions.append("StorageRootId = %s AND LEFT(RelativePath, %s) = %s")
-                Params.extend([Parsed.StorageRootId, len(Parsed.RelativePath), Parsed.RelativePath])
+                Params.extend([RfStorageRootId, len(RfRelativePath), RfRelativePath])
             WhereClause = " AND ".join(Conditions)
             Rows = self.ExecuteQuery(
                 "SELECT COUNT(*) AS N FROM MediaFiles WHERE " + WhereClause,

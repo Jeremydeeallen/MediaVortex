@@ -47,38 +47,45 @@ class LoggingService:
         """Set debug mode on or off."""
         cls._DebugEnabled = Enabled
 
+    @staticmethod
+    def _Sanitize(Value):
+        # directive: scan-broken-restore -- surrogate-escape safe for filesystem paths that aren't valid UTF-8
+        if Value is None:
+            return None
+        if isinstance(Value, str):
+            return Value.encode('utf-8', errors='replace').decode('utf-8', errors='replace')
+        return Value
+
     @classmethod
     def LogToDatabase(cls, LogLevel: str, Message: str, FunctionName: str = '', Component: str = 'System',
                      Operation: str = '', ExceptionType: str = None,
                      ExceptionMessage: str = None, StackTrace: str = None):
-        """Log a message to the database."""
         try:
-            # Ensure DatabaseService is initialized
             if cls.DatabaseService is None:
                 cls.DatabaseService = DatabaseService()
 
-            Query = """
-            INSERT INTO Logs (Timestamp, LogLevel, FunctionName, Message, SourceFile,
-                            SourceLine, SourceFunction, ExceptionType, ExceptionMessage,
-                            StackTrace, Component, Operation, CreatedAt)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """
+            Query = (
+                "INSERT INTO Logs (Timestamp, LogLevel, FunctionName, Message, SourceFile, "
+                "SourceLine, SourceFunction, ExceptionType, ExceptionMessage, "
+                "StackTrace, Component, Operation, CreatedAt) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            )
 
             Now = datetime.now(timezone.utc)
             Params = (
-                Now,           # Timestamp
-                LogLevel,      # LogLevel
-                FunctionName,  # FunctionName
-                Message,       # Message
-                '',            # SourceFile
-                0,             # SourceLine
-                '',            # SourceFunction
-                ExceptionType, # ExceptionType
-                ExceptionMessage, # ExceptionMessage
-                StackTrace,    # StackTrace
-                Component,     # Component
-                Operation,     # Operation
-                Now            # CreatedAt
+                Now,
+                LogLevel,
+                cls._Sanitize(FunctionName),
+                cls._Sanitize(Message),
+                '',
+                0,
+                '',
+                cls._Sanitize(ExceptionType),
+                cls._Sanitize(ExceptionMessage),
+                cls._Sanitize(StackTrace),
+                cls._Sanitize(Component),
+                cls._Sanitize(Operation),
+                Now,
             )
 
             cls.DatabaseService.ExecuteNonQuery(Query, Params)
