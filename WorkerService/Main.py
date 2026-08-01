@@ -119,6 +119,7 @@ class WorkerServiceApp:
         self.QualityTestService = None
         self.ContinuousScanService = None
         self.LanguageWorker = None
+        self.ProbeWorker = None
 
         # Current capabilities and status from DB
         self.TranscodeEnabled = False
@@ -126,6 +127,7 @@ class WorkerServiceApp:
         self.RemuxEnabled = False
         self.ScanEnabled = False
         self.LanguageEnabled = False
+        self.ProbeEnabled = False
         self.WorkerStatus = "Paused"
 
         # Concurrency slot cap read from Workers.MaxConcurrentJobs (single source of truth)
@@ -281,7 +283,7 @@ class WorkerServiceApp:
         """Read capability flags + MaxConcurrentJobs from Workers table. Single query, single source of truth."""
         try:
             Query = (
-                "SELECT TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, LanguageEnabled, Status, "
+                "SELECT TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, LanguageEnabled, ProbeEnabled, Status, "
                 "MaxConcurrentJobs, MaxConcurrentQualityTestJobs "
                 "FROM Workers WHERE WorkerName = %s"
             )
@@ -293,6 +295,7 @@ class WorkerServiceApp:
                 self.RemuxEnabled = bool(Row.get('RemuxEnabled', True))
                 self.ScanEnabled = bool(Row.get('ScanEnabled', False))
                 self.LanguageEnabled = bool(Row.get('LanguageEnabled', False))
+                self.ProbeEnabled = bool(Row.get('ProbeEnabled', False))
                 self.WorkerStatus = Row.get('Status', 'Paused') or 'Paused'
                 RawMax = Row.get('MaxConcurrentJobs')
                 RawQualityTest = Row.get('MaxConcurrentQualityTestJobs')
@@ -305,6 +308,7 @@ class WorkerServiceApp:
                 self.RemuxEnabled = True
                 self.ScanEnabled = False
                 self.LanguageEnabled = False
+                self.ProbeEnabled = False
                 self.WorkerStatus = "Paused"
                 self.CurrentTranscodeConcurrency = 1
                 self.CurrentQualityTestConcurrency = 2
@@ -498,6 +502,27 @@ class WorkerServiceApp:
             self.LanguageWorker = None
         except Exception as e:
             LoggingService.LogException("Error stopping language capability", e, "WorkerService", "_StopLanguageCapability")
+
+    # directive: probe-worker-decoupled
+    def _StartProbeCapability(self):
+        if self.ProbeWorker is not None:
+            return
+        try:
+            from WorkerService.ProbeWorker import ProbeWorker
+            self.ProbeWorker = ProbeWorker(self.WorkerName)
+            self.ProbeWorker.Start()
+        except Exception as e:
+            LoggingService.LogException("Error starting probe capability", e, "WorkerService", "_StartProbeCapability")
+
+    # directive: probe-worker-decoupled
+    def _StopProbeCapability(self):
+        if self.ProbeWorker is None:
+            return
+        try:
+            self.ProbeWorker.Stop()
+            self.ProbeWorker = None
+        except Exception as e:
+            LoggingService.LogException("Error stopping probe capability", e, "WorkerService", "_StopProbeCapability")
 
     # --- Mount validation ---
 
@@ -773,6 +798,11 @@ class WorkerServiceApp:
         elif not self.LanguageEnabled and self.LanguageWorker is not None:
             self._StopLanguageCapability()
 
+        if self.ProbeEnabled and self.ProbeWorker is None:
+            self._StartProbeCapability()
+        elif not self.ProbeEnabled and self.ProbeWorker is not None:
+            self._StopProbeCapability()
+
     # --- Polling threads ---
 
     def _StartStuckJobDetection(self):
@@ -984,6 +1014,8 @@ class WorkerServiceApp:
             self._StopScanCapability()
         if self.LanguageWorker is not None:
             self._StopLanguageCapability()
+        if self.ProbeWorker is not None:
+            self._StopProbeCapability()
 
     def _LoadCapabilityPollingInterval(self) -> int:
         """Read CapabilityPollingIntervalSec from SystemSettings. Default 15."""
@@ -1029,6 +1061,7 @@ class WorkerServiceApp:
                 OldScan = self.ScanEnabled
                 OldRemux = self.RemuxEnabled
                 OldLanguage = self.LanguageEnabled
+                OldProbe = self.ProbeEnabled
                 OldMaxConcurrent = self.CurrentTranscodeConcurrency
                 OldQualityTestConcurrency = self.CurrentQualityTestConcurrency
 
@@ -1038,13 +1071,15 @@ class WorkerServiceApp:
                         OldQualityTest != self.QualityTestEnabled or
                         OldRemux != self.RemuxEnabled or
                         OldScan != self.ScanEnabled or
-                        OldLanguage != self.LanguageEnabled):
+                        OldLanguage != self.LanguageEnabled or
+                        OldProbe != self.ProbeEnabled):
                     LoggingService.LogInfo(
                         f"Capabilities changed: Transcode={OldTranscode}->{self.TranscodeEnabled}, "
                         f"QualityTest={OldQualityTest}->{self.QualityTestEnabled}, "
                         f"Remux={OldRemux}->{self.RemuxEnabled}, "
                         f"Scan={OldScan}->{self.ScanEnabled}, "
-                        f"Language={OldLanguage}->{self.LanguageEnabled}",
+                        f"Language={OldLanguage}->{self.LanguageEnabled}, "
+                        f"Probe={OldProbe}->{self.ProbeEnabled}",
                         "WorkerService", "_CapabilityPollingLoop"
                     )
                     self._ApplyCapabilities()

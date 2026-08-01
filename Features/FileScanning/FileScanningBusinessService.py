@@ -885,36 +885,7 @@ class FileScanningBusinessService:
 
             LoggingService.LogInfo(f"Scan completed: {len(MediaFiles)} files found")
 
-            # Step 7: Automatically trigger metadata extraction for the scanned files
-            try:
-                if RootFolder and RootFolder.Id:
-                    LoggingService.LogInfo(f"Starting automatic metadata extraction for RootFolderId: {RootFolder.Id}", 'PerformScan', 'FileScanningBusinessService')
-                    # Directive 2026-05-27 criteria 13-14: enter Probing phase. Count the
-                    # files we are about to probe so the Activity page can render a real
-                    # bar instead of a spinner; the callback advances ProbedFiles per file.
-                    FilesQueued = self.MediaProbeService.Repository.GetFilesNeedingProbeCount(RootFolder.Id, self.MediaProbeService.MaxFFprobeFailures)
-                    self._SetPhase(self.CurrentJobId, 'Probing', FilesNeedingProbe=FilesQueued, ProbedFiles=0)
-
-                    def _OnProbed(Index: int):
-                        # Per-probe counter for the Activity page's progress bar.
-                        # Also the soft-stop signal arrives via self._StopRequested;
-                        # the probe loop reads it and exits cleanly.
-                        self._ProbedFiles = Index
-                        return self._StopRequested
-
-                    metadataResult = self.MediaProbeService.ProbeFilesNeedingMetadata(
-                        RootFolder.Id, ProgressCallback=_OnProbed
-                    )
-                else:
-                    LoggingService.LogWarning("No RootFolderId available - skipping automatic metadata extraction", 'PerformScan', 'FileScanningBusinessService')
-                    metadataResult = {'Success': True, 'Message': 'No RootFolderId - metadata extraction skipped', 'Processed': 0}
-                if metadataResult.get('Success', False):
-                    processedFiles = metadataResult.get('Processed', 0)
-                    LoggingService.LogInfo(f"Metadata extraction completed: {processedFiles} files processed")
-                else:
-                    LoggingService.LogWarning(f"Metadata extraction failed: {metadataResult.get('Message', 'Unknown error')}")
-            except Exception as e:
-                LoggingService.LogException("Error during automatic metadata extraction", e, 'PerformScan', 'FileScanningBusinessService')
+            # directive: probe-worker-decoupled -- scan-cycle probe pass retired. ProbeWorker (WorkerService/ProbeWorker.py) handles metadata extraction on its own poll interval, decoupled from RootFolder scope.
 
             # Step 8: Completing -- final stats / RootFolder.LastScannedDate update.
             self._SetPhase(self.CurrentJobId, 'Completing')

@@ -32,6 +32,7 @@ _ALLOWED_CAPABILITIES = frozenset({
     "RemuxEnabled",
     "ScanEnabled",
     "LanguageEnabled",
+    "ProbeEnabled",
     "AcceptsInterlaced",
     "nvenccapable",
     "qsvcapable",

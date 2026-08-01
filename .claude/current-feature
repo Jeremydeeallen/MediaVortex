@@ -6,3 +6,4 @@ deploy-worker-identity-invariants
 docker-purge
 scan-broken-restore
 orphan-generators-stop
+probe-worker-decoupled
