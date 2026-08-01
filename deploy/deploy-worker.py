@@ -146,7 +146,7 @@ def _KillMediaVortexProcs(NameFragment: str, psutil_mod) -> int:
     return Killed
 
 
-def _SpawnDetached(ServiceDir: str, MainPy, LogFile, _os):
+def _SpawnDetached(ServiceDir: str, MainPy, LogFile, _os, WorkerName: str):
     ScriptsDir = MediaVortexRoot / ServiceDir / "venv" / "Scripts"
     Py = ScriptsDir / "pythonw.exe"
     if not Py.exists():
@@ -154,6 +154,9 @@ def _SpawnDetached(ServiceDir: str, MainPy, LogFile, _os):
     CreationFlags = 0
     if _os.name == "nt":
         CreationFlags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+    # directive: probe-worker-decoupled -- explicitly set MEDIAVORTEX_WORKER_NAME per claim-authority.md; fleet's env doesn't have it because fleet doesn't need it, but WorkerService fail-louds without it.
+    Env = _os.environ.copy()
+    Env["MEDIAVORTEX_WORKER_NAME"] = WorkerName
     Fh = open(LogFile, "ab", buffering=0)
     Proc = subprocess.Popen(
         [str(Py), str(MainPy)],
@@ -162,6 +165,7 @@ def _SpawnDetached(ServiceDir: str, MainPy, LogFile, _os):
         creationflags=CreationFlags,
         close_fds=True,
         start_new_session=(_os.name != "nt"),
+        env=Env,
     )
     return Proc, Py
 
@@ -184,14 +188,14 @@ def DeployWindowsLocal(WorkerName: str, Sha: str) -> tuple:
 
     print(f"[4/6] start WebService then WorkerService (detached, pythonw)", flush=True)
     WebProc, WebPy = _SpawnDetached("WebService", MediaVortexRoot / "WebService" / "Main.py",
-                                    MediaVortexRoot / "WebService" / "deploy-worker.log", _os)
+                                    MediaVortexRoot / "WebService" / "deploy-worker.log", _os, WorkerName)
     time.sleep(3)
     if WebProc.poll() is not None:
         Elapsed = time.time() - T0
         print(f"[FAIL] WebService died immediately (rc={WebProc.returncode}); see WebService/deploy-worker.log", flush=True)
         return (False, Elapsed)
     WorkerProc, WorkerPy = _SpawnDetached("WorkerService", MediaVortexRoot / "WorkerService" / "Main.py",
-                                          MediaVortexRoot / "WorkerService" / "deploy-worker.log", _os)
+                                          MediaVortexRoot / "WorkerService" / "deploy-worker.log", _os, WorkerName)
     time.sleep(2)
     if WorkerProc.poll() is not None:
         Elapsed = time.time() - T0
