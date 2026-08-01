@@ -428,7 +428,23 @@ class TranscodedOutputPlacement:
 
             media_file.LastScannedDate = datetime.now(timezone.utc)
 
-            # directive: transcode-flow-canonical -- delete stale scan-artifact row whose (StorageRootId, LOWER(RelativePath)) matches the new target; otherwise SaveMediaFile hits idx_mediafiles_storageroot_relpath_unique
+            # directive: orphan-generators-stop -- reparent FK children to surviving row BEFORE delete. Stale scan-artifact rows may hold TranscodeAttempts / TranscodeFiles; FK rule SET NULL fails against NOT NULL constraint, aborts DELETE, leaves original orphaned.
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                "UPDATE TranscodeAttempts SET MediaFileId = %s "
+                "WHERE MediaFileId IN ("
+                "  SELECT Id FROM MediaFiles "
+                "  WHERE StorageRootId = %s AND LOWER(RelativePath) = LOWER(%s) AND Id <> %s"
+                ")",
+                (media_file.Id, media_file.StorageRootId, media_file.RelativePath, media_file.Id),
+            )
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                "UPDATE TranscodeFiles SET MediaFileId = %s "
+                "WHERE MediaFileId IN ("
+                "  SELECT Id FROM MediaFiles "
+                "  WHERE StorageRootId = %s AND LOWER(RelativePath) = LOWER(%s) AND Id <> %s"
+                ")",
+                (media_file.Id, media_file.StorageRootId, media_file.RelativePath, media_file.Id),
+            )
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                 "DELETE FROM MediaFiles WHERE StorageRootId = %s AND LOWER(RelativePath) = LOWER(%s) AND Id <> %s",
                 (media_file.StorageRootId, media_file.RelativePath, media_file.Id),

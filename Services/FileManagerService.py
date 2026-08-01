@@ -52,11 +52,18 @@ class FileManagerService:
             LoggingService.LogException("Error loading excluded directories", e, 'FileManagerService', '_LoadExcludedDirectories')
             return []
 
+    # directive: orphan-generators-stop -- underscore-prefix basenames are staging/scratch dirs by repo convention; never ingest.
+    STAGING_BASENAME_EXCLUSIONS = ('_downloads', '_audiotests', '_testing')
+
     # directive: path-schema-migration | # see path.S8
     def ShouldExcludeDirectory(self, directory_path: str) -> bool:
-        """Check if a directory should be excluded from scanning."""
         try:
             normalized_path = LocalNormCase(directory_path)
+
+            BaseName = LocalBasename(normalized_path).lower()
+            if BaseName in self.STAGING_BASENAME_EXCLUSIONS:
+                LoggingService.LogDebug(f"Excluding staging directory: {directory_path}", 'ShouldExcludeDirectory', 'FileManagerService')
+                return True
 
             for excluded in self.ExcludedDirectories:
                 if LocalSamePath(normalized_path, excluded) or normalized_path.lower().startswith(excluded.lower() + os.sep):
