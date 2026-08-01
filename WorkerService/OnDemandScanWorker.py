@@ -101,17 +101,16 @@ class OnDemandScanWorker:
         )
         try:
             try:
-                Wk = CoreWorker.Current()
-                LocalPath = CorePath(Sid, Rel).Resolve(Wk)
+                CanonicalPath = CorePath(Sid, Rel).CanonicalDisplay()
             except Exception as Ex:
-                Repo.MarkScanFailed(RequestId, f'Path resolve failed: {Ex}')
-                LoggingService.LogException("Path resolve failed", Ex, 'OnDemandScanWorker', '_PollOnce')
+                Repo.MarkScanFailed(RequestId, f'Canonical path build failed: {Ex}')
+                LoggingService.LogException("Canonical path build failed", Ex, 'OnDemandScanWorker', '_PollOnce')
                 return
             try:
-                Discovered = self._ScanSubtree(Sid, Rel, LocalPath)
+                Discovered = self._ScanSubtree(CanonicalPath)
                 Repo.MarkScanComplete(RequestId, Discovered)
                 LoggingService.LogInfo(
-                    f"OnDemandScanWorker: RequestId={RequestId} complete; {Discovered} files discovered",
+                    f"OnDemandScanWorker: RequestId={RequestId} complete; {Discovered} files discovered/updated",
                     'OnDemandScanWorker', '_PollOnce',
                 )
                 if Discovered > 0:
@@ -126,11 +125,17 @@ class OnDemandScanWorker:
         finally:
             self._DeleteActiveJob(ActiveJobId)
 
-    def _ScanSubtree(self, StorageRootId: int, RelativePath: str, LocalPath: str) -> int:
+    def _ScanSubtree(self, CanonicalPath: str) -> int:
+        # directive: probe-worker-decoupled -- use StartScanning (not PerformScan directly): it handles job creation, worker context, canonical->local translation, and ScanJobs status updates.
         from Features.FileScanning.FileScanningBusinessService import FileScanningBusinessService
         Svc = FileScanningBusinessService()
-        Result = Svc.PerformScan(LocalPath, Recursive=True)
-        if isinstance(Result, dict):
-            Results = Result.get('Results') or {}
+        Result = Svc.StartScanning(CanonicalPath, Recursive=True, WorkerName=self.WorkerName)
+        if not isinstance(Result, dict) or not Result.get('Success', False):
+            Err = (Result or {}).get('Message', 'unknown') if isinstance(Result, dict) else 'invalid result'
+            raise RuntimeError(f'StartScanning returned failure: {Err}')
+        Results = Result.get('Results') or {}
+        if hasattr(Results, 'NewFiles'):
+            return int(getattr(Results, 'NewFiles', 0) or 0) + int(getattr(Results, 'UpdatedFiles', 0) or 0)
+        if isinstance(Results, dict):
             return int(Results.get('NewFiles', 0) or 0) + int(Results.get('UpdatedFiles', 0) or 0)
         return 0
