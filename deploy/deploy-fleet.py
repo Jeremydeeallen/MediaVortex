@@ -43,13 +43,23 @@ def LiveWorkers(Db) -> list:
 
 
 def DeployWorker(WorkerName: str) -> tuple:
+    # directive: orphan-generators-stop -- stream child stdout line-by-line, prefixed with worker name so parallel-across-hosts output stays legible in the invoking terminal.
     Script = str(ROOT / "deploy" / "deploy-worker.py")
-    R = subprocess.run(
-        [sys.executable, Script, WorkerName],
-        cwd=str(ROOT), capture_output=True, text=True,
+    Proc = subprocess.Popen(
+        [sys.executable, "-u", Script, WorkerName],
+        cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
     )
-    Tail = "\n        ".join(R.stdout.strip().splitlines()[-3:])
-    return (WorkerName, R.returncode, Tail)
+    Prefix = f"[{WorkerName}]"
+    LastLines = []
+    for Line in Proc.stdout:
+        Line = Line.rstrip()
+        print(f"{Prefix} {Line}", flush=True)
+        LastLines.append(Line)
+        if len(LastLines) > 3:
+            LastLines.pop(0)
+    Proc.wait()
+    Tail = "\n        ".join(LastLines)
+    return (WorkerName, Proc.returncode, Tail)
 
 
 def DeployHostSerial(HostName: str, WorkerNames: list) -> list:
