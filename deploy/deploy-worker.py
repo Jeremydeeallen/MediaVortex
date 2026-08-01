@@ -156,15 +156,19 @@ def DeployWindowsLocal(WorkerName: str, Sha: str) -> tuple:
             pass
     print(f"       terminated {Killed} WorkerService process(es)", flush=True)
 
-    WorkerPy = MediaVortexRoot / "WorkerService" / "venv" / "Scripts" / "python.exe"
+    # directive: probe-worker-decoupled -- use pythonw.exe (windowless) so no console pops up; verify child alive before returning success.
+    ScriptsDir = MediaVortexRoot / "WorkerService" / "venv" / "Scripts"
+    WorkerPy = ScriptsDir / "pythonw.exe"
+    if not WorkerPy.exists():
+        WorkerPy = ScriptsDir / "python.exe"
     Main = MediaVortexRoot / "WorkerService" / "Main.py"
     LogFile = MediaVortexRoot / "WorkerService" / "deploy-worker.log"
     CreationFlags = 0
     if _os.name == "nt":
-        CreationFlags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        CreationFlags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     Fh = open(LogFile, "ab", buffering=0)
-    print("[4/6] start WorkerService (detached)", flush=True)
-    subprocess.Popen(
+    print(f"[4/6] start WorkerService (detached, {WorkerPy.name})", flush=True)
+    Proc = subprocess.Popen(
         [str(WorkerPy), str(Main)],
         cwd=str(MediaVortexRoot),
         stdout=Fh, stderr=Fh,
@@ -172,8 +176,13 @@ def DeployWindowsLocal(WorkerName: str, Sha: str) -> tuple:
         close_fds=True,
         start_new_session=(_os.name != "nt"),
     )
+    time.sleep(2)
+    if Proc.poll() is not None:
+        Elapsed = time.time() - T0
+        print(f"[FAIL] spawned WorkerService died immediately (rc={Proc.returncode}); see {LogFile}", flush=True)
+        return (False, Elapsed)
     Elapsed = time.time() - T0
-    print(f"       backend total ({Elapsed:.1f}s)", flush=True)
+    print(f"       backend total ({Elapsed:.1f}s); child pid={Proc.pid}", flush=True)
     return (True, Elapsed)
 
 
