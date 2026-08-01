@@ -15,7 +15,7 @@ class AdminWorkersRepository:
         Rows = self._Db.ExecuteQuery(
             "SELECT WorkerName, Platform, Status, LastHeartbeat, MaxConcurrentJobs, "
             "MaxConcurrentQualityTestJobs, "
-            "TranscodeEnabled, RemuxEnabled, QualityTestEnabled, ScanEnabled, LanguageEnabled, NvencCapable, QsvCapable, HwAccelDecodeEnabled, "
+            "TranscodeEnabled, RemuxEnabled, QualityTestEnabled, ScanEnabled, ProbeEnabled, LanguageEnabled, NvencCapable, QsvCapable, HwAccelDecodeEnabled, "
             "Version, BuildInfo, MountValidationError, Enabled, "
             "RuntimeState, CurrentAttemptId, LastRuntimeStateUpdate, "
             "EXTRACT(EPOCH FROM (NOW() - LastHeartbeat))::int AS HeartbeatAgeSec, "

@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from Core.Database.BaseRepository import BaseRepository
 
 
-CAPABILITY_COLUMNS = ('TranscodeEnabled', 'QualityTestEnabled', 'ScanEnabled', 'RemuxEnabled', 'LanguageEnabled', 'NvencCapable', 'HwAccelDecodeEnabled')
+CAPABILITY_COLUMNS = ('TranscodeEnabled', 'QualityTestEnabled', 'ScanEnabled', 'ProbeEnabled', 'RemuxEnabled', 'LanguageEnabled', 'NvencCapable', 'HwAccelDecodeEnabled')
 
 
 # directive: worker-routing | # see worker-routing.C15
@@ -19,7 +19,7 @@ class TeamStatusRepository(BaseRepository):
         Query = (
             "SELECT WorkerName, Platform, Status, LastHeartbeat, "
             "MaxConcurrentJobs, MaxCpuThreads, AcceptsInterlaced, "
-            "TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, LanguageEnabled, "
+            "TranscodeEnabled, QualityTestEnabled, ScanEnabled, ProbeEnabled, RemuxEnabled, LanguageEnabled, "
             "nvenccapable, "
             "MaxConcurrentQualityTestJobs, "
             "Enabled, Version, BuildInfo, MountValidationError, "
