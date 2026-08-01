@@ -131,20 +131,15 @@ def DeployBaremetal(WorkerName: str, Host: str, Sha: str, SkipSync: bool = False
     return (R.returncode == 0, Elapsed)
 
 
-def _KillMediaVortexProcs(NameFragment: str, psutil_mod, ShutdownTimeout: int = 30) -> int:
-    # directive: probe-worker-decoupled -- SIGTERM + short wait. DrainWorker at the parent (DeployOne) already confirmed ActiveJobs=0 and every capability thread (Transcode/QT/Language/Probe/OnDemandScan) records its own ActiveJobs row while in-flight -- so if drain returned success, all threads are idle and SIGTERM lands cleanly. 30s ceiling is the fail-loud tripwire, not a bandaid.
+def _KillMediaVortexProcs(NameFragment: str, psutil_mod) -> int:
+    # directive: probe-worker-decoupled -- Windows-only path (Linux uses systemctl restart). psutil.terminate on Windows is TerminateProcess = hard kill; wait/timeout is meaningless. Safe because DrainWorker at the parent (DeployOne) confirms ActiveJobs=0 first + every capability thread records its own ActiveJobs row, so idle-at-kill is a real invariant.
     Killed = 0
     for P in psutil_mod.process_iter(["pid", "cmdline"]):
         try:
             Cmd = " ".join(P.info.get("cmdline") or [])
             if NameFragment in Cmd and "Main.py" in Cmd:
-                print(f"       SIGTERM pid={P.pid} ({NameFragment}); expecting clean exit within {ShutdownTimeout}s (drain already ran upstream)", flush=True)
+                print(f"       kill pid={P.pid} ({NameFragment}); drain=ok upstream so worker is idle", flush=True)
                 P.terminate()
-                try:
-                    P.wait(timeout=ShutdownTimeout)
-                except psutil_mod.TimeoutExpired:
-                    print(f"       [WARN] pid={P.pid} did not exit in {ShutdownTimeout}s despite drain=ok upstream; SIGKILL. Investigate a capability that didn't record ActiveJobs.", flush=True)
-                    P.kill()
                 Killed += 1
         except Exception:
             pass
