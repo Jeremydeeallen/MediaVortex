@@ -1,9 +1,13 @@
 import argparse
+import hashlib
 import subprocess
 import sys
 import tomllib
 from pathlib import Path
 from typing import Optional
+
+DepsFingerprintPath = "/opt/mediavortex/.deploy-deps-fingerprint"
+TorchPin = "torch==2.6.0 torchaudio==2.6.0"
 
 
 MediaVortexRoot = Path(__file__).resolve().parent.parent
@@ -72,8 +76,37 @@ def StepPreflight(Target: str, Friendly: str) -> bool:
     return True
 
 
-def StepEnsureVenv(Target: str, TorchVariant: str) -> bool:
-    # directive: transcode-flow-canonical -- torch/torchaudio need index-url per variant; every other package installs from requirements.txt in StepInstallRequirements.
+def _ComputeDepsFingerprint(TorchVariant: str) -> str:
+    # directive: scan-broken-restore -- fingerprints inputs that decide pip install output; changes invalidate cache.
+    RequirementsPath = MediaVortexRoot / "WorkerService" / "requirements.txt"
+    RootRequirementsPath = MediaVortexRoot / "requirements.txt"
+    H = hashlib.sha256()
+    H.update(f"torch-variant:{TorchVariant}\n".encode())
+    H.update(f"torch-pin:{TorchPin}\n".encode())
+    for P in (RootRequirementsPath, RequirementsPath):
+        if P.exists():
+            H.update(f"file:{P.name}\n".encode())
+            H.update(P.read_bytes())
+            H.update(b"\n")
+    return H.hexdigest()
+
+
+def _RemoteDepsFingerprint(Target: str) -> str:
+    R = _Ssh(Target, f"cat {DepsFingerprintPath} 2>/dev/null || echo NONE", Timeout=10)
+    return (R.stdout or "").strip()
+
+
+def _WriteRemoteDepsFingerprint(Target: str, Fingerprint: str) -> None:
+    _Ssh(Target, f"mkdir -p /opt/mediavortex && printf '%s' '{Fingerprint}' > {DepsFingerprintPath}", Timeout=10)
+
+
+def StepEnsureVenv(Target: str, TorchVariant: str, DepsFingerprint: str) -> bool:
+    # directive: scan-broken-restore -- skip when host-side fingerprint matches; guarantees venv exists but doesn't pay torch --upgrade cost.
+    Remote = _RemoteDepsFingerprint(Target)
+    VenvOk = _Ssh(Target, "test -x /opt/mediavortex/host-venv/bin/pip && echo YES || echo NO", Timeout=10).stdout.strip()
+    if Remote == DepsFingerprint and VenvOk == "YES":
+        _Status(2, 13, "ensure venv", "SKIPPED", f"deps fingerprint match ({DepsFingerprint[:8]}); venv present")
+        return True
     Index = TorchIndexByVariant.get(TorchVariant, TorchIndexByVariant["cpu"])
     Script = (
         "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12-venv python3-pip > /dev/null && "
@@ -83,7 +116,7 @@ def StepEnsureVenv(Target: str, TorchVariant: str) -> bool:
         "  /opt/mediavortex/host-venv/bin/pip install --no-cache-dir --upgrade pip wheel > /dev/null; "
         "fi && "
         "/opt/mediavortex/host-venv/bin/pip install --no-cache-dir --upgrade "
-        f"--index-url {Index} torch==2.6.0 torchaudio==2.6.0 > /tmp/mv-pip-torch.log 2>&1 && "
+        f"--index-url {Index} {TorchPin} > /tmp/mv-pip-torch.log 2>&1 && "
         "echo VENV_READY"
     )
     R = _Ssh(Target, Script, Timeout=1800)
@@ -95,7 +128,12 @@ def StepEnsureVenv(Target: str, TorchVariant: str) -> bool:
 
 
 # directive: transcode-flow-canonical -- all non-torch installs via requirements.txt (enforced by Tests/Contract/TestDeployPipInstallsRequirementsTxt.py)
-def StepInstallRequirements(Target: str) -> bool:
+def StepInstallRequirements(Target: str, DepsFingerprint: str) -> bool:
+    # directive: scan-broken-restore -- skip when host-side fingerprint matches; write fingerprint on success.
+    Remote = _RemoteDepsFingerprint(Target)
+    if Remote == DepsFingerprint:
+        _Status(8, 13, "install requirements", "SKIPPED", f"deps fingerprint match ({DepsFingerprint[:8]})")
+        return True
     Script = (
         "/opt/mediavortex/host-venv/bin/pip install --no-cache-dir "
         "-r /opt/mediavortex/src/WorkerService/requirements.txt "
@@ -106,7 +144,8 @@ def StepInstallRequirements(Target: str) -> bool:
         Tail = _Ssh(Target, "tail -20 /tmp/mv-pip-reqs.log", Timeout=10).stdout or ""
         _Status(8, 13, "install requirements", "FAILED", Tail[-300:])
         return False
-    _Status(8, 13, "install requirements", "OK", "-r WorkerService/requirements.txt (inherits root)")
+    _WriteRemoteDepsFingerprint(Target, DepsFingerprint)
+    _Status(8, 13, "install requirements", "OK", f"-r WorkerService/requirements.txt; wrote fingerprint {DepsFingerprint[:8]}")
     return True
 
 
@@ -247,11 +286,13 @@ def main():
 
     Variant = Args.torch_variant or _DetectTorchVariant(Target)
     print(f"Torch variant: {Variant}")
+    DepsFingerprint = _ComputeDepsFingerprint(Variant)
+    print(f"Deps fingerprint: {DepsFingerprint[:16]}")
     print("=" * 60)
 
     if not StepPreflight(Target, Friendly):
         return 1
-    if not StepEnsureVenv(Target, Variant):
+    if not StepEnsureVenv(Target, Variant, DepsFingerprint):
         return 2
     if not StepEnsureFfmpeg(Target):
         return 2
@@ -264,7 +305,7 @@ def main():
         return 2
     if not StepShipSchemaSnapshot(Target):
         return 2
-    if not StepInstallRequirements(Target):
+    if not StepInstallRequirements(Target, DepsFingerprint):
         return 2
     if not StepInstallSystemdUnit(Target, Friendly, Count):
         return 2
