@@ -35,7 +35,42 @@ These are the WHAT. HOW is Claude's responsibility below.
 - **Two on-demand queue tables** — `OnDemandScanRequests` + `OnDemandProbeRequests`. Claim via `UPDATE ... WHERE Id = (SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING ...`. Idle workers race; busy workers can't grab — satisfies the operator's "not busy" constraint without a worker-picker dropdown.
 - **Auto-chain via ProbeRequests row insert** — when a scan-request completes and inserted new MediaFiles under its path, the scan worker inserts a matching `OnDemandProbeRequests` row for the same `(StorageRootId, RelativePath)`.
 - **REST endpoints** — `POST /api/OnDemandScan` + `POST /api/OnDemandProbe` (body: `{CanonicalPath}`); `GET /api/OnDemandScan/Recent` + `GET /api/OnDemandProbe/Recent` for the recent-20 table.
-- **GUI** — two new sub-tabs `Scan` + `Probe` under `/Settings`, preserving existing `Scanners`. Each: canonical path input, submit button, recent-20 table (Path / Requested / Claimed By / Status / Files / Elapsed).
+- **GUI** — new collapsible section in `/Settings` between Scanning + Workers sections. Two-panel Scan / Probe with canonical input + submit + recent-20 table.
+- **Capability-thread ActiveJobs recording** — ProbeWorker + OnDemandScanWorker insert an ActiveJobs row at work-start + delete at finally. Makes DrainWorker's existing `WHERE WorkerName=?` count truthful. Same shape LanguageWorker already uses.
+- **OnDemandScanWorker → StartScanning (not PerformScan)** — reuse the higher-level entry that owns job creation, canonical→local translation, ScanJobs progress heartbeat, terminal status write. Discovered mid-implementation; three bugs in the direct-PerformScan path (missing Recursive arg, wrong path type, missing CurrentJobId setup) were fixed by routing through StartScanning.
+
+## Principles Applied
+
+Decision → principle justification:
+
+| Decision | Principle | Justification |
+|---|---|---|
+| ProbeWorker mirrors LanguageWorker shape | **DRY** | Same loop/claim/backend pattern already established; no new mechanism |
+| Split scan and probe into separate capability workers | **SRP** (SOLID) | Scan = disk walk + MediaFiles inserts; Probe = ffprobe metadata population. Different failure modes, different scaling, different SoT |
+| `Workers.ProbeEnabled` column + `BuildClaimPredicate` allowlist | **OCP** (SOLID) | Adding a capability = one column + one allowlist entry. Zero changes to the predicate builder itself. Closed against modification |
+| ActiveJobs shared table (not per-capability busy tables) | **DDD + DRY** | ActiveJobs already means "in-flight work"; every capability doing work IS an active job. Reusing the existing bounded-context term prevents parallel schemas |
+| Reuse ActiveJobs so DrainWorker is truthful (not extend DrainWorker) | **KISS + DRY** | Existing query `WHERE WorkerName=?` already sees the whole worker's load. Adding N-arm capability-aware queries would multiply drain-query surface area |
+| Kill-timeout removed after drain became truthful | **Root-cause fix over bandaid** | Timeout was compensating for drain blindness. Once drain is truthful, kill can be immediate. Bandaid deleted |
+| On-demand queue via `FOR UPDATE SKIP LOCKED` (not worker-picker UI) | **KISS + Open/Closed** | Idle workers race for rows via existing claim discipline. New capability worker = same claim shape. Zero operator surface for routing |
+| GUI = collapsible section, not new sub-tabs framework | **KISS** | Settings.html already uses `settings-section` pattern. Reusing it fits the operator's "don't bloat the GUI" rule; adding a sub-tabs framework would introduce a UI paradigm the app doesn't otherwise use |
+| Canonical path input only (not canonical + local) | **KISS + SoT** | DB shape is canonical everywhere. Accepting local paths would require worker-mount awareness + shape auto-detect in the input parser. One shape in, one shape stored, one shape rendered |
+| Auto-chain scan → probe via queue-row insert (not in-process call) | **SRP + DDD** | Scan worker's job ends at "MediaFiles written." Probe worker's job begins at "MediaFiles need metadata." Queue row is the DDD event that crosses the boundary. Preserves single-responsibility per worker |
+| OnDemandScanWorker routes via StartScanning (not PerformScan direct) | **DRY** | StartScanning already handles job lifecycle + heartbeat + path translation. Re-implementing = fork risk |
+| Two new on-demand tables (not one polymorphic table) | **SRP** | Different fields (`FilesDiscovered` vs `FilesProbed`), different downstream consumers. Polymorphism would demand nullable-everything + type discrimination. Two focused tables are clearer |
+
+## Deliverables at DELIVERING (per R13)
+
+Feature.md + flow.md creation is blocked until directive advances to DELIVERING. At that point Promotions row-map:
+
+| Source (directive) | Target (durable) |
+|---|---|
+| Domain Decisions + Principles Applied + Acceptance Criteria | new `WorkerService/ProbeWorker.feature.md` (What/Criteria/Workflows/Seams/Status) |
+| ProbeWorker fetch cycle + on-demand poll integration | new `WorkerService/probe-worker.flow.md` (single-page ST1..ST5 for poll → fetch → probe → stamp) |
+| OnDemandIngest business logic + endpoints + GUI | new `Features/OnDemandIngest/on-demand-ingest.feature.md` |
+| FileScanning loses probe-phase | update `Features/FileScanning/FileScanning.feature.md` |
+| MediaProbe consumed by ProbeWorker + on-demand invocation shape | update `Features/MediaProbe/MediaProbe.feature.md` |
+| Capability-thread ActiveJobs invariant | update `.claude/rules/claim-authority.md` or new rule `capability-drain-truthfulness.md` (every capability thread records its ActiveJobs row so DrainWorker sees it) |
+| GUI-editable knobs (`ProbeEnabled` column) | update `.claude/rules/gui-editable-knobs.md` if needed (already covered by Settings /Admin pattern) |
 
 ## Acceptance Criteria
 
