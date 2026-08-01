@@ -8,6 +8,7 @@ from Services.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
 from Core.Path.LocalPath import LocalExists
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+from Core.SubprocessUtil import NoWindowFlags
 
 
 class FFmpegService:
@@ -164,7 +165,7 @@ class FFmpegService:
             CommandList = [self.FFprobePath] + Arguments + [FilePath or ""]
             # Keep a display string for logging / error messages
             CommandString = ' '.join(f'"{A}"' if ' ' in A or '$' in A else A for A in CommandList)
-            
+
             Result = subprocess.run(
                 CommandList,
                 capture_output=True,
@@ -172,6 +173,7 @@ class FFmpegService:
                 timeout=30,
                 encoding='utf-8',
                 errors='replace',
+                creationflags=NoWindowFlags(),
             )
             
             ResultDict = {
@@ -254,7 +256,7 @@ class FFmpegService:
                 InputFile
             ]
             
-            Result = subprocess.run(ProbeCommand, capture_output=True, text=True, timeout=30)
+            Result = subprocess.run(ProbeCommand, capture_output=True, text=True, timeout=30, creationflags=NoWindowFlags())
             if Result.returncode == 0 and Result.stdout.strip():
                 Duration = float(Result.stdout.strip())
                 return Duration
@@ -309,12 +311,13 @@ class FFmpegService:
             
             LoggingService.LogDebug(f"Executing FFmpeg command: {' '.join(Command)}", 'ExecuteFFmpeg', 'FFmpegService')
             
-            # Change subprocess.run to Popen so we can set affinity before execution
+            # directive: probe-worker-decoupled -- Popen so we can set affinity before execution + NoWindowFlags suppresses console popup under pythonw.
             Process = subprocess.Popen(
                 Command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                creationflags=NoWindowFlags(),
             )
             
             try:
@@ -377,14 +380,14 @@ class FFmpegService:
         
         try:
             if self.FFmpegPath:
-                Result = subprocess.run([self.FFmpegPath, '-version'], capture_output=True, text=True, timeout=10)
+                Result = subprocess.run([self.FFmpegPath, '-version'], capture_output=True, text=True, timeout=10, creationflags=NoWindowFlags())
                 if Result.returncode == 0:
                     # Extract version from first line
                     FirstLine = Result.stdout.split('\n')[0]
                     Versions['FFmpeg'] = FirstLine
             
             if self.FFprobePath:
-                Result = subprocess.run([self.FFprobePath, '-version'], capture_output=True, text=True, timeout=10)
+                Result = subprocess.run([self.FFprobePath, '-version'], capture_output=True, text=True, timeout=10, creationflags=NoWindowFlags())
                 if Result.returncode == 0:
                     # Extract version from first line
                     FirstLine = Result.stdout.split('\n')[0]

@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, Callable
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalExists, LocalGetSize
+from Core.SubprocessUtil import NoWindowFlags
 from Core.DateTimeHelpers import ToUtcIsoZ
 from Features.ServiceControl.JobPhase import JobPhase
 
@@ -58,13 +59,15 @@ class VideoTranscodingService:
             if ActiveJobId and DatabaseManager:
                 DatabaseManager.SetJobPhase(ActiveJobId, JobPhase.Encoding)
 
+            # directive: probe-worker-decoupled -- NoWindowFlags() suppresses console popup under pythonw.
             Process = subprocess.Popen(
                 TranscodeCommand,
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
-                bufsize=1
+                bufsize=1,
+                creationflags=NoWindowFlags(),
             )
 
             LoggingService.LogInfo(f"subprocess.Popen completed successfully", "VideoTranscodingService", "TranscodeVideo")
