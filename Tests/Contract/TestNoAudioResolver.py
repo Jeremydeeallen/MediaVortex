@@ -74,7 +74,7 @@ class TestNoAudioResolverRouting(unittest.TestCase):
         R.Resolve(42, '/mnt/tv/MyShow/Season 01/MyShow S01E05.mkv')
         R._RegrabTv.assert_called_once()
         R._RegrabMovie.assert_not_called()
-        Repo.DeleteMediaFileCascade.assert_called_once_with(42)
+        Repo.DeleteMediaFile.assert_called_once_with(42)
 
     def test_movies_routes_to_radarr(self):
         R, Repo = self._MakeResolver('movies', 'MyMovie (2020)/MyMovie.mkv', 'MyMovie.mkv')
@@ -83,7 +83,7 @@ class TestNoAudioResolverRouting(unittest.TestCase):
         R.Resolve(42, '/mnt/movies/MyMovie (2020)/MyMovie.mkv')
         R._RegrabMovie.assert_called_once()
         R._RegrabTv.assert_not_called()
-        Repo.DeleteMediaFileCascade.assert_called_once_with(42)
+        Repo.DeleteMediaFile.assert_called_once_with(42)
 
     def test_other_root_skips_arr_but_still_deletes(self):
         R, Repo = self._MakeResolver('xxx', 'stuff/thing.mkv', 'thing.mkv')
@@ -92,7 +92,7 @@ class TestNoAudioResolverRouting(unittest.TestCase):
         R.Resolve(42, '/mnt/xxx/stuff/thing.mkv')
         R._RegrabTv.assert_not_called()
         R._RegrabMovie.assert_not_called()
-        Repo.DeleteMediaFileCascade.assert_called_once_with(42)
+        Repo.DeleteMediaFile.assert_called_once_with(42)
 
 
 # directive: language-worker-progress-invariant C2
@@ -108,7 +108,7 @@ class TestNoAudioResolverOrdering(unittest.TestCase):
         Order = []
         R._RegrabTv = MagicMock(side_effect=lambda *A, **K: Order.append('regrab') or 'ok')
         R._DeleteFile = MagicMock(side_effect=lambda *A, **K: Order.append('disk'))
-        Repo.DeleteMediaFileCascade.side_effect = lambda *A, **K: Order.append('cascade')
+        Repo.DeleteMediaFile.side_effect = lambda *A, **K: Order.append('cascade')
         R.Resolve(42, '/mnt/tv/foo/bar.mkv')
         self.assertEqual(Order, ['regrab', 'disk', 'cascade'])
 

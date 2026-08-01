@@ -41,7 +41,7 @@ class NoAudioResolver:
         RootName, RelPath, FileName = self._LookupMediaFile(MediaFileId)
         RegrabOutcome = self._Regrab(RootName, RelPath, FileName, MediaFileId)
         self._DeleteFile(LocalFilePath, MediaFileId)
-        self.MediaFilesRepo.DeleteMediaFileCascade(MediaFileId)
+        self.MediaFilesRepo.DeleteMediaFile(MediaFileId)
         LoggingService.LogInfo(
             f"NoAudioResolver: MediaFileId={MediaFileId} root={RootName} regrab={RegrabOutcome}",
             'NoAudioResolver', 'Resolve',

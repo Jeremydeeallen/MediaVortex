@@ -141,34 +141,6 @@ class MediaFilesRepository(BaseRepository):
         )
         return affected > 0
 
-    # directive: language-worker-progress-invariant
-    def DeleteMediaFileCascade(self, MediaFileId: int) -> bool:
-        Connection = self.DatabaseService.GetConnection()
-        try:
-            Cursor = Connection.cursor()
-            Cursor.execute("SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s", (MediaFileId,))
-            AttemptIds = [Row[0] for Row in Cursor.fetchall()]
-            if AttemptIds:
-                Cursor.execute("DELETE FROM QualityTestResults WHERE TranscodeAttemptId = ANY(%s)", (AttemptIds,))
-                Cursor.execute("DELETE FROM QualityTestingQueue WHERE TranscodeAttemptId = ANY(%s)", (AttemptIds,))
-                Cursor.execute("DELETE FROM MediaFilesArchive WHERE TranscodeAttemptId = ANY(%s)", (AttemptIds,))
-            Cursor.execute("DELETE FROM TranscodeAttempts WHERE MediaFileId = %s", (MediaFileId,))
-            Cursor.execute("DELETE FROM TranscodeFiles WHERE MediaFileId = %s", (MediaFileId,))
-            Cursor.execute("DELETE FROM FailureBudgetResets WHERE MediaFileId = %s", (MediaFileId,))
-            Cursor.execute(
-                "DELETE FROM ActiveJobs WHERE QueueId = %s AND ServiceName IN ('LanguageService','TranscodeService','QualityTestService')",
-                (MediaFileId,),
-            )
-            Cursor.execute("DELETE FROM MediaFiles WHERE Id = %s", (MediaFileId,))
-            Affected = Cursor.rowcount
-            Connection.commit()
-            return Affected > 0
-        except Exception:
-            Connection.rollback()
-            raise
-        finally:
-            self.DatabaseService.CloseConnection(Connection)
-
     # directive: path-schema-migration | # see path.S8
     def SaveMediaFile(self, MediaFile: MediaFileModel) -> int:
         """Insert or update by Id when set; else dedupe on typed pair; returns the row Id."""

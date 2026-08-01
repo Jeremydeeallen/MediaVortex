@@ -1976,8 +1976,7 @@ class FileScanningBusinessService:
                     f"Deleting DB row for missing file: {DbFile.FilePath} (Id={DbFile.Id})",
                     'ReconcileWithDisk', 'FileScanningBusinessService'
                 )
-                # directive: probe-worker-decoupled -- cascade delete FK children (TranscodeAttempts / TranscodeFiles / ActiveJobs) before the MediaFiles row so the NOT-NULL-on-MediaFileId FK doesn't abort the whole reconcile (same fix as orphan-generators-stop C1 for TranscodedOutputPlacement, applied here now that DDD-shared invariant "MediaFile delete cascades to attempt-history" belongs on the repository).
-                self.MediaFilesRepository.DeleteMediaFileCascade(DbFile.Id)
+                self.MediaFilesRepository.DeleteMediaFile(DbFile.Id)
                 DeletedCount += 1
                 self.ScanResults.DeletedFilesCount += 1
 
