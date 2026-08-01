@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""
-SystemSettingsController.py - Controller for managing system settings
-"""
-
 import os
 import re
 import ntpath
@@ -11,6 +7,7 @@ from flask import Blueprint, request, jsonify
 from Core.Logging.LoggingService import LoggingService
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 from Core.Path.LocalPath import LocalExists
+from Core.SubprocessUtil import NoWindowFlags
 
 
 _WIN_DRIVE_RX = re.compile(r'^[A-Za-z]:')
@@ -608,7 +605,8 @@ class SystemSettingsController:
                         capture_output=True,
                         text=True,
                         timeout=10,
-                        shell=True
+                        shell=True,
+                        creationflags=NoWindowFlags(),
                     )
                     FFmpegVersion = FFmpegResult.stdout.split('\n')[0] if FFmpegResult.returncode == 0 else 'Unknown'
                 except Exception:
@@ -620,7 +618,8 @@ class SystemSettingsController:
                         capture_output=True,
                         text=True,
                         timeout=10,
-                        shell=True
+                        shell=True,
+                        creationflags=NoWindowFlags(),
                     )
                     FFprobeVersion = FFprobeResult.stdout.split('\n')[0] if FFprobeResult.returncode == 0 else 'Unknown'
                 except Exception:

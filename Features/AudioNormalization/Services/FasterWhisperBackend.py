@@ -3,6 +3,8 @@ import subprocess
 import tempfile
 import threading
 
+from Core.SubprocessUtil import NoWindowFlags
+
 
 # directive: audio-language-detection
 class FasterWhisperBackend:
@@ -44,6 +46,7 @@ class FasterWhisperBackend:
             Res = subprocess.run(
                 Cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                 timeout=self._Timeout, check=False,
+                creationflags=NoWindowFlags(),
             )
             if Res.returncode != 0:
                 return {'Language': 'und', 'Confidence': 0.0, 'Error': f'ffmpeg_extract_rc={Res.returncode}'}

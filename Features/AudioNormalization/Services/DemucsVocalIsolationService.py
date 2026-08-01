@@ -7,6 +7,7 @@ import sys
 
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalExists, LocalJoin
+from Core.SubprocessUtil import NoWindowFlags
 
 
 DEMUCS_MODEL_NAME = "htdemucs"
@@ -22,7 +23,7 @@ def _ParseHms(H, M, S, Cs):
 
 
 def _RunFfmpegStreaming(Cmd, ProgressCallback):
-    Proc = subprocess.Popen(Cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, bufsize=1)
+    Proc = subprocess.Popen(Cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, bufsize=1, creationflags=NoWindowFlags())
     StderrChunks = []
     TotalSec = None
     LastPct = -1
@@ -121,7 +122,7 @@ class DemucsVocalIsolationService:
             "-ar", "48000",
             OutputWavPath,
         ]
-        Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=1800)
+        Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=1800, creationflags=NoWindowFlags())
         if Result.returncode != 0:
             raise RuntimeError(
                 f"premix ffmpeg failed (exit {Result.returncode}): {Result.stderr[-500:]}"
@@ -197,7 +198,7 @@ class DemucsVocalIsolationService:
     def _MeasureWavRmsDbfs(self, WavPath):
         Result = subprocess.run(
             [self.FfmpegPath, "-i", WavPath, "-map", "0:a:0", "-af", "astats", "-f", "null", "-"],
-            capture_output=True, text=True, timeout=120
+            capture_output=True, text=True, timeout=120, creationflags=NoWindowFlags()
         )
         Values = []
         for Line in Result.stderr.splitlines():

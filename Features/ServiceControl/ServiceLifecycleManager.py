@@ -13,6 +13,7 @@ import signal
 import psutil
 from typing import List, Tuple, Dict, Any, Optional
 from Core.Logging.LoggingService import LoggingService
+from Core.SubprocessUtil import NoWindowFlags
 
 
 class ServiceLifecycleManager:
@@ -150,7 +151,7 @@ class ServiceLifecycleManager:
                 process = subprocess.Popen(
                     [python_exe, main_file],
                     cwd=service_dir,
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | NoWindowFlags(),
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )

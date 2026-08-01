@@ -2,6 +2,7 @@ import os
 import subprocess
 import tempfile
 from Core.Logging.LoggingService import LoggingService
+from Core.SubprocessUtil import NoWindowFlags
 from Core.WorkerContext import WorkerContext
 
 
@@ -56,7 +57,7 @@ class ClipBuilderBusinessService:
                 ]
 
                 LoggingService.LogInfo(f"[{PrimarySuffix}] Extracting clip {Index + 1}/{len(StartTimes)} at {StartTime} ({ClipDuration}s)", "ClipBuilderBusinessService", "ExtractAndConcatenate")
-                Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=300)
+                Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=300, creationflags=NoWindowFlags())
 
                 if Result.returncode != 0:
                     raise RuntimeError(f"FFmpeg clip extraction failed (clip {Index + 1}): {Result.stderr[-500:]}")
@@ -90,7 +91,7 @@ class ClipBuilderBusinessService:
                     ]
 
                     LoggingService.LogInfo(f"[{HalfSuffix}] Trimming clip {Index + 1}/{len(PrimaryClips)} to {HalfDuration}s", "ClipBuilderBusinessService", "ExtractAndConcatenate")
-                    Result = subprocess.run(TrimCmd, capture_output=True, text=True, timeout=60)
+                    Result = subprocess.run(TrimCmd, capture_output=True, text=True, timeout=60, creationflags=NoWindowFlags())
 
                     if Result.returncode != 0:
                         raise RuntimeError(f"FFmpeg trim failed ({HalfSuffix} clip {Index + 1}): {Result.stderr[-500:]}")
@@ -143,7 +144,7 @@ class ClipBuilderBusinessService:
         ]
 
         LoggingService.LogInfo(f"[{Suffix}] Concatenating {len(ClipPaths)} clips to {OutputPath}", "ClipBuilderBusinessService", "_ConcatenateClips")
-        Result = subprocess.run(ConcatCmd, capture_output=True, text=True, timeout=120)
+        Result = subprocess.run(ConcatCmd, capture_output=True, text=True, timeout=120, creationflags=NoWindowFlags())
 
         if Result.returncode != 0:
             raise RuntimeError(f"FFmpeg concat failed ({Suffix}): {Result.stderr[-500:]}")

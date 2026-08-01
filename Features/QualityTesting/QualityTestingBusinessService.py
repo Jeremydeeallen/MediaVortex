@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
 from Core.Path.LocalPath import LocalExists
+from Core.SubprocessUtil import NoWindowFlags
 from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 from Features.QualityTesting.Vmaf.VmafAlignmentProbe import VmafAlignmentProbe
@@ -474,7 +475,7 @@ class QualityTestingBusinessService:
             )
             Command = self._ArgvToShellCommand(Argv)
             LoggingService.LogInfo(f"Mode A VMAF for attempt {TranscodeAttemptId}: {Command}", "QualityTestingBusinessService", "RunLocalVmafForAttempt")
-            Result = subprocess.run(Command, shell=True, capture_output=True, text=True)
+            Result = subprocess.run(Command, shell=True, capture_output=True, text=True, creationflags=NoWindowFlags())
             if Result.returncode != 0:
                 Stderr = (Result.stderr or '')[-2000:]
                 return {"Success": False, "Error": f"Mode A VMAF ffmpeg failed rc={Result.returncode}: {Stderr}"}
@@ -888,7 +889,8 @@ class QualityTestingBusinessService:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
-                bufsize=1
+                bufsize=1,
+                creationflags=NoWindowFlags(),
             )
 
             LoggingService.LogInfo(f"subprocess.Popen completed successfully", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
@@ -1441,7 +1443,7 @@ class QualityTestingBusinessService:
             if ViewFilter:
                 Cmd += ["-vf", ViewFilter]
             Cmd += ["-frames:v", "1", "-y", OutputPath]
-            R = subprocess.run(Cmd, capture_output=True, text=True)
+            R = subprocess.run(Cmd, capture_output=True, text=True, creationflags=NoWindowFlags())
             if R.returncode != 0 or not LocalExists(OutputPath):
                 return {
                     'Success': False,
@@ -1736,7 +1738,7 @@ class QualityTestingBusinessService:
                 local_path
             ]
 
-            result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=10, creationflags=NoWindowFlags())
 
             if result.returncode == 0 and result.stdout.strip():
                 return float(result.stdout.strip())

@@ -8,6 +8,7 @@ from flask import Blueprint, request, jsonify, Response, send_file
 from Features.ClipBuilder.ClipBuilderBusinessService import ClipBuilderBusinessService, _ResolveFFmpegPath
 from Repositories.DatabaseManager import DatabaseManager
 from Core.Logging.LoggingService import LoggingService
+from Core.SubprocessUtil import NoWindowFlags
 import ntpath
 # directive: path-schema-migration | # see path.S8
 from Core.Path.Path import Path, PathError
@@ -442,7 +443,7 @@ def Waveform():
                 "-frames:v", "1",
                 "-y", CachePath
             ]
-            Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=120)
+            Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=120, creationflags=NoWindowFlags())
             if Result.returncode != 0:
                 return jsonify({"Success": False, "ErrorMessage": f"Waveform generation failed: {Result.stderr[-300:]}"}), 500
 
@@ -495,7 +496,7 @@ def Thumbnail():
                 "-q:v", "4",
                 "-y", CachePath
             ]
-            Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=30)
+            Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=30, creationflags=NoWindowFlags())
             if Result.returncode != 0:
                 return jsonify({"Success": False, "ErrorMessage": "Thumbnail extraction failed"}), 500
 

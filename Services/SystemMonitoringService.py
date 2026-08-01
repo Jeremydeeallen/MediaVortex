@@ -13,6 +13,7 @@ import re
 import json
 from typing import Dict, Any, Optional
 from Services.LoggingService import LoggingService
+from Core.SubprocessUtil import NoWindowFlags
 
 class SystemMonitoringService:
     """Service for monitoring system resources."""
@@ -153,7 +154,7 @@ class SystemMonitoringService:
             ps_command = "Get-WmiObject -Namespace 'root\\LibreHardwareMonitor' -Class Sensor | Where-Object {$_.SensorType -eq 'Temperature'} | Select-Object Name, Value | ConvertTo-Json"
             result = subprocess.run([
                 'powershell', '-Command', ps_command
-            ], capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+            ], capture_output=True, text=True, timeout=10, creationflags=NoWindowFlags())
 
             if result.returncode == 0 and result.stdout.strip():
                 try:

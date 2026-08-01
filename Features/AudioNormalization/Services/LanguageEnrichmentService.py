@@ -4,6 +4,7 @@ import subprocess
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalExists, LocalJoin, LocalSplitExt
+from Core.SubprocessUtil import NoWindowFlags
 
 from Features.AudioNormalization.Repositories.MediaFileLanguageDetectionsRepository import MediaFileLanguageDetectionsRepository
 from Features.AudioNormalization.Services.AudioStreamProbe import AudioStreamProbe
@@ -134,7 +135,7 @@ class LanguageEnrichmentService:
             Cmd += [f'-metadata:s:a:{Idx}', f'language={Lang}']
         Cmd += ['-y', InProgressPath]
         try:
-            Result = subprocess.run(Cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300, check=False)
+            Result = subprocess.run(Cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300, check=False, creationflags=NoWindowFlags())
         except (subprocess.TimeoutExpired, FileNotFoundError) as Ex:
             self._SafeUnlink(InProgressPath)
             raise LanguageEnrichmentError(MediaFileId, 'ffmpeg_subprocess_error', Detail=type(Ex).__name__)

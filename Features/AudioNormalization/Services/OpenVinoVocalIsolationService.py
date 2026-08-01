@@ -5,6 +5,7 @@ import sys
 
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalBasename, LocalExists, LocalJoin, LocalSplitExt
+from Core.SubprocessUtil import NoWindowFlags
 from Features.AudioNormalization.Services.DemucsVocalIsolationService import DemucsIsolationResult, SILENCE_FLOOR_DBFS
 
 
@@ -49,6 +50,7 @@ class OpenVinoVocalIsolationService:
         Result = subprocess.run(
             [sys.executable, "-c", Script],
             capture_output=True, text=True, timeout=3600,
+            creationflags=NoWindowFlags(),
         )
         if Result.returncode != 0:
             raise RuntimeError(
@@ -83,7 +85,7 @@ class OpenVinoVocalIsolationService:
             "-ar", "48000",
             OutputWavPath,
         ]
-        R = subprocess.run(Cmd, capture_output=True, text=True, timeout=1800)
+        R = subprocess.run(Cmd, capture_output=True, text=True, timeout=1800, creationflags=NoWindowFlags())
         if R.returncode != 0:
             raise RuntimeError(f"premix ffmpeg failed: {R.stderr[-400:]}")
         IsolationResult.PremixWavPath = OutputWavPath
@@ -101,6 +103,7 @@ class OpenVinoVocalIsolationService:
         Result = subprocess.run(
             [self.FfmpegPath, "-i", WavPath, "-map", "0:a:0", "-af", "astats", "-f", "null", "-"],
             capture_output=True, text=True, timeout=120,
+            creationflags=NoWindowFlags(),
         )
         Values = []
         for Line in Result.stderr.splitlines():

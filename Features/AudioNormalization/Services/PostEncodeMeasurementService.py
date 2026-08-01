@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
+from Core.SubprocessUtil import NoWindowFlags
 from Features.AudioNormalization.Measurement.EbuR128MeasurementService import ParseSummary
 
 
@@ -71,6 +72,7 @@ class PostEncodeMeasurementService:
                 ],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 timeout=60, check=False,
+                creationflags=NoWindowFlags(),
             )
             if Result.returncode != 0:
                 return []
@@ -98,6 +100,7 @@ class PostEncodeMeasurementService:
             Result = subprocess.run(
                 Cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                 timeout=self.DEFAULT_TIMEOUT_SECONDS, check=False,
+                creationflags=NoWindowFlags(),
             )
             if Result.returncode != 0:
                 return None

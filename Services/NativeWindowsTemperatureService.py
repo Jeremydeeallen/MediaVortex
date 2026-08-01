@@ -7,6 +7,7 @@ import ctypes
 import platform
 from typing import Dict, Any, Optional
 from Services.LoggingService import LoggingService
+from Core.SubprocessUtil import NoWindowFlags
 
 class NativeWindowsTemperatureService:
     """Service for reading CPU temperatures using only Windows built-in APIs."""
@@ -36,7 +37,7 @@ class NativeWindowsTemperatureService:
             ps_command = "Get-WmiObject -Namespace 'root\\wmi' -Class MSAcpi_ThermalZoneTemperature | Select-Object -ExpandProperty CurrentTemperature"
             result = subprocess.run([
                 'powershell', '-Command', ps_command
-            ], capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+            ], capture_output=True, text=True, timeout=10, creationflags=NoWindowFlags())
             
             if result.returncode == 0 and result.stdout.strip():
                 lines = result.stdout.strip().split('\n')

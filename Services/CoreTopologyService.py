@@ -9,6 +9,7 @@ import ctypes.wintypes
 import platform
 from typing import List, Dict, Any, Optional
 from Core.Logging.LoggingService import LoggingService
+from Core.SubprocessUtil import NoWindowFlags
 
 
 class CoreTopologyService:
@@ -155,7 +156,7 @@ class CoreTopologyService:
             Result = subprocess.run(
                 ['powershell', '-NoProfile', '-Command', PsCommand],
                 capture_output=True, text=True, timeout=10,
-                creationflags=0x08000000  # CREATE_NO_WINDOW
+                creationflags=NoWindowFlags(),
             )
 
             if Result.returncode != 0 or not Result.stdout.strip():

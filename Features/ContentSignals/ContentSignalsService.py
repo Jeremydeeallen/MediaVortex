@@ -7,6 +7,7 @@ from typing import Optional
 
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalExists
+from Core.SubprocessUtil import NoWindowFlags
 from Features.ContentSignals.Models.ContentSignalsModel import ContentSignalsModel
 
 
@@ -48,7 +49,7 @@ def _RunSignalstats(FfmpegBinary: str, LocalFile: str) -> Optional[dict]:
         "-f", "null", "-",
     ]
     try:
-        R = subprocess.run(Cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT_SEC)
+        R = subprocess.run(Cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT_SEC, creationflags=NoWindowFlags())
     except subprocess.TimeoutExpired:
         LoggingService.LogWarning(
             f"signalstats timeout after {_FFMPEG_TIMEOUT_SEC}s on {LocalFile}",

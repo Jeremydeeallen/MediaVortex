@@ -9,6 +9,7 @@ from typing import Optional, Tuple
 
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
+from Core.SubprocessUtil import NoWindowFlags
 
 
 _RE_INTEGRATED = re.compile(r'I:\s+(-?\d+(?:\.\d+)?)\s+LUFS')
@@ -131,6 +132,7 @@ class EbuR128MeasurementService:
                 stderr=subprocess.PIPE,
                 timeout=Timeout,
                 check=False,
+                creationflags=NoWindowFlags(),
             )
         except subprocess.TimeoutExpired:
             return None, 'timeout'

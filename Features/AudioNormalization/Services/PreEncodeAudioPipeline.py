@@ -5,6 +5,7 @@ import tempfile
 
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalExists, LocalJoin
+from Core.SubprocessUtil import NoWindowFlags
 from Features.AudioNormalization.Repositories.AudioComplianceRulesRepository import AudioComplianceRulesRepository
 from Features.AudioNormalization.Services.DemucsVocalIsolationService import DemucsVocalIsolationService
 
@@ -135,7 +136,7 @@ class PreEncodeAudioPipeline:
             "-c:a", "pcm_s16le",
             OutputPath,
         ]
-        Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=1800)
+        Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=1800, creationflags=NoWindowFlags())
         if Result.returncode != 0:
             raise RuntimeError(
                 f"stereo downmix failed (exit {Result.returncode}): {Result.stderr[-500:]}"

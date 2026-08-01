@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.LocalPath import LocalExists
+from Core.SubprocessUtil import NoWindowFlags
 
 
 # directive: audio-vertical-live-evidence | # see audio-normalization.L1
@@ -33,6 +34,7 @@ class AudioStreamProbe:
             Result = subprocess.run(
                 Cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 timeout=self._Timeout, check=False,
+                creationflags=NoWindowFlags(),
             )
         except (subprocess.TimeoutExpired, FileNotFoundError) as Ex:
             LoggingService.LogException(

@@ -31,6 +31,7 @@ from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
 from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalJoin, LocalSplitExt, LocalExists
+from Core.SubprocessUtil import NoWindowFlags
 
 
 from Core.DateTimeHelpers import ToUtcIsoZ
@@ -670,7 +671,7 @@ class ProcessTranscodeQueueService:
                        '-show_entries', 'packet=data_hash',
                        '-of', 'default=nokey=1:noprint_wrappers=1',
                        LocalPath]
-            Result = subprocess.run(Command, capture_output=True, text=True, timeout=600)
+            Result = subprocess.run(Command, capture_output=True, text=True, timeout=600, creationflags=NoWindowFlags())
             if Result.returncode != 0:
                 LoggingService.LogError(
                     f"ffprobe packet-hash probe returned {Result.returncode} for {LocalPath!r}: {Result.stderr.strip()[:200]}",

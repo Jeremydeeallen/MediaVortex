@@ -8,6 +8,7 @@ import time
 import uuid
 
 from Core.Logging.LoggingService import LoggingService
+from Core.SubprocessUtil import NoWindowFlags
 from Features.AudioNormalization.Services.DemucsDaemonProtocol import (
     EncodeRequest,
     DecodeResponse,
@@ -71,6 +72,7 @@ class DemucsDaemonClient:
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
+                creationflags=NoWindowFlags(),
             )
             # directive: transcode-flow-canonical -- background reader thread makes deadline reads cross-platform (Windows select() rejects pipe fds); stderr drain prevents pipe-buffer deadlock during long Demucs runs
             self._StdoutQueue = queue.Queue()
