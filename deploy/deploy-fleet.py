@@ -11,6 +11,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# directive: orphan-generators-stop -- force line-buffered stdout so background/piped invocations see live progress.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 
 def _HostFromWorkerName(Wn: str) -> str:
     M = re.match(r"^(.+)-worker-\d+$", Wn)
@@ -139,22 +145,19 @@ def Main() -> int:
             _FinishHist('FAILED', [], [], 'no matching live workers')
             return 1
 
-    ByHost = defaultdict(list)
-    for N in AllNames:
-        ByHost[_HostFromWorkerName(N)].append(N)
-
-    print(f"deploying {len(AllNames)} worker(s) across {len(ByHost)} host(s); parallel across hosts, serial within host:")
-    for H in sorted(ByHost):
-        print(f"   {H}: {', '.join(sorted(ByHost[H]))}")
+    # directive: orphan-generators-stop -- full-parallel per worker for code-only deploys. Torch + pip skips make pip lock races a non-issue; per-host serialization was premature.
+    print(f"deploying {len(AllNames)} worker(s) in parallel:")
+    for N in sorted(AllNames):
+        print(f"   {N}")
 
     (ROOT / "VERSION").write_text(Sha + "\n", encoding="utf-8")
     print(f"VERSION bumped -> {Sha[:8]}")
 
     Results = []
-    with ThreadPoolExecutor(max_workers=max(1, len(ByHost))) as Ex:
-        Futs = [Ex.submit(DeployHostSerial, H, Wns) for H, Wns in ByHost.items()]
+    with ThreadPoolExecutor(max_workers=max(1, len(AllNames))) as Ex:
+        Futs = [Ex.submit(DeployWorker, N) for N in AllNames]
         for F in as_completed(Futs):
-            Results.extend(F.result())
+            Results.append(F.result())
 
     AnyFail = False
     OkNames = []
