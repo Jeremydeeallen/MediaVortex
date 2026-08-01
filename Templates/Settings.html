@@ -131,6 +131,51 @@
             </div>
         </div>
 
+        <!-- =============== SECTION: On-Demand Ingest =============== -->
+        <!-- directive: probe-worker-decoupled -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#OnDemandIngestSection">
+                <span><i class="fas fa-bolt me-2"></i> On-Demand Scan &amp; Probe &mdash; ingest a specific path right now</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="OnDemandIngestSection" class="collapse">
+                <div class="p-3">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <h6><i class="fas fa-search me-1"></i> Scan a path</h6>
+                            <small class="text-muted d-block mb-2">Walks the folder, inserts / updates MediaFiles rows, auto-chains a probe request when new files are found.</small>
+                            <div class="input-group input-group-sm mb-2">
+                                <input type="text" id="OnDemandScanPath" class="form-control" placeholder="T:\Cape Fear\Season 1" />
+                                <button class="btn btn-primary" id="OnDemandScanSubmit" onclick="SubmitOnDemandScan()">Scan</button>
+                            </div>
+                            <div id="OnDemandScanStatus" class="small text-muted mb-2"></div>
+                            <div class="table-responsive" style="max-height: 260px; overflow-y: auto;">
+                                <table class="table table-sm table-hover mb-0">
+                                    <thead class="table-light"><tr><th>Path</th><th>Status</th><th>Files</th><th>Requested</th><th>Elapsed</th></tr></thead>
+                                    <tbody id="OnDemandScanRecent"><tr><td colspan="5" class="text-muted small">Loading...</td></tr></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <h6><i class="fas fa-microscope me-1"></i> Probe a path</h6>
+                            <small class="text-muted d-block mb-2">Runs ffprobe on any file under the path that lacks metadata (Codec / Resolution / AudioCodec).</small>
+                            <div class="input-group input-group-sm mb-2">
+                                <input type="text" id="OnDemandProbePath" class="form-control" placeholder="T:\Cape Fear\Season 1" />
+                                <button class="btn btn-primary" id="OnDemandProbeSubmit" onclick="SubmitOnDemandProbe()">Probe</button>
+                            </div>
+                            <div id="OnDemandProbeStatus" class="small text-muted mb-2"></div>
+                            <div class="table-responsive" style="max-height: 260px; overflow-y: auto;">
+                                <table class="table table-sm table-hover mb-0">
+                                    <thead class="table-light"><tr><th>Path</th><th>Status</th><th>Files</th><th>Requested</th><th>Elapsed</th></tr></thead>
+                                    <tbody id="OnDemandProbeRecent"><tr><td colspan="5" class="text-muted small">Loading...</td></tr></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- =============== SECTION: Workers =============== -->
         <div class="settings-section">
             <div class="card-header" data-bs-toggle="collapse" data-bs-target="#WorkerConcurrencySection">
@@ -2452,6 +2497,79 @@ $(function() {
         _RefreshGates();
         RefreshBucketCounts();
     });
+});
+
+/* directive: probe-worker-decoupled -- on-demand scan + probe UI wiring. */
+function _ElapsedFmt(RequestedAt, CompletedAt) {
+    if (!RequestedAt) return '-';
+    var start = new Date(RequestedAt).getTime();
+    var end = CompletedAt ? new Date(CompletedAt).getTime() : Date.now();
+    var s = Math.max(0, Math.round((end - start) / 1000));
+    if (s < 60) return s + 's';
+    if (s < 3600) return Math.round(s/60) + 'm';
+    return Math.round(s/3600) + 'h';
+}
+function _RenderRows(TbodyId, Rows, FilesKey) {
+    var t = document.getElementById(TbodyId);
+    if (!Rows || Rows.length === 0) {
+        t.innerHTML = '<tr><td colspan="5" class="text-muted small">No recent requests.</td></tr>';
+        return;
+    }
+    t.innerHTML = Rows.map(function(r){
+        var files = (r[FilesKey] == null) ? '-' : r[FilesKey];
+        var when = r.RequestedAt || r.requestedat || '';
+        var comp = r.CompletedAt || r.completedat || null;
+        var stat = r.Status || r.status || '';
+        var rel = (r.RelativePath || r.relativepath || '') || '(root)';
+        var sid = r.StorageRootId || r.storagerootid || '';
+        return '<tr><td class="small">'+sid+' / '+rel+'</td>'+
+               '<td class="small">'+stat+'</td>'+
+               '<td class="small">'+files+'</td>'+
+               '<td class="small">'+(when||'').replace('T',' ').substring(0,19)+'</td>'+
+               '<td class="small">'+_ElapsedFmt(when, comp)+'</td></tr>';
+    }).join('');
+}
+async function _LoadOnDemandScanRecent(){
+    try {
+        var r = await fetch('/api/OnDemandScan/Recent');
+        var j = await r.json();
+        _RenderRows('OnDemandScanRecent', j.Rows || j.rows || [], 'FilesDiscovered');
+    } catch(e){ document.getElementById('OnDemandScanRecent').innerHTML='<tr><td colspan="5" class="text-danger small">Error: '+e+'</td></tr>'; }
+}
+async function _LoadOnDemandProbeRecent(){
+    try {
+        var r = await fetch('/api/OnDemandProbe/Recent');
+        var j = await r.json();
+        _RenderRows('OnDemandProbeRecent', j.Rows || j.rows || [], 'FilesProbed');
+    } catch(e){ document.getElementById('OnDemandProbeRecent').innerHTML='<tr><td colspan="5" class="text-danger small">Error: '+e+'</td></tr>'; }
+}
+async function SubmitOnDemandScan(){
+    var path = document.getElementById('OnDemandScanPath').value.trim();
+    var s = document.getElementById('OnDemandScanStatus');
+    if (!path) { s.className = 'small text-danger'; s.textContent = 'Enter a canonical path (e.g. T:\\Cape Fear\\Season 1).'; return; }
+    s.className = 'small text-muted'; s.textContent = 'Submitting...';
+    try {
+        var r = await fetch('/api/OnDemandScan', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({CanonicalPath: path})});
+        var j = await r.json();
+        if (j.Success) { s.className='small text-success'; s.textContent='Queued as RequestId ' + j.RequestId; document.getElementById('OnDemandScanPath').value=''; _LoadOnDemandScanRecent(); }
+        else { s.className='small text-danger'; s.textContent = j.Message || 'Failed'; }
+    } catch(e){ s.className='small text-danger'; s.textContent='Error: '+e; }
+}
+async function SubmitOnDemandProbe(){
+    var path = document.getElementById('OnDemandProbePath').value.trim();
+    var s = document.getElementById('OnDemandProbeStatus');
+    if (!path) { s.className = 'small text-danger'; s.textContent = 'Enter a canonical path (e.g. T:\\Cape Fear\\Season 1).'; return; }
+    s.className = 'small text-muted'; s.textContent = 'Submitting...';
+    try {
+        var r = await fetch('/api/OnDemandProbe', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({CanonicalPath: path})});
+        var j = await r.json();
+        if (j.Success) { s.className='small text-success'; s.textContent='Queued as RequestId ' + j.RequestId; document.getElementById('OnDemandProbePath').value=''; _LoadOnDemandProbeRecent(); }
+        else { s.className='small text-danger'; s.textContent = j.Message || 'Failed'; }
+    } catch(e){ s.className='small text-danger'; s.textContent='Error: '+e; }
+}
+document.addEventListener('DOMContentLoaded', function(){
+    var s = document.getElementById('OnDemandIngestSection');
+    if (s) s.addEventListener('shown.bs.collapse', function(){ _LoadOnDemandScanRecent(); _LoadOnDemandProbeRecent(); });
 });
 
 </script>
