@@ -29,7 +29,7 @@ def _GitHead() -> str:
 
 
 def _HostFromWorkerName(Wn: str) -> str:
-    M = re.match(r"^([A-Za-z0-9]+)-worker-\d+$", Wn)
+    M = re.match(r"^(.+)-worker-\d+$", Wn)
     if M:
         return M.group(1)
     M = re.match(r"^([A-Za-z0-9]+)-\d+$", Wn)
@@ -39,7 +39,7 @@ def _HostFromWorkerName(Wn: str) -> str:
 
 
 def _BaremetalUnitFromWorkerName(Wn: str) -> str:
-    M = re.match(r"^[A-Za-z0-9]+-worker-(\d+)$", Wn)
+    M = re.match(r"^.+-worker-(\d+)$", Wn)
     if not M:
         raise ValueError(f"cannot derive systemd unit from {Wn!r}")
     return f"mediavortex-worker@{M.group(1)}.service"

@@ -1,12 +1,24 @@
 # see .claude/rules/worker-deploy-drain.md
 import argparse
+import re
 import subprocess
 import sys
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+
+def _HostFromWorkerName(Wn: str) -> str:
+    M = re.match(r"^(.+)-worker-\d+$", Wn)
+    if M:
+        return M.group(1)
+    M = re.match(r"^([A-Za-z0-9]+)-\d+$", Wn)
+    if M:
+        return M.group(1)
+    return Wn
 
 
 def _Sh(Cmd, cwd=None):
@@ -38,6 +50,13 @@ def DeployWorker(WorkerName: str) -> tuple:
     )
     Tail = "\n        ".join(R.stdout.strip().splitlines()[-3:])
     return (WorkerName, R.returncode, Tail)
+
+
+def DeployHostSerial(HostName: str, WorkerNames: list) -> list:
+    Results = []
+    for Wn in sorted(WorkerNames):
+        Results.append(DeployWorker(Wn))
+    return Results
 
 
 def Main() -> int:
@@ -104,18 +123,22 @@ def Main() -> int:
             _FinishHist('FAILED', [], [], 'no matching live workers')
             return 1
 
-    print(f"deploying {len(AllNames)} worker(s) per-service, in parallel:")
+    ByHost = defaultdict(list)
     for N in AllNames:
-        print(f"   {N}")
+        ByHost[_HostFromWorkerName(N)].append(N)
+
+    print(f"deploying {len(AllNames)} worker(s) across {len(ByHost)} host(s); parallel across hosts, serial within host:")
+    for H in sorted(ByHost):
+        print(f"   {H}: {', '.join(sorted(ByHost[H]))}")
 
     (ROOT / "VERSION").write_text(Sha + "\n", encoding="utf-8")
     print(f"VERSION bumped -> {Sha[:8]}")
 
     Results = []
-    with ThreadPoolExecutor(max_workers=max(1, len(AllNames))) as Ex:
-        Futs = [Ex.submit(DeployWorker, N) for N in AllNames]
+    with ThreadPoolExecutor(max_workers=max(1, len(ByHost))) as Ex:
+        Futs = [Ex.submit(DeployHostSerial, H, Wns) for H, Wns in ByHost.items()]
         for F in as_completed(Futs):
-            Results.append(F.result())
+            Results.extend(F.result())
 
     AnyFail = False
     OkNames = []

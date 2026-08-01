@@ -1,6 +1,7 @@
 # Directive: docker-purge
 
 **Status:** Active -- phase: IMPLEMENTING
+
 **Opened:** 2026-07-31
 **Parent (paused):** deploy-worker-identity-invariants
 **Slug:** docker-purge
