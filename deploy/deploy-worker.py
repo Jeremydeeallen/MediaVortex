@@ -131,6 +131,43 @@ def DeployBaremetal(WorkerName: str, Host: str, Sha: str, SkipSync: bool = False
     return (R.returncode == 0, Elapsed)
 
 
+def _KillMediaVortexProcs(NameFragment: str, psutil_mod) -> int:
+    Killed = 0
+    for P in psutil_mod.process_iter(["pid", "cmdline"]):
+        try:
+            Cmd = " ".join(P.info.get("cmdline") or [])
+            if NameFragment in Cmd and "Main.py" in Cmd:
+                P.terminate()
+                try:
+                    P.wait(timeout=10)
+                except psutil_mod.TimeoutExpired:
+                    P.kill()
+                Killed += 1
+        except Exception:
+            pass
+    return Killed
+
+
+def _SpawnDetached(ServiceDir: str, MainPy, LogFile, _os):
+    ScriptsDir = MediaVortexRoot / ServiceDir / "venv" / "Scripts"
+    Py = ScriptsDir / "pythonw.exe"
+    if not Py.exists():
+        Py = ScriptsDir / "python.exe"
+    CreationFlags = 0
+    if _os.name == "nt":
+        CreationFlags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+    Fh = open(LogFile, "ab", buffering=0)
+    Proc = subprocess.Popen(
+        [str(Py), str(MainPy)],
+        cwd=str(MediaVortexRoot),
+        stdout=Fh, stderr=Fh,
+        creationflags=CreationFlags,
+        close_fds=True,
+        start_new_session=(_os.name != "nt"),
+    )
+    return Proc, Py
+
+
 def DeployWindowsLocal(WorkerName: str, Sha: str) -> tuple:
     T0 = time.time()
     print(f"[3/6] deploy backend: windows-local ({WorkerName})", flush=True)
@@ -141,48 +178,30 @@ def DeployWindowsLocal(WorkerName: str, Sha: str) -> tuple:
         Elapsed = time.time() - T0
         print(f"[FAIL] psutil not installed ({Elapsed:.1f}s)", flush=True)
         return (False, Elapsed)
-    Killed = 0
-    for P in psutil.process_iter(["pid", "cmdline"]):
-        try:
-            Cmd = " ".join(P.info.get("cmdline") or [])
-            if "WorkerService" in Cmd and "Main.py" in Cmd:
-                P.terminate()
-                try:
-                    P.wait(timeout=10)
-                except psutil.TimeoutExpired:
-                    P.kill()
-                Killed += 1
-        except Exception:
-            pass
-    print(f"       terminated {Killed} WorkerService process(es)", flush=True)
 
-    # directive: probe-worker-decoupled -- use pythonw.exe (windowless) so no console pops up; verify child alive before returning success.
-    ScriptsDir = MediaVortexRoot / "WorkerService" / "venv" / "Scripts"
-    WorkerPy = ScriptsDir / "pythonw.exe"
-    if not WorkerPy.exists():
-        WorkerPy = ScriptsDir / "python.exe"
-    Main = MediaVortexRoot / "WorkerService" / "Main.py"
-    LogFile = MediaVortexRoot / "WorkerService" / "deploy-worker.log"
-    CreationFlags = 0
-    if _os.name == "nt":
-        CreationFlags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-    Fh = open(LogFile, "ab", buffering=0)
-    print(f"[4/6] start WorkerService (detached, {WorkerPy.name})", flush=True)
-    Proc = subprocess.Popen(
-        [str(WorkerPy), str(Main)],
-        cwd=str(MediaVortexRoot),
-        stdout=Fh, stderr=Fh,
-        creationflags=CreationFlags,
-        close_fds=True,
-        start_new_session=(_os.name != "nt"),
-    )
-    time.sleep(2)
-    if Proc.poll() is not None:
+    # directive: probe-worker-decoupled -- I9 hosts BOTH WebService + WorkerService locally; restart both.
+    KilledW = _KillMediaVortexProcs("WorkerService", psutil)
+    KilledS = _KillMediaVortexProcs("WebService", psutil)
+    print(f"       terminated {KilledW} WorkerService + {KilledS} WebService process(es)", flush=True)
+
+    print(f"[4/6] start WebService then WorkerService (detached, pythonw)", flush=True)
+    WebProc, WebPy = _SpawnDetached("WebService", MediaVortexRoot / "WebService" / "Main.py",
+                                    MediaVortexRoot / "WebService" / "deploy-worker.log", _os)
+    time.sleep(3)
+    if WebProc.poll() is not None:
         Elapsed = time.time() - T0
-        print(f"[FAIL] spawned WorkerService died immediately (rc={Proc.returncode}); see {LogFile}", flush=True)
+        print(f"[FAIL] WebService died immediately (rc={WebProc.returncode}); see WebService/deploy-worker.log", flush=True)
         return (False, Elapsed)
+    WorkerProc, WorkerPy = _SpawnDetached("WorkerService", MediaVortexRoot / "WorkerService" / "Main.py",
+                                          MediaVortexRoot / "WorkerService" / "deploy-worker.log", _os)
+    time.sleep(2)
+    if WorkerProc.poll() is not None:
+        Elapsed = time.time() - T0
+        print(f"[FAIL] WorkerService died immediately (rc={WorkerProc.returncode}); see WorkerService/deploy-worker.log", flush=True)
+        return (False, Elapsed)
+
     Elapsed = time.time() - T0
-    print(f"       backend total ({Elapsed:.1f}s); child pid={Proc.pid}", flush=True)
+    print(f"       backend total ({Elapsed:.1f}s); web pid={WebProc.pid} worker pid={WorkerProc.pid}", flush=True)
     return (True, Elapsed)
 
 
