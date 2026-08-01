@@ -26,6 +26,7 @@ These are the WHAT. HOW is Claude's responsibility below.
 - **Worker routing:** operator's constraint = "not busy so it doesn't queue behind a probing or walking scan." Idle workers should take on-demand work; busy workers should not force the request to wait.
 - **UI location:** sub-tabs under existing `/Settings` page (there's already a `Scanners` sub-tab there). Don't bloat the GUI with new top-level tabs.
 - **Design principle:** KISS. Simplest solution meeting the above.
+- **Probe owns "gather all details and classify correctly".** Probe stage writes MediaFiles metadata columns (Resolution, Codec, VideoBitrateKbps, AudioCodec, ContainerFormat, ...). Any downstream state derived from those columns -- WorkBucket, IsCompliant, {Video,Audio,Container}Compliant -- becomes stale the moment the probe writes new values. Probe stage is responsible for making that derived state consistent with the columns it just wrote. Operator does not manually recompute compliance; probe does it for every file it touches. Related fix: compliance evaluators fail-loud on missing inputs (return `(None, 'missing_input:<field>')`, not silent `(True, None)`) so `Unclassified` catches gaps instead of `Compliant` hiding them.
 
 ## Implementation (Claude's how)
 

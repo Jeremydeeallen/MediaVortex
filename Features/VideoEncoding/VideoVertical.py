@@ -31,17 +31,21 @@ class VideoVertical:
         SrcKbps = getattr(Mf, 'VideoBitrateKbps', None)
         AssignedProfile = getattr(Mf, 'AssignedProfile', None)
 
-        if not (ResolutionCategory and SrcKbps and int(SrcKbps) > 0 and AssignedProfile):
-            return (True, None)
+        if not ResolutionCategory:
+            return (None, 'missing_input:ResolutionCategory')
+        if not SrcKbps or int(SrcKbps) <= 0:
+            return (None, 'missing_input:VideoBitrateKbps')
+        if not AssignedProfile:
+            return (None, 'missing_input:AssignedProfile')
 
         Family = self._ResolveFamily(AssignedProfile)
         if not Family:
-            return (True, None)
+            return (None, f'missing_input:Family(profile={AssignedProfile})')
 
         ContentClass = getattr(Mf, 'ContentClass', None) or 'live_action'
         Tier1TargetKbps = self._Tiers.GetTier1Target(Family, ContentClass, ResolutionCategory)
         if Tier1TargetKbps is None:
-            return (True, None)
+            return (None, f'missing_input:Tier1TargetKbps(family={Family},class={ContentClass},res={ResolutionCategory})')
 
         Multiplier = self._Thresholds.GetMultiplier(ResolutionCategory)
         Threshold = int(round(Tier1TargetKbps * Multiplier))

@@ -86,23 +86,35 @@ class TestVideoComplianceMultiplier(unittest.TestCase):
         self.assertTrue(Compliant)
         self.assertNotIn('codec', Reason)
 
-    def test_no_profile_falls_through_compliant(self):
+    def test_no_profile_returns_none_with_missing_input_reason(self):
         Db = _StubDb()
         Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(AssignedProfile=None))
-        self.assertTrue(Compliant)
-        self.assertIsNone(Reason)
+        self.assertIsNone(Compliant)
+        self.assertEqual(Reason, 'missing_input:AssignedProfile')
 
-    def test_missing_family_falls_through_compliant(self):
+    def test_missing_family_returns_none_with_missing_input_reason(self):
         Db = _StubDb(Family=None)
         Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf())
-        self.assertTrue(Compliant)
-        self.assertIsNone(Reason)
+        self.assertIsNone(Compliant)
+        self.assertIn('missing_input:Family', Reason)
 
-    def test_missing_tier1_falls_through_compliant(self):
+    def test_missing_tier1_returns_none_with_missing_input_reason(self):
         Db = _StubDb(Tier1TargetKbps=None)
         Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf())
-        self.assertTrue(Compliant)
-        self.assertIsNone(Reason)
+        self.assertIsNone(Compliant)
+        self.assertIn('missing_input:Tier1TargetKbps', Reason)
+
+    def test_missing_bitrate_returns_none_with_missing_input_reason(self):
+        Db = _StubDb()
+        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(VideoBitrateKbps=None))
+        self.assertIsNone(Compliant)
+        self.assertEqual(Reason, 'missing_input:VideoBitrateKbps')
+
+    def test_missing_resolution_category_returns_none_with_missing_input_reason(self):
+        Db = _StubDb()
+        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(ResolutionCategory=None))
+        self.assertIsNone(Compliant)
+        self.assertEqual(Reason, 'missing_input:ResolutionCategory')
 
     def test_missing_multiplier_fail_loud(self):
         Db = _StubDb(Multiplier=None)

@@ -178,6 +178,8 @@ class ProbeWorker:
                     f"ProbeWorker: ProbeFile failed MediaFileId={MediaFileId}: {Msg}",
                     'ProbeWorker', '_ProcessOne',
                 )
+                return
+            self._Reclassify(MediaFileId)
         except Exception as Ex:
             LoggingService.LogException(
                 f"ProbeWorker: ProbeFile raised MediaFileId={MediaFileId}",
@@ -185,3 +187,10 @@ class ProbeWorker:
             )
         finally:
             self._DeleteActiveJob(ActiveJobId)
+
+    def _Reclassify(self, MediaFileId):
+        # directive: probe-worker-decoupled -- probe owns making derived compliance state consistent with the columns it just wrote.
+        from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+        if not hasattr(self, '_Qmbs'):
+            self._Qmbs = QueueManagementBusinessService()
+        self._Qmbs.RecomputeForFiles([MediaFileId])
