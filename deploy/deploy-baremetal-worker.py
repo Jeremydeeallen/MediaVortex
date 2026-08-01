@@ -111,7 +111,7 @@ def StepEnsureVenv(Target: str, TorchVariant: str, DepsFingerprint: str) -> bool
     VenvOk = _Ssh(Target, "test -x /opt/mediavortex/host-venv/bin/pip && echo YES || echo NO", Timeout=10).stdout.strip()
     if VenvOk == "YES":
         InstalledTorch = _RemoteTorchVersion(Target)
-        if InstalledTorch == TorchExpectedVersion:
+        if InstalledTorch.startswith(TorchExpectedVersion):
             _Status(2, 13, "ensure venv", "SKIPPED", f"torch {InstalledTorch} already installed")
             return True
     Index = TorchIndexByVariant.get(TorchVariant, TorchIndexByVariant["cpu"])
