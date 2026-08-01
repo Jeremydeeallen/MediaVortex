@@ -56,11 +56,59 @@ class ProbeWorker:
     def _PollOnce(self):
         BatchSize = self._ResolveIntSetting('ProbeBatchSize', self.DEFAULT_BATCH_SIZE)
         MaxFailures = MediaProbeBusinessService.MaxFFprobeFailures
+        # On-demand probe request takes priority over continuous fetch pool.
+        self._ClaimAndRunOnDemandProbe(MaxFailures)
         Batch = self._FetchBatch(BatchSize, MaxFailures)
         for Row in Batch:
             if self.StopEvent.is_set():
                 break
             self._ProcessOne(Row)
+
+    def _ClaimAndRunOnDemandProbe(self, MaxFailures: int):
+        from Features.OnDemandIngest.OnDemandIngestRepository import OnDemandIngestRepository
+        from Core.Database.DatabaseService import EscapeLikePattern
+        try:
+            Repo = OnDemandIngestRepository(self.Db)
+            Claim = Repo.ClaimNextPendingProbeRequest(self.WorkerName)
+            if not Claim:
+                return
+            RequestId = Claim.get('id') or Claim.get('Id')
+            Sid = Claim.get('storagerootid') or Claim.get('StorageRootId')
+            Rel = Claim.get('relativepath') or Claim.get('RelativePath') or ''
+            LoggingService.LogInfo(
+                f"ProbeWorker: claimed OnDemandProbe RequestId={RequestId} sid={Sid} rel={Rel!r}",
+                'ProbeWorker', '_ClaimAndRunOnDemandProbe',
+            )
+            Prefix = Rel.rstrip('/').rstrip('\\')
+            LikePattern = f"{EscapeLikePattern(Prefix)}%" if not Prefix else f"{EscapeLikePattern(Prefix)}/%"
+            Rows = self.Db.ExecuteQuery(
+                "SELECT Id FROM MediaFiles "
+                "WHERE StorageRootId=%s AND RelativePath LIKE %s ESCAPE '!' "
+                "AND (Resolution IS NULL OR Codec IS NULL OR AudioCodec IS NULL) "
+                "AND COALESCE(FFprobeFailureCount, 0) < %s "
+                "ORDER BY LastScannedDate DESC NULLS LAST",
+                (Sid, LikePattern, MaxFailures),
+            ) or []
+            Probed = 0
+            for Row in Rows:
+                if self.StopEvent.is_set():
+                    break
+                self._ProcessOne(Row)
+                Probed += 1
+            Repo.MarkProbeComplete(RequestId, Probed)
+            LoggingService.LogInfo(
+                f"ProbeWorker: OnDemandProbe RequestId={RequestId} complete; {Probed} files processed",
+                'ProbeWorker', '_ClaimAndRunOnDemandProbe',
+            )
+        except Exception as Ex:
+            LoggingService.LogException(
+                "ProbeWorker._ClaimAndRunOnDemandProbe raised", Ex, 'ProbeWorker', '_ClaimAndRunOnDemandProbe',
+            )
+            try:
+                if 'RequestId' in locals():
+                    Repo.MarkProbeFailed(RequestId, str(Ex))
+            except Exception:
+                pass
 
     def _ResolveIntSetting(self, Key, Default):
         try:
