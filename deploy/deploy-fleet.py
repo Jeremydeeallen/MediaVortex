@@ -149,7 +149,7 @@ def Main() -> int:
             _FinishHist('FAILED', [], [], 'no matching live workers')
             return 1
 
-    # directive: orphan-generators-stop -- group by host so each host syncs source once (rsync/pip contention on target disk was the real bottleneck when running per-worker sync). Then per-worker restart-only in parallel across ALL workers.
+    # directive: probe-worker-decoupled -- 3-step fleet: pause-all -> per-host sync -> per-worker restart. Drain overlaps sync.
     ByHost = defaultdict(list)
     WindowsWorkers = []
     for N in AllNames:
@@ -168,20 +168,35 @@ def Main() -> int:
     (ROOT / "VERSION").write_text(Sha + "\n", encoding="utf-8")
     print(f"VERSION bumped -> {Sha[:8]}")
 
+    T1Start = _dt.datetime.now()
+    print(f"[STEP 1/3 @ {T1Start.strftime('%H:%M:%S')}] pause ALL {len(AllNames)} workers (single UPDATE); drain begins in the background")
+    Placeholders = ",".join(["%s"] * len(AllNames))
+    PauseAffected = Db.ExecuteNonQuery(
+        f"UPDATE Workers SET Status='Paused' WHERE WorkerName IN ({Placeholders}) AND Status<>'Paused'",
+        tuple(AllNames),
+    )
+    T1Elapsed = (_dt.datetime.now() - T1Start).total_seconds()
+    print(f"[STEP 1/3 DONE] {PauseAffected} worker(s) flipped to Paused in {T1Elapsed:.1f}s; drain in-flight for all")
+
     Results = []
+    SyncResults = {}
+    FailedHosts = []
 
     if ByHost:
-        print(f"[phase 1/2] per-host source sync + dep install ({len(ByHost)} host(s) in parallel)")
-        SyncResults = {}
+        T2Start = _dt.datetime.now()
+        print(f"[STEP 2/3 @ {T2Start.strftime('%H:%M:%S')}] per-host source sync + dep install -- {len(ByHost)} host(s) in parallel; drain runs concurrently")
         with ThreadPoolExecutor(max_workers=max(1, len(ByHost))) as Ex:
             Futs = {Ex.submit(SyncHost, H): H for H in ByHost.keys()}
             for F in as_completed(Futs):
                 H, Rc, Tail, StartTs, EndTs, Elapsed = F.result()
                 SyncResults[H] = (Rc, Tail, StartTs, EndTs, Elapsed)
+                print(f"[STEP 2/3] sync:{H} finished rc={Rc} elapsed={Elapsed:.1f}s")
 
         FailedHosts = [H for H, (Rc, *_ ) in SyncResults.items() if Rc != 0]
+        T2Elapsed = (_dt.datetime.now() - T2Start).total_seconds()
+        print(f"[STEP 2/3 DONE] per-host sync complete in {T2Elapsed:.1f}s wall")
         if FailedHosts:
-            print(f"[FAIL] per-host sync failed on: {FailedHosts}")
+            print(f"[STEP 2/3 FAIL] per-host sync failed on: {FailedHosts}")
             for H in FailedHosts:
                 Rc, Tail, *_ = SyncResults[H]
                 print(f"   sync:{H} rc={Rc}\n        {Tail}")
@@ -189,7 +204,8 @@ def Main() -> int:
     RestartTargets = [N for N in AllNames if _HostFromWorkerName(N) not in (FailedHosts if ByHost else [])]
 
     if RestartTargets:
-        print(f"[phase 2/2] per-worker pause+drain+restart+verify ({len(RestartTargets)} in parallel)")
+        T3Start = _dt.datetime.now()
+        print(f"[STEP 3/3 @ {T3Start.strftime('%H:%M:%S')}] per-worker drain-wait + restart + verify + Online ({len(RestartTargets)} in parallel)")
         with ThreadPoolExecutor(max_workers=max(1, len(RestartTargets))) as Ex:
             Futs = []
             for N in RestartTargets:
@@ -197,6 +213,8 @@ def Main() -> int:
                 Futs.append(Ex.submit(DeployWorker, N, SkipSync))
             for F in as_completed(Futs):
                 Results.append(F.result())
+        T3Elapsed = (_dt.datetime.now() - T3Start).total_seconds()
+        print(f"[STEP 3/3 DONE] per-worker restart complete in {T3Elapsed:.1f}s wall")
 
     AnyFail = False
     OkNames = []
