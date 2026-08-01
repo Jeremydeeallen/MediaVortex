@@ -8,6 +8,7 @@ from typing import Optional
 
 DepsFingerprintPath = "/opt/mediavortex/.deploy-deps-fingerprint"
 TorchPin = "torch==2.6.0 torchaudio==2.6.0"
+TorchExpectedVersion = "2.6.0"
 
 
 MediaVortexRoot = Path(__file__).resolve().parent.parent
@@ -100,13 +101,19 @@ def _WriteRemoteDepsFingerprint(Target: str, Fingerprint: str) -> None:
     _Ssh(Target, f"mkdir -p /opt/mediavortex && printf '%s' '{Fingerprint}' > {DepsFingerprintPath}", Timeout=10)
 
 
+def _RemoteTorchVersion(Target: str) -> str:
+    R = _Ssh(Target, "/opt/mediavortex/host-venv/bin/pip show torch 2>/dev/null | awk '/^Version:/ {print $2}'", Timeout=15)
+    return (R.stdout or "").strip()
+
+
+# directive: scan-broken-restore -- state check (pip show torch) beats marker check; torch installed at pin = skip always.
 def StepEnsureVenv(Target: str, TorchVariant: str, DepsFingerprint: str) -> bool:
-    # directive: scan-broken-restore -- skip when host-side fingerprint matches; guarantees venv exists but doesn't pay torch --upgrade cost.
-    Remote = _RemoteDepsFingerprint(Target)
     VenvOk = _Ssh(Target, "test -x /opt/mediavortex/host-venv/bin/pip && echo YES || echo NO", Timeout=10).stdout.strip()
-    if Remote == DepsFingerprint and VenvOk == "YES":
-        _Status(2, 13, "ensure venv", "SKIPPED", f"deps fingerprint match ({DepsFingerprint[:8]}); venv present")
-        return True
+    if VenvOk == "YES":
+        InstalledTorch = _RemoteTorchVersion(Target)
+        if InstalledTorch == TorchExpectedVersion:
+            _Status(2, 13, "ensure venv", "SKIPPED", f"torch {InstalledTorch} already installed")
+            return True
     Index = TorchIndexByVariant.get(TorchVariant, TorchIndexByVariant["cpu"])
     Script = (
         "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12-venv python3-pip > /dev/null && "
@@ -115,7 +122,7 @@ def StepEnsureVenv(Target: str, TorchVariant: str, DepsFingerprint: str) -> bool
         "  rm -rf /opt/mediavortex/host-venv && python3.12 -m venv /opt/mediavortex/host-venv && "
         "  /opt/mediavortex/host-venv/bin/pip install --no-cache-dir --upgrade pip wheel > /dev/null; "
         "fi && "
-        "/opt/mediavortex/host-venv/bin/pip install --no-cache-dir --upgrade "
+        "/opt/mediavortex/host-venv/bin/pip install --no-cache-dir "
         f"--index-url {Index} {TorchPin} > /tmp/mv-pip-torch.log 2>&1 && "
         "echo VENV_READY"
     )
@@ -127,12 +134,11 @@ def StepEnsureVenv(Target: str, TorchVariant: str, DepsFingerprint: str) -> bool
     return True
 
 
-# directive: transcode-flow-canonical -- all non-torch installs via requirements.txt (enforced by Tests/Contract/TestDeployPipInstallsRequirementsTxt.py)
+# directive: scan-broken-restore -- requirements.txt content hash marker; skip pip install if unchanged.
 def StepInstallRequirements(Target: str, DepsFingerprint: str) -> bool:
-    # directive: scan-broken-restore -- skip when host-side fingerprint matches; write fingerprint on success.
     Remote = _RemoteDepsFingerprint(Target)
     if Remote == DepsFingerprint:
-        _Status(8, 13, "install requirements", "SKIPPED", f"deps fingerprint match ({DepsFingerprint[:8]})")
+        _Status(8, 13, "install requirements", "SKIPPED", f"requirements unchanged (fingerprint {DepsFingerprint[:8]})")
         return True
     Script = (
         "/opt/mediavortex/host-venv/bin/pip install --no-cache-dir "
