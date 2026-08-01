@@ -181,6 +181,15 @@ def DeployWindowsLocal(WorkerName: str, Sha: str) -> tuple:
         print(f"[FAIL] psutil not installed ({Elapsed:.1f}s)", flush=True)
         return (False, Elapsed)
 
+    # directive: probe-worker-decoupled -- stamp VERSION to target Sha before spawn so WorkerService reads matching Version at startup (verify checks Version.startswith(Sha)).
+    try:
+        (MediaVortexRoot / "VERSION").write_text(Sha + "\n", encoding="utf-8")
+        print(f"       stamped VERSION -> {Sha[:8]}", flush=True)
+    except Exception as StampEx:
+        Elapsed = time.time() - T0
+        print(f"[FAIL] stamp VERSION failed: {StampEx}", flush=True)
+        return (False, Elapsed)
+
     # directive: probe-worker-decoupled -- I9 hosts BOTH WebService + WorkerService locally; restart both.
     KilledW = _KillMediaVortexProcs("WorkerService", psutil)
     KilledS = _KillMediaVortexProcs("WebService", psutil)
