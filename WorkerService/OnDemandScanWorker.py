@@ -129,7 +129,7 @@ class OnDemandScanWorker:
     def _ScanSubtree(self, StorageRootId: int, RelativePath: str, LocalPath: str) -> int:
         from Features.FileScanning.FileScanningBusinessService import FileScanningBusinessService
         Svc = FileScanningBusinessService()
-        Result = Svc.PerformScan(LocalPath)
+        Result = Svc.PerformScan(LocalPath, Recursive=True)
         if isinstance(Result, dict):
             Results = Result.get('Results') or {}
             return int(Results.get('NewFiles', 0) or 0) + int(Results.get('UpdatedFiles', 0) or 0)
