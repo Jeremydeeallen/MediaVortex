@@ -131,19 +131,19 @@ def DeployBaremetal(WorkerName: str, Host: str, Sha: str, SkipSync: bool = False
     return (R.returncode == 0, Elapsed)
 
 
-def _KillMediaVortexProcs(NameFragment: str, psutil_mod, GracefulTimeout: int = 1800) -> int:
-    # directive: probe-worker-decoupled -- SIGTERM then wait up to GracefulTimeout seconds for the process's own SignalHandler drain (`_StopAllCapabilities`) to finish before SIGKILL. Matches graceful-drain.feature.md 30-min budget so we never yank an in-flight FFmpeg.
+def _KillMediaVortexProcs(NameFragment: str, psutil_mod, ShutdownTimeout: int = 30) -> int:
+    # directive: probe-worker-decoupled -- SIGTERM + short wait. DrainWorker at the parent (DeployOne) already confirmed ActiveJobs=0 and every capability thread (Transcode/QT/Language/Probe/OnDemandScan) records its own ActiveJobs row while in-flight -- so if drain returned success, all threads are idle and SIGTERM lands cleanly. 30s ceiling is the fail-loud tripwire, not a bandaid.
     Killed = 0
     for P in psutil_mod.process_iter(["pid", "cmdline"]):
         try:
             Cmd = " ".join(P.info.get("cmdline") or [])
             if NameFragment in Cmd and "Main.py" in Cmd:
-                print(f"       SIGTERM pid={P.pid} ({NameFragment}); waiting up to {GracefulTimeout}s for graceful shutdown", flush=True)
+                print(f"       SIGTERM pid={P.pid} ({NameFragment}); expecting clean exit within {ShutdownTimeout}s (drain already ran upstream)", flush=True)
                 P.terminate()
                 try:
-                    P.wait(timeout=GracefulTimeout)
+                    P.wait(timeout=ShutdownTimeout)
                 except psutil_mod.TimeoutExpired:
-                    print(f"       [WARN] pid={P.pid} did not exit in {GracefulTimeout}s; SIGKILL", flush=True)
+                    print(f"       [WARN] pid={P.pid} did not exit in {ShutdownTimeout}s despite drain=ok upstream; SIGKILL. Investigate a capability that didn't record ActiveJobs.", flush=True)
                     P.kill()
                 Killed += 1
         except Exception:

@@ -1,4 +1,5 @@
 # directive: probe-worker-decoupled -- polls OnDemandScanRequests, walks the requested subtree via FileScanningBusinessService, auto-chains OnDemandProbeRequests for the same path on completion.
+import os
 import threading
 
 from Core.Database.DatabaseService import DatabaseService
@@ -7,6 +8,15 @@ from Core.Path import Worker as CoreWorker
 from Core.Logging.LoggingService import LoggingService
 from Features.OnDemandIngest.OnDemandIngestRepository import OnDemandIngestRepository
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+
+
+ACTIVE_JOB_INSERT_SQL = (
+    "INSERT INTO ActiveJobs (ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName, "
+    "Status, StartedAt, Phase, PhaseTransitionedAt) "
+    "VALUES ('ScanService', 'OnDemandScan', %s, %s, %s, %s, 'Running', NOW(), 'Scanning', NOW()) "
+    "RETURNING Id"
+)
+ACTIVE_JOB_DELETE_SQL = "DELETE FROM ActiveJobs WHERE Id = %s"
 
 
 class OnDemandScanWorker:
@@ -56,6 +66,26 @@ class OnDemandScanWorker:
         except (TypeError, ValueError):
             return Default
 
+    def _CreateActiveJob(self, RequestId):
+        # directive: probe-worker-decoupled -- record in-flight on-demand scan in ActiveJobs so DrainWorker sees us truthfully.
+        try:
+            self.Db.ExecuteNonQuery(
+                ACTIVE_JOB_INSERT_SQL,
+                (RequestId, os.getpid(), threading.get_ident(), self.WorkerName),
+            )
+            return self.Db.GetLastInsertId()
+        except Exception as Ex:
+            LoggingService.LogException("OnDemandScanWorker._CreateActiveJob failed", Ex, 'OnDemandScanWorker', '_CreateActiveJob')
+            return None
+
+    def _DeleteActiveJob(self, ActiveJobId):
+        if not ActiveJobId:
+            return
+        try:
+            self.Db.ExecuteNonQuery("DELETE FROM ActiveJobs WHERE Id = %s", (ActiveJobId,))
+        except Exception as Ex:
+            LoggingService.LogException("OnDemandScanWorker._DeleteActiveJob failed", Ex, 'OnDemandScanWorker', '_DeleteActiveJob')
+
     def _PollOnce(self):
         Repo = OnDemandIngestRepository(self.Db)
         Claim = Repo.ClaimNextPendingScanRequest(self.WorkerName)
@@ -64,33 +94,37 @@ class OnDemandScanWorker:
         RequestId = Claim.get('id') or Claim.get('Id')
         Sid = Claim.get('storagerootid') or Claim.get('StorageRootId')
         Rel = Claim.get('relativepath') or Claim.get('RelativePath') or ''
+        ActiveJobId = self._CreateActiveJob(RequestId)
         LoggingService.LogInfo(
             f"OnDemandScanWorker: claimed RequestId={RequestId} sid={Sid} rel={Rel!r}",
             'OnDemandScanWorker', '_PollOnce',
         )
         try:
-            Wk = CoreWorker.Current()
-            LocalPath = CorePath(Sid, Rel).Resolve(Wk)
-        except Exception as Ex:
-            Repo.MarkScanFailed(RequestId, f'Path resolve failed: {Ex}')
-            LoggingService.LogException("Path resolve failed", Ex, 'OnDemandScanWorker', '_PollOnce')
-            return
-        try:
-            Discovered = self._ScanSubtree(Sid, Rel, LocalPath)
-            Repo.MarkScanComplete(RequestId, Discovered)
-            LoggingService.LogInfo(
-                f"OnDemandScanWorker: RequestId={RequestId} complete; {Discovered} files discovered",
-                'OnDemandScanWorker', '_PollOnce',
-            )
-            if Discovered > 0:
-                ProbeRid = Repo.InsertProbeRequest(Sid, Rel)
+            try:
+                Wk = CoreWorker.Current()
+                LocalPath = CorePath(Sid, Rel).Resolve(Wk)
+            except Exception as Ex:
+                Repo.MarkScanFailed(RequestId, f'Path resolve failed: {Ex}')
+                LoggingService.LogException("Path resolve failed", Ex, 'OnDemandScanWorker', '_PollOnce')
+                return
+            try:
+                Discovered = self._ScanSubtree(Sid, Rel, LocalPath)
+                Repo.MarkScanComplete(RequestId, Discovered)
                 LoggingService.LogInfo(
-                    f"OnDemandScanWorker: auto-chained OnDemandProbe RequestId={ProbeRid} for same path",
+                    f"OnDemandScanWorker: RequestId={RequestId} complete; {Discovered} files discovered",
                     'OnDemandScanWorker', '_PollOnce',
                 )
-        except Exception as Ex:
-            Repo.MarkScanFailed(RequestId, str(Ex))
-            LoggingService.LogException("Scan failed", Ex, 'OnDemandScanWorker', '_PollOnce')
+                if Discovered > 0:
+                    ProbeRid = Repo.InsertProbeRequest(Sid, Rel)
+                    LoggingService.LogInfo(
+                        f"OnDemandScanWorker: auto-chained OnDemandProbe RequestId={ProbeRid} for same path",
+                        'OnDemandScanWorker', '_PollOnce',
+                    )
+            except Exception as Ex:
+                Repo.MarkScanFailed(RequestId, str(Ex))
+                LoggingService.LogException("Scan failed", Ex, 'OnDemandScanWorker', '_PollOnce')
+        finally:
+            self._DeleteActiveJob(ActiveJobId)
 
     def _ScanSubtree(self, StorageRootId: int, RelativePath: str, LocalPath: str) -> int:
         from Features.FileScanning.FileScanningBusinessService import FileScanningBusinessService

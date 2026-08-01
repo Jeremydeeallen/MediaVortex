@@ -1,4 +1,5 @@
 # directive: probe-worker-decoupled -- standalone ffprobe worker; decouples probe cadence from scan-cycle-per-RootFolder scoping.
+import os
 import threading
 
 from Core.Database.DatabaseService import DatabaseService
@@ -6,6 +7,15 @@ from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate
 from Core.Logging.LoggingService import LoggingService
 from Features.MediaProbe.MediaProbeBusinessService import MediaProbeBusinessService
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+
+
+ACTIVE_JOB_INSERT_SQL = (
+    "INSERT INTO ActiveJobs (ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName, "
+    "Status, StartedAt, Phase, PhaseTransitionedAt) "
+    "VALUES ('ProbeService', 'Probe', %s, %s, %s, %s, 'Running', NOW(), 'Probing', NOW()) "
+    "RETURNING Id"
+)
+ACTIVE_JOB_DELETE_SQL = "DELETE FROM ActiveJobs WHERE Id = %s"
 
 
 class ProbeWorker:
@@ -137,8 +147,29 @@ class ProbeWorker:
             LoggingService.LogException("ProbeWorker._FetchBatch failed", Ex, 'ProbeWorker', '_FetchBatch')
             return []
 
+    def _CreateActiveJob(self, MediaFileId):
+        # directive: probe-worker-decoupled -- record in-flight probe in ActiveJobs so DrainWorker sees us truthfully.
+        try:
+            self.Db.ExecuteNonQuery(
+                ACTIVE_JOB_INSERT_SQL,
+                (MediaFileId, os.getpid(), threading.get_ident(), self.WorkerName),
+            )
+            return self.Db.GetLastInsertId()
+        except Exception as Ex:
+            LoggingService.LogException("ProbeWorker._CreateActiveJob failed", Ex, 'ProbeWorker', '_CreateActiveJob')
+            return None
+
+    def _DeleteActiveJob(self, ActiveJobId):
+        if not ActiveJobId:
+            return
+        try:
+            self.Db.ExecuteNonQuery(ACTIVE_JOB_DELETE_SQL, (ActiveJobId,))
+        except Exception as Ex:
+            LoggingService.LogException("ProbeWorker._DeleteActiveJob failed", Ex, 'ProbeWorker', '_DeleteActiveJob')
+
     def _ProcessOne(self, Row):
         MediaFileId = Row.get('id') if hasattr(Row, 'get') else Row['Id']
+        ActiveJobId = self._CreateActiveJob(MediaFileId)
         try:
             Result = self.Service.ProbeFile(MediaFileId)
             if not Result or not Result.get('Success', False):
@@ -152,3 +183,5 @@ class ProbeWorker:
                 f"ProbeWorker: ProbeFile raised MediaFileId={MediaFileId}",
                 Ex, 'ProbeWorker', '_ProcessOne',
             )
+        finally:
+            self._DeleteActiveJob(ActiveJobId)
