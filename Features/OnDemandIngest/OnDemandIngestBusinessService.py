@@ -1,7 +1,7 @@
 # directive: probe-worker-decoupled -- path validation + queue insertion for on-demand scan / probe.
 from typing import Dict, Any
 from Core.Path import Path, PathError
-from Core.Path.StorageRoot import GetStorageRoots
+from Core.Path.PathStorageRoots import GetStorageRoots
 from Core.Logging.LoggingService import LoggingService
 from Features.OnDemandIngest.OnDemandIngestRepository import OnDemandIngestRepository
 

@@ -131,16 +131,19 @@ def DeployBaremetal(WorkerName: str, Host: str, Sha: str, SkipSync: bool = False
     return (R.returncode == 0, Elapsed)
 
 
-def _KillMediaVortexProcs(NameFragment: str, psutil_mod) -> int:
+def _KillMediaVortexProcs(NameFragment: str, psutil_mod, GracefulTimeout: int = 1800) -> int:
+    # directive: probe-worker-decoupled -- SIGTERM then wait up to GracefulTimeout seconds for the process's own SignalHandler drain (`_StopAllCapabilities`) to finish before SIGKILL. Matches graceful-drain.feature.md 30-min budget so we never yank an in-flight FFmpeg.
     Killed = 0
     for P in psutil_mod.process_iter(["pid", "cmdline"]):
         try:
             Cmd = " ".join(P.info.get("cmdline") or [])
             if NameFragment in Cmd and "Main.py" in Cmd:
+                print(f"       SIGTERM pid={P.pid} ({NameFragment}); waiting up to {GracefulTimeout}s for graceful shutdown", flush=True)
                 P.terminate()
                 try:
-                    P.wait(timeout=10)
+                    P.wait(timeout=GracefulTimeout)
                 except psutil_mod.TimeoutExpired:
+                    print(f"       [WARN] pid={P.pid} did not exit in {GracefulTimeout}s; SIGKILL", flush=True)
                     P.kill()
                 Killed += 1
         except Exception:
