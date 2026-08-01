@@ -101,22 +101,25 @@ def _ResolveInventory(Host: str):
     return Friendly, Ip, User
 
 
-def DeployBaremetal(WorkerName: str, Host: str, Sha: str) -> tuple:
+def DeployBaremetal(WorkerName: str, Host: str, Sha: str, SkipSync: bool = False) -> tuple:
     T0 = time.time()
-    print(f"[3/6] deploy backend: baremetal (host={Host})", flush=True)
+    print(f"[3/6] deploy backend: baremetal (host={Host}, skip_sync={SkipSync})", flush=True)
     _, Ip, User = _ResolveInventory(Host)
     Target = f"{User}@{Ip}"
 
-    print("       source rsync via deploy-baremetal-worker.py --sync-only", flush=True)
-    R = subprocess.run(
-        [sys.executable, str(MediaVortexRoot / "deploy" / "deploy-baremetal-worker.py"),
-         Host, "--sync-only"],
-        cwd=str(MediaVortexRoot),
-    )
-    if R.returncode != 0:
-        Elapsed = time.time() - T0
-        print(f"[FAIL] sync-only prep for {Host} ({Elapsed:.1f}s)", flush=True)
-        return (False, Elapsed)
+    if not SkipSync:
+        print("       source rsync via deploy-baremetal-worker.py --sync-only", flush=True)
+        R = subprocess.run(
+            [sys.executable, str(MediaVortexRoot / "deploy" / "deploy-baremetal-worker.py"),
+             Host, "--sync-only"],
+            cwd=str(MediaVortexRoot),
+        )
+        if R.returncode != 0:
+            Elapsed = time.time() - T0
+            print(f"[FAIL] sync-only prep for {Host} ({Elapsed:.1f}s)", flush=True)
+            return (False, Elapsed)
+    else:
+        print("       skip sync (fleet did per-host sync once)", flush=True)
 
     Unit = _BaremetalUnitFromWorkerName(WorkerName)
     print(f"[4/6] restart systemd unit: {Unit}", flush=True)
@@ -213,7 +216,7 @@ def OnlineWorker(Db, WorkerName: str) -> float:
     return Elapsed
 
 
-def DeployOne(WorkerName: str, Sha: str) -> int:
+def DeployOne(WorkerName: str, Sha: str, SkipSync: bool = False) -> int:
     from Core.Database.DatabaseService import DatabaseService
     Db = DatabaseService()
 
@@ -238,7 +241,7 @@ def DeployOne(WorkerName: str, Sha: str) -> int:
     if _WindowsLocal(Host):
         Ok, TDeploy = DeployWindowsLocal(WorkerName, Sha)
     else:
-        Ok, TDeploy = DeployBaremetal(WorkerName, Host, Sha)
+        Ok, TDeploy = DeployBaremetal(WorkerName, Host, Sha, SkipSync=SkipSync)
     if not Ok:
         print("[FAIL] backend deploy failed; leaving Status=Paused", flush=True)
         return 4
@@ -262,12 +265,14 @@ def DeployOne(WorkerName: str, Sha: str) -> int:
 def Main(Argv=None) -> int:
     P = argparse.ArgumentParser(description="Per-service deploy: pause -> drain -> deploy -> Online.")
     P.add_argument("WorkerName", help="e.g. larry-worker-1, wakko-worker-2, I9-2024")
+    P.add_argument("--skip-sync", action="store_true",
+                   help="Skip the per-worker source sync + dep install. Fleet uses this after doing per-host sync once.")
     Args = P.parse_args(Argv)
     Sha = _GitHead()
     if not Sha:
         print("[FAIL] git HEAD unreadable")
         return 2
-    return DeployOne(Args.WorkerName, Sha)
+    return DeployOne(Args.WorkerName, Sha, SkipSync=Args.skip_sync)
 
 
 if __name__ == "__main__":

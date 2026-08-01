@@ -49,36 +49,40 @@ def LiveWorkers(Db) -> list:
     )
 
 
-def DeployWorker(WorkerName: str) -> tuple:
-    # directive: orphan-generators-stop -- stream child stdout line-by-line, prefixed with worker name; capture start/stop for the final summary table.
-    Script = str(ROOT / "deploy" / "deploy-worker.py")
+def _StreamChild(Prefix: str, Cmd: list) -> tuple:
+    # directive: orphan-generators-stop -- stream child stdout line-by-line, prefixed for legibility across parallel subprocesses.
     StartTs = _dt.datetime.now()
-    print(f"[{WorkerName}] START {StartTs.strftime('%H:%M:%S')}", flush=True)
+    print(f"[{Prefix}] START {StartTs.strftime('%H:%M:%S')}", flush=True)
     Proc = subprocess.Popen(
-        [sys.executable, "-u", Script, WorkerName],
-        cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        Cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
     )
-    Prefix = f"[{WorkerName}]"
     LastLines = []
     for Line in Proc.stdout:
         Line = Line.rstrip()
-        print(f"{Prefix} {Line}", flush=True)
+        print(f"[{Prefix}] {Line}", flush=True)
         LastLines.append(Line)
         if len(LastLines) > 3:
             LastLines.pop(0)
     Proc.wait()
     EndTs = _dt.datetime.now()
     Elapsed = (EndTs - StartTs).total_seconds()
-    print(f"[{WorkerName}] END {EndTs.strftime('%H:%M:%S')} (elapsed {Elapsed:.1f}s, rc={Proc.returncode})", flush=True)
-    Tail = "\n        ".join(LastLines)
-    return (WorkerName, Proc.returncode, Tail, StartTs, EndTs, Elapsed)
+    print(f"[{Prefix}] END {EndTs.strftime('%H:%M:%S')} (elapsed {Elapsed:.1f}s, rc={Proc.returncode})", flush=True)
+    return (Proc.returncode, "\n        ".join(LastLines), StartTs, EndTs, Elapsed)
 
 
-def DeployHostSerial(HostName: str, WorkerNames: list) -> list:
-    Results = []
-    for Wn in sorted(WorkerNames):
-        Results.append(DeployWorker(Wn))
-    return Results
+def SyncHost(HostName: str) -> tuple:
+    # directive: orphan-generators-stop -- one source sync per host, not per worker. rsync/pip target-disk contention was the actual bottleneck.
+    Cmd = [sys.executable, "-u", str(ROOT / "deploy" / "deploy-baremetal-worker.py"), HostName, "--sync-only"]
+    Rc, Tail, StartTs, EndTs, Elapsed = _StreamChild(f"sync:{HostName}", Cmd)
+    return (HostName, Rc, Tail, StartTs, EndTs, Elapsed)
+
+
+def DeployWorker(WorkerName: str, SkipSync: bool = False) -> tuple:
+    Cmd = [sys.executable, "-u", str(ROOT / "deploy" / "deploy-worker.py"), WorkerName]
+    if SkipSync:
+        Cmd.append("--skip-sync")
+    Rc, Tail, StartTs, EndTs, Elapsed = _StreamChild(WorkerName, Cmd)
+    return (WorkerName, Rc, Tail, StartTs, EndTs, Elapsed)
 
 
 def Main() -> int:
@@ -145,19 +149,54 @@ def Main() -> int:
             _FinishHist('FAILED', [], [], 'no matching live workers')
             return 1
 
-    # directive: orphan-generators-stop -- full-parallel per worker for code-only deploys. Torch + pip skips make pip lock races a non-issue; per-host serialization was premature.
-    print(f"deploying {len(AllNames)} worker(s) in parallel:")
-    for N in sorted(AllNames):
-        print(f"   {N}")
+    # directive: orphan-generators-stop -- group by host so each host syncs source once (rsync/pip contention on target disk was the real bottleneck when running per-worker sync). Then per-worker restart-only in parallel across ALL workers.
+    ByHost = defaultdict(list)
+    WindowsWorkers = []
+    for N in AllNames:
+        Host = _HostFromWorkerName(N)
+        if Host.upper().startswith("I9"):
+            WindowsWorkers.append(N)
+        else:
+            ByHost[Host].append(N)
+
+    print(f"deploying {len(AllNames)} worker(s):")
+    for H in sorted(ByHost):
+        print(f"   host={H}: {', '.join(sorted(ByHost[H]))}")
+    if WindowsWorkers:
+        print(f"   windows-local: {', '.join(sorted(WindowsWorkers))}")
 
     (ROOT / "VERSION").write_text(Sha + "\n", encoding="utf-8")
     print(f"VERSION bumped -> {Sha[:8]}")
 
     Results = []
-    with ThreadPoolExecutor(max_workers=max(1, len(AllNames))) as Ex:
-        Futs = [Ex.submit(DeployWorker, N) for N in AllNames]
-        for F in as_completed(Futs):
-            Results.append(F.result())
+
+    if ByHost:
+        print(f"[phase 1/2] per-host source sync + dep install ({len(ByHost)} host(s) in parallel)")
+        SyncResults = {}
+        with ThreadPoolExecutor(max_workers=max(1, len(ByHost))) as Ex:
+            Futs = {Ex.submit(SyncHost, H): H for H in ByHost.keys()}
+            for F in as_completed(Futs):
+                H, Rc, Tail, StartTs, EndTs, Elapsed = F.result()
+                SyncResults[H] = (Rc, Tail, StartTs, EndTs, Elapsed)
+
+        FailedHosts = [H for H, (Rc, *_ ) in SyncResults.items() if Rc != 0]
+        if FailedHosts:
+            print(f"[FAIL] per-host sync failed on: {FailedHosts}")
+            for H in FailedHosts:
+                Rc, Tail, *_ = SyncResults[H]
+                print(f"   sync:{H} rc={Rc}\n        {Tail}")
+
+    RestartTargets = [N for N in AllNames if _HostFromWorkerName(N) not in (FailedHosts if ByHost else [])]
+
+    if RestartTargets:
+        print(f"[phase 2/2] per-worker pause+drain+restart+verify ({len(RestartTargets)} in parallel)")
+        with ThreadPoolExecutor(max_workers=max(1, len(RestartTargets))) as Ex:
+            Futs = []
+            for N in RestartTargets:
+                SkipSync = _HostFromWorkerName(N) in ByHost
+                Futs.append(Ex.submit(DeployWorker, N, SkipSync))
+            for F in as_completed(Futs):
+                Results.append(F.result())
 
     AnyFail = False
     OkNames = []
