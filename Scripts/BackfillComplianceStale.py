@@ -1,5 +1,6 @@
-# see probe-worker-decoupled -- one-shot backfill for stale WorkBucket rows created before probe-integrated classification landed. Batches through MediaFiles in Id chunks; delta-reports bucket transitions.
-import sys, os
+# see probe-worker-decoupled -- backfill stale silent-True Compliant rows. Only targets suspects (WorkBucket='Compliant' AND VideoBitrateKbps > 1500) since silent-True false-positives can only land in Compliant, and files with bitrate <= 1500 kbps are genuinely under every tier target so cannot be false positives.
+import sys, os, time
+sys.stdout.reconfigure(line_buffering=True)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 os.environ.setdefault('MEDIAVORTEX_DB_HOST', '10.0.0.15')
 
@@ -11,7 +12,7 @@ from Core.Database.DatabaseService import DatabaseService
 BATCH_SIZE = 200
 
 
-def Run(ProfileName=None, StorageRootId=None, Limit=None):
+def Run(MinBitrateKbps=1500):
     if not WorkerContext.TryCurrent():
         try:
             WorkerContext.Initialize(WorkerName='I9-2024', Platform=platform.system())
@@ -24,33 +25,27 @@ def Run(ProfileName=None, StorageRootId=None, Limit=None):
     Db = DatabaseService()
     Q = QueueManagementBusinessService()
 
-    Wheres, Args = [], []
-    if ProfileName:
-        Wheres.append("AssignedProfile = %s")
-        Args.append(ProfileName)
-    if StorageRootId is not None:
-        Wheres.append("StorageRootId = %s")
-        Args.append(int(StorageRootId))
-    WhereSql = ("WHERE " + " AND ".join(Wheres)) if Wheres else ""
-    LimitSql = f"LIMIT {int(Limit)}" if Limit else ""
-
     Ids = [int(R['id']) for R in Db.ExecuteQuery(
-        f"SELECT Id FROM MediaFiles {WhereSql} ORDER BY Id ASC {LimitSql}", tuple(Args)
+        "SELECT Id FROM MediaFiles WHERE WorkBucket='Compliant' AND VideoBitrateKbps > %s ORDER BY Id ASC",
+        (MinBitrateKbps,),
     )]
     Total = len(Ids)
-    print(f"Recomputing {Total} files (batch={BATCH_SIZE})")
+    print(f"Suspect Compliant rows with VideoBitrateKbps > {MinBitrateKbps}: {Total}")
+
+    if not Total:
+        return
 
     Changes = {}
+    T0 = time.time()
     for Start in range(0, Total, BATCH_SIZE):
         Batch = Ids[Start:Start + BATCH_SIZE]
+        Placeholders = ','.join(['%s'] * len(Batch))
         Pre = {int(R['id']): R['workbucket'] for R in Db.ExecuteQuery(
-            f"SELECT Id, WorkBucket FROM MediaFiles WHERE Id IN ({','.join(['%s']*len(Batch))})",
-            tuple(Batch),
+            f"SELECT Id, WorkBucket FROM MediaFiles WHERE Id IN ({Placeholders})", tuple(Batch)
         )}
         Q.RecomputeForFiles(Batch)
         Post = {int(R['id']): R['workbucket'] for R in Db.ExecuteQuery(
-            f"SELECT Id, WorkBucket FROM MediaFiles WHERE Id IN ({','.join(['%s']*len(Batch))})",
-            tuple(Batch),
+            f"SELECT Id, WorkBucket FROM MediaFiles WHERE Id IN ({Placeholders})", tuple(Batch)
         )}
         for Mid in Batch:
             P0, P1 = Pre.get(Mid), Post.get(Mid)
@@ -58,9 +53,12 @@ def Run(ProfileName=None, StorageRootId=None, Limit=None):
                 K = f"{P0} -> {P1}"
                 Changes[K] = Changes.get(K, 0) + 1
         Done = Start + len(Batch)
-        print(f"  {Done}/{Total} ({100*Done//Total}%) transitions so far: {Changes}")
+        Elapsed = time.time() - T0
+        Rate = Done / Elapsed if Elapsed > 0 else 0
+        Eta = (Total - Done) / Rate if Rate > 0 else 0
+        print(f"  {Done}/{Total} ({100*Done//Total}%) rate={Rate:.1f} files/s eta={Eta:.0f}s changes={Changes}")
 
-    print("\n=== FINAL DELTA ===")
+    print("\n=== FINAL ===")
     for K, V in sorted(Changes.items(), key=lambda X: -X[1]):
         print(f"  {V:6d}  {K}")
 
@@ -68,8 +66,6 @@ def Run(ProfileName=None, StorageRootId=None, Limit=None):
 if __name__ == '__main__':
     import argparse
     Ap = argparse.ArgumentParser()
-    Ap.add_argument('--profile', default=None)
-    Ap.add_argument('--sid', type=int, default=None)
-    Ap.add_argument('--limit', type=int, default=None)
+    Ap.add_argument('--min-kbps', type=int, default=1500)
     A = Ap.parse_args()
-    Run(A.profile, A.sid, A.limit)
+    Run(A.min_kbps)
