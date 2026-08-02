@@ -708,7 +708,7 @@ class WorkerServiceApp:
             LoggingService.LogException("Error ensuring ServiceStatus exists", e, "WorkerService", "_EnsureServiceStatusExists")
 
     def _RecoverFromCrash(self):
-        """Recover from previous crash."""
+        # see worker-lifecycle.C13 -- ActiveJobs rows are valid only while the owning process is alive; every boot enforces this invariant across all capability services this worker runs.
         try:
             LoggingService.LogInfo("Starting crash recovery...", "WorkerService", "_RecoverFromCrash")
             from Services.CrashRecoveryService import CrashRecoveryService
@@ -721,6 +721,13 @@ class WorkerServiceApp:
                 )
             else:
                 LoggingService.LogError(f"Crash recovery failed: {Result.get('Message', 'Unknown error')}", "WorkerService", "_RecoverFromCrash")
+            SweepRows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                "DELETE FROM ActiveJobs WHERE WorkerName = %s", (self.WorkerName,)
+            )
+            LoggingService.LogInfo(
+                f"ActiveJobs sweep: deleted {SweepRows} row(s) for WorkerName={self.WorkerName}",
+                "WorkerService", "_RecoverFromCrash",
+            )
         except Exception as e:
             LoggingService.LogException("Error during crash recovery", e, "WorkerService", "_RecoverFromCrash")
 

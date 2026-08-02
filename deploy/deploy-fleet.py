@@ -1,4 +1,4 @@
-# see .claude/rules/worker-deploy-drain.md
+# see .claude/rules/worker-deploy-invariants.md
 import argparse
 import datetime as _dt
 import re
@@ -41,11 +41,10 @@ def GitOriginMain() -> str:
     return R.stdout.strip() if R.returncode == 0 else ""
 
 
-def LiveWorkers(Db, IncludeStale: bool = False) -> list:
-    Where = "Enabled = TRUE" if IncludeStale else "LastHeartbeat > NOW() - INTERVAL '5 minutes'"
+def EnabledWorkers(Db) -> list:
     return Db.ExecuteQuery(
-        f"SELECT WorkerName, COALESCE(Version, '') AS Version, Status "
-        f"FROM Workers WHERE {Where} "
+        "SELECT WorkerName, COALESCE(Version, '') AS Version, Status "
+        "FROM Workers WHERE Enabled = TRUE "
         "ORDER BY WorkerName"
     )
 
@@ -87,9 +86,8 @@ def DeployWorker(WorkerName: str, SkipSync: bool = False) -> tuple:
 
 
 def Main() -> int:
-    P = argparse.ArgumentParser(description="Per-service fleet deploy: pause -> drain -> deploy -> Online for each live worker.")
-    P.add_argument("--workers", help="comma-separated WorkerName list; default = all live")
-    P.add_argument("--include-stale", action="store_true", help="include Enabled workers whose heartbeat is older than 5 min (recovery from dead fleet)")
+    P = argparse.ArgumentParser(description="Fleet deploy: per-host sync + per-worker restart. See .claude/rules/worker-deploy-invariants.md.")
+    P.add_argument("--workers", help="comma-separated WorkerName list; default = all Enabled")
     Args = P.parse_args()
 
     Sha = GitHead()
@@ -136,10 +134,10 @@ def Main() -> int:
             (",".join(Attempted), ",".join(Succeeded), Outcome, ErrorMessage, HistId),
         )
 
-    Pre = LiveWorkers(Db, IncludeStale=Args.include_stale)
+    Pre = EnabledWorkers(Db)
     if not Pre:
-        print("ERROR: no workers heartbeating in the last 5 minutes (use --include-stale to deploy Enabled-but-stale workers)")
-        _FinishHist('FAILED', [], [], 'no live workers')
+        print("ERROR: no Enabled workers in Workers table")
+        _FinishHist('FAILED', [], [], 'no enabled workers')
         return 1
 
     AllNames = [R["WorkerName"] for R in Pre]
@@ -147,11 +145,11 @@ def Main() -> int:
         Want = {W.strip() for W in Args.workers.split(",") if W.strip()}
         AllNames = [N for N in AllNames if N in Want]
         if not AllNames:
-            print(f"ERROR: --workers {Args.workers!r} matched no live workers")
+            print(f"ERROR: --workers {Args.workers!r} matched no enabled workers")
             _FinishHist('FAILED', [], [], 'no matching live workers')
             return 1
 
-    # directive: probe-worker-decoupled -- 3-step fleet: pause-all -> per-host sync -> per-worker restart. Drain overlaps sync.
+    # see worker-deploy-invariants.md: two verbs, sync-host + restart-worker. No pause, no drain, no verify.
     ByHost = defaultdict(list)
     WindowsWorkers = []
     for N in AllNames:
@@ -167,38 +165,25 @@ def Main() -> int:
     if WindowsWorkers:
         print(f"   windows-local: {', '.join(sorted(WindowsWorkers))}")
 
-    (ROOT / "VERSION").write_text(Sha + "\n", encoding="utf-8")
-    print(f"VERSION bumped -> {Sha[:8]}")
-
-    T1Start = _dt.datetime.now()
-    print(f"[STEP 1/3 @ {T1Start.strftime('%H:%M:%S')}] pause ALL {len(AllNames)} workers (single UPDATE); drain begins in the background")
-    Placeholders = ",".join(["%s"] * len(AllNames))
-    PauseAffected = Db.ExecuteNonQuery(
-        f"UPDATE Workers SET Status='Paused' WHERE WorkerName IN ({Placeholders}) AND Status<>'Paused'",
-        tuple(AllNames),
-    )
-    T1Elapsed = (_dt.datetime.now() - T1Start).total_seconds()
-    print(f"[STEP 1/3 DONE] {PauseAffected} worker(s) flipped to Paused in {T1Elapsed:.1f}s; drain in-flight for all")
-
     Results = []
     SyncResults = {}
     FailedHosts = []
 
     if ByHost:
         T2Start = _dt.datetime.now()
-        print(f"[STEP 2/3 @ {T2Start.strftime('%H:%M:%S')}] per-host source sync + dep install -- {len(ByHost)} host(s) in parallel; drain runs concurrently")
+        print(f"[STEP 1/2 @ {T2Start.strftime('%H:%M:%S')}] per-host source sync -- {len(ByHost)} host(s) in parallel")
         with ThreadPoolExecutor(max_workers=max(1, len(ByHost))) as Ex:
             Futs = {Ex.submit(SyncHost, H): H for H in ByHost.keys()}
             for F in as_completed(Futs):
                 H, Rc, Tail, StartTs, EndTs, Elapsed = F.result()
                 SyncResults[H] = (Rc, Tail, StartTs, EndTs, Elapsed)
-                print(f"[STEP 2/3] sync:{H} finished rc={Rc} elapsed={Elapsed:.1f}s")
+                print(f"[STEP 1/2] sync:{H} finished rc={Rc} elapsed={Elapsed:.1f}s")
 
         FailedHosts = [H for H, (Rc, *_ ) in SyncResults.items() if Rc != 0]
         T2Elapsed = (_dt.datetime.now() - T2Start).total_seconds()
-        print(f"[STEP 2/3 DONE] per-host sync complete in {T2Elapsed:.1f}s wall")
+        print(f"[STEP 1/2 DONE] per-host sync complete in {T2Elapsed:.1f}s wall")
         if FailedHosts:
-            print(f"[STEP 2/3 FAIL] per-host sync failed on: {FailedHosts}")
+            print(f"[STEP 1/2 FAIL] per-host sync failed on: {FailedHosts}")
             for H in FailedHosts:
                 Rc, Tail, *_ = SyncResults[H]
                 print(f"   sync:{H} rc={Rc}\n        {Tail}")
@@ -207,7 +192,7 @@ def Main() -> int:
 
     if RestartTargets:
         T3Start = _dt.datetime.now()
-        print(f"[STEP 3/3 @ {T3Start.strftime('%H:%M:%S')}] per-worker drain-wait + restart + verify + Online ({len(RestartTargets)} in parallel)")
+        print(f"[STEP 2/2 @ {T3Start.strftime('%H:%M:%S')}] per-worker restart ({len(RestartTargets)} in parallel)")
         with ThreadPoolExecutor(max_workers=max(1, len(RestartTargets))) as Ex:
             Futs = []
             for N in RestartTargets:
@@ -216,7 +201,7 @@ def Main() -> int:
             for F in as_completed(Futs):
                 Results.append(F.result())
         T3Elapsed = (_dt.datetime.now() - T3Start).total_seconds()
-        print(f"[STEP 3/3 DONE] per-worker restart complete in {T3Elapsed:.1f}s wall")
+        print(f"[STEP 2/2 DONE] per-worker restart complete in {T3Elapsed:.1f}s wall")
 
     AnyFail = False
     OkNames = []
