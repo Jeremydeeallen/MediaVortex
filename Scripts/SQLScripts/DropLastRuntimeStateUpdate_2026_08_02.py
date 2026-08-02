@@ -1,4 +1,4 @@
-# see worker-deploy-invariants.md I3 -- LastRuntimeStateUpdate was a duplicate of LastHeartbeat (both written in the same health-check tick). Consolidated to LastHeartbeat; drop column + delete redundant setting.
+# see .claude/rules/worker-lifecycle-invariants.md I3 -- LastRuntimeStateUpdate was a duplicate of LastHeartbeat (both written in the same health-check tick). Consolidated to LastHeartbeat; drop column + delete redundant setting.
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from Core.Database.DatabaseService import DatabaseService

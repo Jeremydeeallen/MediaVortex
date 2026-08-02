@@ -13,7 +13,7 @@ After this directive closes (`Status: Closed -- Success`), this file may be dele
 | 1 | `transcode.flow.md` | no (uses `(N)` parenthesized tokens) | yes (5-column shape; will migrate to 6-column `\| ID \| ...\|` per `.claude/rules/flow-docs.md`) |
 | 2 | `path-storage.flow.md` | no | no |
 | 3 | `deploy/worker-deploy-linux.flow.md` | no | no |
-| 4 | `deploy/worker-deploy-windows.flow.md` | no | no |
+| 4 | `deploy/worker-deploy-windows.flow.md` | (deleted -- MediaVortex has no remote Windows workers; I9-2024 runs from live source tree) | -- |
 | 5 | `Docs/bottleneck-analysis.flow.md` | no | no |
 | 6 | `Features/AudioCompletion/audio-completion.flow.md` | no | no |
 | 7 | `Features/ContentClassifier/content-classifier.flow.md` | no | no |
@@ -57,7 +57,7 @@ Pipelines that might look missing on a casual scan but are intentionally folded 
 - **Windows UNC path translation** -- `path-storage.flow.md` (Windows worker = `StorageRootResolutions.Platform='windows'`; same Resolve seam).
 - **CommandBuilder / nvenc-profiles / nvenc-rate-anchored / Profiles** -- utility / config concerns, not pipeline stages. Stay as `*.feature.md` only.
 - **ClipBuilder / SQLQueries / Settings** -- non-pipeline UI surfaces. Stay as `*.feature.md` only.
-- **Worker deploy** -- already covered by `deploy/worker-deploy-{linux,windows}.flow.md`.
+- **Worker deploy** -- already covered by `deploy/worker-deploy-baremetal.flow.md`.
 
 ## How to use this baseline
 

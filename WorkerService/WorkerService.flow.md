@@ -55,11 +55,11 @@ The worker never resolves the version live (no `git rev-parse HEAD`, no environm
 
 **Who writes `VERSION` + `BUILD_INFO`:**
 - **Bare-metal Linux:** `deploy/deploy-baremetal-worker.py` `StepStampVersion` writes both files to `/opt/mediavortex/src/` on the target via SSH after each rsync.
-- **Windows native:** `deploy/deploy-windows-worker.py` step 5 (`StepStampVersion`) writes both files to `C:\Code\MediaVortex\` on the target via SSH/PowerShell. `StartWorker.py` also runs `Scripts/StampVersion.py` at every launch as belt-and-suspenders, so an operator restart picks up the local HEAD even without re-running the full deploy.
+- **I9-2024 (local):** `StartWorker.py` runs `Scripts/StampVersion.py` at every launch, so an operator restart picks up the local HEAD without any deploy step.
 
-Both deploy scripts assert, after restart, that `Workers.Version` equals the SHA they just stamped. Mismatch fails the deploy with exit code 3.
+The bare-metal deploy asserts, after restart, that `Workers.Version` equals the SHA it just stamped. Mismatch fails the deploy with exit code 3.
 
-The Activity page tile shows the short SHA next to the worker name; the tooltip shows the full SHA + BuildInfo. A fleet-wide mismatch banner (`/api/TeamStatus/Workers/VersionStatus`) appears when two or more enabled workers report different non-unknown versions. See `deploy/version-on-deploy.feature.md` for the current contract.
+The Activity page tile shows the short SHA next to the worker name; the tooltip shows the full SHA + BuildInfo. A fleet-wide mismatch banner (`/api/TeamStatus/Workers/VersionStatus`) appears when two or more enabled workers report different non-unknown versions. See `.claude/rules/worker-lifecycle-invariants.md` I3 for the current contract.
 
 ## Per-Worker Status Control
 

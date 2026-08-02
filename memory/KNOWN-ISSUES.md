@@ -334,19 +334,18 @@ The principle: each pick decision must either (a) be a single explicit rule with
 
 2. **Remote worker deploys are independent.** Deploying larry/wakko/dot or any future host MUST NOT depend on the state of any other worker. Today `deploy-fleet.py`-style orchestration creates cross-worker dependencies (one host's deploy can stall waiting on another's heartbeat). Each remote deploy is a self-contained unit; failure on host A does not block or roll back host B.
 
-3. **Single SOLID deploy script.** Today there are two scripts (`deploy-baremetal-worker.py` + `deploy-windows-worker.py`) plus a fleet wrapper plus a register-task PS1. Collapse to ONE entry-point script with a Strategy pattern per host shape (bare-metal Linux / Windows-SMB / I9-local). SRP: per-shape strategy owns its bring-up steps; the entry script owns CLI parsing + inventory lookup + verification polling only. Constructor-DI throughout. 100% clean code -- no scripts-shaped-as-bash-pipelines, no shared mutable state, no copy-paste between OS branches.
+3. **Single SOLID deploy script.** Today there is `deploy-baremetal-worker.py` plus a fleet wrapper. Collapse to ONE entry-point script with a Strategy pattern per host shape (bare-metal Linux / I9-local NO-OP). SRP: per-shape strategy owns its bring-up steps; the entry script owns CLI parsing + inventory lookup + verification polling only. Constructor-DI throughout. 100% clean code -- no scripts-shaped-as-bash-pipelines, no shared mutable state, no copy-paste between OS branches.
 
-**Violates:** `deploy/worker-deploy.feature.md` criterion 14 (added with this entry). Also touches:
+**Violates:** `.claude/rules/worker-deploy.md` (SoT for deploy behavior). Also touches:
 - `feature-docs.md` / `flow-docs.md` -- the I9-local-vs-remote split must be reflected in feature + flow contracts
 - `scope-discipline.md` -- a perfect-implementation directive cannot leave the I9 case smudged across "Code updates on I9-2024" prose
 
 **Look first:**
-- `deploy/worker-deploy.feature.md` lines 16-17 -- the "Code updates on I9-2024" paragraph today is informal prose; it needs to become a hard contract (no deploy path, just start/stop)
-- `deploy/deploy-windows-worker.py` -- this exists today and registers a Windows Task Scheduler task; if I9 is local-only it shouldn't be running through this path
+- `.claude/rules/worker-deploy.md` -- the deploy rule; the I9-local (no deploy path, just start/stop) contract belongs here
 - `deploy/bringup.md` -- the runbook should route I9 to a local start command, not a deploy
-- `deploy/deploy-baremetal-worker.py` + `deploy/deploy-fleet.py` (if it exists) -- audit for inter-worker dependencies
+- `deploy/deploy-baremetal-worker.py` + `deploy/deploy-fleet.py` -- audit for inter-worker dependencies
 - `StartMediaVortex.py` -- already exists as the local lifecycle entry point; the I9-local "deploy" probably collapses into this
-- The two host-shape strategies that need to exist: bare-metal Linux (larry, wakko, dot), Windows-SMB (I9), and the I9-local NO-OP
+- The two host-shape strategies that need to exist: bare-metal Linux (larry, wakko, dot) and the I9-local NO-OP
 
 **Fix with:** `/t BUG-0064`.
 
@@ -1008,14 +1007,14 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG-0033] Linux worker deploy flow doc incomplete -- no post-deploy verification, FFmpeg path troubleshooting, or automation parity with Windows
+### [BUG-0033] Linux worker deploy flow doc incomplete -- no post-deploy verification or FFmpeg path troubleshooting
 **Date:** 2026-05-13
 
-**What breaks:** `deploy/worker-deploy.flow.md` ends at `systemctl start mediavortex-worker@N` with only an optional SVT-AV1 encoder check and a Workers table query. Does not document: post-deploy health checks confirming FFmpeg/FFprobe paths resolve on the host, the full unit-started-to-operational sequence, troubleshooting when FFmpeg path resolution fails, or what additional operator actions differ between first deploy vs code-only redeploy. An operator following this doc alone would not know how to diagnose "worker registered but can't find FFmpeg" without reading source code. The Windows deploy path (`deploy/windows-worker.flow.md` + `deploy-windows-worker.py`) has full post-deploy verification and single-command automation; Linux has neither.
+**What breaks:** `deploy/worker-deploy-baremetal.flow.md` does not document: post-deploy health checks confirming FFmpeg/FFprobe paths resolve on the host, the full unit-started-to-operational sequence, troubleshooting when FFmpeg path resolution fails, or what additional operator actions differ between first deploy vs code-only redeploy. An operator following this doc alone would not know how to diagnose "worker registered but can't find FFmpeg" without reading source code.
 
-**Violates:** `deploy/worker-deploy.feature.md` criterion 20 (added with this entry).
+**Violates:** `.claude/rules/worker-deploy.md` (SoT for deploy behavior).
 
-**Look first:** `deploy/worker-deploy.flow.md` -- compare post-deploy coverage to `deploy/windows-worker.flow.md`. The Runtime Pipeline table documents what happens inside the container (steps 8-17) but that knowledge is not surfaced as operator-actionable verification steps. Also consider whether a `deploy-linux-worker.py` (or shell script) should exist to match the Windows automation.
+**Look first:** `deploy/worker-deploy-baremetal.flow.md` -- the Runtime Pipeline documents what happens inside the systemd unit but that knowledge is not surfaced as operator-actionable verification steps.
 
 **Fix with:** `/t`.
 
@@ -1143,7 +1142,7 @@ Minnie's metrics with the fix:
 - `WorkerShareMappings` table holds per-worker drive-letter -> local-mount rows (12 rows today: 4 workers x 3 letters M/T/Z).
 - `MEDIAVORTEX_SHARE_MAPPINGS` env var on each container seeds those rows at registration time.
 - `WorkerContext.Current().PathTranslation` is the runtime entry point all services call.
-- `Core/WorkerContext.feature.md` and `deploy/worker-deploy.feature.md` document the workaround surfaces.
+- `Core/WorkerContext.feature.md` and `.claude/rules/worker-deploy.md` document the workaround surfaces.
 
 **Violates:** `path-storage.feature.md` (repo root) -- success criteria 1, 2, 4. Criterion 1 is the [BUG] criterion: no row in any DB table contains a drive letter or backslash in a path field.
 

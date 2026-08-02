@@ -293,7 +293,7 @@ Rule violation shapes (all bugs, all contract-test-locked):
 - Any hand-editing of `Workers.Version` = bug. Deploy is the only path.
 - Any deploy script or skill that restarts a worker without checking `ActiveJobs = 0` = bug.
 
-Contract tests: `Tests/Contract/TestDeployMustDrain.py` (step 2) + `Tests/Contract/TestDeployVersionGate.py` (step 5). Every deploy path (`deploy-fleet.py`, `deploy-baremetal-worker.py`, `deploy-linux-worker.py`, `deploy-windows-worker.py`) is locked against the same invariants -- no shortcut path exists.
+Contract tests: `Tests/Contract/TestDeployMustDrain.py` (step 2) + `Tests/Contract/TestDeployVersionGate.py` (step 5). Every deploy path (`deploy-fleet.py`, `deploy-baremetal-worker.py`, `deploy-linux-worker.py`) is locked against the same invariants -- no shortcut path exists.
 
 *Refined by 2026-07-26 "Fleet-on-HEAD applies only to worker-affecting commits" (below): docs / web-only / test / tooling commits do not require worker redeploy.*
 

@@ -252,7 +252,7 @@ class WorkerServiceApp:
         return ""
 
     def _ResolveWorkerVersion(self):
-        # see worker-deploy-invariants.md I3 -- prefer .git/HEAD (same-host = no stamp needed); fall back to VERSION file (remote hosts don't ship .git).
+        # see .claude/rules/worker-lifecycle-invariants.md I3 -- prefer .git/HEAD (same-host = no stamp needed); fall back to VERSION file (remote hosts don't ship .git).
         from Core.Path.LocalPath import LocalExists, LocalJoin, LocalDirname
         try:
             ProjectRoot = LocalDirname(LocalDirname(os.path.abspath(__file__)))

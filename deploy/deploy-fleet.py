@@ -1,4 +1,4 @@
-# see .claude/rules/worker-deploy-invariants.md
+# see .claude/rules/worker-deploy.md
 import argparse
 import datetime as _dt
 import re
@@ -86,7 +86,7 @@ def DeployWorker(WorkerName: str, SkipSync: bool = False) -> tuple:
 
 
 def Main() -> int:
-    P = argparse.ArgumentParser(description="Fleet deploy: per-host sync + per-worker restart. See .claude/rules/worker-deploy-invariants.md.")
+    P = argparse.ArgumentParser(description="Fleet deploy: pause-all -> per-host sync + per-worker drain-restart. See .claude/rules/worker-deploy.md.")
     P.add_argument("--workers", help="comma-separated WorkerName list; default = all Enabled")
     Args = P.parse_args()
 
@@ -149,7 +149,7 @@ def Main() -> int:
             _FinishHist('FAILED', [], [], 'no matching live workers')
             return 1
 
-    # see worker-deploy-invariants.md: two verbs, sync-host + restart-worker. No pause, no drain, no verify.
+    # see .claude/rules/worker-deploy.md -- per-service pause -> drain -> deploy -> back Online.
     ByHost = defaultdict(list)
     WindowsWorkers = []
     for N in AllNames:

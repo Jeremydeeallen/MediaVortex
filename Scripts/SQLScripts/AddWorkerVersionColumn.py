@@ -1,4 +1,4 @@
-# see version-on-deploy.C4 -- adds Version + BuildInfo columns to Workers; idempotent
+# see .claude/rules/worker-lifecycle-invariants.md I3 -- adds Version + BuildInfo columns to Workers; idempotent
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))

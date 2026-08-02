@@ -1,4 +1,4 @@
-# see version-on-deploy.C4 -- writes VERSION + BUILD_INFO from git HEAD; used by baremetal + windows deploy scripts
+# see .claude/rules/worker-lifecycle-invariants.md I3 -- writes VERSION + BUILD_INFO from git HEAD; used by baremetal deploy scripts
 
 from __future__ import annotations
 

@@ -4,9 +4,6 @@
 
 Deploys the MediaVortex `WorkerService` directly on a bare-metal Linux host with no containers. Covers all Linux hosts: LXC containers (larry CT 218), Intel Arc / Xe workstations (wakko) where hardware demucs runs against `torch.xpu`, and NVIDIA workstations (dot). Runs one systemd unit per configured worker slot, all from a single Python venv on the host.
 
-Counterpart flow:
-- `worker-deploy-windows.flow.md` -- Task Scheduler + SMB (I9-2024)
-
 ## Entry Point
 
 ```bash

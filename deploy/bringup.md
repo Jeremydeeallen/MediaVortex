@@ -7,7 +7,8 @@ Pick the shape, check prerequisites, run one command, verify.
 | The host runs... | Use |
 |---|---|
 | Bare-metal Linux (LXC container, physical Linux workstation) | `deploy-baremetal-worker.py` -- see `worker-deploy-baremetal.flow.md` |
-| Windows 10/11 -- native via Task Scheduler | `deploy-windows-worker.py` -- see `worker-deploy-windows.flow.md` |
+
+MediaVortex has no remote Windows workers today. I9-2024 runs WebService + WorkerService directly from its live source tree via `StartMediaVortex.py` / `StartWorker.py` -- no deploy step.
 
 ## 2. Prerequisites (one-time per host)
 
@@ -15,16 +16,13 @@ The `infrastructure` repo (`https://github.com/TheAdroitDBA/infrastructure`) is 
 
 **Bare-metal Linux (larry LXC 218 / wakko / Intel Arc + dot / NVIDIA)** -- host in `inventory.toml`; root SSH; DB reachable on `10.0.0.15:5432`. Run `py infrastructure/terraform/mediavortex-baremetal-linux-bootstrap.py --host <friendly>` first. Installs `nfs-common`, Python 3.12, GPU runtime (Intel Level Zero for Arc, NVIDIA driver for RTX), reconciles `/etc/fstab` from `fstab_mounts`, drops the systemd template unit at `/etc/systemd/system/mediavortex-worker@.service`.
 
-**Windows** -- see `worker-deploy-windows.flow.md` for the full prereq list (OpenSSH Server, Python 3.12+, SMB credential caching, Vaultwarden references).
-
 ## 3. Run the deploy
 
 ```bash
 py deploy/deploy-baremetal-worker.py <friendly-or-ip> # Bare-metal Linux
-py deploy/deploy-windows-worker.py <ip>               # Windows
 ```
 
-Every script is idempotent. Re-running updates source and restarts the workers without duplicating `Workers` rows.
+The script is idempotent. Re-running updates source and restarts the workers without duplicating `Workers` rows.
 
 ## 4. Verify
 
@@ -36,8 +34,8 @@ The script names the failing check and a one-line remediation hint. Open the flo
 
 ## References
 
-- Contract: `deploy/worker-deploy.feature.md`
-- Flows: `deploy/worker-deploy-{baremetal,windows}.flow.md`
+- Deploy rule (SoT): `.claude/rules/worker-deploy.md`
+- Flow: `deploy/worker-deploy-baremetal.flow.md`
 - Inventory: `infrastructure/terraform/inventory.toml`
 - Vault: `infrastructure/terraform/secrets.py`
 - Known issues: `memory/KNOWN-ISSUES.md`

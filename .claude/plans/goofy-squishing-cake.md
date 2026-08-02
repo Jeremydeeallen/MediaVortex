@@ -66,8 +66,8 @@ Workers become general-purpose. Each worker can enable/disable: transcoding, VMA
 ### Feature docs to update
 - `Features/FileScanning/FileScanning.feature.md` -- scanning as worker capability
 - `Features/ServiceControl/ServiceControl.feature.md` -- per-worker capability control
-- `deploy/worker-deploy.feature.md` -- WorkerService entry point
-- `deploy/worker-deploy.flow.md` -- updated runtime pipeline
+- `.claude/rules/worker-deploy.md` -- WorkerService deploy behavior (SoT)
+- `deploy/worker-deploy-baremetal.flow.md` -- updated runtime pipeline
 
 ### Verification
 - Deploy WorkerService on one Linux worker with TranscodeEnabled=TRUE only. Verify transcoding works.

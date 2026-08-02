@@ -1,30 +1,4 @@
-"""StartWorker - Launch MediaVortex WorkerService natively on Windows.
-
-Worker-only analog of StartMediaVortex.py for hosts that run only the
-transcode worker (no WebService) -- e.g. REMINGTON, I9-2024, future bare-metal
-workers.
-
-What this does on every run:
-  1. Mount required NFS drives (T:, M:, Z:) in *this* process's session.
-  2. Verify each drive is accessible.
-  3. Launch WorkerService\\Main.py inline (this script blocks until it exits).
-
-Why re-mount every run: persistent mappings do NOT reconnect for non-
-interactive sessions (Task Scheduler, NSSM, SSH). See worker-deploy-windows.flow.md.
-
-The mounts are NFS via the Windows NFS client (AUTH_SYS, no credentials).
-Porky exports the TV share; Synology exports Movies + XXX.
-
-Designed for unattended use:
-  - No Windows Terminal tabs (wt.exe is unavailable in service contexts).
-  - Inline subprocess launch so the parent's exit code reflects the worker's.
-  - Exits 2 on infrastructure problems and propagates worker exit codes.
-
-Usage:
-  py StartWorker.py
-  py StartWorker.py --no-mount    # drives already mounted
-  py StartWorker.py --dry-run     # mount + verify but don't launch worker
-"""
+# Windows worker-only launcher: mount NFS drives (T:, M:, Z:) in this session (persistent maps don't reconnect for Task Scheduler / SSH sessions), then exec WorkerService/Main.py inline.
 
 import argparse
 import os

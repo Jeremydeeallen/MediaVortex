@@ -1,4 +1,4 @@
-# see .claude/rules/worker-deploy-invariants.md
+# see .claude/rules/worker-deploy.md
 from __future__ import annotations
 
 import argparse
@@ -10,6 +10,8 @@ from pathlib import Path
 
 MediaVortexRoot = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(MediaVortexRoot))
+
+DrainPollSec = 5
 
 SshOpts = ["-o", "ConnectTimeout=5", "-o", "BatchMode=yes",
            "-o", "StrictHostKeyChecking=accept-new"]
@@ -59,6 +61,43 @@ def _ResolveInventory(Host: str):
     return Friendly, Ip, User
 
 
+def PauseWorker(Db, WorkerName: str) -> float:
+    T0 = time.time()
+    Db.ExecuteNonQuery(
+        "UPDATE Workers SET Status='Paused' WHERE WorkerName=%s AND Status<>'Paused'",
+        (WorkerName,),
+    )
+    Elapsed = time.time() - T0
+    print(f"[1/5] pause: {WorkerName} ({Elapsed:.1f}s)", flush=True)
+    return Elapsed
+
+
+def DrainWorker(Db, WorkerName: str) -> float:
+    # see worker-deploy.md step 2 -- poll until in-flight work reaches zero. No hard timeout; drain is the contract, not a suggestion.
+    T0 = time.time()
+    print(f"[2/5] drain: {WorkerName} (poll every {DrainPollSec}s)", flush=True)
+    LastReportedAt = 0
+    while True:
+        ActiveJobs = Db.ExecuteQuery(
+            "SELECT COUNT(*) AS N FROM ActiveJobs WHERE WorkerName=%s",
+            (WorkerName,),
+        )[0]["N"]
+        ScanBusy = Db.ExecuteQuery(
+            "SELECT COUNT(*) AS N FROM ScanJobs "
+            "WHERE WorkerName=%s AND Status IN ('Pending','Running','Stopping')",
+            (WorkerName,),
+        )[0]["N"]
+        if ActiveJobs == 0 and ScanBusy == 0:
+            Elapsed = time.time() - T0
+            print(f"       drained: ActiveJobs=0, ScanJobs=0 ({Elapsed:.1f}s)", flush=True)
+            return Elapsed
+        Waited = int(time.time() - T0)
+        if Waited - LastReportedAt >= 30 or Waited < 10:
+            print(f"       waiting: ActiveJobs={ActiveJobs} ScanBusy={ScanBusy} ({Waited}s elapsed)", flush=True)
+            LastReportedAt = Waited
+        time.sleep(DrainPollSec)
+
+
 def _KillMediaVortexProcs(NameFragment: str, psutil_mod) -> int:
     Killed = 0
     for P in psutil_mod.process_iter(["pid", "cmdline"]):
@@ -97,9 +136,9 @@ def _SpawnDetached(ServiceDir: str, MainPy, LogFile, _os, WorkerName: str):
 
 
 def RestartWindowsLocal(WorkerName: str) -> tuple:
-    # see worker-deploy-invariants.md I1+I2+I3+I4 -- kill is safe (I1); ActiveJobs sweep runs at worker boot (I2); worker reads sha from .git/HEAD so no VERSION stamp needed (I3); Popen return value + one-shot poll enforces fail-loud (I4).
+    # see worker-deploy.md steps 3-4 -- drain confirmed by caller so hard kill is safe. Worker reads sha from .git/HEAD (worker-lifecycle-invariants.md I3) so no VERSION stamp needed. Popen return + one-shot poll enforces fail-loud (I4).
     T0 = time.time()
-    print(f"       restart backend: windows-local ({WorkerName})", flush=True)
+    print(f"[3/5] restart backend: windows-local ({WorkerName})", flush=True)
     import os as _os
     try:
         import psutil
@@ -126,7 +165,7 @@ def RestartWindowsLocal(WorkerName: str) -> tuple:
 
 def RestartBaremetal(WorkerName: str, Host: str, SkipSync: bool = False) -> tuple:
     T0 = time.time()
-    print(f"       restart backend: baremetal (host={Host}, skip_sync={SkipSync})", flush=True)
+    print(f"[3/5] restart backend: baremetal (host={Host}, skip_sync={SkipSync})", flush=True)
     _, Ip, User = _ResolveInventory(Host)
     Target = f"{User}@{Ip}"
 
@@ -140,10 +179,10 @@ def RestartBaremetal(WorkerName: str, Host: str, SkipSync: bool = False) -> tupl
             return (False, time.time() - T0)
 
     Unit = _BaremetalUnitFromWorkerName(WorkerName)
-    # see worker-deploy-invariants.md I1 -- hard-kill is safe; boot cleanup restores state. Avoids graceful-stop wait (systemd TimeoutStopSec) blocking deploy.
+    # Drain confirmed by caller; systemctl restart's graceful-stop wait is redundant. kill -s TERM + start = fast + clean.
     R = subprocess.run(
         ["ssh", *SshOpts, Target,
-         f"systemctl kill -s KILL {Unit}; systemctl start {Unit}"],
+         f"systemctl kill -s TERM {Unit}; systemctl start {Unit}"],
         timeout=30,
     )
     Elapsed = time.time() - T0
@@ -151,38 +190,65 @@ def RestartBaremetal(WorkerName: str, Host: str, SkipSync: bool = False) -> tupl
     return (R.returncode == 0, Elapsed)
 
 
+def OnlineWorker(Db, WorkerName: str, WasOnline: bool) -> float:
+    T0 = time.time()
+    if WasOnline:
+        Db.ExecuteNonQuery(
+            "UPDATE Workers SET Status='Online' WHERE WorkerName=%s",
+            (WorkerName,),
+        )
+        Elapsed = time.time() - T0
+        print(f"[5/5] online: {WorkerName} ({Elapsed:.1f}s)", flush=True)
+    else:
+        Elapsed = time.time() - T0
+        print(f"[5/5] leaving Paused (was not Online pre-deploy)", flush=True)
+    return Elapsed
+
+
 def DeployOne(WorkerName: str, Sha: str, SkipSync: bool = False) -> int:
     from Core.Database.DatabaseService import DatabaseService
     Db = DatabaseService()
 
     Rows = Db.ExecuteQuery(
-        "SELECT WorkerName, Platform FROM Workers WHERE WorkerName=%s",
+        "SELECT WorkerName, Platform, Status FROM Workers WHERE WorkerName=%s",
         (WorkerName,),
     )
     if not Rows:
         print(f"[FAIL] no Workers row for {WorkerName!r}")
         return 2
     Platform = (Rows[0].get("Platform") or "").lower()
+    WasOnline = (Rows[0].get("Status") or "") == "Online"
     Host = _HostFromWorkerName(WorkerName)
 
-    print(f"=== deploy-worker {WorkerName} (Platform={Platform}, Host={Host}, Sha={Sha[:8]}) ===", flush=True)
+    print(f"=== deploy-worker {WorkerName} (Platform={Platform}, Host={Host}, Sha={Sha[:8]}, WasOnline={WasOnline}) ===", flush=True)
     TStart = time.time()
 
-    if _WindowsLocal(Host):
-        Ok, TDeploy = RestartWindowsLocal(WorkerName)
-    else:
-        Ok, TDeploy = RestartBaremetal(WorkerName, Host, SkipSync=SkipSync)
+    TPause = PauseWorker(Db, WorkerName)
+    TDrain = DrainWorker(Db, WorkerName)
 
-    TTotal = time.time() - TStart
+    if _WindowsLocal(Host):
+        Ok, TRestart = RestartWindowsLocal(WorkerName)
+    else:
+        Ok, TRestart = RestartBaremetal(WorkerName, Host, SkipSync=SkipSync)
+
     if not Ok:
-        print(f"=== FAIL {WorkerName} in {TTotal:.1f}s ===", flush=True)
+        print(f"[FAIL] restart backend failed; leaving Status=Paused", flush=True)
         return 4
-    print(f"=== OK {WorkerName} restarted in {TTotal:.1f}s ===", flush=True)
+
+    print(f"[4/5] start returned rc=0 (fail-loud invariant satisfied)", flush=True)
+
+    TOnline = OnlineWorker(Db, WorkerName, WasOnline)
+    TTotal = time.time() - TStart
+    print(
+        f"=== OK {WorkerName} in {TTotal:.1f}s "
+        f"(pause={TPause:.1f}s, drain={TDrain:.1f}s, restart={TRestart:.1f}s, online={TOnline:.1f}s) ===",
+        flush=True,
+    )
     return 0
 
 
 def Main(Argv=None) -> int:
-    P = argparse.ArgumentParser(description="Per-worker restart: sync (baremetal only) + restart process.")
+    P = argparse.ArgumentParser(description="Per-worker deploy: pause -> drain -> restart -> online. See .claude/rules/worker-deploy.md.")
     P.add_argument("WorkerName", help="e.g. larry-worker-1, wakko-worker-2, I9-2024")
     P.add_argument("--skip-sync", action="store_true",
                    help="Skip source sync (fleet uses per-host sync-once + this flag on per-worker restart)")
