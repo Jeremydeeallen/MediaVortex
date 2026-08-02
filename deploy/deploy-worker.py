@@ -96,8 +96,8 @@ def _SpawnDetached(ServiceDir: str, MainPy, LogFile, _os, WorkerName: str):
     return Proc, Py
 
 
-def RestartWindowsLocal(WorkerName: str, Sha: str) -> tuple:
-    # see worker-deploy-invariants.md I1+I2+I3+I4 -- kill is safe; ActiveJobs sweep runs at boot; VERSION stamp before spawn keeps I3; Popen return value + one-shot poll enforces I4.
+def RestartWindowsLocal(WorkerName: str) -> tuple:
+    # see worker-deploy-invariants.md I1+I2+I3+I4 -- kill is safe (I1); ActiveJobs sweep runs at worker boot (I2); worker reads sha from .git/HEAD so no VERSION stamp needed (I3); Popen return value + one-shot poll enforces fail-loud (I4).
     T0 = time.time()
     print(f"       restart backend: windows-local ({WorkerName})", flush=True)
     import os as _os
@@ -105,8 +105,6 @@ def RestartWindowsLocal(WorkerName: str, Sha: str) -> tuple:
         import psutil
     except ImportError:
         return (False, time.time() - T0)
-
-    (MediaVortexRoot / "VERSION").write_text(Sha + "\n", encoding="utf-8")
 
     KilledW = _KillMediaVortexProcs("WorkerService", psutil)
     KilledS = _KillMediaVortexProcs("WebService", psutil)
@@ -171,7 +169,7 @@ def DeployOne(WorkerName: str, Sha: str, SkipSync: bool = False) -> int:
     TStart = time.time()
 
     if _WindowsLocal(Host):
-        Ok, TDeploy = RestartWindowsLocal(WorkerName, Sha)
+        Ok, TDeploy = RestartWindowsLocal(WorkerName)
     else:
         Ok, TDeploy = RestartBaremetal(WorkerName, Host, SkipSync=SkipSync)
 

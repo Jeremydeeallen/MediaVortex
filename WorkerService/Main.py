@@ -252,29 +252,38 @@ class WorkerServiceApp:
         return ""
 
     def _ResolveWorkerVersion(self):
-        """Read worker version from the deploy-stamped artifact. Returns (version, build_info_or_none).
-
-        The VERSION file is written by the deploy script at deploy time -- never
-        resolved live. If the file is missing or empty, returns "unknown" rather
-        than guessing from a live source (e.g. git HEAD), so the displayed
-        version never advances past the running code.
-
-        BuildInfo is the contents of <repo>/BUILD_INFO when present, else None."""
+        # see worker-deploy-invariants.md I3 -- prefer .git/HEAD (same-host = no stamp needed); fall back to VERSION file (remote hosts don't ship .git).
+        from Core.Path.LocalPath import LocalExists, LocalJoin, LocalDirname
         try:
-            ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            VersionFile = os.path.join(ProjectRoot, "VERSION")
-            BuildInfoFile = os.path.join(ProjectRoot, "BUILD_INFO")
-            if os.path.exists(VersionFile):
+            ProjectRoot = LocalDirname(LocalDirname(os.path.abspath(__file__)))
+            BuildInfoFile = LocalJoin(ProjectRoot, "BUILD_INFO")
+            BuildInfo = None
+            if LocalExists(BuildInfoFile):
+                with open(BuildInfoFile, "r", encoding="utf-8") as Fh:
+                    BuildInfo = Fh.read()
+
+            HeadFile = LocalJoin(ProjectRoot, ".git", "HEAD")
+            if LocalExists(HeadFile):
+                with open(HeadFile, "r", encoding="utf-8") as Fh:
+                    Head = Fh.read().strip()
+                if Head.startswith("ref: "):
+                    RefPath = LocalJoin(ProjectRoot, ".git", Head[5:])
+                    if LocalExists(RefPath):
+                        with open(RefPath, "r", encoding="utf-8") as Fh:
+                            Sha = Fh.read().strip()
+                        if Sha:
+                            return (Sha[:64], BuildInfo)
+                elif Head:
+                    return (Head[:64], BuildInfo)
+
+            VersionFile = LocalJoin(ProjectRoot, "VERSION")
+            if LocalExists(VersionFile):
                 with open(VersionFile, "r", encoding="utf-8") as Fh:
                     Sha = Fh.read().strip()
                 if Sha:
-                    BuildInfo = None
-                    if os.path.exists(BuildInfoFile):
-                        with open(BuildInfoFile, "r", encoding="utf-8") as Fh:
-                            BuildInfo = Fh.read()
                     return (Sha[:64], BuildInfo)
         except Exception as Ex:
-            LoggingService.LogException("VERSION-file read failed", Ex, "WorkerService", "_ResolveWorkerVersion")
+            LoggingService.LogException("Version resolve failed", Ex, "WorkerService", "_ResolveWorkerVersion")
 
         return ("unknown", None)
 
