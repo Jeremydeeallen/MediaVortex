@@ -142,9 +142,14 @@ def RestartBaremetal(WorkerName: str, Host: str, SkipSync: bool = False) -> tupl
             return (False, time.time() - T0)
 
     Unit = _BaremetalUnitFromWorkerName(WorkerName)
-    R = subprocess.run(["ssh", *SshOpts, Target, f"systemctl restart {Unit}"], timeout=60)
+    # see worker-deploy-invariants.md I1 -- hard-kill is safe; boot cleanup restores state. Avoids graceful-stop wait (systemd TimeoutStopSec) blocking deploy.
+    R = subprocess.run(
+        ["ssh", *SshOpts, Target,
+         f"systemctl kill -s KILL {Unit}; systemctl start {Unit}"],
+        timeout=30,
+    )
     Elapsed = time.time() - T0
-    print(f"       systemctl restart {Unit} rc={R.returncode} ({Elapsed:.1f}s)", flush=True)
+    print(f"       systemctl kill+start {Unit} rc={R.returncode} ({Elapsed:.1f}s)", flush=True)
     return (R.returncode == 0, Elapsed)
 
 
