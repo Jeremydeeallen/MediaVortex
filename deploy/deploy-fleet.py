@@ -1,47 +1,24 @@
-# see .claude/rules/worker-deploy.md
-import argparse
 import datetime as _dt
-import re
 import subprocess
 import sys
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+Root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Root))
 
-# directive: orphan-generators-stop -- force line-buffered stdout so background/piped invocations see live progress.
 try:
     sys.stdout.reconfigure(line_buffering=True)
 except Exception:
     pass
 
-
-def _HostFromWorkerName(Wn: str) -> str:
-    M = re.match(r"^(.+)-worker-\d+$", Wn)
-    if M:
-        return M.group(1)
-    M = re.match(r"^([A-Za-z0-9]+)-\d+$", Wn)
-    if M:
-        return M.group(1)
-    return Wn
+from deploy.common import (
+    MediaVortexRoot, HostFromWorkerName, IsWindowsLocal,
+    GitHead, GitOriginMain, Sh,
+)
 
 
-def _Sh(Cmd, cwd=None):
-    return subprocess.run(Cmd, capture_output=True, text=True, cwd=cwd)
-
-
-def GitHead() -> str:
-    return _Sh(["git", "rev-parse", "HEAD"], cwd=str(ROOT)).stdout.strip()
-
-
-def GitOriginMain() -> str:
-    R = _Sh(["git", "rev-parse", "origin/main"], cwd=str(ROOT))
-    return R.stdout.strip() if R.returncode == 0 else ""
-
-
-def EnabledWorkers(Db) -> list:
+def _EnabledWorkers(Db) -> list:
     return Db.ExecuteQuery(
         "SELECT WorkerName, COALESCE(Version, '') AS Version, Status "
         "FROM Workers WHERE Enabled = TRUE "
@@ -50,11 +27,10 @@ def EnabledWorkers(Db) -> list:
 
 
 def _StreamChild(Prefix: str, Cmd: list) -> tuple:
-    # directive: orphan-generators-stop -- stream child stdout line-by-line, prefixed for legibility across parallel subprocesses.
     StartTs = _dt.datetime.now()
     print(f"[{Prefix}] START {StartTs.strftime('%H:%M:%S')}", flush=True)
     Proc = subprocess.Popen(
-        Cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        Cmd, cwd=str(MediaVortexRoot), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
     )
     LastLines = []
     for Line in Proc.stdout:
@@ -70,32 +46,25 @@ def _StreamChild(Prefix: str, Cmd: list) -> tuple:
     return (Proc.returncode, "\n        ".join(LastLines), StartTs, EndTs, Elapsed)
 
 
-def SyncHost(HostName: str) -> tuple:
-    # directive: orphan-generators-stop -- one source sync per host, not per worker. rsync/pip target-disk contention was the actual bottleneck.
-    Cmd = [sys.executable, "-u", str(ROOT / "deploy" / "deploy-baremetal-worker.py"), HostName, "--sync-only"]
+def _SyncHost(HostName: str) -> tuple:
+    Cmd = [sys.executable, "-u", str(MediaVortexRoot / "deploy" / "deploy-baremetal-worker.py"), HostName]
     Rc, Tail, StartTs, EndTs, Elapsed = _StreamChild(f"sync:{HostName}", Cmd)
     return (HostName, Rc, Tail, StartTs, EndTs, Elapsed)
 
 
-def DeployWorker(WorkerName: str, SkipSync: bool = False) -> tuple:
-    Cmd = [sys.executable, "-u", str(ROOT / "deploy" / "deploy-worker.py"), WorkerName]
-    if SkipSync:
-        Cmd.append("--skip-sync")
+def _DeployWorker(WorkerName: str) -> tuple:
+    Cmd = [sys.executable, "-u", str(MediaVortexRoot / "deploy" / "deploy-worker.py"), WorkerName]
     Rc, Tail, StartTs, EndTs, Elapsed = _StreamChild(WorkerName, Cmd)
     return (WorkerName, Rc, Tail, StartTs, EndTs, Elapsed)
 
 
 def Main() -> int:
-    P = argparse.ArgumentParser(description="Fleet deploy: pause-all -> per-host sync + per-worker drain-restart. See .claude/rules/worker-deploy.md.")
-    P.add_argument("--workers", help="comma-separated WorkerName list; default = all Enabled")
-    Args = P.parse_args()
-
     Sha = GitHead()
     if not Sha:
         print("ERROR: git HEAD unreadable")
         return 2
 
-    Dirty = _Sh(["git", "status", "--porcelain"], cwd=str(ROOT)).stdout.strip()
+    Dirty = Sh(["git", "status", "--porcelain"], cwd=str(MediaVortexRoot)).stdout.strip()
     if Dirty:
         print("ERROR: working tree is dirty. Commit first. Refused:")
         for L in Dirty.splitlines()[:20]:
@@ -134,74 +103,52 @@ def Main() -> int:
             (",".join(Attempted), ",".join(Succeeded), Outcome, ErrorMessage, HistId),
         )
 
-    Pre = EnabledWorkers(Db)
+    Pre = _EnabledWorkers(Db)
     if not Pre:
         print("ERROR: no Enabled workers in Workers table")
         _FinishHist('FAILED', [], [], 'no enabled workers')
         return 1
 
     AllNames = [R["WorkerName"] for R in Pre]
-    if Args.workers:
-        Want = {W.strip() for W in Args.workers.split(",") if W.strip()}
-        AllNames = [N for N in AllNames if N in Want]
-        if not AllNames:
-            print(f"ERROR: --workers {Args.workers!r} matched no enabled workers")
-            _FinishHist('FAILED', [], [], 'no matching live workers')
-            return 1
 
-    # see .claude/rules/worker-deploy.md -- per-service pause -> drain -> deploy -> back Online.
-    ByHost = defaultdict(list)
-    WindowsWorkers = []
-    for N in AllNames:
-        Host = _HostFromWorkerName(N)
-        if Host.upper().startswith("I9"):
-            WindowsWorkers.append(N)
-        else:
-            ByHost[Host].append(N)
+    # see .claude/rules/worker-deploy.md
+    RemoteHosts = sorted({HostFromWorkerName(W) for W in AllNames if not IsWindowsLocal(HostFromWorkerName(W))})
 
     print(f"deploying {len(AllNames)} worker(s):")
-    for H in sorted(ByHost):
-        print(f"   host={H}: {', '.join(sorted(ByHost[H]))}")
-    if WindowsWorkers:
-        print(f"   windows-local: {', '.join(sorted(WindowsWorkers))}")
+    for H in RemoteHosts:
+        HostWorkers = sorted([W for W in AllNames if HostFromWorkerName(W) == H])
+        print(f"   host={H}: {', '.join(HostWorkers)}")
+    LocalWorkers = sorted([W for W in AllNames if IsWindowsLocal(HostFromWorkerName(W))])
+    if LocalWorkers:
+        print(f"   windows-local: {', '.join(LocalWorkers)}")
 
+    T0 = _dt.datetime.now()
     Results = []
     SyncResults = {}
-    FailedHosts = []
 
-    if ByHost:
-        T2Start = _dt.datetime.now()
-        print(f"[STEP 1/2 @ {T2Start.strftime('%H:%M:%S')}] per-host source sync -- {len(ByHost)} host(s) in parallel")
-        with ThreadPoolExecutor(max_workers=max(1, len(ByHost))) as Ex:
-            Futs = {Ex.submit(SyncHost, H): H for H in ByHost.keys()}
-            for F in as_completed(Futs):
-                H, Rc, Tail, StartTs, EndTs, Elapsed = F.result()
-                SyncResults[H] = (Rc, Tail, StartTs, EndTs, Elapsed)
-                print(f"[STEP 1/2] sync:{H} finished rc={Rc} elapsed={Elapsed:.1f}s")
+    MaxThreads = len(RemoteHosts) + len(AllNames)
+    with ThreadPoolExecutor(max_workers=max(1, MaxThreads)) as Ex:
+        SyncFuts = {H: Ex.submit(_SyncHost, H) for H in RemoteHosts}
 
-        FailedHosts = [H for H, (Rc, *_ ) in SyncResults.items() if Rc != 0]
-        T2Elapsed = (_dt.datetime.now() - T2Start).total_seconds()
-        print(f"[STEP 1/2 DONE] per-host sync complete in {T2Elapsed:.1f}s wall")
-        if FailedHosts:
-            print(f"[STEP 1/2 FAIL] per-host sync failed on: {FailedHosts}")
-            for H in FailedHosts:
-                Rc, Tail, *_ = SyncResults[H]
-                print(f"   sync:{H} rc={Rc}\n        {Tail}")
+        def _RestartAfterSync(WorkerName):
+            Host = HostFromWorkerName(WorkerName)
+            SyncFut = SyncFuts.get(Host)
+            if SyncFut is not None:
+                _, Rc, Tail, _S, _E, _El = SyncFut.result()
+                if Rc != 0:
+                    return (WorkerName, 90, f"sync:{Host} failed rc={Rc}\n        {Tail}",
+                            _dt.datetime.now(), _dt.datetime.now(), 0.0)
+            return _DeployWorker(WorkerName)
 
-    RestartTargets = [N for N in AllNames if _HostFromWorkerName(N) not in (FailedHosts if ByHost else [])]
+        WorkerFuts = [Ex.submit(_RestartAfterSync, W) for W in AllNames]
 
-    if RestartTargets:
-        T3Start = _dt.datetime.now()
-        print(f"[STEP 2/2 @ {T3Start.strftime('%H:%M:%S')}] per-worker restart ({len(RestartTargets)} in parallel)")
-        with ThreadPoolExecutor(max_workers=max(1, len(RestartTargets))) as Ex:
-            Futs = []
-            for N in RestartTargets:
-                SkipSync = _HostFromWorkerName(N) in ByHost
-                Futs.append(Ex.submit(DeployWorker, N, SkipSync))
-            for F in as_completed(Futs):
-                Results.append(F.result())
-        T3Elapsed = (_dt.datetime.now() - T3Start).total_seconds()
-        print(f"[STEP 2/2 DONE] per-worker restart complete in {T3Elapsed:.1f}s wall")
+        for F in as_completed(WorkerFuts):
+            Results.append(F.result())
+
+        for H, F in SyncFuts.items():
+            SyncResults[H] = F.result()
+
+    TotalElapsed = (_dt.datetime.now() - T0).total_seconds()
 
     AnyFail = False
     OkNames = []
@@ -220,11 +167,16 @@ def Main() -> int:
     for Wn, Rc, Tail, _S, _E, _El in sorted(Results, key=lambda x: x[0]):
         if Rc != 0:
             print(f"   [FAIL tail] {Wn}\n        {Tail}")
+    print()
+    print(f"Fleet wall time: {TotalElapsed:.1f}s")
+    for H, (_, Rc, _, _, _, Elapsed) in sorted(SyncResults.items()):
+        print(f"  sync:{H}: {Elapsed:.1f}s rc={Rc}")
 
     if AnyFail:
         _FinishHist('PARTIAL', AllNames, OkNames, 'per-worker failures during deploy')
         return 1
 
+    print()
     print(f"== FLEET ON {Sha[:8]} ({len(OkNames)} workers) ==")
     _FinishHist('OK', AllNames, OkNames)
     return 0

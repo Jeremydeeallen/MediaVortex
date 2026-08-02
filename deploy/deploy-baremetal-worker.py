@@ -22,7 +22,7 @@ TorchIndexByVariant = {
     "xpu": "https://download.pytorch.org/whl/xpu",
 }
 
-# see worker-deploy.md -- keep last N versioned src + venv dirs, GC older
+# see .claude/rules/worker-deploy.md
 KeepVersions = 5
 
 
@@ -95,7 +95,7 @@ def StepPreflight(Target: str, Friendly: str) -> bool:
 
 
 def StepMigrateLegacyLayout(Target: str, Friendly: str) -> bool:
-    # see worker-deploy.md -- one-time move of pre-versioned real dirs out of the way; idempotent
+    # see .claude/rules/worker-deploy.md
     Script = (
         "mkdir -p /opt/mediavortex /etc/mediavortex && cd /opt/mediavortex && "
         "if [ -e src ] && [ ! -L src ] && [ -d src ]; then "
@@ -111,7 +111,7 @@ def StepMigrateLegacyLayout(Target: str, Friendly: str) -> bool:
 
 
 def StepEnsureVenv(Target: str, TorchVariant: str, DepsFingerprint: str) -> tuple:
-    # see worker-deploy.md -- per-fingerprint venv; draining workers keep their venv-<old_fp>/bin/python
+    # see .claude/rules/worker-deploy.md
     VenvPath = f"/opt/mediavortex/host-venv-{DepsFingerprint[:16]}"
     Check = _Ssh(Target, f"test -x {VenvPath}/bin/pip && echo YES || echo NO", Timeout=10).stdout.strip()
     if Check == "YES":
@@ -154,7 +154,7 @@ def StepEnsureFfmpeg(Target: str) -> bool:
 
 
 def StepSyncSource(Target: str, Sha: str) -> tuple:
-    # see worker-deploy.md -- rsync to versioned dir; draining workers stay bound to their src-<old_sha>/
+    # see .claude/rules/worker-deploy.md
     SrcPath = f"/opt/mediavortex/src-{Sha[:16]}"
     _Ssh(Target, f"mkdir -p {SrcPath}", Timeout=10)
     Sync = MediaVortexRoot / "deploy" / "SyncSource.py"
@@ -190,7 +190,7 @@ def StepShipSchemaSnapshot(Target: str, SrcPath: str) -> bool:
 
 
 def StepInstallRequirements(Target: str, VenvPath: str, SrcPath: str, DepsFingerprint: str) -> bool:
-    # see worker-deploy.md -- fingerprint file lives inside venv-<fp>/; same-fp reuse skips reinstall
+    # see .claude/rules/worker-deploy.md
     FingerprintFile = f"{VenvPath}/.deps-fingerprint"
     Remote = _Ssh(Target, f"cat {FingerprintFile} 2>/dev/null || echo NONE", Timeout=10).stdout.strip()
     if Remote == DepsFingerprint:
@@ -211,7 +211,7 @@ def StepInstallRequirements(Target: str, VenvPath: str, SrcPath: str, DepsFinger
 
 
 def StepRenderSystemdUnit(Target: str, Friendly: str, Count: int, SrcPath: str, VenvPath: str) -> bool:
-    # see worker-deploy.md -- unit rewritten per deploy with fully-resolved paths; draining worker's running command line is frozen at boot
+    # see .claude/rules/worker-deploy.md
     UnitBody = (
         "[Unit]\n"
         "Description=MediaVortex WorkerService instance %i\n"
@@ -259,7 +259,7 @@ def StepRenderSystemdUnit(Target: str, Friendly: str, Count: int, SrcPath: str, 
 
 
 def StepGarbageCollect(Target: str) -> bool:
-    # see worker-deploy.md -- keep last N versioned dirs; legacy dirs (-legacy-*) never GC'd
+    # see .claude/rules/worker-deploy.md
     Script = (
         f"cd /opt/mediavortex && "
         f"ls -1t src-* 2>/dev/null | grep -v -- '-legacy-' | tail -n +{KeepVersions + 1} | "
