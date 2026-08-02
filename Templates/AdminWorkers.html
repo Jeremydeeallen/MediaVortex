@@ -60,10 +60,9 @@ function ConnectivityDotHtml(HeartbeatAgeSec, StaleSec) {
   return `<span class="badge ${cls}" title="${title}">&#9679;</span>`;
 }
 
-function RenderTile(W, StaleSec, DivergenceSec) {
+function RenderTile(W, StaleSec) {
   const Name = W.WorkerName;
   const HbAge = W.HeartbeatAgeSec != null ? W.HeartbeatAgeSec : W.heartbeatagesec;
-  const RsAge = W.RuntimeStateAgeSec != null ? W.RuntimeStateAgeSec : W.runtimestateagesec;
   const Intent = IntentBadgeHtml(W.Status);
   const Truth = TruthBadgeHtml(W.RuntimeState);
   const Dot = ConnectivityDotHtml(HbAge, StaleSec);
@@ -93,9 +92,9 @@ function RenderTile(W, StaleSec, DivergenceSec) {
   const Hung = W.IsHung === true;
   const Border = Hung ? 'hung-border' : (Diverge ? 'diverge-border' : '');
   const DivergeTip = Hung
-    ? `title="Encoding AttemptId ${W.CurrentAttemptId || '?'} for ${Math.round((RsAge || 0)/60)} min without progress -- auto-reset pending."`
+    ? `title="Encoding AttemptId ${W.CurrentAttemptId || '?'} for ${Math.round((HbAge || 0)/60)} min without progress -- auto-reset pending."`
     : (Diverge
-      ? `title="Operator intent: ${W.Status || '?'}; worker reports: ${W.RuntimeState || 'no truth'}. Worker may be stuck or unable to honor the intent (> ${DivergenceSec}s)."`
+      ? `title="Operator intent: ${W.Status || '?'}; worker reports: ${W.RuntimeState || 'no truth'}. Fresh heartbeat but worker is not honoring the intent."`
       : '');
   const AttemptLine = (W.CurrentAttemptId !== null && W.CurrentAttemptId !== undefined)
     ? `<div class="small text-muted">attempt ${W.CurrentAttemptId}</div>` : '';
@@ -142,11 +141,10 @@ function Load() {
     .then(data => {
       if (!data.Success) throw new Error(data.Message || 'unknown');
       const StaleSec = data.Data.HeartbeatStaleThresholdSec || 300;
-      const DivergenceSec = data.Data.WorkerIntentDivergenceSec || 60;
       document.getElementById('StaleNote').textContent =
-        `Two badges per tile: left = operator intent (Workers.Status), right = worker truth (Workers.RuntimeState). Amber border if disagreement persists > ${DivergenceSec}s. Connectivity dot: green if heartbeat < ${StaleSec}s.`;
+        `Two badges per tile: left = operator intent (Workers.Status), right = worker truth (Workers.RuntimeState). Amber border when a FRESH worker's intent and truth disagree. Connectivity dot: green if heartbeat age <= ${StaleSec}s (stale threshold).`;
       const Grid = document.getElementById('WorkersGrid');
-      Grid.innerHTML = data.Data.Workers.map(W => RenderTile(W, StaleSec, DivergenceSec)).join('');
+      Grid.innerHTML = data.Data.Workers.map(W => RenderTile(W, StaleSec)).join('');
       Grid.querySelectorAll('button[data-action]').forEach(btn => {
         btn.addEventListener('click', () => {
           const W = btn.getAttribute('data-worker');

@@ -159,7 +159,7 @@ class DashboardSnapshotService:
             Threshold = 600
         Rows = self.Db.ExecuteQuery(
             "SELECT w.WorkerName, w.RuntimeState, w.CurrentAttemptId, "
-            "EXTRACT(EPOCH FROM (NOW() - w.LastRuntimeStateUpdate))::int AS rs_age, "
+            "EXTRACT(EPOCH FROM (NOW() - w.LastHeartbeat))::int AS hb_age, "
             "EXTRACT(EPOCH FROM (NOW() - tp.LastProgressUpdate))::int AS prog_age, "
             "tq.FileName "
             "FROM Workers w "
@@ -170,13 +170,13 @@ class DashboardSnapshotService:
         )
         Out = []
         for R in (Rows or []):
-            if not IsHung(R.get('RuntimeState') or R.get('runtimestate'), R.get('rs_age'), R.get('prog_age'), Threshold):
+            if not IsHung(R.get('RuntimeState') or R.get('runtimestate'), R.get('hb_age'), R.get('prog_age'), Threshold):
                 continue
             Out.append({
                 'AttemptId': int(R['CurrentAttemptId']) if R.get('CurrentAttemptId') is not None else int(R['currentattemptid']),
                 'WorkerName': R.get('WorkerName') or R.get('workername'),
                 'FileName': R.get('FileName') or R.get('filename'),
-                'MinutesStuck': int((int(R.get('rs_age') or 0)) / 60),
+                'MinutesStuck': int((int(R.get('hb_age') or 0)) / 60),
             })
         return Out
 

@@ -17,13 +17,12 @@ class AdminWorkersRepository:
             "MaxConcurrentQualityTestJobs, "
             "TranscodeEnabled, RemuxEnabled, QualityTestEnabled, ScanEnabled, ProbeEnabled, LanguageEnabled, NvencCapable, QsvCapable, HwAccelDecodeEnabled, "
             "Version, BuildInfo, MountValidationError, Enabled, "
-            "RuntimeState, CurrentAttemptId, LastRuntimeStateUpdate, "
-            "EXTRACT(EPOCH FROM (NOW() - LastHeartbeat))::int AS HeartbeatAgeSec, "
-            "EXTRACT(EPOCH FROM (NOW() - LastRuntimeStateUpdate))::int AS RuntimeStateAgeSec "
+            "RuntimeState, CurrentAttemptId, "
+            "EXTRACT(EPOCH FROM (NOW() - LastHeartbeat))::int AS HeartbeatAgeSec "
             "FROM Workers WHERE Enabled = TRUE "
             "ORDER BY WorkerName ASC"
         )
-        Threshold = self.GetDivergenceThresholdSec()
+        Threshold = self.GetStaleThresholdSec()
         HungThreshold = self.GetHungEncodeThresholdSec()
         ProgressAgeByAttempt = self._GetProgressAgeByAttempt([R.get('currentattemptid') for R in (Rows or []) if R.get('currentattemptid') is not None])
         from Features.StuckJobDetection.HungEncodeDetector import IsHung
@@ -34,14 +33,14 @@ class AdminWorkersRepository:
             Tile['IntentDiverges'] = _DeriveDivergence(
                 Tile.get('status'),
                 Tile.get('runtimestate'),
-                Tile.get('runtimestateagesec'),
+                Tile.get('heartbeatagesec'),
                 Threshold,
             )
             AttemptId = Tile.get('currentattemptid')
             ProgAge = ProgressAgeByAttempt.get(int(AttemptId)) if AttemptId is not None else None
             Tile['IsHung'] = IsHung(
                 Tile.get('runtimestate'),
-                Tile.get('runtimestateagesec'),
+                Tile.get('heartbeatagesec'),
                 ProgAge,
                 HungThreshold,
             )
@@ -81,33 +80,20 @@ class AdminWorkersRepository:
         except (KeyError, ValueError, TypeError):
             return 300
 
-    # directive: worker-runtime-state | # see admin-workers.C6
-    def GetDivergenceThresholdSec(self) -> int:
-        Rows = self._Db.ExecuteQuery(
-            "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'WorkerIntentDivergenceSec' LIMIT 1"
-        )
-        try:
-            return int(Rows[0]['settingvalue']) if Rows else 60
-        except (KeyError, ValueError, TypeError):
-            return 60
-
 
 # directive: worker-runtime-state | # see admin-workers.C6
-def _DeriveDivergence(Status, RuntimeState, RuntimeStateAgeSec, ThresholdSec):
-    """Operator-Status vs worker-RuntimeState. Returns True when disagreement has persisted past threshold."""
+def _DeriveDivergence(Status, RuntimeState, HeartbeatAgeSec, ThresholdSec):
+    """Fresh worker with intent/state disagreement; stale is offline not diverge."""
     if not Status:
         return False
-    Threshold = int(ThresholdSec)
-    Age = None if RuntimeStateAgeSec is None else int(RuntimeStateAgeSec)
-    if Status == 'Online' and (RuntimeState is None or Age is None or Age > Threshold):
-        return True
+    if HeartbeatAgeSec is None:
+        return False
+    if int(HeartbeatAgeSec) > int(ThresholdSec):
+        return False
     if not RuntimeState:
         return False
-    WorkerActive = RuntimeState in ('Idle', 'ClaimingJob', 'Encoding', 'Scanning', 'Initializing')
-    Compatible = (
-        (Status == 'Online' and WorkerActive)
-        or (Status == 'Paused' and (RuntimeState in ('Paused', 'Draining')))
-    )
-    if Compatible:
-        return False
-    return Age is not None and Age > Threshold
+    if Status == 'Online':
+        return RuntimeState not in ('Idle', 'ClaimingJob', 'Encoding', 'Scanning', 'Initializing')
+    if Status == 'Paused':
+        return RuntimeState not in ('Paused', 'Draining')
+    return False

@@ -536,7 +536,7 @@ Table: `ActiveJobs`
 
 Every worker's `StuckJobDetectionService` runs only over jobs it owns (SELECT-layer filter `WorkerName = WorkerContext.Current().WorkerName`). Two detectors run:
 1. **Progress stagnation** -- `TranscodeProgress.LastFrameAdvance` older than `FrozenProgressThresholdMin` (SystemSettings, default 5 min) -> owner kills its own ffmpeg + writes Success=FALSE on its own attempt. Local psutil, local PID.
-2. **Hung-encode via RuntimeState** -- `Workers.RuntimeState='Encoding'` with stale `LastRuntimeStateUpdate` -> owner kills its own ffmpeg + writes Success=FALSE on its own attempt.
+2. **Hung-encode via RuntimeState** -- `Workers.RuntimeState='Encoding'` with stale `LastHeartbeat` -> owner kills its own ffmpeg + writes Success=FALSE on its own attempt.
 
 **No cross-worker progress polling. No cross-worker DB writes.** A worker whose owner is heartbeat-stale + Offline gets its attempts released by `AttemptAbandonmentSweeper`; that is the entire cross-worker cleanup surface.
 

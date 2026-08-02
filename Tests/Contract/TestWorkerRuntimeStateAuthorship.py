@@ -26,8 +26,8 @@ def _ScanPyFiles(Roots):
 class TestWorkerRuntimeStateAuthorship(unittest.TestCase):
 
     # directive: worker-runtime-state | # see admin-workers.C7
-    def test_only_workerstatereporter_writes_the_three_columns(self):
-        Pattern = re.compile(r"UPDATE\s+Workers\s+SET\s[^;]*?(RuntimeState|CurrentAttemptId|LastRuntimeStateUpdate)", re.IGNORECASE | re.DOTALL)
+    def test_only_workerstatereporter_writes_the_two_columns(self):
+        Pattern = re.compile(r"UPDATE\s+Workers\s+SET\s[^;]*?(RuntimeState|CurrentAttemptId)", re.IGNORECASE | re.DOTALL)
         Hits = []
         for Filename, Content in _ScanPyFiles(['Features', 'WebService']):
             for M in Pattern.finditer(Content):
@@ -41,7 +41,7 @@ class TestWorkerRuntimeStateAuthorship(unittest.TestCase):
             Content = Fh.read()
         self.assertIn('RuntimeState', Content)
         self.assertIn('CurrentAttemptId', Content)
-        self.assertIn('LastRuntimeStateUpdate', Content)
+        self.assertNotIn('LastRuntimeStateUpdate', Content)
 
 
 if __name__ == '__main__':

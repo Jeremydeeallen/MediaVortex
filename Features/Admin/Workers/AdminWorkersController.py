@@ -20,14 +20,12 @@ def admin_workers_snapshot():
         Repo = AdminWorkersRepository()
         Tiles = Repo.GetTiles()
         StaleSec = Repo.GetStaleThresholdSec()
-        DivergenceSec = Repo.GetDivergenceThresholdSec()
         HungSec = Repo.GetHungEncodeThresholdSec()
         return jsonify({
             'Success': True,
             'Data': {
                 'Workers': Tiles,
                 'HeartbeatStaleThresholdSec': StaleSec,
-                'WorkerIntentDivergenceSec': DivergenceSec,
                 'HungEncodeThresholdSec': HungSec,
             },
         })

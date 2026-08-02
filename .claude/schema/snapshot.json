@@ -2345,6 +2345,110 @@
       "is_nullable": "YES"
     }
   },
+  "ondemandproberequests": {
+    "claimedat": {
+      "data_type": "timestamp with time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "claimedby": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "completedat": {
+      "data_type": "timestamp with time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "errormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filesprobed": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "relativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "requestedat": {
+      "data_type": "timestamp with time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "ondemandscanrequests": {
+    "claimedat": {
+      "data_type": "timestamp with time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "claimedby": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "completedat": {
+      "data_type": "timestamp with time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "errormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "filesdiscovered": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "relativepath": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "requestedat": {
+      "data_type": "timestamp with time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "status": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
   "posttranscodegateconfig": {
     "filereplacementcanreplacethreshold": {
       "data_type": "integer",
@@ -4673,7 +4777,7 @@
     "mediafileid": {
       "data_type": "bigint",
       "is_generated": "NEVER",
-      "is_nullable": "NO"
+      "is_nullable": "YES"
     },
     "newsizebytes": {
       "data_type": "bigint",
@@ -5549,11 +5653,6 @@
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
-    "lastruntimestateupdate": {
-      "data_type": "timestamp without time zone",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
     "localscratchdir": {
       "data_type": "text",
       "is_generated": "NEVER",
@@ -5598,6 +5697,11 @@
       "data_type": "text",
       "is_generated": "NEVER",
       "is_nullable": "YES"
+    },
+    "probeenabled": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
     },
     "qsvcapable": {
       "data_type": "boolean",

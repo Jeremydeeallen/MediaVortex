@@ -9,21 +9,20 @@ Renders the operator-facing worker fleet at `/Admin/Workers`. Each tile shows TW
 - **Intent badge** -- `Workers.Status` (operator-set: `Online` / `Paused`). The operator's intent.
 - **Truth badge** -- `Workers.RuntimeState` (worker-authored: `Initializing` / `Idle` / `ClaimingJob` / `Encoding` / `Scanning` / `Draining` / `Paused` / `Faulted:<reason>`). What the worker is actually doing right now.
 
-When the two values disagree for more than the divergence threshold, the tile renders with an amber border + tooltip explaining the disagreement. The threshold lives in `SystemSettings.WorkerIntentDivergenceSec` (default 60). Operator-tunable per `worker-runtime-state` directive.
+When the two values disagree AND the worker is fresh (heartbeat within `SystemSettings.HeartbeatStaleThresholdSec`, default 300), the tile renders with an amber border + tooltip explaining the disagreement. Stale workers show a gray connectivity dot (offline) instead -- stale is not divergence.
 
 Tiles also display a connectivity dot independent of either badge: green when `(NOW() - LastHeartbeat) <= HeartbeatStaleThresholdSec` (default 300), red otherwise.
 
 ## Source-of-truth model
 
-Three columns on `Workers` are worker-authored ONLY -- WebService never writes them. The single SRP writer is `WorkerService/WorkerStateReporter.py`:
+Two columns on `Workers` are worker-authored ONLY -- WebService never writes them. The single SRP writer is `WorkerService/WorkerStateReporter.py`:
 
 | Column | Type | Worker-writes when |
 |---|---|---|
-| `RuntimeState` | TEXT | Every lifecycle transition + every heartbeat tick |
+| `RuntimeState` | TEXT | Every lifecycle transition |
 | `CurrentAttemptId` | BIGINT NULL | Non-null exactly when `RuntimeState='Encoding'`; points at `TranscodeAttempts.Id` |
-| `LastRuntimeStateUpdate` | TIMESTAMP | Every state change or heartbeat tick |
 
-If WebService is down, RuntimeState writes continue. When WebService comes back, the page reflects worker truth immediately without manual recompute.
+Freshness is derived from `Workers.LastHeartbeat` alone (written every 30s by the health-monitor tick). Divergence and IsHung both gate on heartbeat age against `HeartbeatStaleThresholdSec`. If WebService is down, heartbeat + RuntimeState writes continue. When WebService comes back, the page reflects worker truth immediately without manual recompute.
 
 ## Surface
 
@@ -35,7 +34,7 @@ If WebService is down, RuntimeState writes continue. When WebService comes back,
 
 C1. `/Admin/Workers` returns HTTP 200 and renders one tile per row in `Workers WHERE Enabled = TRUE`. Verifiable: `curl -I /Admin/Workers` -> 200; page source contains every enabled worker's name.
 
-C2. `/api/Admin/Workers/Snapshot` returns `{Success, Data: {Workers, HeartbeatStaleThresholdSec, WorkerIntentDivergenceSec}}`. `Workers` is a list of dicts with `WorkerName`, `Status`, `RuntimeState`, `CurrentAttemptId`, `LastHeartbeat`, `LastRuntimeStateUpdate`, `HeartbeatAgeSec`, `IntentDiverges` (bool), capability flags, `Version`. Verifiable: `curl /api/Admin/Workers/Snapshot | jq '.Data.Workers[0] | keys'` includes the new keys.
+C2. `/api/Admin/Workers/Snapshot` returns `{Success, Data: {Workers, HeartbeatStaleThresholdSec, HungEncodeThresholdSec}}`. `Workers` is a list of dicts with `WorkerName`, `Status`, `RuntimeState`, `CurrentAttemptId`, `LastHeartbeat`, `HeartbeatAgeSec`, `IntentDiverges` (bool), capability flags, `Version`. Verifiable: `curl /api/Admin/Workers/Snapshot | jq '.Data.Workers[0] | keys'` includes the new keys.
 
 C3. Intent badge maps `Online` -> green, `Paused` -> amber. Unknown values render grey with the raw string. Same data-driven table approach for Truth badge: `Idle` -> light, `Encoding` -> blue, `Scanning` -> cyan, `Draining` -> amber, `Paused` -> grey, `Faulted` -> red, unknown -> grey. Verifiable: `UPDATE Workers SET Status='Maintenance'` -- the Intent badge displays `Maintenance` in grey without code change.
 
@@ -43,13 +42,13 @@ C4. Connectivity dot derived from heartbeat freshness only, independent of eithe
 
 C5. Tile actions: Online / Pause buttons POST to `/api/TeamStatus/Workers/<name>/Status`. Page re-fetches snapshot on success. Verifiable: click Pause; the Intent badge flips to amber on the next poll.
 
-C6. **Two-badge divergence warning.** When `Status` and `RuntimeState` carry semantically-incompatible values (e.g. `Status='Online'` but `RuntimeState='Paused'`) for more than `WorkerIntentDivergenceSec` seconds (default 60, operator-tunable in `SystemSettings`), the tile renders with an amber border. Tooltip text: `"Operator intent: Online; worker reports: Paused. Worker may be stuck or unable to honor the intent."` Verifiable: stop a worker process while its `Status='Online'`; the tile shows the amber border within ~60s of `LastRuntimeStateUpdate` going stale.
+C6. **Two-badge divergence warning.** When the worker is FRESH (heartbeat age <= `HeartbeatStaleThresholdSec`) AND `Status` and `RuntimeState` carry semantically-incompatible values (e.g. `Status='Online'` but `RuntimeState='Paused'`), the tile renders with an amber border. Tooltip text: `"Operator intent: Online; worker reports: Paused. Fresh heartbeat but worker is not honoring the intent."` Stale workers render with a red connectivity dot instead (offline, not divergence). Verifiable: `UPDATE Workers SET Status='Paused', LastHeartbeat=NOW()` on a worker whose `RuntimeState='Encoding'` -- tile shows amber border immediately.
 
-C7. **Worker is the only writer.** `grep -rn 'UPDATE Workers SET .* RuntimeState\|UPDATE Workers SET .* CurrentAttemptId\|UPDATE Workers SET .* LastRuntimeStateUpdate' Features/ WebService/` returns 0 matches. The three columns are written only by `WorkerService/WorkerStateReporter.py`.
+C7. **Worker is the only writer.** `grep -rn 'UPDATE Workers SET .* RuntimeState\|UPDATE Workers SET .* CurrentAttemptId' Features/ WebService/` returns 0 matches. The two columns are written only by `WorkerService/WorkerStateReporter.py`.
 
 C8. **WebService-outage resilience verified end-to-end.** Stop WebService; observe `Workers.RuntimeState` continues to update through normal worker lifecycle. Bring WebService back; `/api/Admin/Workers/Snapshot` reflects the truth immediately. Contract test `Tests/Contract/TestWorkerStateReporterResilience.py`.
 
-C9. **Hung-encode detector.** A worker is classified `IsHung=true` when `RuntimeState='Encoding'` on the same `CurrentAttemptId` for longer than `SystemSettings.HungEncodeThresholdSec` (default 600) AND `TranscodeProgress.LastProgressUpdate` for that attempt has not advanced within the same window. Auto-recovery: `StuckJobDetectionService` kills the ffmpeg subprocess by `FFmpegPid`, flips `TranscodeAttempts.Success=FALSE` with `ErrorMessage='hung_encode_detector'`, deletes the `ActiveJobs` row, and the worker on next lifecycle tick transitions `RuntimeState` to `Idle`. Verifiable: `Tests/Contract/TestHungEncodeDetector.py` simulates a stale progress row for an in-flight attempt and asserts auto-reset within the next detection sweep.
+C9. **Hung-encode detector.** A worker is classified `IsHung=true` when `RuntimeState='Encoding'` AND `Workers.LastHeartbeat` is older than `SystemSettings.HungEncodeThresholdSec` (default 600) AND `TranscodeProgress.LastProgressUpdate` for that attempt has not advanced within the same window. Auto-recovery: `StuckJobDetectionService` kills the ffmpeg subprocess by `FFmpegPid`, flips `TranscodeAttempts.Success=FALSE` with `ErrorMessage='hung_encode_detector'`, deletes the `ActiveJobs` row, and the worker on next lifecycle tick transitions `RuntimeState` to `Idle`. Verifiable: `Tests/Contract/TestHungEncodeDetector.py` simulates a stale progress row for an in-flight attempt and asserts auto-reset within the next detection sweep.
 
 C10. **Hung tile rendering.** A tile with `IsHung=true` renders with a red border + tooltip `"Encoding attempt N for X minutes without progress -- auto-reset pending."`. Operator visual signal independent of the amber-intent-divergence border. Verifiable: insert a synthetic hung attempt; the tile's class list contains `hung-border` within next poll.
 
@@ -67,9 +66,9 @@ C12. **Hung-encode threshold is operator-tunable** via `SystemSettings.HungEncod
 | `Templates/_admin_subnav.html` | Workers link |
 | `WorkerService/WorkerStateReporter.py` | NEW SRP writer (the only writer of the 3 worker-truth columns) |
 | `WorkerService/Main.py` | Wires WorkerStateReporter into lifecycle transitions |
-| `Scripts/SQLScripts/AddWorkerRuntimeStateColumns.py` | Idempotent migration: adds 3 columns + seeds `SystemSettings.WorkerIntentDivergenceSec=60` |
+| `Scripts/SQLScripts/AddWorkerRuntimeStateColumns.py` | Idempotent migration: adds worker-truth columns |
 | `Scripts/SQLScripts/AddHungEncodeThresholdSetting.py` | Idempotent: seeds `SystemSettings.HungEncodeThresholdSec=600` |
-| `Features/StuckJobDetection/HungEncodeDetector.py` | Pure detector function (RuntimeState, AttemptId, RuntimeStateAge, ProgressAge, Threshold, Now) -> bool |
+| `Features/StuckJobDetection/HungEncodeDetector.py` | Pure detector function (RuntimeState, HeartbeatAge, ProgressAge, Threshold) -> bool |
 | `Features/StuckJobDetection/StuckJobDetectionService.py` | Sweep invokes detector + executes auto-recovery |
 | `Templates/Activity.html` | Hung-attempts red banner with Reset buttons |
 

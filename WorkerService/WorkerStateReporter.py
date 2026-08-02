@@ -3,7 +3,7 @@ from datetime import datetime
 
 # directive: worker-runtime-state | see workerservice.ST14
 class WorkerStateReporter:
-    """Sole writer of Workers.RuntimeState / CurrentAttemptId / LastRuntimeStateUpdate."""
+    """Sole writer of Workers.RuntimeState + Workers.CurrentAttemptId."""
 
     # directive: worker-runtime-state
     def __init__(self, Db, WorkerName, Clock=None):
@@ -13,17 +13,8 @@ class WorkerStateReporter:
 
     # directive: worker-runtime-state
     def Transition(self, NewState, AttemptId=None):
-        Now = self.Clock()
         self.Db.ExecuteNonQuery(
-            "UPDATE Workers SET RuntimeState = %s, CurrentAttemptId = %s, LastRuntimeStateUpdate = %s "
+            "UPDATE Workers SET RuntimeState = %s, CurrentAttemptId = %s "
             "WHERE WorkerName = %s",
-            (NewState, AttemptId, Now, self.WorkerName),
-        )
-
-    # directive: worker-runtime-state
-    def Tick(self):
-        Now = self.Clock()
-        self.Db.ExecuteNonQuery(
-            "UPDATE Workers SET LastRuntimeStateUpdate = %s WHERE WorkerName = %s",
-            (Now, self.WorkerName),
+            (NewState, AttemptId, self.WorkerName),
         )

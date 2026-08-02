@@ -16,17 +16,29 @@ class TestAdminWorkersIsHungWiredToSnapshot(unittest.TestCase):
         self.WorkerName = 'wakko-worker-1'
         self.SyntheticErrorMessage = 'synthetic-c10-test-regression'
         self.AttemptId = None
+        self.OriginalHeartbeat = None
+        Row = self.Db.ExecuteQuery(
+            "SELECT LastHeartbeat FROM Workers WHERE WorkerName = %s",
+            (self.WorkerName,),
+        )
+        if Row:
+            self.OriginalHeartbeat = Row[0]['lastheartbeat']
 
     def tearDown(self):
         if self.AttemptId is not None:
             self.Db.ExecuteNonQuery("DELETE FROM TranscodeAttempts WHERE Id = %s", (self.AttemptId,))
         self.Db.ExecuteNonQuery(
-            "UPDATE Workers SET RuntimeState = NULL, CurrentAttemptId = NULL, LastRuntimeStateUpdate = NULL "
+            "UPDATE Workers SET RuntimeState = NULL, CurrentAttemptId = NULL "
             "WHERE WorkerName = %s",
             (self.WorkerName,),
         )
+        if self.OriginalHeartbeat is not None:
+            self.Db.ExecuteNonQuery(
+                "UPDATE Workers SET LastHeartbeat = %s WHERE WorkerName = %s",
+                (self.OriginalHeartbeat, self.WorkerName),
+            )
 
-    def test_IsHung_True_When_Worker_Encoding_With_Stale_Rs_Age(self):
+    def test_IsHung_True_When_Worker_Encoding_With_Stale_Heartbeat(self):
         self.Db.ExecuteNonQuery(
             "INSERT INTO TranscodeAttempts (AttemptDate, Success, ErrorMessage, WorkerName, ProfileName) "
             "VALUES (NOW(), NULL, %s, %s, 'TEST_C10_REGRESSION')",
@@ -40,7 +52,7 @@ class TestAdminWorkersIsHungWiredToSnapshot(unittest.TestCase):
 
         self.Db.ExecuteNonQuery(
             "UPDATE Workers SET RuntimeState = 'Encoding', CurrentAttemptId = %s, "
-            "LastRuntimeStateUpdate = NOW() - INTERVAL '700 seconds' WHERE WorkerName = %s",
+            "LastHeartbeat = NOW() - INTERVAL '700 seconds' WHERE WorkerName = %s",
             (self.AttemptId, self.WorkerName),
         )
 
@@ -49,8 +61,8 @@ class TestAdminWorkersIsHungWiredToSnapshot(unittest.TestCase):
         self.assertEqual(len(Match), 1, f"Expected one tile for {self.WorkerName}")
         Tile = Match[0]
         self.assertEqual(Tile.get('RuntimeState'), 'Encoding')
-        self.assertGreater(Tile.get('RuntimeStateAgeSec') or 0, 600)
-        self.assertTrue(Tile.get('IsHung'), f"IsHung must be True when RuntimeState=Encoding and rs_age>threshold; tile={dict(Tile)}")
+        self.assertGreater(Tile.get('HeartbeatAgeSec') or 0, 600)
+        self.assertTrue(Tile.get('IsHung'), f"IsHung must be True when RuntimeState=Encoding and heartbeat age>threshold; tile={dict(Tile)}")
 
 
 if __name__ == '__main__':

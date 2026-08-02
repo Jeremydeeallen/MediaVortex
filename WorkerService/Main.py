@@ -959,8 +959,6 @@ class WorkerServiceApp:
                     'HealthStatus': 'Healthy'
                 })
                 self.WorkersRepository.UpdateWorkerHeartbeat(self.WorkerName)
-                if self.StateReporter is not None:
-                    self.StateReporter.Tick()
                 self.ShutdownEvent.wait(30)
             except Exception as e:
                 LoggingService.LogException("Error in health check", e, "WorkerService", "_HealthCheckLoop")
