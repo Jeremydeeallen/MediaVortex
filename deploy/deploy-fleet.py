@@ -41,10 +41,11 @@ def GitOriginMain() -> str:
     return R.stdout.strip() if R.returncode == 0 else ""
 
 
-def LiveWorkers(Db) -> list:
+def LiveWorkers(Db, IncludeStale: bool = False) -> list:
+    Where = "Enabled = TRUE" if IncludeStale else "LastHeartbeat > NOW() - INTERVAL '5 minutes'"
     return Db.ExecuteQuery(
-        "SELECT WorkerName, COALESCE(Version, '') AS Version, Status "
-        "FROM Workers WHERE LastHeartbeat > NOW() - INTERVAL '5 minutes' "
+        f"SELECT WorkerName, COALESCE(Version, '') AS Version, Status "
+        f"FROM Workers WHERE {Where} "
         "ORDER BY WorkerName"
     )
 
@@ -88,6 +89,7 @@ def DeployWorker(WorkerName: str, SkipSync: bool = False) -> tuple:
 def Main() -> int:
     P = argparse.ArgumentParser(description="Per-service fleet deploy: pause -> drain -> deploy -> Online for each live worker.")
     P.add_argument("--workers", help="comma-separated WorkerName list; default = all live")
+    P.add_argument("--include-stale", action="store_true", help="include Enabled workers whose heartbeat is older than 5 min (recovery from dead fleet)")
     Args = P.parse_args()
 
     Sha = GitHead()
@@ -134,9 +136,9 @@ def Main() -> int:
             (",".join(Attempted), ",".join(Succeeded), Outcome, ErrorMessage, HistId),
         )
 
-    Pre = LiveWorkers(Db)
+    Pre = LiveWorkers(Db, IncludeStale=Args.include_stale)
     if not Pre:
-        print("ERROR: no workers heartbeating in the last 5 minutes")
+        print("ERROR: no workers heartbeating in the last 5 minutes (use --include-stale to deploy Enabled-but-stale workers)")
         _FinishHist('FAILED', [], [], 'no live workers')
         return 1
 
