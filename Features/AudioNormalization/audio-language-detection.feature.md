@@ -28,7 +28,7 @@ C5. Isolation. Language-detection production python imports zero of AudioVertica
 
 C6. ActiveJobs lifecycle. Every `_ProcessOne` inserts (`ServiceName='LanguageService'`, `JobType='Language'`, `QueueId=MediaFileId`, `Phase='Setup'`) and deletes in `finally` (success + failure paths). Verifiable: `Tests/Contract/TestLanguageWorkerActiveJobs.py`.
 
-C7. Activity UI. `/Activity` renders "Active Language Detections" (File / Worker / Elapsed) when `Data.ActiveLanguageJobs` non-empty; empty-state message otherwise. `/api/Activity/Snapshot` returns the list.
+C7. Activity UI. `/Activity` renders "Active Language Detections" (File / Worker / Elapsed) when `Data.ActiveLanguageJobs` non-empty; hides the whole table otherwise. `/api/Activity/Snapshot` returns the list.
 
 C8. `Workers.LanguageEnabled` defaults FALSE. Migration is idempotent. `Tests/Contract/TestLanguageEnabledDefault.py`.
 

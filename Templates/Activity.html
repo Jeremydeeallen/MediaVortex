@@ -67,7 +67,6 @@
     </div>
     <div class="card-body p-0">
       <div id="LangSummary" class="p-3 small"></div>
-      <div id="NoActiveLang" class="text-muted px-3 pb-3 small d-none"><em>No detection in flight this instant.</em></div>
       <div id="ActiveLangWrapper" class="d-none">
         <table class="activity-tbl">
           <thead><tr>
@@ -238,13 +237,12 @@ function RenderLanguageSummary(S) {
 function RenderActiveLanguageJobs(Jobs) {
   var Body = document.getElementById('ActiveLangBody');
   var Wrapper = document.getElementById('ActiveLangWrapper');
-  var Empty = document.getElementById('NoActiveLang');
   var Cnt = document.getElementById('ActiveLangCount');
   if (!Jobs || Jobs.length === 0) {
-    Wrapper.classList.add('d-none'); Empty.classList.remove('d-none'); Cnt.textContent = '';
+    Wrapper.classList.add('d-none'); Cnt.textContent = '';
     return;
   }
-  Wrapper.classList.remove('d-none'); Empty.classList.add('d-none');
+  Wrapper.classList.remove('d-none');
   Cnt.textContent = '(' + Jobs.length + ' running)';
   Body.innerHTML = Jobs.map(function(L) {
     return '<tr>' +
