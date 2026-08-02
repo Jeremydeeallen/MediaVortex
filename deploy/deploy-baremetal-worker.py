@@ -6,22 +6,24 @@ import tomllib
 from pathlib import Path
 from typing import Optional
 
-DepsFingerprintPath = "/opt/mediavortex/.deploy-deps-fingerprint"
-TorchPin = "torch==2.6.0 torchaudio==2.6.0"
-TorchExpectedVersion = "2.6.0"
-
 
 MediaVortexRoot = Path(__file__).resolve().parent.parent
 BaremetalDir = MediaVortexRoot / "deploy" / "baremetal"
 DefaultInventoryToml = Path(r"C:\Code\infrastructure\terraform\inventory.toml")
 SshOpts = ["-o", "ConnectTimeout=5", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"]
 DefaultWorkerCount = 4
+
+TorchPin = "torch==2.6.0 torchaudio==2.6.0"
+TorchExpectedVersion = "2.6.0"
 TorchIndexByVariant = {
     "cpu": "https://download.pytorch.org/whl/cpu",
     "cu124": "https://download.pytorch.org/whl/cu124",
     "cu121": "https://download.pytorch.org/whl/cu121",
     "xpu": "https://download.pytorch.org/whl/xpu",
 }
+
+# see worker-deploy.md -- keep last N versioned src + venv dirs, GC older
+KeepVersions = 5
 
 
 def _Status(Step: int, Total: int, Title: str, Result: str = "...", Detail: str = "") -> None:
@@ -35,7 +37,8 @@ def _Ssh(Target: str, Cmd: str, Timeout: int = 60) -> subprocess.CompletedProces
 
 
 def _Scp(LocalPath: Path, Target: str, RemotePath: str, Timeout: int = 300) -> bool:
-    R = subprocess.run(["scp", *SshOpts, "-r", str(LocalPath), f"{Target}:{RemotePath}"], capture_output=True, text=True, timeout=Timeout)
+    R = subprocess.run(["scp", *SshOpts, "-r", str(LocalPath), f"{Target}:{RemotePath}"],
+                       capture_output=True, text=True, timeout=Timeout)
     return R.returncode == 0
 
 
@@ -68,17 +71,7 @@ def _DetectTorchVariant(Target: str) -> str:
     return "cpu"
 
 
-def StepPreflight(Target: str, Friendly: str) -> bool:
-    R = _Ssh(Target, "which python3.12 && test -d /mnt/media_tv && echo mounts_ok", Timeout=10)
-    if "mounts_ok" not in (R.stdout or ""):
-        _Status(1, 13, "preflight", "FAILED", f"missing python3.12 or /mnt/media_tv on {Friendly}")
-        return False
-    _Status(1, 13, "preflight", "OK", f"python3.12 + mounts present on {Friendly}")
-    return True
-
-
 def _ComputeDepsFingerprint(TorchVariant: str) -> str:
-    # directive: scan-broken-restore -- fingerprints inputs that decide pip install output; changes invalidate cache.
     RequirementsPath = MediaVortexRoot / "WorkerService" / "requirements.txt"
     RootRequirementsPath = MediaVortexRoot / "requirements.txt"
     H = hashlib.sha256()
@@ -92,134 +85,164 @@ def _ComputeDepsFingerprint(TorchVariant: str) -> str:
     return H.hexdigest()
 
 
-def _RemoteDepsFingerprint(Target: str) -> str:
-    R = _Ssh(Target, f"cat {DepsFingerprintPath} 2>/dev/null || echo NONE", Timeout=10)
-    return (R.stdout or "").strip()
+def StepPreflight(Target: str, Friendly: str) -> bool:
+    R = _Ssh(Target, "which python3.12 && test -d /mnt/media_tv && echo mounts_ok", Timeout=10)
+    if "mounts_ok" not in (R.stdout or ""):
+        _Status(1, 10, "preflight", "FAILED", f"missing python3.12 or /mnt/media_tv on {Friendly}")
+        return False
+    _Status(1, 10, "preflight", "OK", f"python3.12 + mounts present on {Friendly}")
+    return True
 
 
-def _WriteRemoteDepsFingerprint(Target: str, Fingerprint: str) -> None:
-    _Ssh(Target, f"mkdir -p /opt/mediavortex && printf '%s' '{Fingerprint}' > {DepsFingerprintPath}", Timeout=10)
+def StepMigrateLegacyLayout(Target: str, Friendly: str) -> bool:
+    # see worker-deploy.md -- one-time move of pre-versioned real dirs out of the way; idempotent
+    Script = (
+        "mkdir -p /opt/mediavortex /etc/mediavortex && cd /opt/mediavortex && "
+        "if [ -e src ] && [ ! -L src ] && [ -d src ]; then "
+        "  mv src src-legacy-$(date +%Y%m%d-%H%M%S); "
+        "fi && "
+        "if [ -e host-venv ] && [ ! -L host-venv ] && [ -d host-venv ]; then "
+        "  mv host-venv host-venv-legacy-$(date +%Y%m%d-%H%M%S); "
+        "fi && echo MIGRATE_OK"
+    )
+    R = _Ssh(Target, Script, Timeout=30)
+    _Status(2, 10, "migrate legacy layout", "OK" if "MIGRATE_OK" in (R.stdout or "") else "FAILED", "")
+    return "MIGRATE_OK" in (R.stdout or "")
 
 
-def _RemoteTorchVersion(Target: str) -> str:
-    R = _Ssh(Target, "/opt/mediavortex/host-venv/bin/pip show torch 2>/dev/null | awk '/^Version:/ {print $2}'", Timeout=15)
-    return (R.stdout or "").strip()
-
-
-# directive: scan-broken-restore -- state check (pip show torch) beats marker check; torch installed at pin = skip always.
-def StepEnsureVenv(Target: str, TorchVariant: str, DepsFingerprint: str) -> bool:
-    VenvOk = _Ssh(Target, "test -x /opt/mediavortex/host-venv/bin/pip && echo YES || echo NO", Timeout=10).stdout.strip()
-    if VenvOk == "YES":
-        InstalledTorch = _RemoteTorchVersion(Target)
+def StepEnsureVenv(Target: str, TorchVariant: str, DepsFingerprint: str) -> tuple:
+    # see worker-deploy.md -- per-fingerprint venv; draining workers keep their venv-<old_fp>/bin/python
+    VenvPath = f"/opt/mediavortex/host-venv-{DepsFingerprint[:16]}"
+    Check = _Ssh(Target, f"test -x {VenvPath}/bin/pip && echo YES || echo NO", Timeout=10).stdout.strip()
+    if Check == "YES":
+        InstalledTorch = _Ssh(
+            Target,
+            f"{VenvPath}/bin/pip show torch 2>/dev/null | awk '/^Version:/ {{print $2}}'",
+            Timeout=15,
+        ).stdout.strip()
         if InstalledTorch.startswith(TorchExpectedVersion):
-            _Status(2, 13, "ensure venv", "SKIPPED", f"torch {InstalledTorch} already installed")
-            return True
+            _Status(3, 10, "ensure venv", "SKIPPED", f"{VenvPath} exists, torch {InstalledTorch}")
+            return True, VenvPath
     Index = TorchIndexByVariant.get(TorchVariant, TorchIndexByVariant["cpu"])
     Script = (
         "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.12-venv python3-pip > /dev/null && "
-        "mkdir -p /opt/mediavortex && "
-        "if [ ! -x /opt/mediavortex/host-venv/bin/pip ]; then "
-        "  rm -rf /opt/mediavortex/host-venv && python3.12 -m venv /opt/mediavortex/host-venv && "
-        "  /opt/mediavortex/host-venv/bin/pip install --no-cache-dir --upgrade pip wheel > /dev/null; "
-        "fi && "
-        "/opt/mediavortex/host-venv/bin/pip install --no-cache-dir "
-        f"--index-url {Index} {TorchPin} > /tmp/mv-pip-torch.log 2>&1 && "
+        f"rm -rf {VenvPath} && python3.12 -m venv {VenvPath} && "
+        f"{VenvPath}/bin/pip install --no-cache-dir --upgrade pip wheel > /dev/null && "
+        f"{VenvPath}/bin/pip install --no-cache-dir --index-url {Index} {TorchPin} > /tmp/mv-pip-torch.log 2>&1 && "
         "echo VENV_READY"
     )
     R = _Ssh(Target, Script, Timeout=1800)
     if "VENV_READY" not in (R.stdout or ""):
-        _Status(2, 13, "ensure venv", "FAILED", (R.stderr or "")[-200:])
-        return False
-    _Status(2, 13, "ensure venv", "OK", f"torch variant={TorchVariant}")
-    return True
-
-
-# directive: scan-broken-restore -- requirements.txt content hash marker; skip pip install if unchanged.
-def StepInstallRequirements(Target: str, DepsFingerprint: str) -> bool:
-    Remote = _RemoteDepsFingerprint(Target)
-    if Remote == DepsFingerprint:
-        _Status(8, 13, "install requirements", "SKIPPED", f"requirements unchanged (fingerprint {DepsFingerprint[:8]})")
-        return True
-    Script = (
-        "/opt/mediavortex/host-venv/bin/pip install --no-cache-dir "
-        "-r /opt/mediavortex/src/WorkerService/requirements.txt "
-        "> /tmp/mv-pip-reqs.log 2>&1 && echo REQS_READY"
-    )
-    R = _Ssh(Target, Script, Timeout=1800)
-    if "REQS_READY" not in (R.stdout or ""):
-        Tail = _Ssh(Target, "tail -20 /tmp/mv-pip-reqs.log", Timeout=10).stdout or ""
-        _Status(8, 13, "install requirements", "FAILED", Tail[-300:])
-        return False
-    _WriteRemoteDepsFingerprint(Target, DepsFingerprint)
-    _Status(8, 13, "install requirements", "OK", f"-r WorkerService/requirements.txt; wrote fingerprint {DepsFingerprint[:8]}")
-    return True
+        _Status(3, 10, "ensure venv", "FAILED", (R.stderr or "")[-200:])
+        return False, VenvPath
+    _Status(3, 10, "ensure venv", "OK", f"{VenvPath} (torch={TorchVariant})")
+    return True, VenvPath
 
 
 def StepEnsureFfmpeg(Target: str) -> bool:
     R = _Ssh(Target, "test -x /usr/local/bin/ffmpeg && echo FFMPEG_OK", Timeout=10)
     if "FFMPEG_OK" in (R.stdout or ""):
-        _Status(3, 13, "ensure ffmpeg", "SKIPPED", "already at /usr/local/bin/ffmpeg")
+        _Status(4, 10, "ensure ffmpeg", "SKIPPED", "already at /usr/local/bin/ffmpeg")
         return True
-    _Ssh(Target, "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg > /dev/null && ln -sf $(which ffmpeg) /usr/local/bin/ffmpeg && ln -sf $(which ffprobe) /usr/local/bin/ffprobe", Timeout=300)
-    _Status(3, 13, "ensure ffmpeg", "OK", "apt install ffmpeg")
+    _Ssh(Target,
+         "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg > /dev/null && "
+         "ln -sf $(which ffmpeg) /usr/local/bin/ffmpeg && "
+         "ln -sf $(which ffprobe) /usr/local/bin/ffprobe",
+         Timeout=300)
+    _Status(4, 10, "ensure ffmpeg", "OK", "apt install ffmpeg")
     return True
 
 
-# directive: transcode-flow-canonical -- stop systemd units before SyncSource; SyncSource preserves the dir inode, but systemd stop is the operator-visible drain that also guarantees no ffmpeg subprocesses are mid-flight during the file swap
-def StepStopSystemdUnits(Target: str, Count: int) -> bool:
-    Units = " ".join(f"mediavortex-worker@{I}.service" for I in range(1, Count + 1))
-    _Ssh(Target, f"systemctl stop {Units} 2>&1 || true", Timeout=120)
-    _Ssh(Target, "mkdir -p /opt/mediavortex/src /etc/mediavortex", Timeout=10)
-    _Status(4, 13, "stop systemd units + prep dirs", "OK", f"{Count} unit(s) stopped")
-    return True
-
-
-# directive: transcode-flow-canonical | # see worker-deploy.C14
-def StepSyncSource(Target: str) -> bool:
+def StepSyncSource(Target: str, Sha: str) -> tuple:
+    # see worker-deploy.md -- rsync to versioned dir; draining workers stay bound to their src-<old_sha>/
+    SrcPath = f"/opt/mediavortex/src-{Sha[:16]}"
+    _Ssh(Target, f"mkdir -p {SrcPath}", Timeout=10)
     Sync = MediaVortexRoot / "deploy" / "SyncSource.py"
-    R = subprocess.run([sys.executable, str(Sync), Target, "/opt/mediavortex/src", "--prune"], capture_output=True, text=True, timeout=600)
+    R = subprocess.run([sys.executable, str(Sync), Target, SrcPath, "--prune"],
+                       capture_output=True, text=True, timeout=600)
     if R.returncode != 0:
-        _Status(5, 13, "sync source", "FAILED", (R.stderr or R.stdout or "")[-200:])
+        _Status(5, 10, "sync source", "FAILED", (R.stderr or R.stdout or "")[-200:])
+        return False, SrcPath
+    _Status(5, 10, "sync source", "OK", SrcPath)
+    return True, SrcPath
+
+
+def StepStampVersion(Target: str, SrcPath: str, Sha: str) -> bool:
+    R = _Ssh(Target, f"echo -n {Sha} > {SrcPath}/VERSION", Timeout=15)
+    if R.returncode != 0:
+        _Status(6, 10, "stamp VERSION", "FAILED", "")
         return False
-    _Status(5, 13, "sync source", "OK", "source at /opt/mediavortex/src (in-place; stale files pruned)")
+    _Status(6, 10, "stamp VERSION", "OK", f"{Sha[:7]} into {SrcPath}/VERSION")
     return True
 
 
-# directive: transcode-flow-canonical -- stamp VERSION with actual HEAD sha on target
-def StepStampVersion(Target: str) -> bool:
-    Head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(MediaVortexRoot), capture_output=True, text=True, timeout=10)
-    if Head.returncode != 0:
-        _Status(6, 13, "stamp VERSION", "FAILED", (Head.stderr or Head.stdout or '')[-200:])
-        return False
-    Sha = Head.stdout.strip()
-    R = _Ssh(Target, f"echo -n {Sha} > /opt/mediavortex/src/VERSION", Timeout=15)
-    if R.returncode != 0:
-        _Status(6, 13, "stamp VERSION", "FAILED", (R.stderr or R.stdout or '')[-200:])
-        return False
-    _Status(6, 13, "stamp VERSION", "OK", f"stamped {Sha[:7]}")
-    return True
-
-
-# directive: transcode-flow-canonical -- .claude is excluded from SyncSource; ship schema snapshot explicitly
-def StepShipSchemaSnapshot(Target: str) -> bool:
+def StepShipSchemaSnapshot(Target: str, SrcPath: str) -> bool:
     Snapshot = MediaVortexRoot / ".claude" / "schema" / "snapshot.json"
     if not Snapshot.exists():
-        _Status(7, 13, "ship schema snapshot", "SKIP", "no local snapshot")
+        _Status(7, 10, "ship schema snapshot", "SKIP", "no local snapshot")
         return True
-    _Ssh(Target, "mkdir -p /opt/mediavortex/src/.claude/schema", Timeout=10)
-    if not _Scp(Snapshot, Target, "/opt/mediavortex/src/.claude/schema/snapshot.json", Timeout=30):
-        _Status(7, 13, "ship schema snapshot", "FAILED")
+    _Ssh(Target, f"mkdir -p {SrcPath}/.claude/schema", Timeout=10)
+    if not _Scp(Snapshot, Target, f"{SrcPath}/.claude/schema/snapshot.json", Timeout=30):
+        _Status(7, 10, "ship schema snapshot", "FAILED")
         return False
-    _Status(7, 13, "ship schema snapshot", "OK")
+    _Status(7, 10, "ship schema snapshot", "OK")
     return True
 
 
-# directive: transcode-flow-canonical | # see claim-authority.md
-def StepInstallSystemdUnit(Target: str, Friendly: str, Count: int) -> bool:
-    """Install unit template + write one instance-N.env per systemd instance. WorkerName is deploy-assigned; no runtime slot-claim."""
-    UnitLocal = BaremetalDir / "mediavortex-worker@.service"
+def StepInstallRequirements(Target: str, VenvPath: str, SrcPath: str, DepsFingerprint: str) -> bool:
+    # see worker-deploy.md -- fingerprint file lives inside venv-<fp>/; same-fp reuse skips reinstall
+    FingerprintFile = f"{VenvPath}/.deps-fingerprint"
+    Remote = _Ssh(Target, f"cat {FingerprintFile} 2>/dev/null || echo NONE", Timeout=10).stdout.strip()
+    if Remote == DepsFingerprint:
+        _Status(8, 10, "install requirements", "SKIPPED", f"fingerprint {DepsFingerprint[:8]} unchanged")
+        return True
+    Script = (
+        f"{VenvPath}/bin/pip install --no-cache-dir -r {SrcPath}/WorkerService/requirements.txt "
+        "> /tmp/mv-pip-reqs.log 2>&1 && "
+        f"printf '%s' '{DepsFingerprint}' > {FingerprintFile} && echo REQS_READY"
+    )
+    R = _Ssh(Target, Script, Timeout=1800)
+    if "REQS_READY" not in (R.stdout or ""):
+        Tail = _Ssh(Target, "tail -20 /tmp/mv-pip-reqs.log", Timeout=10).stdout or ""
+        _Status(8, 10, "install requirements", "FAILED", Tail[-300:])
+        return False
+    _Status(8, 10, "install requirements", "OK", f"{DepsFingerprint[:8]}")
+    return True
+
+
+def StepRenderSystemdUnit(Target: str, Friendly: str, Count: int, SrcPath: str, VenvPath: str) -> bool:
+    # see worker-deploy.md -- unit rewritten per deploy with fully-resolved paths; draining worker's running command line is frozen at boot
+    UnitBody = (
+        "[Unit]\n"
+        "Description=MediaVortex WorkerService instance %i\n"
+        "After=network-online.target\n"
+        "Wants=network-online.target\n"
+        "\n"
+        "[Service]\n"
+        "Type=simple\n"
+        "User=root\n"
+        f"WorkingDirectory={SrcPath}\n"
+        "EnvironmentFile=/etc/mediavortex/worker.env\n"
+        "EnvironmentFile=/etc/mediavortex/instance-%i.env\n"
+        "Environment=PYTHONUNBUFFERED=1\n"
+        "Environment=HOME=/root\n"
+        f"ExecStart={VenvPath}/bin/python {SrcPath}/WorkerService/Main.py\n"
+        "Restart=always\n"
+        "RestartSec=10\n"
+        "TimeoutStopSec=1800\n"
+        "KillSignal=SIGTERM\n"
+        "LimitNOFILE=65536\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
     EnvLocal = BaremetalDir / "worker.env.template"
-    _Scp(UnitLocal, Target, "/etc/systemd/system/mediavortex-worker@.service", Timeout=30)
+    R = _Ssh(Target,
+             f"cat > /etc/systemd/system/mediavortex-worker@.service <<'UNIT_EOF'\n{UnitBody}UNIT_EOF",
+             Timeout=15)
+    if R.returncode != 0:
+        _Status(9, 10, "render systemd unit", "FAILED", (R.stderr or "")[-200:])
+        return False
     R = _Ssh(Target, "test -f /etc/mediavortex/worker.env && echo ENV_EXISTS", Timeout=10)
     if "ENV_EXISTS" not in (R.stdout or ""):
         _Scp(EnvLocal, Target, "/etc/mediavortex/worker.env", Timeout=30)
@@ -230,103 +253,84 @@ def StepInstallSystemdUnit(Target: str, Friendly: str, Count: int) -> bool:
     )
     _Ssh(Target, Writes, Timeout=30)
     _Ssh(Target, "systemctl daemon-reload", Timeout=10)
-    _Status(9, 13, "install systemd unit + instance env", "OK", f"{Count} instance-N.env file(s) written under /etc/mediavortex/")
+    _Ssh(Target, "systemctl enable " + " ".join(f"mediavortex-worker@{I}.service" for I in range(1, Count + 1)), Timeout=30)
+    _Status(9, 10, "render systemd unit", "OK", f"{Count} instance env(s); daemon-reload")
     return True
 
 
-# directive: transcode-flow-canonical | # see claim-authority.md
-def StepStartInstances(Target: str, Friendly: str, Count: int) -> bool:
-    """Start each systemd instance. Serialization not required: WorkerName is deploy-assigned, no advisory-claim race."""
-    Units = " ".join(f"mediavortex-worker@{I}.service" for I in range(1, Count + 1))
-    _Ssh(Target, f"systemctl enable --now {Units}", Timeout=60)
-    R = _Ssh(Target, f"systemctl list-units 'mediavortex-worker@*' --no-legend --state=active | wc -l", Timeout=10)
-    Active = int((R.stdout or "0").strip() or 0)
-    if Active < Count:
-        _Status(11, 13, "start instances", "FAILED", f"expected {Count} active, got {Active}")
-        return False
-    _Status(11, 13, "start instances", "OK", f"{Active}/{Count} instances active")
-    return True
-
-
-def StepVerify(Target: str, Friendly: str, Count: int) -> bool:
-    R = _Ssh(Target, "systemctl list-units 'mediavortex-worker@*' --no-legend --state=active | awk '{print $1}' | head -8", Timeout=10)
-    Lines = [L.strip() for L in (R.stdout or "").splitlines() if L.strip()]
-    _Status(13, 13, "verify", "OK" if len(Lines) >= Count else "FAILED", f"{len(Lines)}/{Count} systemd units active on {Friendly}")
-    return len(Lines) >= Count
-
-
-# directive: transcode-flow-canonical -- bare-metal deploy reconciles Workers.{nvenccapable,qsvcapable}
-def StepReconcileCapabilities(Target: str, Friendly: str) -> bool:
-    ScriptsDir = MediaVortexRoot / "Scripts"
-    Prefix = f"{Friendly}-worker"
-    NvR = subprocess.run([sys.executable, str(ScriptsDir / "ReconcileNvencCapability.py"), Target, "--worker-prefix", Prefix], capture_output=True, text=True, timeout=180)
-    if NvR.returncode != 0:
-        _Status(12, 13, "capability reconcile", "FAILED", f"nvenc: {(NvR.stderr or NvR.stdout)[-200:]}")
-        return False
-    QsvR = subprocess.run([sys.executable, str(ScriptsDir / "ReconcileQsvCapability.py"), Target, "--worker-prefix", Prefix], capture_output=True, text=True, timeout=180)
-    if QsvR.returncode != 0:
-        _Status(12, 13, "capability reconcile", "FAILED", f"qsv: {(QsvR.stderr or QsvR.stdout)[-200:]}")
-        return False
-    NvTail = (NvR.stdout or '').strip().splitlines()[-1] if NvR.stdout else ''
-    QsvTail = (QsvR.stdout or '').strip().splitlines()[-1] if QsvR.stdout else ''
-    _Status(12, 13, "capability reconcile", "OK", f"nvenc: {NvTail} | qsv: {QsvTail}")
+def StepGarbageCollect(Target: str) -> bool:
+    # see worker-deploy.md -- keep last N versioned dirs; legacy dirs (-legacy-*) never GC'd
+    Script = (
+        f"cd /opt/mediavortex && "
+        f"ls -1t src-* 2>/dev/null | grep -v -- '-legacy-' | tail -n +{KeepVersions + 1} | "
+        f"  xargs -r -I {{}} rm -rf {{}} && "
+        f"ls -1t host-venv-* 2>/dev/null | grep -v -- '-legacy-' | tail -n +{KeepVersions + 1} | "
+        f"  xargs -r -I {{}} rm -rf {{}} && "
+        "echo GC_OK"
+    )
+    R = _Ssh(Target, Script, Timeout=60)
+    _Status(10, 10, "garbage collect", "OK" if "GC_OK" in (R.stdout or "") else "SKIPPED",
+            f"kept last {KeepVersions} src + venv")
     return True
 
 
 def main():
-    Parser = argparse.ArgumentParser(description="Idempotent bare-metal deploy for MediaVortex WorkerService.")
-    Parser.add_argument("target", help="Friendly name (dot, wakko, larry) or IP literal.")
+    Parser = argparse.ArgumentParser(description="Bare-metal per-host sync: versioned src + venv + rendered systemd unit + GC. Restarts happen via deploy-worker.py.")
+    Parser.add_argument("target", help="Friendly name (dot, wakko, mediavortex-workers) or IP.")
     Parser.add_argument("--user", default=None)
     Parser.add_argument("--count", type=int, default=None)
     Parser.add_argument("--torch-variant", default=None, choices=list(TorchIndexByVariant.keys()))
     Parser.add_argument("--inventory", type=Path, default=DefaultInventoryToml)
-    Parser.add_argument("--sync-only", action="store_true",
-                        help="Sync source + install deps + install systemd unit; skip stop/start/verify. Used by deploy-worker.py per-service driver.")
     Args = Parser.parse_args()
 
     Friendly, Ip, User, InventoryCount = _ResolveTarget(Args.target, Args.inventory, Args.user)
     Count = Args.count or InventoryCount
     Target = f"{User}@{Ip}"
-    print("=" * 60)
-    print(f"Target: {Friendly} ({Target}), count={Count}")
+
+    Sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(MediaVortexRoot),
+                         capture_output=True, text=True, timeout=10).stdout.strip()
+    if not Sha:
+        print("[FAIL] git HEAD unreadable")
+        return 2
 
     Variant = Args.torch_variant or _DetectTorchVariant(Target)
-    print(f"Torch variant: {Variant}")
     DepsFingerprint = _ComputeDepsFingerprint(Variant)
+
+    print("=" * 60)
+    print(f"Target: {Friendly} ({Target}), count={Count}")
+    print(f"Sha: {Sha[:16]}")
+    print(f"Torch variant: {Variant}")
     print(f"Deps fingerprint: {DepsFingerprint[:16]}")
     print("=" * 60)
 
     if not StepPreflight(Target, Friendly):
         return 1
-    if not StepEnsureVenv(Target, Variant, DepsFingerprint):
+    if not StepMigrateLegacyLayout(Target, Friendly):
+        return 2
+    Ok, VenvPath = StepEnsureVenv(Target, Variant, DepsFingerprint)
+    if not Ok:
         return 2
     if not StepEnsureFfmpeg(Target):
         return 2
-    if not Args.sync_only:
-        if not StepStopSystemdUnits(Target, Count):
-            return 2
-    if not StepSyncSource(Target):
+    Ok, SrcPath = StepSyncSource(Target, Sha)
+    if not Ok:
         return 2
-    if not StepStampVersion(Target):
+    if not StepStampVersion(Target, SrcPath, Sha):
         return 2
-    if not StepShipSchemaSnapshot(Target):
+    if not StepShipSchemaSnapshot(Target, SrcPath):
         return 2
-    if not StepInstallRequirements(Target, DepsFingerprint):
+    if not StepInstallRequirements(Target, VenvPath, SrcPath, DepsFingerprint):
         return 2
-    if not StepInstallSystemdUnit(Target, Friendly, Count):
+    if not StepRenderSystemdUnit(Target, Friendly, Count, SrcPath, VenvPath):
         return 2
-    if Args.sync_only:
-        print()
-        print(f"[OK] --sync-only complete on {Friendly}; per-service restart handled by deploy-worker.py")
-        return 0
-    if not StepStartInstances(Target, Friendly, Count):
-        return 3
-    if not StepReconcileCapabilities(Target, Friendly):
-        return 3
-    if not StepVerify(Target, Friendly, Count):
-        return 3
+    if not StepGarbageCollect(Target):
+        return 2
+
     print()
-    print(f"[OK] bare-metal deploy complete on {Friendly}")
+    print(f"[OK] bare-metal sync complete on {Friendly}")
+    print(f"     src={SrcPath}")
+    print(f"     venv={VenvPath}")
+    print(f"     Restart workers to pick up new unit config: `py deploy/deploy-fleet.py`")
     return 0
 
 
