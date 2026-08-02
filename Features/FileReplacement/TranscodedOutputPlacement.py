@@ -289,9 +289,8 @@ class TranscodedOutputPlacement:
                 StepsCompleted.append("Original already absent")
 
             try:  # see jellyfin-push-notify.C1
-                from Services.JellyfinNotifyService import NotifyJellyfin
-                if CanonicalNewPath:
-                    NotifyJellyfin([{'Path': CanonicalNewPath, 'UpdateType': 'Modified'}], self.DatabaseManager.DatabaseService)
+                from Services.JellyfinNotifyService import NotifyReplaced
+                NotifyReplaced(CanonicalOriginalPath, CanonicalNewPath, self.DatabaseManager.DatabaseService)
             except Exception as NfEx:
                 LoggingService.LogException(
                     "Jellyfin notify swallowed at FinalizePartialReplacement boundary",

@@ -185,5 +185,68 @@ class TestNotifyJellyfin(unittest.TestCase):
             self.assertGreater(MockRead.call_count, FirstCallCount)
 
 
+class TestExtensionOf(unittest.TestCase):
+
+    def test_windows_path_mkv(self):
+        self.assertEqual(JellyfinNotifyService._ExtensionOf('T:\\Show\\s01e01.mkv'), '.mkv')
+
+    def test_windows_path_mp4(self):
+        self.assertEqual(JellyfinNotifyService._ExtensionOf('T:\\Show\\s01e01-mv.mp4'), '.mp4')
+
+    def test_posix_path(self):
+        self.assertEqual(JellyfinNotifyService._ExtensionOf('/mnt/tv/show/e01.MKV'), '.mkv')
+
+    def test_no_extension(self):
+        self.assertEqual(JellyfinNotifyService._ExtensionOf('T:\\Show\\file'), '')
+
+    def test_dot_in_directory_only(self):
+        # dot appears in directory but not in filename -> no extension
+        self.assertEqual(JellyfinNotifyService._ExtensionOf('T:\\Show.2020\\file'), '')
+
+    def test_empty(self):
+        self.assertEqual(JellyfinNotifyService._ExtensionOf(''), '')
+
+
+class TestNotifyReplaced(unittest.TestCase):
+
+    def test_same_extension_sends_modified_only(self):
+        # Re-transcode -mv.mp4 -> -mv.mp4 -- Modified-only avoids the same-ext orphan bug (30 Rock S02E10, 2026-05-27).
+        with _MockSettings(), _PatchTranslate('/mnt/tv/OLD.mp4', '/mnt/tv/NEW.mp4'), \
+                patch('requests.post', return_value=_FakeResponse(204)) as MockPost:
+            JellyfinNotifyService.NotifyReplaced(
+                'T:\\Show\\s01e01-mv.mp4', 'T:\\Show\\s01e01-mv.mp4'
+            )
+            Sent = MockPost.call_args.kwargs['json']['Updates']
+            self.assertEqual(len(Sent), 1)
+            self.assertEqual(Sent[0]['UpdateType'], 'Modified')
+
+    def test_different_extension_sends_deleted_plus_created(self):
+        # First-time transcode .mkv -> .mp4 -- Jellyfin's coalescing sweep doesn't strip stale old-ext entries (Heroes S02E08, 2026-08-02).
+        with _MockSettings(), _PatchTranslate('/mnt/tv/OLD.mkv', '/mnt/tv/NEW.mp4'), \
+                patch('requests.post', return_value=_FakeResponse(204)) as MockPost:
+            JellyfinNotifyService.NotifyReplaced(
+                'T:\\Show\\s01e01.mkv', 'T:\\Show\\s01e01-mv.mp4'
+            )
+            Sent = MockPost.call_args.kwargs['json']['Updates']
+            self.assertEqual(len(Sent), 2)
+            Kinds = {(E['UpdateType'], E['Path']) for E in Sent}
+            self.assertIn(('Deleted', '/mnt/tv/OLD.mkv'), Kinds)
+            self.assertIn(('Created', '/mnt/tv/NEW.mp4'), Kinds)
+
+    def test_missing_new_path_is_noop(self):
+        with _MockSettings(), patch('requests.post') as MockPost:
+            JellyfinNotifyService.NotifyReplaced('T:\\Show\\a.mkv', '')
+            MockPost.assert_not_called()
+
+    def test_missing_old_path_treated_as_same_extension(self):
+        # No old path known -> can't diff extensions -> fall through to Modified-only (best-effort).
+        with _MockSettings(), _PatchTranslate('/mnt/tv/NEW.mp4'), \
+                patch('requests.post', return_value=_FakeResponse(204)) as MockPost:
+            JellyfinNotifyService.NotifyReplaced('', 'T:\\Show\\a.mp4')
+            Sent = MockPost.call_args.kwargs['json']['Updates']
+            self.assertEqual(len(Sent), 1)
+            self.assertEqual(Sent[0]['UpdateType'], 'Modified')
+
+
 if __name__ == '__main__':
     unittest.main()

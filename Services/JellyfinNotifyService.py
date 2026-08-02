@@ -1,32 +1,4 @@
-"""Outbound Jellyfin push-notify on file mutations.
-
-Owns jellyfin-push-notify.feature.md. The public surface is two functions:
-
-    TranslateForJellyfin(CanonicalPath) -> Optional[str]
-    NotifyJellyfin(Updates) -> None
-
-Callers in Features/Services that mutate a media file (rename, replace,
-delete) pass canonical (Windows-shaped) paths plus an UpdateType; this
-module translates them to the path Jellyfin sees on its own host (via the
-synthetic `__jellyfin__` worker in StorageRootResolutions) and POSTs one
-batched request to Jellyfin's `/Library/Media/Updated` endpoint.
-
-Failure is non-fatal by design (criterion 4). MediaVortex correctness does
-NOT depend on Jellyfin acknowledging the notify -- a missed notify just
-means Jellyfin will pick the change up on its next safety-net scan.
-
-Config (SystemSettings rows, criterion 6 -- shares the credentials with
-Features/Optimization/JellyfinService so the operator manages one set of
-Jellyfin creds, not two):
-    JellyfinHost             hostname or IP (e.g. 10.0.0.179)
-    JellyfinApiPort          HTTP API port (e.g. 8096, default if blank)
-    JellyfinApiKey           X-Emby-Token value
-
-Settings are read fresh from the DB on every NotifyJellyfin call. Cached
-snapshots are not used -- per the "don't cache DB-backed settings" rule,
-they have caused silent bugs in the past (operator flips a setting and
-the running process keeps the old value).
-"""
+# see jellyfin-push-notify.feature.md
 
 from typing import Dict, List, Optional
 
@@ -84,6 +56,29 @@ def TranslateForJellyfin(CanonicalPath: str, Db=None) -> Optional[str]:
             Ex, _COMPONENT, "TranslateForJellyfin",
         )
         return None
+
+
+def NotifyReplaced(OldCanonicalPath: str, NewCanonicalPath: str, Db=None) -> None:
+    # see jellyfin-push-notify.C1 -- domain event = "file replaced". Wire shape depends on Jellyfin quirks and lives here, not in callers. Same-ext (re-transcode) uses Modified-only to avoid the same-ext orphan bug (30 Rock S02E10, commit 464d9f7d). Different-ext (mkv->mp4 first-time transcode) uses Deleted(old)+Created(new) because Jellyfin's coalescing sweep does not strip the stale old-ext entry (Heroes S02E08, 2026-08-02).
+    if not NewCanonicalPath:
+        return
+    OldNorm = (OldCanonicalPath or '').strip()
+    NewNorm = NewCanonicalPath.strip()
+    if OldNorm and _ExtensionOf(OldNorm) != _ExtensionOf(NewNorm):
+        NotifyJellyfin([
+            {'Path': OldNorm, 'UpdateType': 'Deleted'},
+            {'Path': NewNorm, 'UpdateType': 'Created'},
+        ], Db)
+    else:
+        NotifyJellyfin([{'Path': NewNorm, 'UpdateType': 'Modified'}], Db)
+
+
+def _ExtensionOf(CanonicalPath: str) -> str:
+    Dot = CanonicalPath.rfind('.')
+    Slash = max(CanonicalPath.rfind('/'), CanonicalPath.rfind('\\'))
+    if Dot <= Slash:
+        return ''
+    return CanonicalPath[Dot:].lower()
 
 
 def NotifyJellyfin(Updates: List[Dict[str, str]], Db=None) -> None:

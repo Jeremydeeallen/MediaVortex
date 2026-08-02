@@ -274,10 +274,10 @@ class FileReplacementBusinessService:
                 )
 
                 try:  # see jellyfin-push-notify.C1
-                    from Services.JellyfinNotifyService import NotifyJellyfin
+                    from Services.JellyfinNotifyService import NotifyReplaced
                     _NewPath = replacement_result.get('CanonicalNewPath')
                     if _NewPath:
-                        NotifyJellyfin([{'Path': _NewPath, 'UpdateType': 'Modified'}], self.DatabaseManager.DatabaseService)
+                        NotifyReplaced(OriginalPath, _NewPath, self.DatabaseManager.DatabaseService)
                 except Exception as NfEx:
                     LoggingService.LogException(
                         "Jellyfin notify swallowed at ProcessFileReplacement boundary",

@@ -44,14 +44,17 @@ decision.
 
 ## Success Criteria
 
-1. **Notify on every file-mutation choke point.** MediaVortex calls
-   `NotifyJellyfin(Updates)` at every site that creates, moves, renames, or
-   deletes a media file Jellyfin would index. Specifically:
-   - `Features/FileReplacement/FileReplacementBusinessService.py` —
-     after a successful replace (original → archive, transcoded → original
-     location): one notify with `UpdateType=Modified` for the canonical
-     path, plus `UpdateType=Deleted` for any path Jellyfin previously
-     indexed that no longer exists.
+1. **Notify on every file-mutation choke point.** MediaVortex calls a
+   `JellyfinNotifyService` public function at every site that creates,
+   moves, renames, or deletes a media file Jellyfin would index.
+   Domain-shaped calls (`NotifyReplaced(OldPath, NewPath)`) are preferred
+   over the wire-level primitive (`NotifyJellyfin(Updates)`), which
+   remains for genuine batch cases like DuplicateDetection.
+   - `Features/FileReplacement/*` (both `FileReplacementBusinessService.ProcessFileReplacement`
+     and `TranscodedOutputPlacement.FinalizePartialReplacement`) — after a
+     successful replace, invokes `NotifyReplaced(OldCanonicalPath,
+     NewCanonicalPath)`. Adapter case-splits on extension change
+     (Modified-only vs Deleted+Created); see the note under Status.
    - `Features/FileScanning/*` — when reconcile detects a new or deleted
      file that wasn't introduced by MediaVortex itself (i.e. external
      additions reach Jellyfin without waiting for a poll). Optional
@@ -226,20 +229,25 @@ Jellyfin on `10.0.0.179`: notifies POST with status=204, Jellyfin
 refreshes the parent folder ~60s later, new files become playable with
 correct series/episode metadata.
 
-**Notify shape change 2026-05-27 (root-cause fix for an orphan-import bug):**
-`FileReplacementBusinessService._NotifyJellyfinOfReplacement` previously
-sent `Deleted(old) + Created(new)` in a single POST whenever the source
-path differed from the new path. That shape caused Jellyfin to orphan
-the new item (`Series=null`, `IndexNumber=null`) when source and target
-shared the same extension (typical re-transcode of a `-mv.mp4`):
-S02E10 and S03E16 of 30 Rock both orphaned this session. The canary
-that worked (Steven Universe S01E37) had `.mkv -> .mp4` -- different
-extensions -- which Jellyfin processed cleanly. Fix: always send a
-single `Modified(new)`. Jellyfin's directory-coalescing scan
-(`/Library/Media/Updated` is folder-scoped, ~60s window) naturally
-sweeps stale entries for the old filename, observed in the 2026-05-22
-live verify ("swept stale entries for other episodes in the same
-folder"). One notify per replacement, no orphans.
+**Notify shape 2026-08-02 (case-split per file-extension change):**
+Callers invoke `NotifyReplaced(OldCanonicalPath, NewCanonicalPath)` — the
+adapter decides wire shape internally:
+
+- **Same extension** (typical re-transcode of a `-mv.mp4`): send
+  `Modified(new)` only. Prior `Deleted(old) + Created(new)` shape
+  orphaned the new item in Jellyfin (`Series=null`, `IndexNumber=null`)
+  when source and target shared the same extension — 30 Rock S02E10 +
+  S03E16, 2026-05-27. Modified-only avoids that race; Jellyfin's
+  directory-coalescing sweep handles the stale entry.
+- **Different extension** (first-time transcode, `.mkv → .mp4`): send
+  `Deleted(old) + Created(new)`. The coalescing sweep does NOT remove
+  stale entries when the filename changes across extensions — Heroes
+  S02E08 stayed pointing at the old `.mkv` for 90+ minutes after the
+  2026-08-02 replace despite a 204 ACK from `/Library/Media/Updated`.
+  Explicit `Deleted` is required.
+
+Business logic is untouched — callers say "file replaced," the adapter
+picks the wire shape per Jellyfin's per-case behavior.
 
 The Jellyfin 2h interval scan stays on -- see Out of scope.
 
