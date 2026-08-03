@@ -614,23 +614,139 @@ class FileScanningBusinessService:
             self.ScanProgress = 30.0
             self._SetPhase(self.CurrentJobId, 'Walking')
             LocalMediaFiles = self.FileManager.ScanDirectory(LocalRootPath, Recursive)
-            # directive: scan-new-subtrees-first
-            if Recursive and LocalMediaFiles:
-                LocalMediaFiles = self._SortNewSubtreesFirst(
-                    LocalMediaFiles, LocalRootPath, RootFolder, RootFolderPath
-                )
-            MediaFiles = [self._ToCanonicalPath(p) for p in LocalMediaFiles]
-            self.ScanResults.TotalFilesFound = len(MediaFiles)
             self.ScanResults.RootFolderId = RootFolder.Id
 
-            self._ShowEpisodeIndex = self._BuildShowEpisodeIndex(RootFolder.Id)
-            try:
-                self.ProcessMediaFiles(MediaFiles, RootFolder.Id, RootFolderPath, ExtractMetadata=False)
-            finally:
-                self._ShowEpisodeIndex = None
+            DiskMap: Dict[str, Dict[str, Any]] = {}
+            Roots = _GetStorageRoots()
+            NowUtc = datetime.now(timezone.utc).replace(tzinfo=None)
+            for LocalPath in LocalMediaFiles or []:
+                try:
+                    CanonicalPath = self._ToCanonicalPath(LocalPath)
+                    try:
+                        Parsed = Path.FromLegacyString(CanonicalPath, Roots)
+                        Sid, Rel = Parsed.StorageRootId, Parsed.RelativePath
+                    except PathError:
+                        continue
+                    if Sid is None or not Rel:
+                        continue
+                    try:
+                        Size = LocalGetSize(LocalPath)
+                        Mtime = datetime.fromtimestamp(LocalGetMTime(LocalPath), tz=timezone.utc).replace(tzinfo=None)
+                    except OSError:
+                        continue
+                    FileName = LocalBasename(LocalPath)
+                    DiskMap[Rel.lower()] = {
+                        'StorageRootId': Sid,
+                        'RelativePath': Rel,
+                        'FileName': FileName,
+                        'FileSize': Size,
+                        'FileModificationTime': Mtime,
+                    }
+                except Exception as WalkEx:
+                    LoggingService.LogException(f"Walk entry failed for {LocalPath}", WalkEx, 'PerformScan', 'FileScanningBusinessService')
+
+            self.ScanResults.TotalFilesFound = len(DiskMap)
+
+            DbMap = self.MediaFilesRepository.BatchFetchExistingByRootFolder(RootFolder.Id)
+
+            DiskKeys = set(DiskMap.keys())
+            DbKeys = set(DbMap.keys())
+            NewKeys = DiskKeys - DbKeys
+            DeletedKeys = DbKeys - DiskKeys
+            CommonKeys = DiskKeys & DbKeys
+
+            RenamePairs = []
+            if NewKeys and DeletedKeys:
+                DeletedByKey: Dict[tuple, list] = {}
+                for K in DeletedKeys:
+                    Dbr = DbMap[K]
+                    KeyTuple = (Dbr.get('FileSize'), (Dbr.get('FileName') or '').lower())
+                    DeletedByKey.setdefault(KeyTuple, []).append(K)
+                for Nk in list(NewKeys):
+                    Dsk = DiskMap[Nk]
+                    KeyTuple = (Dsk['FileSize'], Dsk['FileName'].lower())
+                    Bucket = DeletedByKey.get(KeyTuple)
+                    if Bucket:
+                        Dk = Bucket.pop(0)
+                        RenamePairs.append((Dk, Nk))
+                for Dk, Nk in RenamePairs:
+                    NewKeys.discard(Nk)
+                    DeletedKeys.discard(Dk)
+
+            ChangedRows: List[dict] = []
+            for K in CommonKeys:
+                Dsk = DiskMap[K]
+                Dbr = DbMap[K]
+                if Dsk['FileSize'] != Dbr.get('FileSize') or Dsk['FileModificationTime'] != Dbr.get('FileModificationTime'):
+                    ChangedRows.append({
+                        'Id': Dbr['Id'],
+                        'FileSize': Dsk['FileSize'],
+                        'FileModificationTime': Dsk['FileModificationTime'],
+                    })
+
+            NewInserts = 0
+            if NewKeys:
+                InsertRows = []
+                for K in NewKeys:
+                    D = DiskMap[K]
+                    InsertRows.append((
+                        None,
+                        D['StorageRootId'],
+                        D['RelativePath'],
+                        D['FileName'],
+                        round(D['FileSize'] / (1024.0 * 1024.0), 2),
+                        D['FileSize'],
+                        D['FileModificationTime'],
+                        D['FileModificationTime'],
+                        NowUtc,
+                        False,
+                    ))
+                NewInserts = self.MediaFilesRepository.BatchInsertMediaFiles(InsertRows)
+
+            Updates = 0
+            if ChangedRows:
+                UpdateRows = [
+                    (
+                        C['Id'],
+                        round(C['FileSize'] / (1024.0 * 1024.0), 2),
+                        C['FileSize'],
+                        C['FileModificationTime'],
+                        C['FileModificationTime'],
+                        NowUtc,
+                    )
+                    for C in ChangedRows
+                ]
+                Updates = self.MediaFilesRepository.BatchUpdateChanged(UpdateRows)
+
+            Renames = 0
+            if RenamePairs:
+                RenameRows = []
+                for Dk, Nk in RenamePairs:
+                    D = DiskMap[Nk]
+                    RenameRows.append((
+                        DbMap[Dk]['Id'],
+                        D['RelativePath'],
+                        D['FileName'],
+                        round(D['FileSize'] / (1024.0 * 1024.0), 2),
+                        D['FileSize'],
+                        D['FileModificationTime'],
+                        D['FileModificationTime'],
+                        NowUtc,
+                    ))
+                Renames = self.MediaFilesRepository.BatchRenameMediaFiles(RenameRows)
+
+            Deletes = 0
+            if DeletedKeys:
+                DeleteIds = [DbMap[K]['Id'] for K in DeletedKeys]
+                Deletes = self.MediaFilesRepository.BatchDeleteMediaFiles(DeleteIds)
+
+            self.ScanResults.NewFilesCount = NewInserts
+            self.ScanResults.UpdatedFilesCount = Updates + Renames
+            self.ScanResults.DeletedFilesCount = Deletes
+            self.ScanResults.TotalFilesProcessed = NewInserts + Updates + Renames
+            self.ScanResults.TotalFilesSkipped = max(0, len(CommonKeys) - len(ChangedRows))
 
             self.ScanProgress = 90.0
-            self.UpdateScanResults()
 
             self._SetPhase(self.CurrentJobId, 'Completing')
             try:
@@ -641,7 +757,9 @@ class FileScanningBusinessService:
             self.ScanProgress = 100.0
             self.IsScanning = False
 
-            LoggingService.LogInfo(f"Scan completed: {len(MediaFiles)} files found")
+            LoggingService.LogInfo(
+                f"Scan complete for {RootFolderPath}: disk={len(DiskMap)}, new={NewInserts}, changed={Updates}, renamed={Renames}, deleted={Deletes}, unchanged={self.ScanResults.TotalFilesSkipped}"
+            )
 
             return {
                 'Success': True,
