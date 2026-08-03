@@ -1852,6 +1852,7 @@ class QueueManagementBusinessService:
             ValuesClause = ','.join(
                 f"({int(Id)},{_SqlText(P)},{int(S)})" for Id, P, S in updates
             )
+            # cascade-ok: this WRITE is inside RecomputeForFiles itself; calling it again would loop
             db.ExecuteNonQuery(
                 "UPDATE MediaFiles "
                 "SET AssignedProfile = v.profile, PriorityScore = v.score "
@@ -1944,6 +1945,8 @@ class QueueManagementBusinessService:
                     "UPDATE MediaFiles SET TranscodedByMediaVortex = TRUE WHERE Id = %s AND (TranscodedByMediaVortex IS NULL OR TranscodedByMediaVortex = FALSE)",
                     (int(MediaFileId),),
                 )
+                # directive: ingest-pipeline-kiss -- writer-owns-cascade: TranscodedByMediaVortex is a VideoVertical.Evaluate short-circuit
+                self.RecomputeForFiles([int(MediaFileId)])
 
             # Handle profile assignment if ProfileId is provided (user selected a profile)
             if ProfileId is not None:

@@ -166,6 +166,9 @@ class EbuR128MeasurementService:
                     PERSIST_MEASUREMENT_ONLY_SQL,
                     (I, L, P, T, MediaFileId),
                 )
+            # directive: ingest-pipeline-kiss -- writer-owns-cascade: loudness columns feed AudioVertical.Evaluate
+            from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+            QueueManagementBusinessService().RecomputeForFiles([MediaFileId])
             return True
         except Exception as Ex:
             LoggingService.LogException(

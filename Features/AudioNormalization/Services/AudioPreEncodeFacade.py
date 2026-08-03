@@ -88,6 +88,9 @@ def PersistSourceLoudness(MediaFileId, MediaFile, PreAudio):
                 MediaFile.SourceIntegratedThresholdLufs = float(SrcThresh)
             except Exception:
                 pass
+        # directive: ingest-pipeline-kiss -- writer-owns-cascade: loudness columns feed AudioVertical.Evaluate
+        from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+        QueueManagementBusinessService().RecomputeForFiles([int(MediaFileId)])
     except Exception as Ex:
         LoggingService.LogException(
             f"AudioPreEncodeFacade.PersistSourceLoudness failed for MediaFileId={MediaFileId}",
