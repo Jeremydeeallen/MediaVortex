@@ -903,3 +903,20 @@ class FileScanningRepository(BaseRepository):
         except Exception as e:
             LoggingService.LogException("Exception saving media file archive", e, "FileScanningRepository", "SaveMediaFileArchive")
             return 0
+
+    # directive: ingest-pipeline-kiss
+    def UpdateRootFolderPostScan(self, RootFolderId: int) -> None:
+        Query = (
+            "UPDATE RootFolders "
+            "   SET LastScannedDate = NOW(), "
+            "       TotalSizeGB = COALESCE(( "
+            "           SELECT SUM(FileSize)::double precision / 1073741824.0 "
+            "           FROM MediaFiles "
+            "           WHERE StorageRootId = (SELECT StorageRootId FROM RootFolders WHERE Id = %s) "
+            "             AND RelativePath LIKE ( "
+            "                   (SELECT RelativePath FROM RootFolders WHERE Id = %s) || '%%' "
+            "                 ) "
+            "       ), 0) "
+            " WHERE Id = %s"
+        )
+        self.ExecuteNonQuery(Query, (RootFolderId, RootFolderId, RootFolderId))

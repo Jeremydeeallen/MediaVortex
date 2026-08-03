@@ -510,219 +510,6 @@ class FileScanningBusinessService:
         self._HeartbeatStopEvent = None
         self._HeartbeatThread = None
 
-    # directive: path-schema-migration | # see path.S8
-    def _RunSizeSurvey(self, LocalRootPath: str, CanonicalRootPath: str, RootFolder: RootFolderModel):
-        # see filescanning.ST2
-        """Directive 2026-05-27 (scan -- largest files first), criteria 1-5.
-
-        Stat-only recursive enumeration of media files under LocalRootPath.
-        Sorts by size descending, takes top-N (SystemSettings SizeSurveyTopN,
-        default 100, soft-cap 500), UPSERTs those MediaFiles rows so the rest
-        of the pipeline can act on them immediately, and writes a JSON array
-        of {path, sizeMB, modifiedAt} to ScanJobs.TopFiles so /Activity can
-        surface them inline under the scan row.
-
-        No FFprobe, no metadata reads -- stat-only. Budget: ~30s on Larry NFS
-        for a 40k-file share.
-        """
-        import json
-        from datetime import datetime, timezone
-
-        SurveyStart = datetime.now(timezone.utc)
-
-        # Read TopN fresh from settings every scan (no worker restart for changes).
-        TopN = 100
-        try:
-            from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
-            Raw = SystemSettingsRepository().GetSystemSetting('SizeSurveyTopN')
-            if Raw:
-                TopN = max(1, min(500, int(Raw)))
-        except Exception as Ex:
-            LoggingService.LogException("Failed to read SizeSurveyTopN, using default 100", Ex, 'FileScanningBusinessService', '_RunSizeSurvey')
-
-        MediaExts = self.FileManager.MediaExtensions
-        Excluded = {p.lower() for p in (self.FileManager.ExcludedDirectories or [])}
-
-        # Heap-based top-N via os.scandir recursion. Avoids holding all 40k
-        # entries in memory and avoids a full sort -- O(N log K) instead of
-        # O(N log N) where K << N.
-        import heapq
-        Heap = []  # min-heap of (sizeBytes, mtimeFloat, localPath)
-        FilesSeen = 0
-
-        def _WalkSurvey(Path: str):
-            nonlocal FilesSeen
-            try:
-                with os.scandir(Path) as It:
-                    for Entry in It:
-                        try:
-                            if Entry.is_dir(follow_symlinks=False):
-                                if Entry.name.lower() in Excluded:
-                                    continue
-                                _WalkSurvey(Entry.path)
-                            elif Entry.is_file(follow_symlinks=False):
-                                Ext = LocalSplitExt(Entry.name)[1].lower()
-                                if Ext not in MediaExts:
-                                    continue
-                                St = Entry.stat(follow_symlinks=False)
-                                FilesSeen += 1
-                                Item = (St.st_size, St.st_mtime, Entry.path)
-                                if len(Heap) < TopN:
-                                    heapq.heappush(Heap, Item)
-                                elif St.st_size > Heap[0][0]:
-                                    heapq.heapreplace(Heap, Item)
-                        except (PermissionError, OSError):
-                            continue
-            except (PermissionError, OSError) as DirEx:
-                LoggingService.LogWarning(f"SizeSurvey could not enter {Path}: {DirEx}", 'FileScanningBusinessService', '_RunSizeSurvey')
-
-        _WalkSurvey(LocalRootPath)
-
-        # Drain the heap, largest first.
-        TopList = sorted(Heap, key=lambda x: -x[0])
-        ElapsedSec = (datetime.now(timezone.utc) - SurveyStart).total_seconds()
-        LoggingService.LogInfo(
-            f"SizeSurvey: enumerated {FilesSeen} media files under {LocalRootPath} in {ElapsedSec:.1f}s; top-{len(TopList)} surfaced",
-            'FileScanningBusinessService', '_RunSizeSurvey'
-        )
-
-        # Pass 1 UPSERT top-N into MediaFiles + capture Id; each Record carries Id/localPath/path/fileName/sizeMB/modifiedAt.
-        Roots = _GetStorageRoots()
-        Records = []
-        for SizeBytes, Mtime, LocalPath in TopList:
-            try:
-                CanonicalPath = self._ToCanonicalPath(LocalPath)
-                FileName = LocalBasename(LocalPath)
-                SizeMB = round(SizeBytes / (1024 * 1024), 2)
-                MtimeDt = datetime.fromtimestamp(Mtime, tz=timezone.utc).replace(tzinfo=None)
-                try:
-                    _PPair = Path.FromLegacyString(CanonicalPath, Roots)
-                    StorageRootId, RelativePath = _PPair.StorageRootId, _PPair.RelativePath
-                except PathError:
-                    StorageRootId, RelativePath = None, None
-
-                ExistingId = None
-                if StorageRootId is not None and RelativePath is not None:
-                    Found = self.Repository.DatabaseService.ExecuteQuery(
-                        "SELECT Id FROM MediaFiles WHERE StorageRootId = %s AND LOWER(RelativePath) = LOWER(%s) LIMIT 1",
-                        (StorageRootId, RelativePath),
-                    )
-                    if Found:
-                        ExistingId = Found[0].get('Id') or Found[0].get('id')
-
-                if ExistingId is not None:
-                    # directive: path-schema-migration | # see path.S8 -- update typed pair, FileName, and core metadata; FilePath is computed display
-                    self.Repository.DatabaseService.ExecuteNonQuery(
-                        "UPDATE MediaFiles "
-                        "SET SizeMB = %s, "
-                        "    FileSize = %s, "
-                        "    FileModificationTime = %s, "
-                        "    LastModifiedDate = %s, "
-                        "    LastScannedDate = %s, "
-                        "    StorageRootId = %s, "
-                        "    RelativePath = %s, "
-                        "    FileName = %s "
-                        "WHERE Id = %s",
-                        (SizeMB, SizeBytes, MtimeDt, MtimeDt, datetime.now(timezone.utc), StorageRootId, RelativePath, FileName, ExistingId),
-                    )
-                    RowId = ExistingId
-                else:
-                    NewFile = MediaFileModel(
-                        SeasonId=None,
-                        StorageRootId=StorageRootId,
-                        RelativePath=RelativePath or '',
-                        FileName=FileName,
-                        SizeMB=SizeMB,
-                        FileModificationTime=MtimeDt,
-                        LastModifiedDate=MtimeDt,
-                        FileSize=SizeBytes,
-                        LastScannedDate=datetime.now(timezone.utc),
-                    )
-                    RowId = self.MediaFilesRepository.SaveMediaFile(NewFile)
-
-                if RowId is not None:
-                    Records.append({
-                        'Id': RowId,
-                        'path': CanonicalPath,
-                        'fileName': FileName,
-                        'sizeMB': SizeMB,
-                        'modifiedAt': MtimeDt.isoformat() + 'Z',
-                    })
-            except Exception as Ex:
-                LoggingService.LogException(f"SizeSurvey UPSERT failed for {LocalPath}", Ex, 'FileScanningBusinessService', '_RunSizeSurvey')
-
-        # Initial TopFiles snapshot (all enumerated entries) + counter init for
-        # the heartbeat. The probe pass below drops each entry as it completes,
-        # so /Activity shows the list drain in real time.
-        def _WriteTopFiles(EntriesList):
-            try:
-                Payload = [{k: r[k] for k in ('path', 'fileName', 'sizeMB', 'modifiedAt')} for r in EntriesList]
-                self.Repository.DatabaseService.ExecuteNonQuery(
-                    "UPDATE ScanJobs SET TopFiles = %s::jsonb, LastUpdated = NOW() WHERE JobId = %s",
-                    (json.dumps(Payload), self.CurrentJobId),
-                )
-            except Exception as WriteEx:
-                LoggingService.LogException("Failed to persist ScanJobs.TopFiles", WriteEx, 'FileScanningBusinessService', '_RunSizeSurvey')
-
-        _WriteTopFiles(Records)
-        EnumSec = (datetime.now(timezone.utc) - SurveyStart).total_seconds()
-        LoggingService.LogInfo(
-            f"SizeSurvey enumeration: {len(Records)} top files staged in {EnumSec:.1f}s ({FilesSeen} surveyed); now probing largest-first",
-            'FileScanningBusinessService', '_RunSizeSurvey'
-        )
-
-        # Pass 2: probe each top-N file in size-descending order. Roll each one
-        # off the TopFiles list as it completes so the operator watches the
-        # largest items drain. Soft-stop honored.
-        self._FilesNeedingProbe = len(Records)
-        self._ProbedFiles = 0
-        ProbeStart = datetime.now(timezone.utc)
-        Remaining = list(Records)
-        ProbedCount = 0
-        for Rec in Records:
-            if self._StopRequested:
-                LoggingService.LogInfo("SizeSurvey probe loop interrupted by soft-stop", 'FileScanningBusinessService', '_RunSizeSurvey')
-                break
-            try:
-                MediaFile = self.MediaFilesRepository.GetMediaFileById(Rec['Id'])
-                if MediaFile is not None:
-                    # Skip the probe if the file already has full metadata. The
-                    # operator still sees this entry roll off TopFiles, but we
-                    # don't waste minutes re-probing a 4K Bluray whose metadata
-                    # is already current. ShouldExtractMetadata also gates on
-                    # the FFprobe failure limit.
-                    if self.ShouldExtractMetadata(MediaFile):
-                        Result = self.MediaProbeService._ExecuteProbe(MediaFile)
-                        if not Result.get('Success', False):
-                            LoggingService.LogWarning(
-                                f"SizeSurvey probe failed for {Rec['path']}: {Result.get('Message') or Result.get('Error')}",
-                                'FileScanningBusinessService', '_RunSizeSurvey'
-                            )
-                    else:
-                        LoggingService.LogDebug(
-                            f"SizeSurvey skip-probe (metadata current): {Rec['path']}",
-                            'FileScanningBusinessService', '_RunSizeSurvey'
-                        )
-            except Exception as ProbeEx:
-                LoggingService.LogException(f"SizeSurvey probe exception for {Rec['path']}", ProbeEx, 'FileScanningBusinessService', '_RunSizeSurvey')
-
-            # Roll this entry off the list regardless of probe outcome -- the
-            # MediaFiles row carries any failure state (FFprobeFailureCount).
-            try:
-                Remaining.remove(Rec)
-            except ValueError:
-                pass
-            ProbedCount += 1
-            self._ProbedFiles = ProbedCount
-            _WriteTopFiles(Remaining)
-
-        TotalSec = (datetime.now(timezone.utc) - SurveyStart).total_seconds()
-        ProbeSec = (datetime.now(timezone.utc) - ProbeStart).total_seconds()
-        LoggingService.LogInfo(
-            f"SizeSurvey complete: enumerated {FilesSeen}, staged {len(Records)}, probed {ProbedCount} in {ProbeSec:.1f}s (total {TotalSec:.1f}s)",
-            'FileScanningBusinessService', '_RunSizeSurvey'
-        )
-
     # directive: scan-new-subtrees-first
     def _SortNewSubtreesFirst(self, LocalMediaFiles, LocalRootPath, RootFolder, CanonicalRootPath):
         """Reorder scan output so files under DB-unknown level-1 subdirs come first."""
@@ -809,30 +596,12 @@ class FileScanningBusinessService:
         """
         try:
             LoggingService.LogInfo("Starting scan of directory: {}", RootFolderPath)
-
-            # Reset per-scan counters (was carrying over between consecutive scans on
-            # the same FileScanningBusinessService instance, polluting heartbeats with
-            # stale numbers from the previous rootfolder).
             self.ScanResults = FileScanResultModel()
 
             LocalRootPath = self._ToLocalPath(RootFolderPath)
 
-            # Step 0: Clean up any existing duplicate records before scanning
-            # Skipped during continuous scans where cleanup runs once before the loop
-            if not SkipDuplicateCleanup:
-                # directive: path-schema-migration | # see path.S8 -- CleanupDuplicateMediaFiles lives on MediaFilesRepository
-                from Features.MediaFiles.MediaFilesRepository import MediaFilesRepository
-                CleanupResult = MediaFilesRepository(self.Repository.DatabaseService).CleanupDuplicateMediaFiles()
-                if CleanupResult.get('DuplicatesRemoved', 0) > 0:
-                    LoggingService.LogInfo(f"Pre-scan cleanup removed {CleanupResult['DuplicatesRemoved']} duplicate records", 'PerformScan', 'FileScanningBusinessService')
-
-            # Step 1: Calculate directory size (uses local path)
             self.ScanProgress = 10.0
-            TotalSizeGB = self.FileManager.CalculateDirectorySize(LocalRootPath)
-
-            # Step 2: Get or create root folder record (canonical path stored in DB)
-            self.ScanProgress = 20.0
-            RootFolder = self.GetOrCreateRootFolder(RootFolderPath, TotalSizeGB)
+            RootFolder = self.GetOrCreateRootFolder(RootFolderPath, 0.0)
 
             if not RootFolder or not RootFolder.Id:
                 LoggingService.LogError(f"Failed to create or get root folder for: {RootFolderPath}", 'PerformScan', 'FileScanningBusinessService')
@@ -841,17 +610,6 @@ class FileScanningBusinessService:
                     'Message': f'Failed to create root folder record for: {RootFolderPath}',
                     'Error': 'RootFolderCreationFailed'
                 }
-
-            # Step 2.5: SizeSurvey -- directive 2026-05-27 (scan -- largest files first).
-            # Stat-only enumeration that front-loads the top-N largest files into
-            # MediaFiles so the operator gets the biggest savings opportunities on
-            # /Activity within ~30s, before the long walk. Reads SizeSurveyTopN
-            # fresh from SystemSettings each scan; default 100, soft cap 500.
-            self._SetPhase(self.CurrentJobId, 'SizeSurvey')
-            try:
-                self._RunSizeSurvey(LocalRootPath, RootFolderPath, RootFolder)
-            except Exception as SurveyEx:
-                LoggingService.LogException("SizeSurvey failed -- continuing to full scan", SurveyEx, 'PerformScan', 'FileScanningBusinessService')
 
             self.ScanProgress = 30.0
             self._SetPhase(self.CurrentJobId, 'Walking')
@@ -865,37 +623,31 @@ class FileScanningBusinessService:
             self.ScanResults.TotalFilesFound = len(MediaFiles)
             self.ScanResults.RootFolderId = RootFolder.Id
 
-            # Build per-scan show/episode index ONCE (criterion 25). Without
-            # this, FindFuzzyFileMatch reloads + regex-parses all RootFolder
-            # rows for every new file -- O(N x M) wall clock.
             self._ShowEpisodeIndex = self._BuildShowEpisodeIndex(RootFolder.Id)
             try:
-                # Step 4: Process each media file (without metadata extraction for speed)
                 self.ProcessMediaFiles(MediaFiles, RootFolder.Id, RootFolderPath, ExtractMetadata=False)
             finally:
                 self._ShowEpisodeIndex = None
 
-            # Step 5: Update scan results
             self.ScanProgress = 90.0
             self.UpdateScanResults()
 
-            # Step 6: Complete scan
+            self._SetPhase(self.CurrentJobId, 'Completing')
+            try:
+                self.Repository.UpdateRootFolderPostScan(RootFolder.Id)
+            except Exception as AggEx:
+                LoggingService.LogException("Post-scan RootFolder aggregate failed", AggEx, 'PerformScan', 'FileScanningBusinessService')
+
             self.ScanProgress = 100.0
             self.IsScanning = False
 
             LoggingService.LogInfo(f"Scan completed: {len(MediaFiles)} files found")
-
-            # directive: probe-worker-decoupled -- scan-cycle probe pass retired. ProbeWorker (WorkerService/ProbeWorker.py) handles metadata extraction on its own poll interval, decoupled from RootFolder scope.
-
-            # Step 8: Completing -- final stats / RootFolder.LastScannedDate update.
-            self._SetPhase(self.CurrentJobId, 'Completing')
 
             return {
                 'Success': True,
                 'Message': 'Scan completed successfully',
                 'Results': self.ScanResults,
                 'RootFolderId': RootFolder.Id,
-                'TotalSizeGB': TotalSizeGB
             }
 
         except Exception as e:
