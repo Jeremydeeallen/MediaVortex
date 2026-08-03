@@ -321,8 +321,6 @@ class MediaProbeBusinessService:
                 Ex, "MediaProbeBusinessService", "_MaybeAutoMarkAudioCompleteAtTarget"
             )
 
-    # directive: probe-worker-decoupled -- retired ProbeFilesNeedingMetadata. Batch probing is now ProbeWorker's job (WorkerService/ProbeWorker.py). Per-path on-demand probe goes through Features/OnDemandIngest.
-
     # ─── Failure Management ────────────────────────────────────────────
 
     def ResetFailures(self, MediaFileId: int) -> Dict[str, Any]:

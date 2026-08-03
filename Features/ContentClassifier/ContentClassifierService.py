@@ -15,6 +15,7 @@ from Features.ContentClassifier.ContentClassifierRepository import ContentClassi
 from Features.ContentClassifier.Models.ContentClassificationRuleModel import (
     ContentClassificationRuleModel,
 )
+from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
 
 
 _SKIP_SENTINEL = "__skip__"
@@ -122,6 +123,7 @@ class ContentClassifierService:
 
             if Matched.AssignProfileName == _SKIP_SENTINEL:
                 self.Repository.WriteAssignment(MediaFileId, None, _SKIP_SOURCE)
+                QueueManagementBusinessService().RecomputeForFiles([MediaFileId])
                 LoggingService.LogInfo(
                     f"ContentClassifier: rule '{Matched.RuleName}' skipped MediaFileId {MediaFileId} (codec={Media.get('Codec')})",
                     "ContentClassifierService", "ClassifyAndAssign",
@@ -129,6 +131,7 @@ class ContentClassifierService:
                 return None
 
             self.Repository.WriteAssignment(MediaFileId, Matched.AssignProfileName, _CLASSIFIER_SOURCE)
+            QueueManagementBusinessService().RecomputeForFiles([MediaFileId])
             LoggingService.LogInfo(
                 f"ContentClassifier: matched rule '{Matched.RuleName}' -> profile '{Matched.AssignProfileName}' for MediaFileId {MediaFileId}",
                 "ContentClassifierService", "ClassifyAndAssign",
@@ -146,6 +149,7 @@ class ContentClassifierService:
         HitCounts = {}
         Skipped = 0
         Unmatched = 0
+        WrittenIds = []
         for MfId in MediaFileIds:
             try:
                 Media = self.Repository.GetMediaFileForClassification(MfId)
@@ -160,10 +164,13 @@ class ContentClassifierService:
                     self.Repository.WriteAssignment(MfId, None, _SKIP_SOURCE)
                 else:
                     self.Repository.WriteAssignment(MfId, Matched.AssignProfileName, _CLASSIFIER_SOURCE)
+                WrittenIds.append(MfId)
                 HitCounts[Matched.RuleName] = HitCounts.get(Matched.RuleName, 0) + 1
             except Exception as Ex:
                 LoggingService.LogException(
                     f"ClassifyAndAssignBatch: failure on MediaFileId {MfId}", Ex,
                     "ContentClassifierService", "ClassifyAndAssignBatch",
                 )
+        if WrittenIds:
+            QueueManagementBusinessService().RecomputeForFiles(WrittenIds)
         return {"HitCounts": HitCounts, "Skipped": Skipped, "Unmatched": Unmatched}

@@ -220,6 +220,21 @@ function Get-R18Overrides {
     return $Out
 }
 
+function Get-R13Overrides {
+    if (-not (Test-Path $DirectiveFile)) { return @() }
+    $Text = Get-Content $DirectiveFile -Raw
+    $M = [regex]::Match($Text, '(?ms)###\s*R13\s+overrides\s*\r?\n(.*?)(?=\r?\n###\s|\r?\n##\s|\r?\n---|\Z)')
+    if (-not $M.Success) { return @() }
+    $Out = @()
+    foreach ($Line in ($M.Groups[1].Value -split "`n")) {
+        $T = $Line.Trim().TrimStart('-', '*', ' ', '`t')
+        if (-not $T) { continue }
+        $Cell = ($T -split '\s+--\s+|\s+#\s+|\s+:\s+', 2)[0].Trim()
+        if ($Cell) { $Out += ($Cell -replace '\\', '/').ToLower() }
+    }
+    return $Out
+}
+
 function Test-R1FlowStubSatisfied {
     param($PostContent, $FilePath, $ReadFiles)
     # Returns $true when the code carries a `# see <flow-slug>.ST<N>` anchor,
@@ -987,11 +1002,24 @@ function Test-R13-NoNewFeatureDocs {
     param($PostContent, $FilePath, $AllContent, $IsNew)
     if (-not $IsNew) { return $null }
     if ($FilePath -notmatch '\.(feature|flow)\.md$') { return $null }
-    # Phase-aware: creation is allowed at DELIVERING (when durable content gets promoted out of the directive doc into its permanent home).
     $CurrentState = Get-SessionState
     if ($CurrentState -and $CurrentState.phase -eq 'DELIVERING') { return $null }
+    $NormFP = ($FilePath -replace '\\', '/').ToLower()
+    foreach ($O in (Get-R13Overrides)) {
+        if ($NormFP.EndsWith($O) -or $O.EndsWith($NormFP) -or $NormFP -like "*$O*") {
+            $Entry = @{
+                ts     = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+                rule   = 'R13'
+                file   = $FilePath
+                line   = 0
+                reason = "override matched directive R13 overrides line"
+            } | ConvertTo-Json -Compress
+            Add-Content -Path $OverrideLog -Value $Entry -Encoding UTF8
+            return $null
+        }
+    }
     $PhaseName = if ($CurrentState -and $CurrentState.phase) { $CurrentState.phase } else { '<none>' }
-    return "R13 Premature feature/flow doc: $FilePath is a new *.feature.md / *.flow.md file but current phase is $PhaseName -- creation is only allowed at DELIVERING (when durable content gets promoted out of the directive doc into its permanent home). See .claude/rules/doc-layering.md + .claude/standards/index.md R13. Path forward: keep the new documentation in the active directive doc (.claude/directive.md) until phase advances to DELIVERING. At DELIVERING, create the *.feature.md / *.flow.md as part of the Promotions step and record the source -> target row in the directive's ### Promotions table."
+    return "R13 Premature feature/flow doc: $FilePath is a new *.feature.md / *.flow.md file but current phase is $PhaseName -- creation is only allowed at DELIVERING (when durable content gets promoted out of the directive doc into its permanent home). See .claude/rules/doc-layering.md + .claude/standards/index.md R13. Path forward: keep the new documentation in the active directive doc (.claude/directive.md) until phase advances to DELIVERING. At DELIVERING, create the *.feature.md / *.flow.md as part of the Promotions step and record the source -> target row in the directive's ### Promotions table. Override: add a line under '### R13 overrides' in .claude/directive.md naming this path, then retry."
 }
 
 function Test-R14-AnnotationDrift {

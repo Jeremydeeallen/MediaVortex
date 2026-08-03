@@ -451,15 +451,6 @@ class WorkerServiceApp:
         if self.ContinuousScanService is not None:
             return
         try:
-            # directive: probe-worker-decoupled -- also start OnDemandScanWorker; both consume ScanEnabled.
-            try:
-                from WorkerService.OnDemandScanWorker import OnDemandScanWorker
-                if not hasattr(self, 'OnDemandScanWorker') or self.OnDemandScanWorker is None:
-                    self.OnDemandScanWorker = OnDemandScanWorker(self.WorkerName)
-                    self.OnDemandScanWorker.Start()
-            except Exception as OdEx:
-                LoggingService.LogException("Failed to start OnDemandScanWorker", OdEx, "WorkerService", "_StartScanCapability")
-
             from Features.FileScanning.ContinuousScanService import ContinuousScanService
             self.ContinuousScanService = ContinuousScanService()
 
@@ -496,13 +487,6 @@ class WorkerServiceApp:
             LoggingService.LogInfo("Stopping scan capability...", "WorkerService", "_StopScanCapability")
             self.ContinuousScanService.StopContinuousScanning()
             self.ContinuousScanService = None
-            # directive: probe-worker-decoupled -- also stop OnDemandScanWorker.
-            try:
-                if getattr(self, 'OnDemandScanWorker', None) is not None:
-                    self.OnDemandScanWorker.Stop()
-                    self.OnDemandScanWorker = None
-            except Exception as OdEx:
-                LoggingService.LogException("Failed to stop OnDemandScanWorker", OdEx, "WorkerService", "_StopScanCapability")
             LoggingService.LogInfo("Scan capability stopped", "WorkerService", "_StopScanCapability")
         except Exception as e:
             LoggingService.LogException("Error stopping scan capability", e, "WorkerService", "_StopScanCapability")

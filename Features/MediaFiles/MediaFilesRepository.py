@@ -543,3 +543,26 @@ class MediaFilesRepository(BaseRepository):
             (ProfileName, Identity.StorageRootId, Identity.RelativePath),
         )
         return int(Affected) if Affected is not None else 0
+
+    # directive: ingest-pipeline-kiss
+    def GetStaleComplianceRows(self, Limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        Base = (
+            "SELECT Id, FileName, VideoCompliantReason "
+            "FROM MediaFiles "
+            "WHERE ( "
+            "        (VideoCompliantReason = %s AND AssignedProfile IS NOT NULL) "
+            "     OR (VideoCompliantReason = %s AND ResolutionCategory IS NOT NULL) "
+            "     OR (VideoCompliantReason = %s AND VideoBitrateKbps IS NOT NULL) "
+            "     OR (VideoCompliantReason LIKE %s AND AssignedProfile IS NOT NULL) "
+            "  ) "
+            "ORDER BY Id"
+        )
+        Params = [
+            'missing_input:AssignedProfile',
+            'missing_input:ResolutionCategory',
+            'missing_input:VideoBitrateKbps',
+            'missing_input:Family(%',
+        ]
+        if Limit is not None and Limit > 0:
+            return self.DatabaseService.ExecuteQuery(Base + " LIMIT %s", tuple(Params + [int(Limit)]))
+        return self.DatabaseService.ExecuteQuery(Base, tuple(Params))
