@@ -533,6 +533,14 @@ class WebServiceApp:
         from Features.MediaFile.ComplianceRecomputeController import ComplianceRecomputeBlueprint
         self.App.register_blueprint(ComplianceRecomputeBlueprint)
 
+        # directive: ingest-pipeline-kiss | # see startup.ST5
+        from Features.Sync.SyncPathController import SyncPathBlueprint
+        from Features.Ingest.IngestWebhookController import IngestWebhookBlueprint
+        from Features.Failures.FailuresController import FailuresBlueprint
+        self.App.register_blueprint(SyncPathBlueprint)
+        self.App.register_blueprint(IngestWebhookBlueprint)
+        self.App.register_blueprint(FailuresBlueprint)
+
         # directive: activity-admin-and-worker-telemetry | # see startup.ST5
         @self.App.route('/Compliance')
         def redirect_compliance_legacy():

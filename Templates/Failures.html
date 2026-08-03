@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Failures{% endblock %}
+{% block content %}
+<div class="container mt-3">
+    <h1><i class="fas fa-triangle-exclamation me-2"></i>Failures</h1>
+    <p class="text-muted small">Files stuck in scan or probe. Retry flips <code>NeedsReprobe=TRUE</code> and resets <code>FFprobeFailureCount=0</code>.</p>
+
+    <div class="card mb-3">
+        <div class="card-header"><strong>Probe failures</strong> <span id="ProbeCount" class="badge bg-secondary ms-2">0</span></div>
+        <div class="card-body p-0">
+            <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr><th>Filename</th><th>Path</th><th>Count</th><th>Last error</th><th>Last attempt</th><th></th></tr>
+                    </thead>
+                    <tbody id="ProbeBody"><tr><td colspan="6" class="text-muted small">Loading...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><strong>Scan failures</strong> <span id="ScanCount" class="badge bg-secondary ms-2">0</span></div>
+        <div class="card-body p-0">
+            <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr><th>RelativePath</th><th>Worker</th><th>Error</th><th>Ended</th><th></th></tr>
+                    </thead>
+                    <tbody id="ScanBody"><tr><td colspan="5" class="text-muted small">Loading...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function _Esc(s){ return (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _Fmt(ts){ return ts ? String(ts).replace('T',' ').substring(0,19) : ''; }
+
+async function _Load(){
+    try {
+        var r = await fetch('/api/Failures');
+        var j = await r.json();
+        var probe = j.Probe || [];
+        var scan = j.Scan || [];
+        document.getElementById('ProbeCount').textContent = probe.length;
+        document.getElementById('ScanCount').textContent = scan.length;
+        document.getElementById('ProbeBody').innerHTML = probe.length ? probe.map(function(row){
+            var id = row.id || row.Id;
+            var fn = _Esc(row.filename || row.FileName || '');
+            var rp = _Esc(row.relativepath || row.RelativePath || '');
+            var cnt = row.ffprobefailurecount || row.FFprobeFailureCount || 0;
+            var err = _Esc(row.lastffprobeerror || row.LastFFprobeError || '');
+            var when = _Fmt(row.lastffprobeattemptdate || row.LastFFprobeAttemptDate);
+            return '<tr><td class="small">'+fn+'</td><td class="small text-muted">'+rp+'</td><td class="small">'+cnt+'</td><td class="small text-truncate" style="max-width:340px;" title="'+err+'">'+err+'</td><td class="small">'+when+'</td><td><button class="btn btn-sm btn-outline-primary" onclick="_RetryProbe('+id+', this)">Retry</button></td></tr>';
+        }).join('') : '<tr><td colspan="6" class="text-muted small">None</td></tr>';
+        document.getElementById('ScanBody').innerHTML = scan.length ? scan.map(function(row){
+            var jid = row.jobid || row.JobId;
+            var rp = _Esc(row.relativepath || row.RelativePath || '');
+            var wn = _Esc(row.workername || row.WorkerName || '');
+            var err = _Esc(row.errormessage || row.ErrorMessage || '');
+            var when = _Fmt(row.endtime || row.EndTime);
+            return '<tr><td class="small">'+rp+'</td><td class="small">'+wn+'</td><td class="small text-truncate" style="max-width:400px;" title="'+err+'">'+err+'</td><td class="small">'+when+'</td><td><button class="btn btn-sm btn-outline-primary" onclick="_RetryScan(\''+jid+'\', this)">Retry</button></td></tr>';
+        }).join('') : '<tr><td colspan="5" class="text-muted small">None</td></tr>';
+    } catch(e){
+        document.getElementById('ProbeBody').innerHTML = '<tr><td colspan="6" class="text-danger small">Error: '+_Esc(e)+'</td></tr>';
+        document.getElementById('ScanBody').innerHTML = '<tr><td colspan="5" class="text-danger small">Error: '+_Esc(e)+'</td></tr>';
+    }
+}
+async function _RetryProbe(id, btn){
+    btn.disabled = true;
+    try { var r = await fetch('/api/Failures/'+id+'/Retry', {method:'POST'}); var j = await r.json(); if (j.Success) { _Load(); } else { alert(j.Message || 'Retry failed'); btn.disabled = false; } }
+    catch(e){ alert('Error: '+e); btn.disabled = false; }
+}
+async function _RetryScan(jid, btn){
+    btn.disabled = true;
+    try { var r = await fetch('/api/Failures/Scan/'+encodeURIComponent(jid)+'/Retry', {method:'POST'}); var j = await r.json(); if (j.Success) { _Load(); } else { alert(j.Message || 'Retry failed'); btn.disabled = false; } }
+    catch(e){ alert('Error: '+e); btn.disabled = false; }
+}
+document.addEventListener('DOMContentLoaded', _Load);
+</script>
+{% endblock %}
