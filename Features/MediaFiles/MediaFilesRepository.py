@@ -692,3 +692,38 @@ class MediaFilesRepository(BaseRepository):
             (list(Ids),),
         )
         return int(Affected) if Affected is not None else 0
+
+    # directive: ingest-pipeline-kiss
+    def SetNeedsReprobe(self, MediaFileId: int) -> bool:
+        Affected = self.DatabaseService.ExecuteNonQuery(
+            "UPDATE MediaFiles SET NeedsReprobe = TRUE WHERE Id = %s",
+            (MediaFileId,),
+        )
+        return int(Affected or 0) > 0
+
+    # directive: ingest-pipeline-kiss
+    def SetNeedsReprobeForRootFolder(self, RootFolderId: Optional[int]) -> int:
+        if RootFolderId is None:
+            Affected = self.DatabaseService.ExecuteNonQuery(
+                "UPDATE MediaFiles SET NeedsReprobe = TRUE"
+            )
+            return int(Affected or 0)
+        RfRows = self.DatabaseService.ExecuteQuery(
+            "SELECT StorageRootId, RelativePath FROM RootFolders WHERE Id = %s",
+            (RootFolderId,),
+        )
+        if not RfRows:
+            return 0
+        StorageRootId = RfRows[0].get('StorageRootId') or RfRows[0].get('storagerootid')
+        RelativePath = (RfRows[0].get('RelativePath') or RfRows[0].get('relativepath') or '')
+        if StorageRootId is None:
+            return 0
+        Prefix = RelativePath.rstrip('/').rstrip('\\')
+        Escaped = EscapeLikePattern(Prefix)
+        Pattern = f"{Escaped}%" if not Prefix else f"{Escaped}/%"
+        Affected = self.DatabaseService.ExecuteNonQuery(
+            "UPDATE MediaFiles SET NeedsReprobe = TRUE "
+            "WHERE StorageRootId = %s AND RelativePath LIKE %s ESCAPE '!'",
+            (StorageRootId, Pattern),
+        )
+        return int(Affected or 0)

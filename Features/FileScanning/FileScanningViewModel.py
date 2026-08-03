@@ -438,32 +438,24 @@ class FileScanningViewModel:
                 'TotalPages': 0
             }
 
+    # directive: ingest-pipeline-kiss
     def RefreshMediaFile(self, MediaFileId: int) -> Dict[str, Any]:
-        """Refresh a single media file using existing file scanning process."""
         try:
-            MediaFile = self.BusinessService.Repository.GetMediaFileById(MediaFileId)
+            MediaFile = self.BusinessService.MediaFilesRepository.GetMediaFileById(MediaFileId)
             if not MediaFile:
                 return {'Success': False, 'Message': 'Media file not found'}
 
-            # directive: path-class-perfection | # see path.C21
             from Core.Path.Path import Path as _PathMF
             from Core.Path.Worker import Worker as _WMF
             if _Exists(_PathMF(MediaFile.StorageRootId, MediaFile.RelativePath or ''), _WMF.Current()):
-                # File exists - refresh it directly
-                self.BusinessService.ProcessSingleMediaFile(
-                    FilePath=MediaFile.FilePath,
-                    RootFolderId=None,
-                    ExtractMetadata=True
-                )
-                return {'Success': True, 'Message': f'Refreshed {MediaFile.FileName}'}
+                self.BusinessService.MediaFilesRepository.SetNeedsReprobe(MediaFileId)
+                return {'Success': True, 'Message': f'Queued {MediaFile.FileName} for re-probe'}
 
-            # Step 2: File doesn't exist - delete from database
-            LoggingService.LogWarning(f"File does not exist for refresh: {MediaFile.FilePath}", 'RefreshMediaFile', 'FileScanningViewModel')
-            Deleted = self.BusinessService.Repository.DeleteMediaFile(MediaFileId)
-            if Deleted:
+            LoggingService.LogWarning(f"File does not exist for refresh: {MediaFile.FileName}", 'RefreshMediaFile', 'FileScanningViewModel')
+            Deleted = self.BusinessService.MediaFilesRepository.BatchDeleteMediaFiles([MediaFileId])
+            if Deleted > 0:
                 return {'Success': True, 'Message': f'Deleted missing file entry: {MediaFile.FileName}'}
-            else:
-                return {'Success': False, 'Message': f'Failed to delete missing file entry: {MediaFile.FileName}'}
+            return {'Success': False, 'Message': f'Failed to delete missing file entry: {MediaFile.FileName}'}
         except Exception as e:
             return {'Success': False, 'Message': str(e)}
 
@@ -616,28 +608,24 @@ class FileScanningViewModel:
                 'TotalPages': 0
             }
 
+    # directive: ingest-pipeline-kiss
     def ExtractMetadataForExistingFiles(self, RootFolderId: Optional[int] = None) -> Dict[str, Any]:
-        """Extract metadata for existing files that need it."""
         try:
-            LoggingService.LogFunctionEntry("ExtractMetadataForExistingFiles", 'FileScanningViewModel', f"RootFolderId: {RootFolderId}")
-
-            # Call the business service to extract metadata
-            result = self.BusinessService.ExtractMetadataForExistingFiles(RootFolderId)
-
-            if result['Success']:
-                # Refresh data to show updated metadata
-                self.RefreshData()
-                LoggingService.LogInfo(f"Successfully extracted metadata for {result.get('ProcessedFiles', 0)} files", 'FileScanningViewModel', 'ExtractMetadataForExistingFiles')
-            else:
-                LoggingService.LogWarning(f"Metadata extraction failed: {result.get('Message', '', 'Unknown error')}", 'FileScanningViewModel', 'ExtractMetadataForExistingFiles')
-
-            return result
-
+            Count = self.BusinessService.MediaFilesRepository.SetNeedsReprobeForRootFolder(RootFolderId)
+            LoggingService.LogInfo(
+                f"Flagged {Count} MediaFiles rows NeedsReprobe=TRUE (RootFolderId={RootFolderId}); ProbeWorker will process them",
+                'FileScanningViewModel', 'ExtractMetadataForExistingFiles',
+            )
+            return {
+                'Success': True,
+                'Message': f'Queued {Count} files for re-probe; ProbeWorker will process them.',
+                'ProcessedFiles': Count,
+            }
         except Exception as e:
-            LoggingService.LogException("Error extracting metadata for existing files", e, 'ExtractMetadataForExistingFiles', 'FileScanningViewModel')
+            LoggingService.LogException("Error queueing files for re-probe", e, 'ExtractMetadataForExistingFiles', 'FileScanningViewModel')
             return {
                 'Success': False,
-                'Message': f'Error extracting metadata: {str(e)}',
+                'Message': f'Error queueing files for re-probe: {str(e)}',
                 'Error': 'MetadataExtractionError'
             }
 
