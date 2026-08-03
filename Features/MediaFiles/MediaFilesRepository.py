@@ -566,3 +566,129 @@ class MediaFilesRepository(BaseRepository):
         if Limit is not None and Limit > 0:
             return self.DatabaseService.ExecuteQuery(Base + " LIMIT %s", tuple(Params + [int(Limit)]))
         return self.DatabaseService.ExecuteQuery(Base, tuple(Params))
+
+    # directive: ingest-pipeline-kiss
+    def BatchFetchExistingByRootFolder(self, RootFolderId: int) -> Dict[str, Dict[str, Any]]:
+        RfRows = self.DatabaseService.ExecuteQuery(
+            "SELECT StorageRootId, RelativePath FROM RootFolders WHERE Id = %s",
+            (RootFolderId,),
+        )
+        if not RfRows:
+            return {}
+        StorageRootId = RfRows[0].get('StorageRootId') or RfRows[0].get('storagerootid')
+        RelativePath = (RfRows[0].get('RelativePath') or RfRows[0].get('relativepath') or '')
+        if StorageRootId is None:
+            return {}
+        Prefix = RelativePath.rstrip('/').rstrip('\\')
+        Escaped = EscapeLikePattern(Prefix)
+        Pattern = f"{Escaped}%" if not Prefix else f"{Escaped}/%"
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT Id, RelativePath, FileName, FileSize, FileModificationTime "
+            "FROM MediaFiles "
+            "WHERE StorageRootId = %s AND RelativePath LIKE %s ESCAPE '!'",
+            (StorageRootId, Pattern),
+        )
+        Out: Dict[str, Dict[str, Any]] = {}
+        for R in Rows or []:
+            Rel = (R.get('RelativePath') or R.get('relativepath') or '')
+            Out[Rel.lower()] = {
+                'Id': R.get('Id') or R.get('id'),
+                'RelativePath': Rel,
+                'FileName': R.get('FileName') or R.get('filename'),
+                'FileSize': R.get('FileSize') or R.get('filesize'),
+                'FileModificationTime': R.get('FileModificationTime') or R.get('filemodificationtime'),
+            }
+        return Out
+
+    # directive: ingest-pipeline-kiss
+    def BatchInsertMediaFiles(self, Rows: List[tuple]) -> int:
+        if not Rows:
+            return 0
+        from psycopg2.extras import execute_values
+        Connection = self.DatabaseService.GetConnection()
+        try:
+            Cursor = Connection.cursor()
+            execute_values(
+                Cursor,
+                "INSERT INTO MediaFiles "
+                "(SeasonId, StorageRootId, RelativePath, FileName, SizeMB, FileSize, "
+                " FileModificationTime, LastModifiedDate, LastScannedDate, NeedsReprobe) "
+                "VALUES %s "
+                "ON CONFLICT (StorageRootId, RelativePath) DO NOTHING",
+                Rows,
+                page_size=500,
+            )
+            Inserted = Cursor.rowcount
+            Connection.commit()
+            return Inserted
+        finally:
+            self.DatabaseService.CloseConnection(Connection)
+
+    # directive: ingest-pipeline-kiss
+    def BatchUpdateChanged(self, Rows: List[tuple]) -> int:
+        if not Rows:
+            return 0
+        from psycopg2.extras import execute_values
+        Connection = self.DatabaseService.GetConnection()
+        try:
+            Cursor = Connection.cursor()
+            execute_values(
+                Cursor,
+                "UPDATE MediaFiles AS mf SET "
+                "  SizeMB = v.SizeMB, "
+                "  FileSize = v.FileSize, "
+                "  FileModificationTime = v.FileModificationTime, "
+                "  LastModifiedDate = v.LastModifiedDate, "
+                "  LastScannedDate = v.LastScannedDate, "
+                "  NeedsReprobe = TRUE "
+                "FROM (VALUES %s) AS v(Id, SizeMB, FileSize, FileModificationTime, LastModifiedDate, LastScannedDate) "
+                "WHERE mf.Id = v.Id",
+                Rows,
+                template="(%s, %s, %s, %s::timestamp, %s::timestamp, %s::timestamp)",
+                page_size=500,
+            )
+            Updated = Cursor.rowcount
+            Connection.commit()
+            return Updated
+        finally:
+            self.DatabaseService.CloseConnection(Connection)
+
+    # directive: ingest-pipeline-kiss
+    def BatchRenameMediaFiles(self, Rows: List[tuple]) -> int:
+        if not Rows:
+            return 0
+        from psycopg2.extras import execute_values
+        Connection = self.DatabaseService.GetConnection()
+        try:
+            Cursor = Connection.cursor()
+            execute_values(
+                Cursor,
+                "UPDATE MediaFiles AS mf SET "
+                "  RelativePath = v.NewRelativePath, "
+                "  FileName = v.NewFileName, "
+                "  SizeMB = v.SizeMB, "
+                "  FileSize = v.FileSize, "
+                "  FileModificationTime = v.FileModificationTime, "
+                "  LastModifiedDate = v.LastModifiedDate, "
+                "  LastScannedDate = v.LastScannedDate "
+                "FROM (VALUES %s) AS v(Id, NewRelativePath, NewFileName, SizeMB, FileSize, FileModificationTime, LastModifiedDate, LastScannedDate) "
+                "WHERE mf.Id = v.Id",
+                Rows,
+                template="(%s, %s, %s, %s, %s, %s::timestamp, %s::timestamp, %s::timestamp)",
+                page_size=500,
+            )
+            Renamed = Cursor.rowcount
+            Connection.commit()
+            return Renamed
+        finally:
+            self.DatabaseService.CloseConnection(Connection)
+
+    # directive: ingest-pipeline-kiss
+    def BatchDeleteMediaFiles(self, Ids: List[int]) -> int:
+        if not Ids:
+            return 0
+        Affected = self.DatabaseService.ExecuteNonQuery(
+            "DELETE FROM MediaFiles WHERE Id = ANY(%s)",
+            (list(Ids),),
+        )
+        return int(Affected) if Affected is not None else 0
