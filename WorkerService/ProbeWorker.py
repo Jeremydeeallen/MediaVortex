@@ -81,9 +81,11 @@ class ProbeWorker:
 
     def _FetchBatch(self, BatchSize, MaxFailures):
         CapFragment, CapParams = BuildClaimPredicate(self.WorkerName, 'ProbeEnabled')
+        # directive: ingest-pipeline-kiss -- probe.C2: fetch on Resolution IS NULL OR NeedsReprobe=TRUE
         Sql = (
             "SELECT mf.Id FROM MediaFiles mf "
-            "WHERE (mf.Resolution IS NULL OR mf.Codec IS NULL OR mf.AudioCodec IS NULL) "
+            "WHERE (mf.Resolution IS NULL OR mf.Codec IS NULL OR mf.AudioCodec IS NULL "
+            "       OR mf.NeedsReprobe = TRUE) "
             "AND COALESCE(mf.FFprobeFailureCount, 0) < %s "
             "AND mf.StorageRootId IS NOT NULL "
             "AND mf.RelativePath IS NOT NULL "
