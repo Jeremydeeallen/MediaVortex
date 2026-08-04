@@ -1,6 +1,6 @@
 # Directive: ingest-pipeline-kiss
 
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Opened:** 2026-08-02
 **Parent (paused):** orphan-generators-stop
 **Slug:** ingest-pipeline-kiss
