@@ -729,6 +729,10 @@ class FileScanningRepository(BaseRepository):
         try:
             if not Path:
                 return Path
+            # directive: ingest-pipeline-kiss -- case-fixup is a Windows-only concern (case-insensitive fs); Linux workers refuse canonical drive-letter paths via LocalPath _AssertLocalShape
+            import platform
+            if platform.system() != 'Windows':
+                return Path
             normalized_path = ntpath.normpath(Path or "")
             if not LocalExists(normalized_path):
                 LoggingService.LogWarning(f"Path does not exist, cannot normalize: {Path}", "FileScanningRepository", "NormalizePathToFilesystemCase")
