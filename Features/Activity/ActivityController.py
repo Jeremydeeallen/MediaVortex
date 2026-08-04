@@ -24,6 +24,7 @@ def _BuildSnapshotPayload():
         'ActiveQualityTests': [_jsonable(Q) for Q in Snap.ActiveQualityTests],
         'ActiveLanguageJobs': [_jsonable(L) for L in Snap.ActiveLanguageJobs],
         'LanguageSummary': _jsonable(Snap.LanguageSummary),
+        'ProbeSummary': Snap.ProbeSummary,
         'StaleProgressThresholdSec': Snap.StaleProgressThresholdSec,
     }
 
@@ -77,6 +78,7 @@ def Snapshot():
                 'ActiveQualityTests': [_jsonable(Q) for Q in Snap.ActiveQualityTests],
                 'ActiveLanguageJobs': [_jsonable(L) for L in Snap.ActiveLanguageJobs],
                 'LanguageSummary': _jsonable(Snap.LanguageSummary),
+                'ProbeSummary': Snap.ProbeSummary,
                 'StaleProgressThresholdSec': Snap.StaleProgressThresholdSec,
             },
         })

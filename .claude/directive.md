@@ -1,6 +1,6 @@
 # Directive: ingest-pipeline-kiss
 
-**Status:** Active -- phase: DELIVERING
+**Status:** Active -- phase: IMPLEMENTING
 **Opened:** 2026-08-02
 **Parent (paused):** orphan-generators-stop
 **Slug:** ingest-pipeline-kiss
@@ -38,6 +38,9 @@ Auto-chain is emergent from shared column state: probe polls the flag scan sets.
 
 **DD_F. Writer-owns-cascade rule.**
 Every write to a compliance-input column recomputes derived downstream state in the same call. Codified as `.claude/rules/writer-owns-cascade.md` + enforced by contract test grepping for the anti-pattern.
+
+**DD_G. Probe backlog + per-worker probe activity visible on /Activity.**
+Operator sees at a glance: total NeedsReprobe count, fresh-unprobed count, at-failure-cap count, per-worker probe state (ProbeEnabled bulb, currently probing Y/N, last-N-min throughput). No CLI queries required. Added 2026-08-04 after live smoke showed 24k probe backlog invisible to the operator.
 
 ## Implementation (Claude's how)
 
@@ -158,6 +161,16 @@ C19. **ScanJobs.Phase values remain compatible with `activity-dashboard.flow.md`
 C20. **`ContinuousScanService` per-RootFolder alphabetical tick shape preserved.** Only inner scan primitive simplifies; outer scheduler contract unchanged. Contract test.
 
 C21. **`LanguageEnrichmentService.ProbeFile(Force=True)` path unchanged.** Cascade only fires on ProbeWorker's own write path; other probe callers keep existing semantics. Contract test.
+
+### G. Probe backlog visibility (DD_G)
+
+C22. **`GET /api/Activity/ProbeSnapshot` endpoint.** Returns `{Backlog: {NeedsReprobe, FreshUnprobed, FailureCap}, Workers: [{WorkerName, ProbeEnabled, Status, InFlightProbes, ProbesLastHour}]}`. Contract test asserts shape.
+
+C23. **`/Activity` page renders probe card.** Header shows total backlog, sub shows fresh + failed counts, per-worker mini-table shows ProbeEnabled bulb + in-flight count + last-hour throughput. Refreshed via existing Activity poll cadence.
+
+C24. **In-flight probe count sourced from ActiveJobs.** `SELECT COUNT(*) FROM ActiveJobs WHERE JobType='Probe' AND WorkerName=? AND Status='Running'`. Correct per capability-thread ActiveJobs discipline (ProbeWorker inserts/deletes on claim/release).
+
+C25. **Per-worker throughput = successful probes in last hour.** `COUNT(*) FROM MediaFiles WHERE LoudnessMeasuredAt > NOW() - INTERVAL '1 hour'` filtered by which worker owns the ProbeEnabled capability. Or simpler: fleet total probes/hour reported once. Design choice deferred to implementation.
 
 ## Call-Graph Audit
 

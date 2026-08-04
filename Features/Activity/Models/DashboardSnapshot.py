@@ -18,5 +18,6 @@ class DashboardSnapshot:
     ActiveQualityTests: List[Dict[str, Any]] = field(default_factory=list)
     ActiveLanguageJobs: List[Dict[str, Any]] = field(default_factory=list)
     LanguageSummary: Dict[str, Any] = field(default_factory=dict)
+    ProbeSummary: Dict[str, Any] = field(default_factory=dict)
     StaleProgressThresholdSec: int = 15
     HeartbeatStaleThresholdSec: int = 300

@@ -61,6 +61,7 @@ class DashboardSnapshotService:
         ActiveQualityTests = self._BuildActiveQualityTests()
         ActiveLanguageJobs = self._BuildActiveLanguageJobs()
         LanguageSummary = self._BuildLanguageSummary()
+        ProbeSummary = self._BuildProbeSummary()
         return DashboardSnapshot(
             Workers=Workers,
             ActiveJobs=ActiveJobs,
@@ -71,9 +72,44 @@ class DashboardSnapshotService:
             ActiveQualityTests=ActiveQualityTests,
             ActiveLanguageJobs=ActiveLanguageJobs,
             LanguageSummary=LanguageSummary,
+            ProbeSummary=ProbeSummary,
             StaleProgressThresholdSec=self.StaleSec,
             HeartbeatStaleThresholdSec=self.HeartSec,
         )
+
+    # directive: ingest-pipeline-kiss -- probe backlog + per-worker probe activity for /Activity page
+    def _BuildProbeSummary(self):
+        Backlog = self.Db.ExecuteQuery(
+            "SELECT "
+            "  COUNT(*) FILTER (WHERE NeedsReprobe = TRUE) AS NeedsReprobe, "
+            "  COUNT(*) FILTER (WHERE Resolution IS NULL AND COALESCE(FFprobeFailureCount, 0) < 3) AS FreshUnprobed, "
+            "  COUNT(*) FILTER (WHERE COALESCE(FFprobeFailureCount, 0) >= 3) AS FailureCap, "
+            "  COUNT(*) FILTER (WHERE LoudnessMeasuredAt > NOW() - INTERVAL '1 hour') AS ProbedLastHour "
+            "FROM MediaFiles"
+        )
+        Workers = self.Db.ExecuteQuery(
+            "SELECT w.WorkerName, w.Status, w.ProbeEnabled, "
+            "  (SELECT COUNT(*) FROM ActiveJobs aj WHERE aj.WorkerName = w.WorkerName AND aj.JobType = 'Probe' AND aj.Status = 'Running') AS InFlightProbes "
+            "FROM Workers w "
+            "WHERE w.ProbeEnabled = TRUE "
+            "ORDER BY w.WorkerName"
+        )
+        Row = (Backlog or [{}])[0]
+        return {
+            'NeedsReprobe': int(Row.get('needsreprobe') or 0),
+            'FreshUnprobed': int(Row.get('freshunprobed') or 0),
+            'FailureCap': int(Row.get('failurecap') or 0),
+            'ProbedLastHour': int(Row.get('probedlasthour') or 0),
+            'Workers': [
+                {
+                    'WorkerName': (W.get('workername') or ''),
+                    'Status': (W.get('status') or ''),
+                    'ProbeEnabled': bool(W.get('probeenabled')),
+                    'InFlightProbes': int(W.get('inflightprobes') or 0),
+                }
+                for W in (Workers or [])
+            ],
+        }
 
     # directive: audio-language-detection | # directive: language-worker-progress-invariant
     def _BuildLanguageSummary(self):
