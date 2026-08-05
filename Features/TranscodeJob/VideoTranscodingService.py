@@ -334,12 +334,12 @@ class VideoTranscodingService:
         return list(self.ActiveProcesses.keys())
 
 
+    # directive: ffmpeg-stderr-deadlock
     def MonitorProgress(self, JobId: int, Process: subprocess.Popen, ProgressCallback: Callable):
         """Monitor transcoding progress and call progress callback."""
         Tail = self.RecentOutput.setdefault(JobId, deque(maxlen=60))
         try:
             while Process.poll() is None:
-                # Read output line by line
                 Line = Process.stdout.readline()
                 if Line:
                     Stripped = Line.strip()
@@ -348,8 +348,6 @@ class VideoTranscodingService:
                     ProgressData = self.ParseProgressLine(Stripped)
                     if ProgressData:
                         ProgressCallback(ProgressData)
-
-                time.sleep(0.1)  # Small delay to prevent excessive CPU usage
 
             # Drain kernel pipe buffer after process exit (fast-fail case: loop above never entered).
             try:

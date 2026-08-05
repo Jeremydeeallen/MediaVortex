@@ -12,6 +12,9 @@ from Core.SubprocessUtil import NoWindowFlags
 
 _WIN_DRIVE_RX = re.compile(r'^[A-Za-z]:')
 
+# directive: ffmpeg-stderr-deadlock
+_FFMPEG_LOG_LEVELS = frozenset({'quiet', 'fatal', 'error', 'warning', 'info', 'verbose', 'debug'})
+
 
 # directive: path-schema-migration | # see path.S5
 def _PickPathFlavor(Value: str):
@@ -194,6 +197,12 @@ class SystemSettingsController:
                     return jsonify({
                         'Success': False,
                         'Error': 'Value is required'
+                    }), 400
+
+                if SettingKey == 'FfmpegLogLevel' and Value not in _FFMPEG_LOG_LEVELS:
+                    return jsonify({
+                        'Success': False,
+                        'Error': f'FfmpegLogLevel must be one of: {", ".join(sorted(_FFMPEG_LOG_LEVELS))}'
                     }), 400
 
                 self.Repository.AddOrUpdateSystemSetting(SettingKey, Value, Description)

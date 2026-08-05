@@ -90,7 +90,7 @@ class CommandComposer:
             pass
         return 'unknown'
 
-    # directive: transcode-flow-canonical | # see transcode.ST5
+    # directive: ffmpeg-stderr-deadlock | # directive: transcode-flow-canonical | # see transcode.ST5
     def Build(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[CommandSpec]:
         if IsAudioOnlyContainer(MediaFile):
             raise NonVideoSourceError(
@@ -129,6 +129,10 @@ class CommandComposer:
                 ScaleFilter = self.HwAccelResolver.AdaptScaleFilter(ScaleFilter, HwAccel)
             AudioEmission_ = self.AudioSlot.Emit(Plan_.AudioOp, MediaFile, Context)
             Parts = [FFmpegPath]
+            FfmpegLogLevel = Context.get('FfmpegLogLevel')
+            if not FfmpegLogLevel:
+                raise ValueError("FfmpegLogLevel missing from Context. Caller must resolve from SystemSettings.FfmpegLogLevel before invoking CommandComposer.")
+            Parts.extend(['-loglevel', FfmpegLogLevel, '-stats'])
             StartTime = Context.get('StartTime')
             if StartTime and StartTime.strip():
                 Parts.extend(['-ss', StartTime.strip()])

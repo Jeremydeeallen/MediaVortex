@@ -903,6 +903,9 @@ class ProcessTranscodeQueueService:
                 LoggingService.LogDebug(f"Final CRF for {Job.FilePath}: {finalCRF} (from profile/adaptive)",
                                      "ProcessTranscodeQueueService", "GetTranscodingSettings")
 
+            FfmpegLogLevel = self.SystemSettingsRepository.GetSystemSetting('FfmpegLogLevel')
+            if FfmpegLogLevel is None:
+                raise ValueError("FfmpegLogLevel setting missing from SystemSettings. Run Scripts/SQLScripts/AddFfmpegLogLevelSetting_2026_08_05.py")
             return {
                 'ProfileSettings': ProfileSettings,
                 'CodecFlags': CodecFlags,
@@ -911,7 +914,8 @@ class ProcessTranscodeQueueService:
                 'StartTime': StartTime,
                 'FFmpegPath': self.FFmpegPath,
                 'FFprobePath': self.FFprobePath,
-                'MaxCpuThreads': self.MaxCpuThreads
+                'MaxCpuThreads': self.MaxCpuThreads,
+                'FfmpegLogLevel': FfmpegLogLevel,
             }
 
         except Exception as e:
