@@ -1,7 +1,8 @@
 # Directive: ingest-pipeline-kiss
 
-**Status:** Active -- phase: DELIVERING
+**Status:** Closed
 **Opened:** 2026-08-02
+**Closed:** 2026-08-05
 **Parent (paused):** orphan-generators-stop
 **Slug:** ingest-pipeline-kiss
 
@@ -241,14 +242,17 @@ C25. **Per-worker throughput = successful probes in last hour.** `COUNT(*) FROM 
 - `Tests/Contract/TestFailuresPage.py` (C12, C13)
 - `Tests/Contract/TestSeamPreservation.py` (C17, C18, C20, C21)
 
-### To promote at DELIVERING (per R13)
-- `ingest.flow.md` (repo root)
-- `Features/FileScanning/scan.feature.md`
-- `Features/MediaProbe/probe.feature.md`
-- `Features/ContentClassifier/classifier.feature.md`
-- `Features/Failures/failures.feature.md`
-- `Features/Ingest/ingest-webhook.feature.md`
-- `.claude/rules/writer-owns-cascade.md` + `.claude/rules-details/writer-owns-cascade.md`
+### Promotions
+
+| Source artifact | Target permanent home |
+|---|---|
+| Ingest pipeline stages (scan+probe+classify+compliance+workbucket) | `ingest.flow.md` (R13 born-in-place) |
+| Scan vertical contract | `Features/FileScanning/scan.feature.md` (R13 born-in-place) |
+| Probe vertical contract | `Features/MediaProbe/probe.feature.md` (R13 born-in-place) |
+| Classifier vertical contract | `Features/ContentClassifier/classifier.feature.md` (R13 born-in-place) |
+| Failures surface contract | `Features/Failures/failures.feature.md` (R13 born-in-place) |
+| Ingest webhook contract | `Features/Ingest/ingest-webhook.feature.md` (R13 born-in-place) |
+| Writer-owns-cascade invariant | `.claude/rules/writer-owns-cascade.md` + `.claude/rules-details/writer-owns-cascade.md` (R13 born-in-place) |
 
 ## Progress
 
