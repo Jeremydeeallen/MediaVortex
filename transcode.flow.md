@@ -242,6 +242,7 @@ Queue admission (whether a file enters the queue at all) is owned by `Features/T
 - `ActiveJobs.ProcessId` = worker Python PID; `ActiveJobs.FFmpegPid` = ffmpeg subprocess PID -- owner's own stuck-detect uses this for local kill only.
 - CPU thermal management: waits for cool-down between jobs.
 - FFmpeg errors captured in TranscodeAttempt.ErrorMessage.
+- **Subprocess I/O contract.** `VideoTranscodingService.MonitorProgress` reads ffmpeg's merged stdout+stderr pipe via `readline()` with NO sleep-throttle -- `readline()` blocks efficiently when idle, drains at CPU speed under load. A throttle between reads (e.g. `time.sleep(0.1)`) is forbidden here: warning floods (subtitle DTS clusters, decoder quirks) fill the pipe faster than a throttled reader drains, ffmpeg blocks on `write()`, and the encode deadlocks. Combined with `-loglevel <value>` from `SystemSettings.FfmpegLogLevel` (default `'error'` suppresses non-error emit) + `-stats` (forces `frame=` progress even under quiet loglevels), the class of stderr-pipe deadlock is closed. Contract test: `Tests/Contract/TestFfmpegLogLevel.py::TestMonitorProgressNoSleep`.
 
 ### ST6 Strategy variants -- per-ProcessingMode `BuildCommand` + `HandleResult`
 

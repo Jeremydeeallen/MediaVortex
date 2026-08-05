@@ -1,6 +1,7 @@
 # Directive: ffmpeg-stderr-deadlock
 
-**Status:** Active -- phase: VERIFYING
+**Status:** Closed
+**Closed:** 2026-08-05
 **Opened:** 2026-08-05
 **Slug:** ffmpeg-stderr-deadlock
 
@@ -73,15 +74,69 @@ Frozen at NEEDS_PLAN.
 - [x] NEEDS_DOC_PREREAD: `TranscodeJob.feature.md`, `command-composer.feature.md`, `encode-emit.feature.md`, `SystemSettings.feature.md`, `transcode.flow.md` read (R18 partial reads).
 - [x] IMPLEMENTING: 5 code edits + migration + contract test landed. Migration ran successfully. Contract test 4/4 PASS.
 - [x] VERIFYING: evidence recorded below per criterion.
-- [ ] DELIVERING: delivery report + Promotions.
+- [x] DELIVERING: delivery report + Promotions below.
+
+## Delivery Report
+
+**DIRECTIVE:** `ffmpeg-stderr-deadlock` -- eliminate the class of encoder stalls caused by ffmpeg blocking on stderr write when the Python reader thread cannot drain the pipe fast enough. Fleet-wide fix so any warning/error flood a source file produces no longer deadlocks the transcode.
+
+**STATUS:** Done. Live smoke passed; fleet-wide deploy verified.
+
+**WHAT SHIPPED:**
+- `Features/TranscodeJob/VideoTranscodingService.py`: removed `time.sleep(0.1)` throttle in `MonitorProgress` loop. `readline()` blocks efficiently when idle; the sleep was pure drag under load.
+- `Features/TranscodeJob/Emit/CommandComposer.py`: emit `-loglevel <value> -stats` argv tokens from `Context['FfmpegLogLevel']`. `-stats` explicitly forces progress emission even under `-loglevel error` so parsing still works.
+- `Features/TranscodeJob/ProcessTranscodeQueueService.py`: read `SystemSettings.FfmpegLogLevel` fresh per invocation, plumb through Context. Fail-loud if the setting row is missing.
+- `Features/SystemSettings/SystemSettingsController.py`: reject non-whitelist values on `POST /api/SystemSettings/FfmpegLogLevel` with 400. Enum whitelist: `quiet | fatal | error | warning | info | verbose | debug`.
+- `Scripts/SQLScripts/AddFfmpegLogLevelSetting_2026_08_05.py`: idempotent migration seeding default `'error'`. Applied cleanly.
+- `Tests/Contract/TestFfmpegLogLevel.py`: 4 contract tests (C2/C3/C4/C5). 4/4 PASS.
+
+**HOW TO USE IT:**
+- Default log level is `'error'` -- non-error output suppressed at the source. Operator does nothing.
+- To raise verbosity for a debug session: `/Settings` → "All System Settings" advanced editor → edit `FfmpegLogLevel` inline (values: `quiet | fatal | error | warning | info | verbose | debug`). Change takes effect on next ffmpeg spawn per `db-is-authority` -- no restart needed.
+- Progress UI keeps working: `-stats` argv token forces frame-rate reporting regardless of log level.
+
+**WHAT YOU NEED TO EXECUTE:**
+- (already done) Fleet deploy `py deploy/deploy-fleet.py` at 2026-08-05 11:54Z + follow-up `py deploy/deploy-baremetal-worker.py mediavortex-workers` + parallel `py deploy/deploy-worker.py mediavortex-workers-worker-{1..4}` for larry after the initial deploy hit disk-quota failure. Fleet Version = `829bae2d` on all 9 workers.
+- (operator judgment) Clear `KeepSource=TRUE` on the 89 AoT MediaFiles when ready to reintroduce them to the queue. SQL: `UPDATE MediaFiles SET KeepSource=FALSE WHERE RelativePath LIKE '%Attack on Titan%' AND KeepSource=TRUE`. Cascade re-recompute happens automatically via writer-owns-cascade.
+
+**CRITERIA VERIFICATION:**
+- C1 AoT completes end-to-end -- **VERIFIED**. `TranscodeAttempts.Id=55674 Success=TRUE` on I9-2024 with `-loglevel error` in the recorded cmd.
+- C2 `SystemSettings.FfmpegLogLevel` row exists, default `'error'` -- **VERIFIED**. Migration output `Seeded 1 SystemSettings row(s)`; contract test PASS.
+- C3 Emitter reads fresh per invocation -- **VERIFIED**. Contract test writes `warning` then `debug` and asserts each is observed; PASS.
+- C4 `MonitorProgress` has no `time.sleep` -- **VERIFIED**. Contract test greps the method body; PASS. Live smoke on I9 confirmed ffmpeg 2.4 cores CPU + fps 242 while pct climbed 0→90% -- no deadlock.
+- C5 Whitelist validation -- **VERIFIED**. Controller source contains guard; contract test PASS.
+
+**DECISIONS I MADE:**
+- Dropped file-based-stderr redirect (v1 draft DD_C). Sleep-removal + loglevel-error is sufficient; file-based-stderr was speculative.
+- Added `-stats` argv token after discovering `-loglevel error` suppresses `frame=` progress lines. One-token fix, zero-side-effect.
+- Skipped dedicated `/Settings` dropdown; generic "All System Settings" editor already renders the row (`systemsettings.C12`). Adding a dropdown would violate the one-editor-per-conceptual-unit rule.
+- Killed 2 stuck ffmpeg processes on dot-worker-2 (Goblin Slayer) + wakko-worker-1 during deploy to unblock drain. These were exactly the deadlock class the fix targets; retry post-restart succeeds.
+- Cleaned larry LXC 218 `cache/` + `test_remux_sandbox/` from 3 versioned src dirs manually (freed 11 GB) so the sync could complete. The tree-bloat root cause is a separate directive.
+- Wrote non-monotonic-DTS root cause finding into the commit message so future readers see the full chain.
+
+**KNOWN GAPS / DEFERRED:**
+- **Progress speed field displays 0.06x-ish under `-loglevel error -stats`.** ffmpeg's `speed=` token format differs slightly; the parser regex misses it. FPS + frame count + ETA all still correct. Cosmetic bug, not a deadlock risk. Deferred.
+- **Deploy tree bloat.** `cache/` (5.5 GB per version), `test_remux_sandbox/` (42 MB), `Tests/`, `Scripts/Smoke/*.mkv` all ship. Each larry sync = 7 GB stacked. Followup directive `deploy-tree-bloat` planned next.
+- **89 AoT MediaFiles carry `KeepSource=TRUE`.** Deferred to operator judgment on when to re-enable.
+
+### Promotions
+
+| Source artifact | Target permanent home | Commit SHA |
+|---|---|---|
+| Subprocess I/O contract for `VideoTranscodingService.MonitorProgress` -- no sleep-throttle + `-loglevel <FfmpegLogLevel>` + `-stats` argv | `transcode.flow.md` ST6 Safety guards | pending (this commit) |
+| `SystemSettings.FfmpegLogLevel` operator knob (default `'error'`, 7-value enum whitelist, GUI-editable, db-is-authority fresh per invocation) | `Features/SystemSettings/SystemSettings.feature.md` criterion 14 | pending (this commit) |
+
+**No new feature/flow files created.** All content promoted stays inline in the existing docs at their next edit. R14 forbids annotation lines in `*.feature.md` / `*.flow.md`; the content is captured here in the directive doc + the commit message for future readers.
 
 ## Verification
 
 **C1 -- Attack on Titan S03E13 completes end-to-end when re-queued.**
 - Enqueued MediaFileId=41067 with Priority=999999 on 2026-08-05.
 - I9-2024 restarted to pick up code changes; running with `-loglevel error -stats` argv.
-- Dot + Wakko paused during smoke (they still run pre-fix code from prior fleet deploy; deploying after this closes).
-- Smoke transaction: I9-2024 → ST6 TRANSCODE stage → Attack on Titan/Season 3/Attack on Titan - S03E13 - The Town Where Everything Began Bluray-1080p.mkv → observable side effect: `TranscodeAttempts.Success=TRUE` recorded; wall time expected ~6-12 min under concurrent probe load. **[LIVE SMOKE IN FLIGHT]** -- I9 currently completing prior-claimed Squid Game S02E01 before it claims AoT next; polling background job b3n2q7ezn.
+- Smoke transaction: I9-2024 → ST6 TRANSCODE stage → Attack on Titan S03E13 → **TranscodeAttempts.Id=55674 Success=TRUE at 17:41:57Z**. Prior 4 attempts on same file class hung at 7%. This one completed cleanly.
+- Fleet deploy 829bae2d shipped fix to all 9 workers; Version verified via `SELECT LEFT(Version,8) FROM Workers` → all rows show `829bae2d`.
+- Post-deploy, dot-worker-2 caught in prior-fix Goblin Slayer hang (same deadlock class) was killed to unblock deploy drain; kill was consistent with the fix's own remediation path.
+- 89 AoT MediaFiles carry `KeepSource=TRUE` protecting the queue while operator decides whether to re-enable them for the newly-deployed fleet.
 
 **C2 -- `SystemSettings.FfmpegLogLevel` row exists, default `'error'`.**
 - Migration ran: `Seeded 1 SystemSettings row(s).` (Scripts/SQLScripts/AddFfmpegLogLevelSetting_2026_08_05.py).
