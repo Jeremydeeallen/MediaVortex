@@ -86,6 +86,10 @@ class JobProcessor:
             PreAudio = self._RunPreEncodeAudio(Mode, EffectiveInputPath, Job, TranscodeAttemptId)
             AudioPreEncodeFacade.PersistSourceLoudness(MediaFile.Id, MediaFile, PreAudio)
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, f"Building {Mode} command...")
+            # directive: ffmpeg-stderr-deadlock -- FfmpegLogLevel is required by CommandComposer for every ProcessingMode (Remux/Quick/AudioFix/SubtitleFix); read fresh per invocation.
+            FfmpegLogLevel = self.QueueService.SystemSettingsRepository.GetSystemSetting('FfmpegLogLevel')
+            if FfmpegLogLevel is None:
+                raise ValueError("FfmpegLogLevel setting missing from SystemSettings. Run Scripts/SQLScripts/AddFfmpegLogLevelSetting_2026_08_05.py")
             CommandResult = Strategy.BuildCommand(
                 Job, MediaFile,
                 Context={
@@ -94,6 +98,7 @@ class JobProcessor:
                     'OutputPath': TargetLocalPath,
                     'FFmpegPath': self.QueueService.FFmpegPath,
                     'FFprobePath': self.QueueService.FFprobePath,
+                    'FfmpegLogLevel': FfmpegLogLevel,
                     'OutputDirectory': LocalDirname(EffectiveInputPath),
                     'TranscodeAttemptId': TranscodeAttemptId,
                     'DemucsPremixPath': (PreAudio or {}).get('DemucsPremixPath'),

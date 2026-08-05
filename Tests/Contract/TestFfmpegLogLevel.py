@@ -54,6 +54,19 @@ class TestMonitorProgressNoSleep(unittest.TestCase):
             "MonitorProgress must not sleep between readline() calls -- the sleep-throttle caused stderr pipe deadlock (AoT 2026-07-30 / 2026-08-05)")
 
 
+# directive: ffmpeg-stderr-deadlock -- C6 regression guard after 2026-08-05 reopen
+class TestJobProcessorContextPopulatesFfmpegLogLevel(unittest.TestCase):
+    """C6: JobProcessor Context passed to Strategy.BuildCommand includes FfmpegLogLevel."""
+
+    def test_jobprocessor_context_has_ffmpeg_log_level(self):
+        SourcePath = Path(__file__).resolve().parent.parent.parent / 'Features' / 'TranscodeJob' / 'Worker' / 'JobProcessor.py'
+        Source = SourcePath.read_text(encoding='utf-8')
+        self.assertIn("'FfmpegLogLevel'", Source,
+            "JobProcessor.py must include 'FfmpegLogLevel' key in the Context dict passed to Strategy.BuildCommand")
+        self.assertIn("GetSystemSetting('FfmpegLogLevel')", Source,
+            "JobProcessor.py must read FfmpegLogLevel fresh from SystemSettingsRepository per invocation")
+
+
 class TestFfmpegLogLevelWhitelist(unittest.TestCase):
     """C5: Whitelist rejection is enforced in the controller module."""
 
