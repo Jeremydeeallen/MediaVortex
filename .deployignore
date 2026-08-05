@@ -28,6 +28,10 @@ __pycache__
 Reports
 Scripts/SQLScripts/backups
 
+# Runtime-generated dirs (never needed on worker; caused larry LXC 218 quota blow-up 2026-08-05)
+cache
+test_remux_sandbox
+
 # JavaScript / node
 node_modules
 

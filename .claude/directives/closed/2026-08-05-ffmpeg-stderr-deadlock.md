@@ -1,7 +1,8 @@
 # Directive: ffmpeg-stderr-deadlock
 
-**Status:** Active -- phase: IMPLEMENTING
-**Reopened:** 2026-08-05 -- Context omission in `JobProcessor.Process` broke Remux/Quick/AudioFix/SubtitleFix paths; C1 verification was for Transcode-only. Fixing.
+**Status:** Closed
+**Closed:** 2026-08-05
+**Reopened:** 2026-08-05 -- Context omission in `JobProcessor.Process` broke Remux/Quick/AudioFix/SubtitleFix paths; C1 verification was for Transcode-only. Fixed 895e33f2; re-verified.
 **Opened:** 2026-08-05
 **Slug:** ffmpeg-stderr-deadlock
 
@@ -157,6 +158,11 @@ Frozen at NEEDS_PLAN.
 
 **Live seam observation:**
 - `ps` on I9 confirms production ffmpeg cmd includes `-loglevel error -stats`. HasLogLevel=True. Wire shape matches C4 expectation.
+
+**Reopen verification (2026-08-05 22:11 UTC):**
+- Fleet redeployed to 895e33f2 (JobProcessor Context fix). All 9 workers report Version=895e33f2.
+- larry-worker-1 Remux Success=TRUE at 22:11:32, wall 2.3 min, Law & Order SVU episode. Pre-fix baseline: 8 consecutive Remux fails "Failed to build Remux command" on same worker (19:09 to 21:07). Post-fix: 1 success + 1 in-flight (Demucs 75%). Bug closed for the strategy path.
+- Contract test `TestJobProcessorContextPopulatesFfmpegLogLevel` added + PASS. Regression guard against future Context omissions.
 
 ## Notes
 
