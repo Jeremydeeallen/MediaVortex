@@ -6,6 +6,26 @@
 
 ### disposition
 
+### media-probe
+
+### [BUG-0086] ContentSignalsService inside probe path blocks throughput on 4K files
+**Date:** 2026-08-06 | **Area:** media-probe / performance
+
+**What breaks:** `MediaProbeBusinessService._ExecuteProbe` calls `ContentSignalsService.ComputeSignals` synchronously per file. That runs two separate ffmpeg passes (signalstats + PySceneDetect) with a hardcoded `_FFMPEG_TIMEOUT_SEC = 600` each. On 4K files (especially non-standard bitrate content in `/mnt/xxx/Videos/_uncategorized/`), signalstats routinely hits the 600s timeout and returns no data. Same class as the removed probe-loudness measurement (BUG deferred from `probe-loudness-remove` directive OOS as tolerated debt category (b)) -- expensive audio/video-pipeline concern in the metadata-extraction path.
+
+**Repro:** Query `SELECT COUNT(*) FROM Logs WHERE LogLevel='WARNING' AND FunctionName='ContentSignalsService' AND Message ILIKE '%signalstats timeout after 600s%' AND Timestamp > NOW() - INTERVAL '24 hours'`. In current logs, this fires every ~2 min against XXX 4K content. Compounds with `ContentClassifier: no rule matched ... res=2160p` -- files stuck NULL AssignedProfile.
+
+**First place to look:**
+- `Features/MediaProbe/MediaProbeBusinessService.py:172-187` -- the ContentSignals try-block inside `_ExecuteProbe`.
+- `Features/ContentSignals/ContentSignalsService.py:14` -- hardcoded `_FFMPEG_TIMEOUT_SEC = 600`.
+- Readers: encoder choice + quality thresholds + held-frame VMAF detection paths.
+
+**Proposed criterion:** "ContentSignalsService no longer called from `MediaProbeBusinessService._ExecuteProbe`. Signal computation moves to either (a) separate `ContentSignalsWorker` on its own queue with `Workers.ContentSignalsEnabled` capability flag, or (b) on-demand at transcode-time. Grep of `ContentSignalsService` in `Features/MediaProbe/` returns 0. Probe throughput on a 25-file batch of 2160p files improves by >=10x post-fix."
+
+**Fix with:** `/t BUG-0086`.
+
+
+
 ### [BUG-0079] Requeue disposition never enqueues a new TranscodeQueue row; .inprogress orphans on disk
 **Date:** 2026-07-02 | **Area:** disposition / transcode-lifecycle
 

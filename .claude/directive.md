@@ -1,7 +1,7 @@
 # Probe Loudness Remove
 
 **Slug:** probe-loudness-remove
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Opened:** 2026-08-06
 **Interrupts:** concurrency-cap-live-reload
 
@@ -77,4 +77,47 @@ NEEDS_STANDARDS_REVIEW -> NEEDS_PLAN -> NEEDS_DOC_PREREAD -> IMPLEMENTING -> VER
 
 ### Promotions
 
-_Populated at DELIVERING. Content promotes into `Features/MediaProbe/probe.feature.md`._
+| Source (directive) | Target (durable) |
+|---|---|
+| Fix rationale: loudness is transcode-owned per SRP | `Features/MediaProbe/probe.feature.md` C3 (rewritten to remove loudness from probe scope + name AudioPreEncodeFacade as sole writer) |
+| Seam S3 (probe -> LoudnessAnalysis) | Deleted from `probe.feature.md` `## Seams` -- no longer exists |
+| ContentSignals-in-probe defect (deferred OOS) | `memory/BUG-INDEX.md` + `memory/KNOWN-ISSUES.md` under BUG-0086 |
+
+## Delivery Report
+
+**STATUS:** Done
+
+**WHAT SHIPPED:**
+- `Features/MediaProbe/MediaProbeBusinessService.py`: -68 lines (EbuR128 try-block + `_MaybeAutoMarkAudioCompleteAtTarget` method deleted)
+- `Tests/Contract/TestProbeNoLoudness.py`: +30 lines (3 assertions locking removal)
+- `Features/MediaProbe/probe.feature.md`: C3 amended, S3 removed
+- `memory/BUG-INDEX.md` + `memory/KNOWN-ISSUES.md`: BUG-0086 filed for deferred ContentSignals-in-probe
+
+**HOW TO USE IT:**
+- Probe path now metadata-only. No operator action.
+- Existing probe values remain (never cleared). New probes leave Source*Lufs untouched.
+- Deploy to fleet (`py deploy/deploy-fleet.py`) to realize full 26,940-file backlog speedup on wakko + dot + mediavortex-workers.
+
+**WHAT YOU NEED TO EXECUTE:**
+- Optionally: `py deploy/deploy-fleet.py` to push commit `6856ac70` to Linux workers. I9 already running new code (restart done).
+
+**CRITERIA VERIFICATION:**
+- C1: `Tests/Contract/TestProbeNoLoudness::test_probe_does_not_import_ebur128` PASS
+- C2: `Tests/Contract/TestProbeNoLoudness::test_probe_does_not_call_maybe_auto_mark_audio_complete` PASS
+- C3: `Tests/Contract/TestProbeNoLoudness::test_transcode_still_writes_source_loudness` PASS
+- C4: `TestPreEncodeSourceLoudness` 5/5 PASS
+- C5: `probe.feature.md` C3 amended + S3 removed (this commit)
+- C6: Live smoke on I9 -- 0 EbuR128 log lines in 5-min post-restart window; 7 probes succeeded in 2 min with no loudness path
+- C7: I9-alone probe rate = 3.5/min (pre-fix baseline was ~1/min/worker). Fleet-wide speedup verified only after deploy propagates to Linux workers.
+
+**DECISIONS I MADE:**
+- Folded criteria into `.claude/directive.md` instead of separate `probe-loudness-remove.feature.md` (KISS -- directive is transient ASK, criteria promote to existing `probe.feature.md` at close)
+- Used R13 override for potential future feature-doc creation (unused; kept for reference)
+- Restarted I9 as smoke-test host (per operator memory: I9 reads source tree directly, no deploy needed)
+- Filed BUG-0086 for ContentSignals-in-probe (deferred OOS as tolerated debt category (b))
+- Skipped adding `[BUG-0086]` criterion into `probe.feature.md` -- avoids scope creep during this directive; `/t BUG-0086` handles it in its own session
+
+**KNOWN GAPS / DEFERRED:**
+- Fleet deploy not run (operator decision)
+- C7 fleet-wide speedup evidence gated on deploy
+- ContentSignals-in-probe (BUG-0086) is the same class of defect and dominates the remaining probe backlog for 4K files

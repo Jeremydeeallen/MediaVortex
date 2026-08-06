@@ -24,7 +24,7 @@ C1. **`ProbeWorker` runs as a capability worker on any worker where `Workers.Pro
 
 C2. **Probe claim: `Resolution IS NULL OR NeedsReprobe = TRUE`, fleet-wide.** No RootFolder scoping. `AND FFprobeFailureCount < MaxFFprobeFailures` gates retries. `AND StorageRootId IS NOT NULL AND RelativePath IS NOT NULL` skips broken rows. Contract test.
 
-C3. **Successful probe writes 12+ metadata columns.** `Resolution, Codec, AudioCodec, VideoBitrateKbps, ResolutionCategory, IsInterlaced, ContainerFormat, AudioLanguages, HasExplicitEnglishAudio, HasForcedSubtitles, SubtitleFormats, DurationMinutes` + chained loudness (`SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, LoudnessMeasuredAt`) via `LoudnessAnalysisService.MeasureAndPersist`. Also clears `NeedsReprobe` and updates `LastProbedFileSize, LastProbedFileMtime`. Contract test.
+C3. **Successful probe writes 12+ metadata columns.** `Resolution, Codec, AudioCodec, VideoBitrateKbps, ResolutionCategory, IsInterlaced, ContainerFormat, AudioLanguages, HasExplicitEnglishAudio, HasForcedSubtitles, SubtitleFormats, DurationMinutes`. Also clears `NeedsReprobe` and updates `LastProbedFileSize, LastProbedFileMtime`. Loudness columns (`SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, LoudnessMeasuredAt`) written by `AudioPreEncodeFacade` at transcode-time -- probe stays metadata-only per SRP. Contract test.
 
 C4. **Failed probe increments `FFprobeFailureCount`, writes `LastFFprobeError` + `LastFFprobeAttemptDate`.** The 12+ metadata columns are NOT overwritten with NULL on failure (preserve last-known-good). Contract test.
 
@@ -52,7 +52,6 @@ Intra-feature. Cross-stage in `ingest.flow.md`.
 |---|---|---|---|---|---|
 | S1 | ProbeWorker -> BusinessService | poll loop | `ProbeFile(Id)` returns `{Success, Message}` | worker handles success (release claim) vs failure (increment count) | contract test |
 | S2 | BusinessService -> `_ExecuteProbe` | after claim | ffprobe subprocess invocation via `Worker.FFprobePath` | parses JSON output, writes columns | existing |
-| S3 | `_ExecuteProbe` -> LoudnessAnalysis | chained per `media-tabs-and-loudness.feature.md` | invokes `LoudnessAnalysisService.MeasureAndPersist(MediaFileId)` | writes 4 loudness columns | existing |
 | S4 | `_ExecuteProbe` -> Classifier | post-flight | invokes `ContentClassifierService.ClassifyAndAssign(Id)` | writes AssignedProfile if NULL | existing (preserved from content-classifier.flow.md ST1-ST7) |
 | S5 | ProbeWorker -> cascade | after write | `QueueManagementBusinessService.RecomputeForFiles([Id])` | recomputes Video/Audio/Container compliance | contract test |
 | S6 | ProbeWorker -> ActiveJobs | claim + release | INSERT `ActiveJobs(JobType='Probe', WorkerName, ...)`; DELETE on release | DrainWorker sees load | existing pattern (per capability-drain-truthfulness) |
