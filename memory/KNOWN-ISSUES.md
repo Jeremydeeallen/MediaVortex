@@ -230,25 +230,6 @@ Detector fires -> HandleJobFailure marks attempt failed -> re-set queue row to P
 
 ---
 
-### [BUG-0088] Post-encode ProcessFileReplacement refuses overwrite on orphaned target
-**Date:** 2026-08-07 | **Area:** file-replacement
-
-**What breaks:** `ProcessFileReplacement` refuses to overwrite an existing file at the transcode target path. When a prior attempt orphaned a `.inprogress` or `-mv.mp4` output at the same target (mid-encode kill, `AudioPolicyUnresolvedError`, drain-then-restart, worker crash), the next attempt for the same MediaFileId fails post-encode with `Post-encode pipeline failed: ProcessFileReplacement returned failure for TranscodeAttempt <n>: Refusing to overwrite existing file at target: <path>`. Refusal is correct fail-loud shape (do not silently overwrite operator content); the miss is pre-flight sweep of same-MediaFileId orphans.
-
-**Repro:** 2026-08-07 last 2 hours, 5 failures: attempts 57441 (American Pickers S2015E22 on I9-2024), 57442 + 57453 (Wizards of Waverly Place S01 on wakko-worker-1), plus 2 more. All logged `Refusing to overwrite existing file at target:` in the same wall-clock window.
-
-**First place to look:**
-- `Features/FileReplacement/*.py` -- `ProcessFileReplacement` refusal path
-- Staging + target directory layout -- what leaves the orphan (mid-encode kill? PostEncode failure? worker restart?)
-- Pre-encode cleanup hook -- does anything sweep target-adjacent orphans for the same MediaFileId before the encode starts?
-- `WorkerService/Main._RecoverFromCrash` -- crash-recovery deletes `ActiveJobs` per I1 but does not sweep `.inprogress` at target paths
-
-**Proposed criterion:** "Every transcode-attempt start includes a pre-flight sweep for stale `.inprogress` / `-mv.mp4` files at target-adjacent locations owned by the same MediaFileId + prior Failed attempt; qualifying orphans are deleted before ffmpeg invocation. Preexisting operator files (different MediaFileId, no prior Failed attempt) still trigger fail-loud refusal + route to operator review (structured disposition, not just an error tail)."
-
-**Fix with:** `/t BUG-0088`.
-
----
-
 ### [BUG-0089] Windows 32,767-char command-line cap on multi-stream files
 **Date:** 2026-08-07 | **Area:** command-composer
 
