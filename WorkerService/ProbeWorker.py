@@ -65,8 +65,7 @@ class ProbeWorker:
 
     def _PollOnce(self):
         BatchSize = self._ResolveIntSetting('ProbeBatchSize', self.DEFAULT_BATCH_SIZE)
-        MaxFailures = MediaProbeBusinessService.MaxFFprobeFailures
-        Batch = self._FetchBatch(BatchSize, MaxFailures)
+        Batch = self._FetchBatch(BatchSize)
         for Row in Batch:
             if self.StopEvent.is_set():
                 break
@@ -79,14 +78,14 @@ class ProbeWorker:
         except (TypeError, ValueError):
             return Default
 
-    def _FetchBatch(self, BatchSize, MaxFailures):
+    def _FetchBatch(self, BatchSize):
         CapFragment, CapParams = BuildClaimPredicate(self.WorkerName, 'ProbeEnabled')
-        # directive: ingest-pipeline-kiss -- probe.C2: fetch on Resolution IS NULL OR NeedsReprobe=TRUE
+        # directive: probe-fail-loud-no-retry-cap -- NeedsReprobe=TRUE = one-shot operator command (consumed each attempt); otherwise probe only when never-attempted (LastFFprobeError IS NULL) and metadata missing. No retry loop.
         Sql = (
             "SELECT mf.Id FROM MediaFiles mf "
-            "WHERE (mf.Resolution IS NULL OR mf.Codec IS NULL OR mf.AudioCodec IS NULL "
-            "       OR mf.NeedsReprobe = TRUE) "
-            "AND COALESCE(mf.FFprobeFailureCount, 0) < %s "
+            "WHERE (mf.NeedsReprobe = TRUE "
+            "       OR (mf.LastFFprobeError IS NULL "
+            "           AND (mf.Resolution IS NULL OR mf.Codec IS NULL OR mf.AudioCodec IS NULL))) "
             "AND mf.StorageRootId IS NOT NULL "
             "AND mf.RelativePath IS NOT NULL "
             f"AND {CapFragment} "
@@ -94,7 +93,7 @@ class ProbeWorker:
             "LIMIT %s "
             "FOR UPDATE OF mf SKIP LOCKED"
         )
-        Params = (MaxFailures,) + CapParams + (BatchSize,)
+        Params = CapParams + (BatchSize,)
         try:
             return self.Db.ExecuteQuery(Sql, Params)
         except Exception as Ex:

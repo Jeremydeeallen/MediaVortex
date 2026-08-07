@@ -8,11 +8,9 @@ from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
 
 
-# directive: mediaprobe-uses-path | # see path.S3
+# directive: probe-fail-loud-no-retry-cap | # see probe.C7 (retry cap removed)
 class MediaProbeBusinessService:
-    """Orchestrates FFprobe metadata extraction with failure tracking."""
-
-    MaxFFprobeFailures = 3  # Files exceeding this are skipped until manually reset
+    """Orchestrates FFprobe metadata extraction. Fail-loud: on failure writes LastFFprobeError + FFprobeFailureCount++; never silently skips."""
 
     # directive: path-class-perfection | # see path.C26
     def __init__(self, RepositoryInstance=None, FileManagerInstance=None, worker: Optional[Worker] = None):
@@ -51,22 +49,12 @@ class MediaProbeBusinessService:
     # ─── Single File Probe ─────────────────────────────────────────────
 
     def ProbeFile(self, MediaFileId: int, Force: bool = False) -> Dict[str, Any]:
-        """Run FFprobe against a single file by ID. Set Force=True to ignore failure limits."""
+        """Run FFprobe against a single file by ID. Force arg preserved for callers; no cap to override (see probe-fail-loud-no-retry-cap)."""
         try:
             MediaFile = self.Repository.GetMediaFileById(MediaFileId)
             if not MediaFile:
                 return {'Success': False, 'Message': f'Media file not found: {MediaFileId}'}
-
-            if not Force and (MediaFile.FFprobeFailureCount or 0) >= self.MaxFFprobeFailures:
-                return {
-                    'Success': False,
-                    'Message': f'File has exceeded max probe failures ({MediaFile.FFprobeFailureCount}/{self.MaxFFprobeFailures}). Use Force=True or reset failures first.',
-                    'FFprobeFailureCount': MediaFile.FFprobeFailureCount,
-                    'LastFFprobeError': MediaFile.LastFFprobeError
-                }
-
             return self._ExecuteProbe(MediaFile)
-
         except Exception as Ex:
             LoggingService.LogException(f"Error probing file ID {MediaFileId}", Ex, "MediaProbeBusinessService", "ProbeFile")
             return {'Success': False, 'Message': f'Error: {str(Ex)}'}
@@ -266,7 +254,7 @@ class MediaProbeBusinessService:
     def GetFailedFiles(self) -> Dict[str, Any]:
         """Get list of permanently failed files."""
         try:
-            FailedFiles = self.Repository.GetPermanentlyFailedFiles(self.MaxFFprobeFailures)
+            FailedFiles = self.Repository.GetPermanentlyFailedFiles()
             FileList = []
             for File in FailedFiles:
                 FileList.append({
@@ -289,7 +277,6 @@ class MediaProbeBusinessService:
         """Get probe status statistics."""
         try:
             Stats = self.Repository.GetProbeStatistics()
-            Stats['MaxFFprobeFailures'] = self.MaxFFprobeFailures
             Stats['Success'] = True
             return Stats
         except Exception as Ex:

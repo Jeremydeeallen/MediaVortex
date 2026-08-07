@@ -54,16 +54,18 @@ class MediaProbeRepository(BaseRepository):
 
     # directive: probe-worker-decoupled -- GetFilesNeedingProbe + GetFilesNeedingProbeCount retired. ProbeWorker inlines its own SKIP-LOCKED fetch in WorkerService/ProbeWorker.py._FetchBatch. No callers of these repository methods remain.
 
-    def GetPermanentlyFailedFiles(self, MaxFailures: int = 3) -> List[MediaFileModel]:
-        """Get files that have exceeded the max failure threshold."""
+    # directive: probe-fail-loud-no-retry-cap | # see probe.C7 -- returns every row with recorded probe failure; MaxFailures arg kept for signature compat, ignored
+    def GetPermanentlyFailedFiles(self, MaxFailures: int = 0) -> List[MediaFileModel]:
         try:
-            Query = f"""SELECT {self._MEDIA_FILE_SELECT_COLS} FROM MediaFiles
-                        WHERE COALESCE(FFprobeFailureCount, 0) >= %s
-                        ORDER BY LastFFprobeAttemptDate DESC"""
-            Rows = self.ExecuteQuery(Query, (MaxFailures,))
+            Query = (
+                f"SELECT {self._MEDIA_FILE_SELECT_COLS} FROM MediaFiles "
+                "WHERE LastFFprobeError IS NOT NULL "
+                "ORDER BY LastFFprobeAttemptDate DESC"
+            )
+            Rows = self.ExecuteQuery(Query)
             return [self._MapRowToMediaFile(Row) for Row in Rows]
         except Exception as Ex:
-            LoggingService.LogException("Error getting permanently failed files", Ex, "MediaProbeRepository", "GetPermanentlyFailedFiles")
+            LoggingService.LogException("Error getting failed files", Ex, "MediaProbeRepository", "GetPermanentlyFailedFiles")
             return []
 
     def GetMediaFileById(self, MediaFileId: int) -> Optional[MediaFileModel]:
@@ -144,26 +146,32 @@ class MediaProbeRepository(BaseRepository):
             LoggingService.LogException(f"Error updating metadata for file ID {MediaFile.Id}", Ex, "MediaProbeRepository", "UpdateMetadata")
             raise
 
+    # directive: probe-fail-loud-no-retry-cap -- failure also clears NeedsReprobe so operator's one-shot command is consumed; prevents re-fetch loop on persistent-fail sources
     def RecordProbeFailure(self, MediaFileId: int, ErrorMessage: str):
-        """Increment FFprobe failure count and record the error."""
         try:
-            Query = """UPDATE MediaFiles SET
-                        FFprobeFailureCount = COALESCE(FFprobeFailureCount, 0) + 1,
-                        LastFFprobeError = %s,
-                        LastFFprobeAttemptDate = %s
-                       WHERE Id = %s"""
+            Query = (
+                "UPDATE MediaFiles SET "
+                "FFprobeFailureCount = COALESCE(FFprobeFailureCount, 0) + 1, "
+                "LastFFprobeError = %s, "
+                "LastFFprobeAttemptDate = %s, "
+                "NeedsReprobe = FALSE "
+                "WHERE Id = %s"
+            )
             self.ExecuteNonQuery(Query, (ErrorMessage, datetime.now(timezone.utc), MediaFileId))
         except Exception as Ex:
             LoggingService.LogException(f"Error recording probe failure for file ID {MediaFileId}", Ex, "MediaProbeRepository", "RecordProbeFailure")
 
+    # directive: probe-fail-loud-no-retry-cap -- operator-facing reset; sets NeedsReprobe=TRUE so the row is picked up next tick
     def ResetProbeFailures(self, MediaFileId: int):
-        """Reset FFprobe failure tracking for a file so it can be retried."""
         try:
-            Query = """UPDATE MediaFiles SET
-                        FFprobeFailureCount = 0,
-                        LastFFprobeError = NULL,
-                        LastFFprobeAttemptDate = NULL
-                       WHERE Id = %s"""
+            Query = (
+                "UPDATE MediaFiles SET "
+                "FFprobeFailureCount = 0, "
+                "LastFFprobeError = NULL, "
+                "LastFFprobeAttemptDate = NULL, "
+                "NeedsReprobe = TRUE "
+                "WHERE Id = %s"
+            )
             self.ExecuteNonQuery(Query, (MediaFileId,))
         except Exception as Ex:
             LoggingService.LogException(f"Error resetting probe failures for file ID {MediaFileId}", Ex, "MediaProbeRepository", "ResetProbeFailures")

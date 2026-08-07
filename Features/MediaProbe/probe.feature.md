@@ -22,7 +22,7 @@ Runs as a dedicated capability worker (`WorkerService/ProbeWorker.py`) with flee
 
 C1. **`ProbeWorker` runs as a capability worker on any worker where `Workers.ProbeEnabled = TRUE`.** Shape mirrors `LanguageWorker`. Loop with configurable poll interval. Contract: `TestProbeWorkerContract.py` asserts capability-gated claim.
 
-C2. **Probe claim: `Resolution IS NULL OR NeedsReprobe = TRUE`, fleet-wide.** No RootFolder scoping. `AND FFprobeFailureCount < MaxFFprobeFailures` gates retries. `AND StorageRootId IS NOT NULL AND RelativePath IS NOT NULL` skips broken rows. Contract test.
+C2. **Probe claim: `NeedsReprobe = TRUE OR (LastFFprobeError IS NULL AND (Resolution IS NULL OR Codec IS NULL OR AudioCodec IS NULL))`, fleet-wide.** No RootFolder scoping. No `FFprobeFailureCount` gate (retry cap deleted 2026-08-07 per `probe-fail-loud-no-retry-cap`). Prior-failed rows skipped forever unless operator explicitly sets `NeedsReprobe = TRUE`. `NeedsReprobe = TRUE` is a one-shot operator command consumed by every attempt (both success + failure clear it). `AND StorageRootId IS NOT NULL AND RelativePath IS NOT NULL` skips broken rows. Contract test: `Tests/Contract/TestProbeFailLoudNoRetryCap.py`.
 
 C3. **Successful probe writes 12+ metadata columns.** `Resolution, Codec, AudioCodec, VideoBitrateKbps, ResolutionCategory, IsInterlaced, ContainerFormat, AudioLanguages, HasExplicitEnglishAudio, HasForcedSubtitles, SubtitleFormats, DurationMinutes`. Also clears `NeedsReprobe` and updates `LastProbedFileSize, LastProbedFileMtime`. Loudness columns (`SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, LoudnessMeasuredAt`) written by `AudioPreEncodeFacade` at transcode-time -- probe stays metadata-only per SRP. No expensive video analysis (signalstats, scenedetect, loudness, or future analog) runs in probe path; probe = ffprobe metadata extraction only. Contract test.
 
@@ -32,9 +32,9 @@ C5. **Cascade before return (writer-owns-cascade).** After probe writes metadata
 
 C6. **Classifier runs after probe write.** `_ExecuteProbe` post-flight invokes `ContentClassifierService.ClassifyAndAssign(Id)` (sticky-guarded). This satisfies pipeline ordering (classifier BEFORE compliance final state) so first-pass compliance sees populated `AssignedProfile`. Contract test.
 
-C7. **`FFprobeFailureCount >= MaxFFprobeFailures` skips claim.** Row is not re-claimed until `NeedsReprobe = TRUE` OR `ResetFailures` runs. Visible on `/Failures`. `MaxFFprobeFailures` in SystemSettings (default 3).
+C7. **`LastFFprobeError IS NOT NULL` skips claim.** Row is not re-claimed until `NeedsReprobe = TRUE` OR `ResetProbeFailures` runs (which sets `NeedsReprobe = TRUE`). Visible on `/Failures`. No count-based cap; no `MaxFFprobeFailures` constant (deleted per `probe-fail-loud-no-retry-cap` 2026-08-07). Fail-loud: every failure surfaces via `LastFFprobeError` immediately, not after N silent tries. Retry cost is now 1 attempt-per-operator-command instead of 3 silent-retries + operator confusion.
 
-C8. **`ResetFailures(Id)` sets `FFprobeFailureCount = 0` + clears `LastFFprobeError` + sets `NeedsReprobe = TRUE`.** Row picked up next ProbeWorker tick. Contract test.
+C8. **`ResetProbeFailures(Id)` sets `FFprobeFailureCount = 0` + clears `LastFFprobeError` + sets `NeedsReprobe = TRUE`.** Row picked up next ProbeWorker tick. `NeedsReprobe` is one-shot: `RecordProbeFailure` clears it on failure (consumed) so a persistent-fail source doesn't re-loop; operator sets it again if they want another try. Contract test.
 
 C9. **FileReplacement re-probe path preserved.** After transcoded output is renamed in place, `Features/FileReplacement/FileReplacementBusinessService._UpdateMediaFilesAfterReplacement` invokes `ProbeFile(Id, Force=True)`. Cascade fires. Contract test.
 

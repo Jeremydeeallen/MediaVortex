@@ -1,7 +1,6 @@
 from typing import List, Dict, Any
 
 from Core.Database.DatabaseService import DatabaseService
-from Features.MediaProbe.MediaProbeBusinessService import MediaProbeBusinessService
 
 
 _HOUSEKEEPING_SUBSTRINGS = [
@@ -32,16 +31,16 @@ class FailuresRepository:
     def __init__(self, Db: DatabaseService = None):
         self.Db = Db or DatabaseService()
 
+    # directive: probe-fail-loud-no-retry-cap -- surface every row with a recorded probe failure; no cap threshold
     def GetProbeFailures(self, Limit: int = 500) -> List[Dict[str, Any]]:
-        Cap = int(MediaProbeBusinessService.MaxFFprobeFailures)
         Rows = self.Db.ExecuteQuery(
             "SELECT Id, FileName, StorageRootId, RelativePath, "
             "       FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate "
             "FROM MediaFiles "
-            "WHERE COALESCE(FFprobeFailureCount, 0) >= %s "
+            "WHERE LastFFprobeError IS NOT NULL "
             "ORDER BY LastFFprobeAttemptDate DESC NULLS LAST "
             "LIMIT %s",
-            (Cap, int(Limit)),
+            (int(Limit),),
         )
         return Rows or []
 
