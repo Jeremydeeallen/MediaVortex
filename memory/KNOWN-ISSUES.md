@@ -230,6 +230,83 @@ Detector fires -> HandleJobFailure marks attempt failed -> re-set queue row to P
 
 ---
 
+### [BUG-0087] AudioFilterEmitter uses per-file scalar channels; libopus rejects 5.1(side) on multi-stream files
+**Date:** 2026-08-07 | **Area:** audio-normalization
+
+**What breaks:** `AudioFilterEmitter._BuildOriginalBlock` reads `Channels = self._ResolveSourceChannels(MediaFile)` -- one scalar from `MediaFile.AudioChannels` -- and uses that value for every output stream. When a source has multiple audio streams with different channel counts (common: eng 5.1(side) + fre 2.0 commentary), the scalar records one stream's channel count and lies about the other. If the scalar is 2 but a stream is 5.1(side), the emitter skips the `-mapping_family:a:{OutputIndex} 1` guard at line 179 and the `aformat=channel_layouts=5.1|7.1` coercion at line 183. libopus refuses `5.1(side)` layout without `mapping_family=1` and crashes: `[libopus @ ...] Invalid channel layout 5.1(side) for specified mapping family -1 / Error while opening encoder`. Windows rc 4294967274, Linux rc 234.
+
+**Repro:** 2026-08-07 12:00 UTC hour: 28 of 31 failed attempts on I9-2024 + wakko-worker-1 + dot-worker-1 exhibit this signature. Sample MediaFileIds: 692097, 692101, 692105 (Vida S02E04 etc); `MediaFiles.AudioChannels=2` on each; source has eng 5.1(side) as second audio stream. FfpmpegCommand shows 3 x libopus outputs, zero `-mapping_family` args.
+
+**First place to look:**
+- `Features/AudioNormalization/AudioFilterEmitter.py:167` -- `_ResolveSourceChannels(MediaFile)` returns per-file scalar
+- `Features/AudioNormalization/AudioFilterEmitter.py:179 + :182` -- guard fires on wrong value
+- `Features/AudioNormalization/Services/AudioStreamProbe.py:29-31` -- ffprobe -show_entries omits `channels`; per-stream truth not surfaced
+- `Features/AudioNormalization/AudioFilterEmitter.py:218` -- `_ResolveSourceChannels` fortress (4 error paths + BUG-0074 fail-loud) defends the wrong abstraction
+- `Tests/Contract/TestAudioChannelsFailLoud.py` -- 5 assertions on the wrong contract
+
+**Proposed criterion:** "For every audio output stream, `AudioFilterEmitter._BuildOriginalBlock` uses the source stream's channel count (from ffprobe `Stream.channels`), not the per-file `MediaFile.AudioChannels` scalar. `AudioStreamProbe.Probe` emits `channels` (int) per stream. The libopus multichannel guard (`-mapping_family:a:N 1` + `aformat=channel_layouts=5.1|7.1`) fires exactly when the per-stream channel count > 2. Contract test: encode a synthetic 2-audio-stream source (2.0 + 5.1) -> both outputs emit correct mapping_family per-stream." Also amends C17 (emit `-ac:N` or strike claim) and C31 (wording "per-stream channel count").
+
+**Fix scope:** (a) `AudioStreamProbe.Probe` adds `channels,channel_layout` to `-show_entries stream=` and includes `'channels': int(S.get('channels') or 0)` in the emitted dict; (b) `_BuildOriginalBlock` reads `Channels = int(Stream.get('channels') or 2)`; (c) delete `_ResolveSourceChannels` + `TestAudioChannelsFailLoud.py`; (d) delete `MaxAudioChannels` column + admission-gate branch (self-admitted dead in `AudioPolicyAdmissionGate.py:127`); (e) amend C17 + C31 wording in `audio-normalization.feature.md`.
+
+**Fix with:** `/t BUG-0087` (in-flight -- directive `bug-0087-audio-per-stream-channels`).
+
+---
+
+### [BUG-0088] Post-encode ProcessFileReplacement refuses overwrite on orphaned target
+**Date:** 2026-08-07 | **Area:** file-replacement
+
+**What breaks:** `ProcessFileReplacement` refuses to overwrite an existing file at the transcode target path. When a prior attempt orphaned a `.inprogress` or `-mv.mp4` output at the same target (mid-encode kill, `AudioPolicyUnresolvedError`, drain-then-restart, worker crash), the next attempt for the same MediaFileId fails post-encode with `Post-encode pipeline failed: ProcessFileReplacement returned failure for TranscodeAttempt <n>: Refusing to overwrite existing file at target: <path>`. Refusal is correct fail-loud shape (do not silently overwrite operator content); the miss is pre-flight sweep of same-MediaFileId orphans.
+
+**Repro:** 2026-08-07 last 2 hours, 5 failures: attempts 57441 (American Pickers S2015E22 on I9-2024), 57442 + 57453 (Wizards of Waverly Place S01 on wakko-worker-1), plus 2 more. All logged `Refusing to overwrite existing file at target:` in the same wall-clock window.
+
+**First place to look:**
+- `Features/FileReplacement/*.py` -- `ProcessFileReplacement` refusal path
+- Staging + target directory layout -- what leaves the orphan (mid-encode kill? PostEncode failure? worker restart?)
+- Pre-encode cleanup hook -- does anything sweep target-adjacent orphans for the same MediaFileId before the encode starts?
+- `WorkerService/Main._RecoverFromCrash` -- crash-recovery deletes `ActiveJobs` per I1 but does not sweep `.inprogress` at target paths
+
+**Proposed criterion:** "Every transcode-attempt start includes a pre-flight sweep for stale `.inprogress` / `-mv.mp4` files at target-adjacent locations owned by the same MediaFileId + prior Failed attempt; qualifying orphans are deleted before ffmpeg invocation. Preexisting operator files (different MediaFileId, no prior Failed attempt) still trigger fail-loud refusal + route to operator review (structured disposition, not just an error tail)."
+
+**Fix with:** `/t BUG-0088`.
+
+---
+
+### [BUG-0089] Windows 32,767-char command-line cap on multi-stream files
+**Date:** 2026-08-07 | **Area:** command-composer
+
+**What breaks:** Files with many audio + subtitle streams push the ffmpeg argv past the Windows `CreateProcess` API cap (32,767 chars). FFmpeg fails immediately with `Transcoding failed with return code 1 / FFmpeg output tail: The command line is too long.` Windows-only (Linux ARG_MAX ~= 128k). Root cause = per-stream metadata + mapping args balloon: each audio track adds `-map`, `-c:a:N`, `-b:a:N`, `-ar:N`, `-filter:a:N` + 3 `-metadata:s:a:N` + `-disposition:a:N` (roughly 400-1500 chars per track including filter chains).
+
+**Repro:** 2026-08-07 12:49 UTC, attempt 57448 on I9-2024, MediaFileId 692215. Single failure so far; class will recur on any file with 3+ audio tracks and heavy filter chains + multi-stream subtitles.
+
+**First place to look:**
+- `Features/TranscodeJob/Emit/CommandComposer.py` -- where argv gets assembled; needs length check + spill-to-argfile branch
+- `Features/AudioNormalization/AudioFilterEmitter.py` -- filter chain generator (loudnorm + alimiter args are the fattest single tokens)
+- Windows-only mitigation: ffmpeg supports `-@ filename` argfile? Check if the current FFmpeg build supports it; if not, use `ffmpeg -f lavfi -filter_complex_script` OR write a batch file wrapper
+
+**Proposed criterion:** "For any ffmpeg invocation whose composed argv exceeds 30,000 characters, the command composer transparently spills argv into a response file (`@argfile.txt` or platform equivalent) and invokes ffmpeg with the file reference. Contract test: synthesize an argv that would exceed 30k, verify the composer spills rather than passing directly. Regression test on MediaFileId 692215 (or a synthetic reproducer) succeeds end-to-end on Windows."
+
+**Fix with:** `/t BUG-0089`.
+
+---
+
+### [BUG-0090] Subtitle streams with codec_name=none crash encode via -map 0:s?
+**Date:** 2026-08-07 | **Area:** subtitle-stream
+
+**What breaks:** `-map 0:s?` includes every subtitle stream unconditionally; the `?` guards "no matching stream", not "matching-but-undecodable stream". When ffprobe reports a subtitle stream with `codec_name=none` (data stream mistagged as subtitle, or codec not registered), ffmpeg crashes on transcode: `[sist#0:23/none @ ...] Decoding requested, but no decoder found for: none / [sost#0:24/mov_text @ ...]`. Linux exit code 234.
+
+**Repro:** 2026-08-07, attempt 57447 on dot-worker-1, MediaFileId 692213. Recurs on any source carrying a subtitle stream with codec_name in {'none', 'unknown', 'null'}.
+
+**First place to look:**
+- `Features/TranscodeJob/Emit/CommandComposer.py` (or wherever `-map 0:s?` is emitted) -- pre-filter subtitle streams via ffprobe before emitting
+- `Features/AudioNormalization/Services/AudioStreamProbe.py` -- reference pattern for per-stream ffprobe filtering (audio side)
+- Complementary: a `SubtitleStreamProbe` analogous to `AudioStreamProbe` that returns only decodable subtitle streams
+
+**Proposed criterion:** "The transcode command emits per-stream subtitle map/codec args only for source subtitle streams whose ffprobe `codec_name` is a decodable value (not in {'none', 'unknown', 'null', ''}); undecodable streams are excluded + logged. Contract test: synthetic source with 2 subtitle streams (1 valid mov_text + 1 codec_name=none) produces argv with `-map 0:s:0` only, no `-map 0:s:1`; test log confirms 1 dropped."
+
+**Fix with:** `/t BUG-0090`.
+
+---
+
 ### uncategorized
 
 *Per-entry area subsection assignment deferred to follow-up directive `migrate-bugs-compliance-deep`. Consult `memory/BUG-INDEX.md` for per-bug area metadata and the operationally-correct active/resolved classification (several entries below still bear `RESOLVED`/`FIXED` annotations in their headers despite living under `## Active`; the INDEX classifies them correctly).*
