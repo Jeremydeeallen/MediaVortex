@@ -972,26 +972,6 @@
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
-    "lumavariancemax": {
-      "data_type": "double precision",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
-    "lumavariancemin": {
-      "data_type": "double precision",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
-    "motionfractionmax": {
-      "data_type": "double precision",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
-    "motionfractionmin": {
-      "data_type": "double precision",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
     "priority": {
       "data_type": "integer",
       "is_generated": "NEVER",
@@ -1006,16 +986,6 @@
       "data_type": "text",
       "is_generated": "NEVER",
       "is_nullable": "NO"
-    },
-    "scenechangeratemax": {
-      "data_type": "double precision",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
-    "scenechangeratemin": {
-      "data_type": "double precision",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
     },
     "source": {
       "data_type": "text",
@@ -1635,16 +1605,6 @@
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
-    "lumavariance": {
-      "data_type": "double precision",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
-    "motionfraction": {
-      "data_type": "double precision",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
     "needsreprobe": {
       "data_type": "boolean",
       "is_generated": "NEVER",
@@ -1692,11 +1652,6 @@
     },
     "resolutioncategory": {
       "data_type": "text",
-      "is_generated": "NEVER",
-      "is_nullable": "YES"
-    },
-    "scenechangeratepermin": {
-      "data_type": "double precision",
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
