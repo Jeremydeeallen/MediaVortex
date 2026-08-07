@@ -4,7 +4,7 @@ from Core.Database.DatabaseService import DatabaseService
 SELECT_ALL_COLUMNS = (
     "Id, Scope, ScopeKey, Enabled, TargetLra, LoudnessTolerance, "
     "EmitTracks, UngainablePolicy, EnableSpeechLanguageDetection, "
-    "LanguageDefault, PreVerticalReNormalizePolicy, MaxAudioChannels, LastUpdated"
+    "LanguageDefault, PreVerticalReNormalizePolicy, LastUpdated"
 )
 
 

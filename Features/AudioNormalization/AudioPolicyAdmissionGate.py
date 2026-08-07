@@ -124,7 +124,6 @@ class AudioPolicyAdmissionGate:
                 PolicyJson=None,
             )
 
-        # directive: transcode-flow-canonical | # see transcode-flow-canonical.C11 -- MaxAudioChannels cap dead under 2-track contract; kept as column for future per-track use.
         Tracks = _GetField(Policy, 'EmitTracks') or []
         if not Tracks:
             return AdmissionDecision(
@@ -179,7 +178,6 @@ class AudioPolicyAdmissionGate:
         for Key in (
             'Scope', 'ScopeKey', 'Enabled', 'TargetLra', 'LoudnessTolerance',
             'EmitTracks', 'UngainablePolicy', 'EnableSpeechLanguageDetection',
-            'MaxAudioChannels',
         ):
             Val = _GetField(Policy, Key)
             if Val is not None:

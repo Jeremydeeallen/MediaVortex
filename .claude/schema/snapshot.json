@@ -268,11 +268,6 @@
       "is_generated": "NEVER",
       "is_nullable": "NO"
     },
-    "maxaudiochannels": {
-      "data_type": "integer",
-      "is_generated": "NEVER",
-      "is_nullable": "NO"
-    },
     "preverticalrenormalizepolicy": {
       "data_type": "text",
       "is_generated": "NEVER",

@@ -20,7 +20,6 @@ CREATE_TABLE_SQL = (
     "EnableSpeechLanguageDetection BOOLEAN NOT NULL DEFAULT FALSE, "
     "LanguageDefault TEXT NOT NULL DEFAULT 'eng', "
     "PreVerticalReNormalizePolicy TEXT NOT NULL DEFAULT 'lazy', "
-    "MaxAudioChannels INTEGER NOT NULL DEFAULT 2, "
     "LastUpdated TIMESTAMP DEFAULT NOW(), "
     "CONSTRAINT audionormalizationconfig_scope_valid "
     "CHECK (Scope IN ('global', 'library', 'folder', 'item')), "
@@ -46,10 +45,10 @@ INSERT_GLOBAL_SQL = (
     "INSERT INTO AudioNormalizationConfig ("
     "Scope, ScopeKey, Enabled, TargetLra, LoudnessTolerance, "
     "EmitTracks, UngainablePolicy, EnableSpeechLanguageDetection, "
-    "LanguageDefault, PreVerticalReNormalizePolicy, MaxAudioChannels"
+    "LanguageDefault, PreVerticalReNormalizePolicy"
     ") VALUES ("
     "'global', NULL, TRUE, NULL, 4.0, "
-    "%s::jsonb, 'adaptive', FALSE, 'eng', 'lazy', 8"
+    "%s::jsonb, 'adaptive', FALSE, 'eng', 'lazy'"
     ") ON CONFLICT DO NOTHING"
 )
 

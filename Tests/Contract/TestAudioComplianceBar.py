@@ -92,19 +92,16 @@ class TestAudioComplianceBar(unittest.TestCase):
         self.assertIsNone(C)
         self.assertEqual(R, 'audio_corrupt_suspect')
 
-    # directive: compliance-symmetry
-    def test_max_audio_channels_lives_on_audionormalizationconfig_not_profiles(self):
+    # directive: bug-0087-followup-maxaudiochannels-delete
+    def test_max_audio_channels_deleted(self):
         Db = DatabaseService()
-        Rows = Db.ExecuteQuery(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name='profiles' AND column_name='maxaudiochannels'"
-        )
-        self.assertEqual(Rows, [], 'Profiles must NOT carry MaxAudioChannels; it lives on AudioNormalizationConfig')
-        Rows2 = Db.ExecuteQuery(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name='audionormalizationconfig' AND column_name='maxaudiochannels'"
-        )
-        self.assertEqual(len(Rows2), 1, 'AudioNormalizationConfig.MaxAudioChannels must exist')
+        for Table in ('profiles', 'audionormalizationconfig'):
+            Rows = Db.ExecuteQuery(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name=%s AND column_name='maxaudiochannels'",
+                (Table,)
+            )
+            self.assertEqual(Rows, [], f'{Table}.MaxAudioChannels must NOT exist')
 
 
 if __name__ == '__main__':

@@ -21,17 +21,17 @@ class TestCrossVerticalLeak(unittest.TestCase):
         for Forbidden in ('AudioCodec', 'AcceptableAudioCodecsCsv', 'ContainerComplianceRules'):
             self.assertNotIn(Forbidden, Source, f'ContainerVertical.py still references {Forbidden}; audio belongs to AudioVertical')
 
-    # directive: compliance-symmetry
-    def test_audiovertical_does_not_read_maxaudiochannels_directly(self):
-        Source = (_REPO / 'Features' / 'AudioNormalization' / 'AudioVertical.py').read_text(encoding='utf-8')
-        self.assertNotIn('MaxAudioChannels', Source,
-                         'AudioVertical must defer channel count check to AudioPolicyAdmissionGate, not read MaxAudioChannels')
-
-    # directive: compliance-symmetry
-    def test_audiopolicyadmissiongate_owns_channel_check(self):
-        Source = (_REPO / 'Features' / 'AudioNormalization' / 'AudioPolicyAdmissionGate.py').read_text(encoding='utf-8')
-        self.assertIn('MaxAudioChannels', Source)
-        self.assertIn('channels_exceed_max', Source)
+    # directive: bug-0087-followup-maxaudiochannels-delete
+    def test_maxaudiochannels_removed_from_audio_vertical_surface(self):
+        for RelPath in (
+            'Features/AudioNormalization/AudioVertical.py',
+            'Features/AudioNormalization/AudioPolicyAdmissionGate.py',
+            'Features/AudioNormalization/AudioNormalizationController.py',
+            'Features/AudioNormalization/Repositories/AudioNormalizationConfigRepository.py',
+            'Features/MediaFile/ComplianceSummaryController.py',
+        ):
+            Source = (_REPO / RelPath).read_text(encoding='utf-8')
+            self.assertNotIn('MaxAudioChannels', Source, f'{RelPath} still references MaxAudioChannels')
 
 
 if __name__ == '__main__':
