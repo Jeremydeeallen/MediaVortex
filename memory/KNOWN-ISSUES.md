@@ -230,28 +230,6 @@ Detector fires -> HandleJobFailure marks attempt failed -> re-set queue row to P
 
 ---
 
-### [BUG-0087] AudioFilterEmitter uses per-file scalar channels; libopus rejects 5.1(side) on multi-stream files
-**Date:** 2026-08-07 | **Area:** audio-normalization
-
-**What breaks:** `AudioFilterEmitter._BuildOriginalBlock` reads `Channels = self._ResolveSourceChannels(MediaFile)` -- one scalar from `MediaFile.AudioChannels` -- and uses that value for every output stream. When a source has multiple audio streams with different channel counts (common: eng 5.1(side) + fre 2.0 commentary), the scalar records one stream's channel count and lies about the other. If the scalar is 2 but a stream is 5.1(side), the emitter skips the `-mapping_family:a:{OutputIndex} 1` guard at line 179 and the `aformat=channel_layouts=5.1|7.1` coercion at line 183. libopus refuses `5.1(side)` layout without `mapping_family=1` and crashes: `[libopus @ ...] Invalid channel layout 5.1(side) for specified mapping family -1 / Error while opening encoder`. Windows rc 4294967274, Linux rc 234.
-
-**Repro:** 2026-08-07 12:00 UTC hour: 28 of 31 failed attempts on I9-2024 + wakko-worker-1 + dot-worker-1 exhibit this signature. Sample MediaFileIds: 692097, 692101, 692105 (Vida S02E04 etc); `MediaFiles.AudioChannels=2` on each; source has eng 5.1(side) as second audio stream. FfpmpegCommand shows 3 x libopus outputs, zero `-mapping_family` args.
-
-**First place to look:**
-- `Features/AudioNormalization/AudioFilterEmitter.py:167` -- `_ResolveSourceChannels(MediaFile)` returns per-file scalar
-- `Features/AudioNormalization/AudioFilterEmitter.py:179 + :182` -- guard fires on wrong value
-- `Features/AudioNormalization/Services/AudioStreamProbe.py:29-31` -- ffprobe -show_entries omits `channels`; per-stream truth not surfaced
-- `Features/AudioNormalization/AudioFilterEmitter.py:218` -- `_ResolveSourceChannels` fortress (4 error paths + BUG-0074 fail-loud) defends the wrong abstraction
-- `Tests/Contract/TestAudioChannelsFailLoud.py` -- 5 assertions on the wrong contract
-
-**Proposed criterion:** "For every audio output stream, `AudioFilterEmitter._BuildOriginalBlock` uses the source stream's channel count (from ffprobe `Stream.channels`), not the per-file `MediaFile.AudioChannels` scalar. `AudioStreamProbe.Probe` emits `channels` (int) per stream. The libopus multichannel guard (`-mapping_family:a:N 1` + `aformat=channel_layouts=5.1|7.1`) fires exactly when the per-stream channel count > 2. Contract test: encode a synthetic 2-audio-stream source (2.0 + 5.1) -> both outputs emit correct mapping_family per-stream." Also amends C17 (emit `-ac:N` or strike claim) and C31 (wording "per-stream channel count").
-
-**Fix scope:** (a) `AudioStreamProbe.Probe` adds `channels,channel_layout` to `-show_entries stream=` and includes `'channels': int(S.get('channels') or 0)` in the emitted dict; (b) `_BuildOriginalBlock` reads `Channels = int(Stream.get('channels') or 2)`; (c) delete `_ResolveSourceChannels` + `TestAudioChannelsFailLoud.py`; (d) delete `MaxAudioChannels` column + admission-gate branch (self-admitted dead in `AudioPolicyAdmissionGate.py:127`); (e) amend C17 + C31 wording in `audio-normalization.feature.md`.
-
-**Fix with:** `/t BUG-0087` (in-flight -- directive `bug-0087-audio-per-stream-channels`).
-
----
-
 ### [BUG-0088] Post-encode ProcessFileReplacement refuses overwrite on orphaned target
 **Date:** 2026-08-07 | **Area:** file-replacement
 
