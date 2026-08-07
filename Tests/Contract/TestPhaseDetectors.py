@@ -40,23 +40,69 @@ class SetupPhaseDetectorTest(unittest.TestCase):
         self.assertFalse(Stuck)
 
 
+# directive: preencode-detector-progress-based-not-wallclock | # see stuck-job-detection.C3
 class PreEncodePhaseDetectorTest(unittest.TestCase):
 
-    def test_fresh_preencode_returns_not_stuck(self):
-        Detector = PreEncodePhaseDetector(_FakeSettingsFactory(20))
-        Stuck, Reason = Detector.Detect(None, None, datetime.now(timezone.utc) - timedelta(minutes=8))
+    def _MakeDetector(self, ProgressRow, Threshold=5):
+        DbManager = MagicMock()
+        DbManager.DatabaseService.ExecuteQuery.return_value = [ProgressRow] if ProgressRow else []
+        return PreEncodePhaseDetector(
+            DatabaseManager=DbManager,
+            SystemSettingsRepositoryFactory=_FakeSettingsFactory(Threshold),
+        )
+
+    def _MakeJob(self):
+        Job = MagicMock()
+        Job.Id = 42
+        Job.StorageRootId = 1
+        Job.RelativePath = 'x/y.mkv'
+        return Job
+
+    def test_fresh_tick_returns_not_stuck(self):
+        Detector = self._MakeDetector({
+            'LastProgressUpdate': datetime.now(timezone.utc) - timedelta(seconds=15),
+            'CurrentPhase': 'Demucs',
+            'ProgressPercent': 47.0,
+        })
+        Stuck, Reason = Detector.Detect(self._MakeJob(), None, None)
         self.assertFalse(Stuck)
-        self.assertIn('in-progress', Reason)
+        self.assertIn('fresh', Reason)
 
-    def test_preencode_over_timeout_returns_stuck(self):
-        Detector = PreEncodePhaseDetector(_FakeSettingsFactory(20))
-        Stuck, Reason = Detector.Detect(None, None, datetime.now(timezone.utc) - timedelta(minutes=21))
+    def test_stale_tick_returns_stuck(self):
+        Detector = self._MakeDetector({
+            'LastProgressUpdate': datetime.now(timezone.utc) - timedelta(minutes=6),
+            'CurrentPhase': 'Demucs',
+            'ProgressPercent': 47.0,
+        })
+        Stuck, Reason = Detector.Detect(self._MakeJob(), None, None)
         self.assertTrue(Stuck)
-        self.assertIn('PreEncode phase stuck', Reason)
+        self.assertIn('PreEncode stuck', Reason)
 
-    def test_preencode_default_20_min(self):
-        Detector = PreEncodePhaseDetector(_FakeSettingsFactory(None))
-        Stuck, _ = Detector.Detect(None, None, datetime.now(timezone.utc) - timedelta(minutes=15))
+    def test_no_progress_row_returns_not_stuck(self):
+        Detector = self._MakeDetector(None)
+        Stuck, Reason = Detector.Detect(self._MakeJob(), None, None)
+        self.assertFalse(Stuck)
+        self.assertIn('No TranscodeProgress row', Reason)
+
+    def test_default_threshold_5min(self):
+        Detector = PreEncodePhaseDetector(
+            DatabaseManager=MagicMock(**{'DatabaseService.ExecuteQuery.return_value': [{
+                'LastProgressUpdate': datetime.now(timezone.utc) - timedelta(minutes=4),
+                'CurrentPhase': 'Demucs',
+                'ProgressPercent': 20.0,
+            }]}),
+            SystemSettingsRepositoryFactory=_FakeSettingsFactory(None),
+        )
+        Stuck, _ = Detector.Detect(self._MakeJob(), None, None)
+        self.assertFalse(Stuck)
+
+    def test_ticker_still_ticking_after_hour_of_demucs(self):
+        Detector = self._MakeDetector({
+            'LastProgressUpdate': datetime.now(timezone.utc) - timedelta(seconds=3),
+            'CurrentPhase': 'Demucs',
+            'ProgressPercent': 82.0,
+        })
+        Stuck, _ = Detector.Detect(self._MakeJob(), None, None)
         self.assertFalse(Stuck)
 
 

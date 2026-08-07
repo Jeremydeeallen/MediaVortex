@@ -16,7 +16,11 @@ class PhaseDetectorRegistry:
         Inspector = ProcessInspector()
         self._Detectors = {
             JobPhase.Setup: SetupPhaseDetector(SystemSettingsRepositoryFactory=SystemSettingsRepositoryFactory),
-            JobPhase.PreEncode: PreEncodePhaseDetector(SystemSettingsRepositoryFactory=SystemSettingsRepositoryFactory),
+            # directive: preencode-detector-progress-based-not-wallclock | # see stuck-job-detection.C3 -- PreEncode detector reads TranscodeProgress.LastProgressUpdate staleness (matches Encoding's frame-advance shape), so it needs DatabaseManager.
+            JobPhase.PreEncode: PreEncodePhaseDetector(
+                DatabaseManager=DatabaseManager,
+                SystemSettingsRepositoryFactory=SystemSettingsRepositoryFactory,
+            ),
             JobPhase.Encoding: EncodingPhaseDetector(
                 DatabaseManager=DatabaseManager,
                 ProcessInspector=Inspector,

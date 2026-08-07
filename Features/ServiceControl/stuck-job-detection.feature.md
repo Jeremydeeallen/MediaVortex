@@ -14,7 +14,7 @@ C1. **`JobPhase` enum drives dispatch.** `Features/ServiceControl/JobPhase.py` =
 
 C2. **`SetupPhaseDetector`** signal = time since phase-entry. Threshold = `SystemSettings.SetupPhaseTimeoutMin` (default 30). Setup covers path-resolve + attempt-record creation, before any subprocess spawns.
 
-C3. **`PreEncodePhaseDetector`** signal = time since phase-entry. Threshold = `SystemSettings.PreEncodePhaseTimeoutMin` (default 20). PreEncode covers the Demucs pipeline (downmix / isolate / premix / measure). No frame-advance check -- ffmpeg has not spawned yet.
+C3. **`PreEncodePhaseDetector`** signal = `TranscodeProgress.LastProgressUpdate` recency. Threshold = `SystemSettings.FrozenProgressThresholdMin` (default 5, shared with Encoding). PreEncode covers the Demucs pipeline (downmix / isolate / premix / measure); every substep ticks LastProgressUpdate via `ProgressReporter` (see audio-normalization.flow.md ST2). Detector kills only when the ticker stops for `Threshold` minutes -- long-duration sources (3h+ movies) survive because they keep ticking; real hangs (subprocess crash, GPU deadlock) die within one detection cycle. Wall-clock `PreEncodePhaseTimeoutMin` retired 2026-08-07 (`preencode-detector-progress-based-not-wallclock`); silent-kill of correctly-running Demucs was the anti-pattern.
 
 C4. **`EncodingPhaseDetector`** signal = `TranscodeProgress.LastFrameAdvance` recency + FFmpeg PID liveness. Threshold = `SystemSettings.FrozenProgressThresholdMin` (default 5). Fires only when Phase='Encoding' -- the ffmpeg subprocess is the only in-scope process here.
 
