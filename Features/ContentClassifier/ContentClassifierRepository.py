@@ -20,8 +20,7 @@ class ContentClassifierRepository:
         Rows = self.Db.ExecuteQuery(
             "SELECT Id, Priority, RuleName, IsActive, AssignProfileName, "
             "       BitrateKbpsMin, BitrateKbpsMax, ResolutionCategory, CodecIn, "
-            "       MotionFractionMin, MotionFractionMax, SceneChangeRateMin, SceneChangeRateMax, "
-            "       LumaVarianceMin, LumaVarianceMax, FolderPathPattern, Description "
+            "       FolderPathPattern, Description "
             "FROM ContentClassificationRules "
             "WHERE IsActive = TRUE "
             "ORDER BY Priority ASC",
@@ -39,12 +38,6 @@ class ContentClassifierRepository:
                 BitrateKbpsMax=R.get("BitrateKbpsMax"),
                 ResolutionCategory=R.get("ResolutionCategory"),
                 CodecIn=R.get("CodecIn"),
-                MotionFractionMin=R.get("MotionFractionMin"),
-                MotionFractionMax=R.get("MotionFractionMax"),
-                SceneChangeRateMin=R.get("SceneChangeRateMin"),
-                SceneChangeRateMax=R.get("SceneChangeRateMax"),
-                LumaVarianceMin=R.get("LumaVarianceMin"),
-                LumaVarianceMax=R.get("LumaVarianceMax"),
                 FolderPathPattern=R.get("FolderPathPattern"),
                 Description=R.get("Description"),
             ))
@@ -71,7 +64,7 @@ class ContentClassifierRepository:
         """Return row dict for the classifier; FilePath is computed via PathStorageRoots, not the renamed column."""
         Rows = self.Db.ExecuteQuery(
             "SELECT Id, StorageRootId, RelativePath, Codec, ResolutionCategory, VideoBitrateKbps, "
-            "       MotionFraction, SceneChangeRatePerMin, LumaVariance, AssignedProfile "
+            "       AssignedProfile "
             "FROM MediaFiles WHERE Id = %s",
             (MediaFileId,),
         )

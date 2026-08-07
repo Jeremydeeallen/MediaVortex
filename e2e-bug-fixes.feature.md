@@ -54,8 +54,6 @@ C15. `SelectPreferredAudioStream: No English audio stream found among 1 stream(s
 
 ### Group H -- deploy-artifact hygiene
 
-C16. `ContentSignalsService: PySceneDetect not installed; SceneChangeRatePerMin will be NULL` drops to zero. Baseline: 5 hits/48h. Add `scenedetect>=0.6.0` to `requirements.txt` per `feedback_all_installs_via_requirements_txt.md`; redeploy Linux workers.
-
 C17. `SchemaChecker: no snapshot at /opt/mediavortex/.claude/schema/snapshot.json` drops to zero. Baseline: 4 hits/48h. Either the snapshot is missing from the Linux worker container image OR `GenerateSchemaSnapshot.py` needs to run at deploy time. Snapshot presence would have caught C4 pre-deploy.
 
 ### Group I -- meta
@@ -275,13 +273,6 @@ Two files, same pattern. If return code is 0 and non-empty Output, the caller al
 **Root cause:** Every non-English audio stream, single or multi, emits the same WARN. Single-`und` is the common case and shouldn't warn.
 **Fix:** Wrap the warning: `if len(streams) > 1: LogWarning(...) else: LogInfo(...)`. One stream = no choice was available; multi-stream + no English = operator may want to investigate.
 **Ripple:** None.
-
-### C16 -- PySceneDetect not installed
-
-**File:** `requirements.txt` + Linux worker deploy
-**Root cause:** `Features/ContentSignals/ContentSignalsService.py` uses PySceneDetect for scene-change-rate; dep missing on the Linux worker venv.
-**Fix:** Add `scenedetect>=0.6.0` to `requirements.txt`. Redeploy Linux workers per `feedback_all_installs_via_requirements_txt.md`.
-**Ripple:** None -- new optional dep; behavior on Windows workers (where it's already installed) unchanged.
 
 ### C21 -- FFmpeg stderr tail capture on non-zero exit
 

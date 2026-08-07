@@ -75,12 +75,6 @@ def _RuleMatches(Rule: ContentClassificationRuleModel, Media: dict, Db: Database
         return False
     if not _MatchesCodec(Media.get("Codec"), Rule.CodecIn):
         return False
-    if not _MatchesNumericRange(Media.get("MotionFraction"), Rule.MotionFractionMin, Rule.MotionFractionMax):
-        return False
-    if not _MatchesNumericRange(Media.get("SceneChangeRatePerMin"), Rule.SceneChangeRateMin, Rule.SceneChangeRateMax):
-        return False
-    if not _MatchesNumericRange(Media.get("LumaVariance"), Rule.LumaVarianceMin, Rule.LumaVarianceMax):
-        return False
     if not _MatchesFolderPattern(Media.get("FilePath"), Rule.FolderPathPattern, Db):
         return False
     return True

@@ -149,23 +149,6 @@ class MediaProbeBusinessService:
                             ProblemEx, "MediaProbeBusinessService", "_ExecuteProbe"
                         )
 
-                # ContentSignals: compute MotionFraction / SceneChangeRatePerMin /
-                # LumaVariance once per file. Failure logged, never blocks probe.
-                # See Features/ContentSignals/content-signals.feature.md.
-                try:
-                    from Features.ContentSignals.ContentSignalsRepository import ContentSignalsRepository
-                    from Features.ContentSignals.ContentSignalsService import ContentSignalsService
-                    SignalsRepo = ContentSignalsRepository()
-                    if not SignalsRepo.HasSignals(MediaFile.Id):
-                        Signals = ContentSignalsService.ComputeSignals(LocalPath)
-                        if Signals is not None:
-                            SignalsRepo.WriteSignals(MediaFile.Id, Signals)
-                except Exception as SignalsEx:
-                    LoggingService.LogException(
-                        f"ContentSignals after probe failed for MediaFileId={MediaFile.Id} -- probe data is saved",
-                        SignalsEx, "MediaProbeBusinessService", "_ExecuteProbe"
-                    )
-
                 # see compliance.flow.md (post-probe recompute; failure must not roll back the probe)
                 try:
                     from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService

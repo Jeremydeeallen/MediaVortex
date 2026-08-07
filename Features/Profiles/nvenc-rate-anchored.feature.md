@@ -145,7 +145,7 @@ Every encoder knob the operator-validated canary names is now held in a column o
 - [x] 5. Deployed to larry workers; CommandBuilder picks up new profile data on next claim (no per-profile code change needed).
 - [ ] 6. Live canary deferred to first operator-triggered encode against one of the new profiles (visible in TranscodeAttempts.FfpmpegCommand).
 - [x] 7. Cross-referenced from `content-classifier.feature.md` seeded rules + `nvenc-profiles.feature.md` follow-ups link is implicit (both live in `Features/Profiles/`).
-- [x] 8. Classifier rules `AnimeByFolder`, `AnimeBySignal`, `LowBitrateLiveAction` flipped IsActive=TRUE once profiles existed (commit d17e2d1).
+- [x] 8. Classifier rules `AnimeByFolder`, `LowBitrateLiveAction` flipped IsActive=TRUE once profiles existed (commit d17e2d1).
 
 ## Scope
 

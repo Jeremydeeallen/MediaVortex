@@ -54,6 +54,17 @@ C8. **Rule references a non-existent ProfileName.** Classifier writes the name; 
 | `'classifier_skip_av1'` | Rule matched codec-skip sentinel; file is already optimal codec |
 | `'operator'` | Manual Scanning-page assignment |
 | `'manual_sql'` | Ad-hoc SQL override |
+| `'bulk_tier_by_root_2026_07_23'` / `'series'` / `'bulk-tier2-already-transcoded-2026-07-21'` | Historical bulk-script assignments; dominate assignment volume |
+
+## Design Decisions
+
+**DD1. Rule matchers are metadata-only.** Rules match against ffprobe-derived columns (`Codec`, `ResolutionCategory`, `VideoBitrateKbps`, `AudioCodec`) plus operator taxonomy (`FolderPathPattern`). No content-analysis inputs (motion, scene-change rate, luma variance) are supported. Adding one would require a new vertical + operator-visible cost/benefit case (see DD2).
+
+**DD2. Content-based classification was removed.** Prior implementation ran `ffmpeg signalstats` + PySceneDetect inside the probe path per file (60-600s cost per file), writing `MediaFiles.MotionFraction / SceneChangeRatePerMin / LumaVariance`. Sole consumer was one rule (`AnimeBySignal`, priority 40) that produced the same output profile as `AnimeByFolder` (priority 30, folder pattern `%Anime%`). Sonarr's default anime placement covered the folder rule. Deletion removed ~200 lines of Python + 9 DB columns + one dep (`scenedetect`) with zero classification-outcome change on the current library.
+
+**DD3. Classifier assigns ~0.6% of profiles.** DB snapshot: bulk scripts (`bulk_tier_by_root_2026_07_23` = 40,283, `series` = 7,638, `bulk-tier2-already-transcoded-2026-07-21` = 758) + operator manual (3,602) dominate. Classifier is a small fallback surface for the long tail; it is not the primary assignment path.
+
+**DD4. Anime classification stays folder-pattern-based.** `AnimeByFolder %Anime%` is the sole anime rule. Any future content-based classification proposal must revisit DD2 evidence.
 
 ## What this feature does NOT own
 

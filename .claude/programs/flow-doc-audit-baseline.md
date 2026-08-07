@@ -17,7 +17,6 @@ After this directive closes (`Status: Closed -- Success`), this file may be dele
 | 5 | `Docs/bottleneck-analysis.flow.md` | no | no |
 | 6 | `Features/AudioCompletion/audio-completion.flow.md` | no | no |
 | 7 | `Features/ContentClassifier/content-classifier.flow.md` | no | no |
-| 8 | `Features/ContentSignals/content-signals.flow.md` | no | no |
 | 9 | `Features/FileScanning/FileScanning.flow.md` | no | no |
 | 10 | `Features/LoudnessAnalysis/linear-loudnorm.flow.md` | no | no |
 | 11 | `Features/Optimization/Optimization.flow.md` | no | no |

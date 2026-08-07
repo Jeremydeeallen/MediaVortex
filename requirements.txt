@@ -16,7 +16,6 @@ requests
 
 # Video transcoding (FFmpeg integration)
 ffmpeg-python>=0.2.0
-scenedetect>=0.6.0
 
 # Speech-language detection (post-Whisper transcript -> language code)
 langdetect>=1.0.9
