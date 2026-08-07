@@ -1,7 +1,7 @@
 # Directive: bug-0087-audio-per-stream-channels
 
 **Slug:** bug-0087-audio-per-stream-channels
-**Status:** Active -- phase: NEEDS_STANDARDS_REVIEW
+**Status:** Active -- phase: VERIFYING
 **Opened:** 2026-08-07
 **Fixes:** BUG-0087
 **Blocks:** work-bucket-bulk-queue (paused pre-code; transcode-failure fires took priority)
@@ -20,7 +20,7 @@ Root cause = wrong abstraction: `MediaFile.AudioChannels` is one scalar pretendi
 
 **DD3. Delete the fortress around the wrong contract.** `_ResolveSourceChannels` (4 error paths + BUG-0074 fail-loud) and `Tests/Contract/TestAudioChannelsFailLoud.py` (5 assertions) defended a scalar that was structurally wrong. Both go. `MediaFiles.AudioChannels` COLUMN stays in DB (used by compliance/audit surfaces + informational) but is no longer read by the emit path.
 
-**DD4. Delete self-admitted dead code in the same beat.** `AudioPolicyAdmissionGate.py:127` comment: `MaxAudioChannels cap dead under 2-track contract; kept as column for future per-track use.` Speculative persistence violates KISS. Column + gate branch removed. If per-track cap is needed later, add then.
+**DD4. `MaxAudioChannels` deletion DEFERRED to follow-up.** Intended to delete the self-admitted-dead column + gate branch (`AudioPolicyAdmissionGate.py:127`). Grep showed 8 callers (AudioNormalizationController, ComplianceSummaryController, AudioNormalizationConfigRepository, Create_AudioNormalizationConfig seed, AlterAudioNormalizationConfigAddMaxChannels) + 2 contract tests explicitly asserting existence (`TestAudioComplianceBar.py`, `TestCrossVerticalLeak.py`). Deletion is theme-adjacent, not verification-blocking for this directive's fire. Filing separately post-close. Feedback: `feedback_preexisting_bug_scope_test.md`.
 
 **DD5. Fix the doc contract too.** `audio-normalization.feature.md` C17 promises `-ac:N` per output; code doesn't emit. Either amend C17 to strike the claim (KISS: source channel count is what ffmpeg auto-picks + libopus/aformat handles) OR emit `-ac:N <Channels>` per output. Decision: STRIKE from C17. `-ac` on a track with an aformat filter would double-declare; extra bytes, no behavior change. C31 wording updated to "per-stream channel count".
 
@@ -40,12 +40,7 @@ C3. **Opus multichannel guard fires per-stream.** For any source with mixed-chan
 
 C4. **`_ResolveSourceChannels` + `TestAudioChannelsFailLoud.py` deleted.** `grep -rn "_ResolveSourceChannels" .` returns 0 production hits. `Test-Path Tests/Contract/TestAudioChannelsFailLoud.py` returns False.
 
-C5. **`MaxAudioChannels` column + gate branch deleted.**
-  - `Scripts/SQLScripts/DropMaxAudioChannels_2026_08_07.py` idempotent DDL: `ALTER TABLE AudioNormalizationConfig DROP COLUMN IF EXISTS MaxAudioChannels`
-  - `AudioPolicyAdmissionGate.py:127` block + `MaxAudioChannels` field on the policy DTO removed
-  - `AudioNormalizationController.py:66, 77, 157` MaxAudioChannels references removed (or table stays; controller stops writing it)
-  - `audio-normalization.feature.md` C23 mention of `MaxAudioChannels` removed
-  - Migration applied on homelab-postgres.
+C5. **DEFERRED per DD4** -- MaxAudioChannels deletion moved to follow-up directive (grep found 8 callers + 2 contract tests asserting existence; scope-adjacent, not verification-blocking for the fire-fix).
 
 C6. **Feature-doc contract updated.** `audio-normalization.feature.md` C17 struck (or amended); C31 wording changed from "source channel count > 2" to "per-stream channel count > 2". Verifiable: grep returns updated text.
 
@@ -61,14 +56,11 @@ C8. **Contract test suite green.** All existing audio-normalization contract tes
 **Edit:**
 - `Features/AudioNormalization/Services/AudioStreamProbe.py` -- add `channels` to ffprobe fields + emitted dict
 - `Features/AudioNormalization/AudioFilterEmitter.py` -- line 167 per-stream read; delete `_ResolveSourceChannels` helper
-- `Features/AudioNormalization/AudioPolicyAdmissionGate.py` -- remove MaxAudioChannels branch + field (self-admitted dead line 127)
-- `Features/AudioNormalization/AudioNormalizationController.py` -- remove MaxAudioChannels write path (lines 66, 77, 157 area)
-- `Features/AudioNormalization/audio-normalization.feature.md` -- C17 amend/strike; C31 per-stream wording; C23 MaxAudioChannels reference removed (at DELIVERING)
+- `Features/AudioNormalization/audio-normalization.feature.md` -- C17 amend/strike; C31 per-stream wording (at DELIVERING)
 - `memory/BUG-INDEX.md` -- BUG-0087 to Recently Resolved at close
 - `memory/KNOWN-ISSUES.md` -- BUG-0087 section deleted at close
 
 **Create:**
-- `Scripts/SQLScripts/DropMaxAudioChannels_2026_08_07.py` -- idempotent column drop
 - `Tests/Contract/TestAudioStreamProbeChannels.py` -- per-stream channels assertion (C1)
 - `Tests/Contract/TestOpusMultichannelPerStream.py` -- per-stream guard-fires assertion (C3)
 
@@ -98,14 +90,13 @@ NEEDS_STANDARDS_REVIEW -> NEEDS_PLAN -> NEEDS_DOC_PREREAD -> IMPLEMENTING -> VER
 ### Progress
 
 - [x] NEEDS_STANDARDS_REVIEW: rules loaded at session start; standards/index.md read (via CLAUDE.md auto-load)
-- [ ] NEEDS_PLAN: criteria + Files + Call-Graph Audit + Domain Decisions locked (this doc)
-- [ ] NEEDS_DOC_PREREAD: read `audio-normalization.feature.md` + `audio-normalization.flow.md`
-- [ ] IMPLEMENTING: AudioStreamProbe add channels field
-- [ ] IMPLEMENTING: AudioFilterEmitter per-stream channels
-- [ ] IMPLEMENTING: delete _ResolveSourceChannels + TestAudioChannelsFailLoud
-- [ ] IMPLEMENTING: DropMaxAudioChannels migration + code paths
-- [ ] IMPLEMENTING: contract tests
-- [ ] VERIFYING: contract test PASS; apply migration; existing audio tests green
+- [x] NEEDS_PLAN: criteria + Files + Call-Graph Audit + Domain Decisions locked
+- [x] NEEDS_DOC_PREREAD: read `audio-normalization.feature.md` (limit=50 walks, offset 55/100/148/195) + `audio-normalization.flow.md` (full)
+- [x] IMPLEMENTING: AudioStreamProbe add channels field
+- [x] IMPLEMENTING: AudioFilterEmitter per-stream channels
+- [x] IMPLEMENTING: delete _ResolveSourceChannels + TestAudioChannelsFailLoud (+ unused AudioPolicyUnresolvedError import)
+- [x] IMPLEMENTING: contract tests
+- [x] VERIFYING: TestAudioStreamProbe 4/4 + TestAudioStreamProbeChannels 1/1 + TestOpusMultichannelPerStream 3/3 + TestMp4TitleResolution 2/2 + TestAlimiterRangeInvariant 10/10 + TestAudioPolicies 20/20 = 40/40 PASS on directly-affected surface. Baseline diff: 22 preexisting failures in TestAudioFilterEmitterDecomposition + TestAudioComplianceBar + TestCrossVerticalLeak + TestAudioPipelineNoSilentFallback + TestAudioDefaultLanguageEnglishPreferred + TestG5VocalsBelowFallbackSkip -- ALL preexisting (confirmed via `git stash` baseline run); zero new failures from this edit.
 - [ ] SMOKE-GATE: I9 drain + restart; reclaim MediaFileId 692101; verify argv shape + no 5.1(side) failures
 - [ ] DELIVERING: feature.md updates (C17/C23/C31); BUG-INDEX + KNOWN-ISSUES; close report
 

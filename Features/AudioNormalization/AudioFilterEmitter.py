@@ -2,7 +2,6 @@
 from typing import List, Optional
 
 from Features.AudioNormalization.AudioDispositionResolver import AudioDispositionResolver
-from Features.AudioNormalization.AudioStrategyResult import AudioPolicyUnresolvedError
 from Features.AudioNormalization.LanguageDetector import LanguageDetector
 from Features.AudioNormalization.Repositories.AudioComplianceRulesRepository import AudioComplianceRulesRepository
 
@@ -162,9 +161,9 @@ class AudioFilterEmitter:
             return False
         return True
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.ST3
+    # directive: bug-0087-audio-per-stream-channels | # see audio-normalization.ST3
     def _BuildOriginalBlock(self, MediaFile, Stream, Language, StreamIdx, OutputIndex, IsDefault, R):
-        Channels = self._ResolveSourceChannels(MediaFile)
+        Channels = max(1, min(8, int(Stream.get('channels') or 2)))
         Bitrate = max(MIN_TRANSPARENT_KBPS_PER_CH, int(R['Track0BitratePerChannelKbps']), int(R['Track0MinPerChannelKbps'])) * Channels
         TargetLufs = float(R['TargetIntegratedLufs'])
         TargetTp = float(R['TargetTruePeakDbtp'])
@@ -213,32 +212,6 @@ class AudioFilterEmitter:
             f'-metadata:s:a:{OutputIndex}', f'"title={Label}"',
             f'-metadata:s:a:{OutputIndex}', f'"handler_name={Label} ({Language})"',
         ]
-
-    # directive: audio-dialog-boost-real | # see audio-normalization.ST3
-    def _ResolveSourceChannels(self, MediaFile):
-        Channels = _GetField(MediaFile, 'AudioChannels')
-        MediaFileId = _GetField(MediaFile, 'Id')
-        if Channels is None or (isinstance(Channels, str) and not Channels.strip()):
-            raise AudioPolicyUnresolvedError(
-                'AudioChannelsMissing',
-                f'MediaFile.Id={MediaFileId} has AudioChannels=NULL; cannot emit audio without known source channel layout. Route to operator review; trigger re-probe. See BUG-0074.',
-                None,
-            )
-        try:
-            ChannelsInt = int(Channels)
-        except (TypeError, ValueError):
-            raise AudioPolicyUnresolvedError(
-                'AudioChannelsInvalid',
-                f'MediaFile.Id={MediaFileId} has AudioChannels={Channels!r} (unparseable). See BUG-0074.',
-                None,
-            )
-        if ChannelsInt <= 0:
-            raise AudioPolicyUnresolvedError(
-                'AudioChannelsInvalid',
-                f'MediaFile.Id={MediaFileId} has AudioChannels={ChannelsInt} (non-positive). See BUG-0074.',
-                None,
-            )
-        return max(1, min(8, ChannelsInt))
 
     # directive: audio-dialog-boost-real | # see audio-normalization.ST3
     def _PickDefaultLanguage(self, AudioStreams, StreamLanguageMap, LibraryDefault):

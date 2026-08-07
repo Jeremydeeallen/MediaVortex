@@ -27,7 +27,7 @@ class AudioStreamProbe:
             return []
         Cmd = [
             Ffprobe, '-v', 'error', '-select_streams', 'a',
-            '-show_entries', 'stream=index:stream_tags=language:stream_disposition=default',
+            '-show_entries', 'stream=index,channels,channel_layout:stream_tags=language:stream_disposition=default',
             '-of', 'json', LocalSourcePath,
         ]
         try:
@@ -50,6 +50,8 @@ class AudioStreamProbe:
         return [
             {
                 'index': AudioOnlyIdx,
+                'channels': int(S.get('channels') or 0),
+                'channel_layout': S.get('channel_layout') or '',
                 'tags': S.get('tags') or {},
                 'disposition': S.get('disposition') or {},
             }
