@@ -12,6 +12,7 @@ class BucketKey:
     Title: str
     Subtitle: str
     Icon: str
+    AllowsBulkQueue: bool = False
 
     @classmethod
     # directive: work-transcode-unified
@@ -28,6 +29,7 @@ _REGISTRY = (
         Title='Transcode',
         Subtitle='Files needing full transcode -- video + audio + container.',
         Icon='fas fa-film',
+        AllowsBulkQueue=True,
     ),
     BucketKey(
         UrlKey='Remux',
@@ -36,6 +38,7 @@ _REGISTRY = (
         Title='Remux',
         Subtitle='Files needing container fix (audio is also normalized through the same emitter).',
         Icon='fas fa-box',
+        AllowsBulkQueue=True,
     ),
     BucketKey(
         UrlKey='Audio',
@@ -44,6 +47,7 @@ _REGISTRY = (
         Title='Audio',
         Subtitle='Files where audio is the only blocker; container + video stream-copy through.',
         Icon='fas fa-volume-up',
+        AllowsBulkQueue=True,
     ),
     BucketKey(
         UrlKey='Compliant',

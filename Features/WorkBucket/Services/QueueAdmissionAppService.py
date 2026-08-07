@@ -64,7 +64,43 @@ class QueueAdmissionAppService:
             Errored=Counts['error'],
         )
 
-    # directive: transcode-flow-canonical -- SSOT for AddJobToQueue result -> outcome bucket mapping; reused by AdmitOne + AdmitSeries
+    # directive: work-bucket-bulk-queue | # see work-bucket.S6 -- bulk over one (bucket, storage-root); reuses AddJobToQueue per-file
+    def AdmitBulk(self, Bucket: BucketKey, StorageRootId: int, QualityTier: int = None) -> AdmissionResult:
+        Rows = self.Db.ExecuteQuery(
+            "SELECT mf.Id FROM MediaFiles mf "
+            "WHERE mf.WorkBucket = %s "
+            "  AND mf.StorageRootId = %s",
+            (Bucket.BucketName, StorageRootId),
+        )
+        Total = len(Rows)
+        Counts = {'queued': 0, 'already_queued': 0, 'skipped': 0, 'admission_deferred': 0, 'error': 0}
+        from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+        Svc = QueueManagementBusinessService()
+        for Row in Rows:
+            MediaFileId = int(Row['id'])
+            R = Svc.AddJobToQueue(
+                MediaFileId=MediaFileId,
+                ProcessingMode=Bucket.ProcessingMode,
+                ForceAdd=True,
+                QualityTier=QualityTier,
+            )
+            Status = self._ClassifyAddJobResult(R)
+            Counts[Status] += 1
+        LoggingService.LogInfo(
+            f"Admit bulk: bucket={Bucket.BucketName} storage_root={StorageRootId} tier={QualityTier} total={Total} queued={Counts['queued']} already={Counts['already_queued']} skipped={Counts['skipped']} deferred={Counts['admission_deferred']} error={Counts['error']}",
+            "QueueAdmissionAppService",
+            "AdmitBulk",
+        )
+        return AdmissionResult(
+            Inserted=Counts['queued'],
+            AlreadyQueued=Counts['already_queued'],
+            Total=Total,
+            Skipped=Counts['skipped'],
+            AdmissionDeferred=Counts['admission_deferred'],
+            Errored=Counts['error'],
+        )
+
+    # directive: transcode-flow-canonical -- SSOT for AddJobToQueue result -> outcome bucket mapping; reused by AdmitOne + AdmitSeries + AdmitBulk
     def _ClassifyAddJobResult(self, R: dict) -> str:
         if R.get('AlreadyQueued'):
             return 'already_queued'

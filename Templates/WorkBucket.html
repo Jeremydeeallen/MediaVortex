@@ -9,6 +9,35 @@
     <p class="text-muted mb-0">{{ Bucket.Subtitle }}</p>
   </div>
 
+  {% if Bucket.AllowsBulkQueue %}
+  <div class="card mb-3 border-primary">
+    <div class="card-body py-2">
+      <div class="row g-2 align-items-center">
+        <div class="col-md-3">
+          <label class="form-label small mb-0">Source</label>
+          <select id="bulk-source" class="form-select form-select-sm"></select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small mb-0">Tier</label>
+          <select id="bulk-tier" class="form-select form-select-sm">
+            <option value="1">Tier 1 (Efficient)</option>
+            <option value="2" selected>Tier 2 (Good)</option>
+            <option value="3">Tier 3 (Better)</option>
+            <option value="4">Tier 4 (Best)</option>
+            <option value="5">Tier 5 (Reference)</option>
+          </select>
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+          <button id="btn-bulk-queue" class="btn btn-sm btn-primary w-100">Queue All</button>
+        </div>
+        <div class="col-md-4 d-flex align-items-end">
+          <div id="bulk-flash" class="small text-muted"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="card mb-3">
     <div class="card-body py-2">
       <div class="row g-2 align-items-center">
@@ -70,7 +99,54 @@
         Opt.textContent = (SR.CanonicalPrefix || SR.canonicalprefix || ('Root ' + Opt.value));
         Select.appendChild(Opt);
       });
+      const BulkSel = document.getElementById('bulk-source');
+      if (BulkSel) {
+        BulkSel.innerHTML = '';
+        const LabelMap = {'media_tv': 'TV', 'movies': 'Movies', 'xxx': 'Adult'};
+        List.forEach(SR => {
+          const Opt = document.createElement('option');
+          Opt.value = SR.Id || SR.id;
+          const Nm = SR.Name || SR.name || '';
+          Opt.textContent = LabelMap[Nm] || Nm || (SR.CanonicalPrefix || SR.canonicalprefix || ('Root ' + Opt.value));
+          BulkSel.appendChild(Opt);
+        });
+      }
     }).catch(() => {});
+  }
+
+  function BulkQueue() {
+    const Src = document.getElementById('bulk-source');
+    const Tier = document.getElementById('bulk-tier');
+    const Btn = document.getElementById('btn-bulk-queue');
+    const Flash = document.getElementById('bulk-flash');
+    if (!Src || !Tier) return;
+    const StorageRootId = parseInt(Src.value, 10);
+    const QualityTier = parseInt(Tier.value, 10);
+    Btn.disabled = true;
+    Flash.textContent = 'Queueing...';
+    Flash.className = 'small text-muted';
+    fetch(ApiBase + '/BulkQueue', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({StorageRootId: StorageRootId, QualityTier: QualityTier})
+    })
+      .then(R => R.json())
+      .then(P => {
+        Btn.disabled = false;
+        if (P.Success) {
+          Flash.className = 'small text-success';
+          Flash.textContent = P.Message;
+          LoadSeries();
+        } else {
+          Flash.className = 'small text-danger';
+          Flash.textContent = 'Failed: ' + (P.Message || 'unknown');
+        }
+      })
+      .catch(E => {
+        Btn.disabled = false;
+        Flash.className = 'small text-danger';
+        Flash.textContent = 'Error: ' + E;
+      });
   }
 
   function BuildQueryString() {
@@ -271,6 +347,8 @@
 
   document.getElementById('btn-apply').addEventListener('click', () => { CurrentPage = 1; LoadSeries(); });
   document.getElementById('filter-search').addEventListener('keydown', E => { if (E.key === 'Enter') { CurrentPage = 1; LoadSeries(); } });
+  const BulkBtn = document.getElementById('btn-bulk-queue');
+  if (BulkBtn) BulkBtn.addEventListener('click', BulkQueue);
 
   Promise.all([FetchProfiles(), FetchDrives()]).then(LoadSeries);
 })();

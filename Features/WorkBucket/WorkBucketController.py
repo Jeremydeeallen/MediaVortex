@@ -198,12 +198,54 @@ class WorkBucketController:
                 LoggingService.LogException("list_active_profiles failed", Ex, "WorkBucketController", "list_active_profiles")
                 return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
 
+        @self.Blueprint.route('/api/Work/<url_key>/BulkQueue', methods=['POST'])
+        # directive: work-bucket-bulk-queue | # see work-bucket.C11
+        def bulk_queue(url_key):
+            try:
+                Bucket = BucketKey.FromUrlKey(url_key)
+                if Bucket is None:
+                    return jsonify({'Success': False, 'Message': f"Unknown bucket: {url_key}", 'Data': {}}), 404
+                if not Bucket.AllowsBulkQueue:
+                    return jsonify({'Success': False, 'Message': f"Bucket {url_key} does not support bulk-queue", 'Data': {}}), 400
+                Body = request.get_json(force=True, silent=True) or {}
+                try:
+                    StorageRootId = int(Body.get('StorageRootId'))
+                except (TypeError, ValueError):
+                    return jsonify({'Success': False, 'Message': 'StorageRootId (int) required', 'Data': {}}), 400
+                QualityTier = Body.get('QualityTier')
+                if QualityTier is not None and QualityTier != '':
+                    try:
+                        QualityTier = int(QualityTier)
+                    except (TypeError, ValueError):
+                        return jsonify({'Success': False, 'Message': f"QualityTier must be int; got {QualityTier!r}", 'Data': {}}), 400
+                else:
+                    QualityTier = None
+                Result = self.QueueService.AdmitBulk(Bucket, StorageRootId, QualityTier=QualityTier)
+                return jsonify({
+                    'Success': True,
+                    'Message': f"Queued {Result.Inserted} (already {Result.AlreadyQueued}, skipped {Result.Skipped}, deferred {Result.AdmissionDeferred}, errored {Result.Errored}) of {Result.Total}",
+                    'Data': {
+                        'Inserted': Result.Inserted,
+                        'AlreadyQueued': Result.AlreadyQueued,
+                        'Skipped': Result.Skipped,
+                        'AdmissionDeferred': Result.AdmissionDeferred,
+                        'Errored': Result.Errored,
+                        'Total': Result.Total,
+                    },
+                })
+            except Exception as Ex:
+                LoggingService.LogException(f"bulk_queue failed for {url_key}", Ex, "WorkBucketController", "bulk_queue")
+                return jsonify({'Success': False, 'Message': str(Ex), 'Data': {}}), 500
+
         @self.Blueprint.route('/api/StorageRoots', methods=['GET'])
-        # directive: work-transcode-unified | # see work-bucket.C6
+        # directive: work-bucket-bulk-queue | # see work-bucket.C6
         def list_storage_roots():
             try:
-                from Core.Path.PathStorageRoots import GetStorageRoots
-                Roots = [{'Id': R['Id'], 'CanonicalPrefix': R['CanonicalPrefix']} for R in GetStorageRoots()]
+                from Core.Database.DatabaseService import DatabaseService
+                Rows = DatabaseService().ExecuteQuery(
+                    "SELECT Id, Name, CanonicalPrefix FROM StorageRoots ORDER BY Id"
+                )
+                Roots = [{'Id': int(R['id']), 'Name': R['name'], 'CanonicalPrefix': R['canonicalprefix']} for R in (Rows or [])]
                 return jsonify({'Success': True, 'Message': 'OK', 'Data': {'StorageRoots': Roots}})
             except Exception as Ex:
                 LoggingService.LogException("list_storage_roots failed", Ex, "WorkBucketController", "list_storage_roots")

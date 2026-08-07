@@ -17,6 +17,7 @@ Renders `/Work/Transcode`, `/Work/Remux`, `/Work/Audio`, `/Work/Compliant`, and 
 | W5 | Clear the profile on a series | dropdown -> blank | DELETE `/api/Work/<bucket>/Series/<sid>/Profile` | `SeriesProfileService.ClearProfile` (`Features/WorkBucket/Services/SeriesProfileService.py`) |
 | W6 | Queue every file in a series | Queue-all button | POST `/api/Work/<bucket>/Series/<sid>/Queue` | `QueueAdmissionAppService.AdmitSeries` (`Features/WorkBucket/Services/QueueAdmissionAppService.py`) |
 | W7 | Queue a single file | per-row Queue button | POST `/api/Work/<bucket>/Queue/<id>` | `QueueAdmissionAppService.AdmitOne` (`Features/WorkBucket/Services/QueueAdmissionAppService.py`) |
+| W8 | Bulk-queue every file in a source library at a chosen tier | top-of-page bulk section (Source + Tier + Queue All) | POST `/api/Work/<bucket>/BulkQueue` | `QueueAdmissionAppService.AdmitBulk` (`Features/WorkBucket/Services/QueueAdmissionAppService.py`) |
 
 ## Success Criteria
 
@@ -40,6 +41,8 @@ C9. `AdmitSeries` returns a per-outcome tally: `Inserted`, `AlreadyQueued`, `Ski
 
 C10. Every admission (single-file + bulk) routes through `Features/TranscodeQueue/QueueManagementBusinessService.AddJobToQueue`. Repository-layer refusal policies are forbidden -- policy lives at the app-service, data access lives at the repository (SRP). Verifiable: `grep -n "return 0" Features/TranscodeQueue/TranscodeQueueRepository.py` returns zero lines inside `SaveTranscodeQueueItem`.
 
+C11. **Bulk-queue by source library + tier.** `POST /api/Work/<bucket>/BulkQueue` accepts `{StorageRootId: int, QualityTier: int}` and admits every `MediaFiles` row where `WorkBucket = <bucket> AND StorageRootId = <source>` via `AdmitBulk` -> per-file `AddJobToQueue(QualityTier=<tier>)`. Route refuses (HTTP 400) when `Bucket.AllowsBulkQueue` is False (Compliant + Unclassified). Returns the same per-outcome tally shape as `AdmitSeries` (C9). Verifiable: `Tests/Contract/TestWorkBucketBulkQueue.py` 4/4 -- route registered, tally sums to Total, idempotence (2nd call = 0 Inserted / N AlreadyQueued), query filters by (WorkBucket, StorageRootId).
+
 ## Seams
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
@@ -51,6 +54,7 @@ C10. Every admission (single-file + bulk) routes through `Features/TranscodeQueu
 | S5 | SeriesProfileService -> MediaFiles | `SeriesProfileService.SetProfile` | `UPDATE MediaFiles SET AssignedProfile = ? WHERE ... AND TranscodedByMediaVortex IS NOT TRUE` | `MediaFiles.AssignedProfile` reflects choice for untranscoded files only | `Tests/Contract/TestSeriesProfileService.py::test_set_profile_updates_only_untranscoded_files` |
 | S6 | QueueAdmissionAppService -> QueueManagementBusinessService -> TranscodeQueue | `QueueAdmissionAppService.AdmitSeries` delegates per-file to `QueueManagementBusinessService.AddJobToQueue` | INSERT via `SaveTranscodeQueueItem` with `ON CONFLICT (MediaFileId) WHERE Status='Pending' AND TestVariantSetId IS NULL DO NOTHING RETURNING Id` against partial unique index `idx_transcodequeue_pending_per_mediafile` | Atomic dedup at DB level (concurrent admissions serialized by PG without exceptions); AudioPolicyJson populated at insert time | `Tests/Contract/TestQueueAdmissionAppService.py::test_admit_series_returns_admission_result` |
 | S7 | BackfillProfileAssignments -> SeriesProfiles | `Scripts/SQLScripts/BackfillProfileAssignments.py` | reads sp.AssignedProfile, writes MediaFiles.AssignedProfile | New files in an existing series get the sticky profile | manual smoke: insert a MediaFiles row with the right show folder, run backfill, observe AssignedProfile populated |
+| S8 | Controller -> AdmitBulk -> AddJobToQueue | `WorkBucketController.bulk_queue` | `POST body {StorageRootId: int, QualityTier: int}` -> `AdmitBulk(Bucket, StorageRootId, QualityTier)` selects `MediaFiles.Id WHERE WorkBucket=? AND StorageRootId=?` and loops `AddJobToQueue(ForceAdd=True, QualityTier=<n>)` per file | Returns `AdmissionResult` tally (Inserted/AlreadyQueued/Skipped/AdmissionDeferred/Errored/Total); sum equals Total | `Tests/Contract/TestWorkBucketBulkQueue.py` 4/4 |
 
 ## Status
 
