@@ -2,6 +2,8 @@
 
 **Slug:** work-bucket
 
+**Pipeline shape SSoT:** `transcode.flow.md` `## Domain Decisions` (D1-D12) is the canonical list of Transcode/Remux/Audio shape decisions (per-dimension compliance, slot-strategy source, WorkBucket priority order, TranscodedByMediaVortex terminal state). Do not restate here.
+
 ## What It Does
 
 Renders `/Work/Transcode`, `/Work/Remux`, `/Work/Audio`, `/Work/Compliant`, and `/Work/Unclassified` as always-grouped-by-series views. Work-needed buckets (Transcode/Remux/Audio) expose file count, total GB, common resolution/codec, InQueue badge, per-series profile dropdown, and a Queue-all button. `Compliant` is browse/audit-only -- no Queue-all button; the operator can still force-enqueue a compliant file via the single-file admit route + quality-tier query param. `Unclassified` surfaces in-flight rows (probe hook not yet complete) plus permanently-deferred rows (`audio_corrupt_suspect`, `no_audio_stream`); action is force-decide (re-run compliance) or defer forever. Every scanned MediaFile lands in exactly one of the five buckets by construction -- `WorkBucket IS NULL` is impossible for probe-complete rows.

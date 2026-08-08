@@ -2,6 +2,8 @@
 
 **Slug:** stuck-job-detection
 
+**Pipeline shape SSoT:** `transcode.flow.md` `## Domain Decisions` (D1-D12) is the canonical list of Transcode/Remux/Audio shape decisions. D10 + D12 govern stuck-detection: progress-tick staleness (not wall-clock), fail-loud on failure.
+
 ## What It Does
 
 Each in-flight transcode job carries an `ActiveJobs.Phase` label (`Setup`, `PreEncode`, `Encoding`, `PostEncode`, `Verifying`). Every worker runs a recurring detector loop that dispatches each of its owned jobs to a phase-specific `IPhaseDetector`. Each detector uses the liveness signal appropriate to its phase. Kill happens only when the detector for the CURRENT phase reports stuck.

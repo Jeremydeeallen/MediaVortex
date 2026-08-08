@@ -6,6 +6,34 @@
 
 Entry point: `StartMediaVortex.py` (all services) or individual service scripts.
 
+## Domain Decisions
+
+Single source of truth for Transcode / Remux / Audio pipeline shape. Sibling docs point here; do not restate.
+
+**D1. Compliance is per-dimension.** Video, Audio, Container each evaluated independently by their own vertical (`VideoVertical`, `AudioVertical`, `ContainerVertical`). No dimension short-circuits another.
+
+**D2. Slot strategy is driven by per-dimension compliance flags, NOT by ProcessingMode enum.** `VideoSlot`: Reencode if `!videocompliant` else Copy. `AudioSlot`: Reencode if `!audiocompliant` else Copy. `ContainerSlot`: Mp4 if `!containercompliant` else Preserve. `SubtitleSlot`: Preserve always (unless explicit SubtitleFix intent).
+
+**D3. `ProcessingMode` is a reporting/priority tag only.** Names which vertical drove the admission. Does not decide slot behavior.
+
+**D4. `WorkBucket` = generated column from the three compliance flags.** Priority: `Unclassified > Compliant > Transcode > Remux > AudioFix`. Definition lives in `work-bucket.feature.md` C7 (subject to Phase 3 amendment for D7 alignment).
+
+**D5. Container target = `.mp4` always.** MP4 mux writes `handler_name` (not `title`) for track identity -- MP4 spec drops `title` on audio streams.
+
+**D6. Audio emission on any Reencode-slot pass = 2 tracks per kept source language.** Track 0 (default) = Dialog Boost from Demucs vocals-isolation on the source (once per encode). Track 1+ = Original per source stream, LRA-preserved. Details in `Features/AudioNormalization/audio-normalization.feature.md`.
+
+**D7. `TranscodedByMediaVortex = TRUE` is a terminal state.** We do not re-encode our own outputs. To change encoding, re-acquire source via Sonarr/Radarr -> fresh scan -> new MediaFile row without the flag. WorkBucket generated column MUST short-circuit `TranscodedByMediaVortex=TRUE -> 'Compliant'` (Phase 3 landing).
+
+**D8. Source file deleted after successful `ProcessFileReplacement`** (`Features/FileReplacement/TranscodedOutputPlacement.py:220`). Once transcode succeeds + MediaFiles row updated, the original .mkv/.mp4 is removed from disk. Sonarr/Radarr re-fetch is the only way to restore.
+
+**D9. Per-stream audio decisions read `Stream.channels` from ffprobe, NOT per-file `MediaFiles.AudioChannels` scalar.** Multi-stream files have per-stream truth (BUG-0087 close 2026-08-07).
+
+**D10. Every Reencode audio pass runs the Demucs pre-encode pipeline** (SourceMeasure -> Downmix -> Demucs -> Premix -> LoudnormMeasure). Progress ticks `TranscodeProgress.LastProgressUpdate` per substep. Stuck-detect reads this signal (not wall-clock).
+
+**D11. Emitter operates on source streams as-received.** No idempotence heuristic (no "detect existing Boost track"). Idempotence is guaranteed structurally by D2 (audio only re-encoded when `!audiocompliant`) + D7 (our outputs are terminal, so they will not be re-encoded).
+
+**D12. Fail-loud everywhere.** Probe failure = LastFFprobeError + one-shot NeedsReprobe. No silent retry caps. Stuck-detect = progress-tick staleness, not wall-clock. Delete failures = raise, not LogWarning.
+
 ## Stage Overview
 
 ```

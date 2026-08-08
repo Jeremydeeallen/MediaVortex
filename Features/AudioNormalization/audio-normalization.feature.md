@@ -2,6 +2,8 @@
 
 **Slug:** audio-normalization
 
+**Pipeline shape SSoT:** `transcode.flow.md` `## Domain Decisions` (D1-D12) is the canonical list of Transcode/Remux/Audio shape decisions (slot-strategy source, ProcessingMode role, TranscodedByMediaVortex terminal state, source-file lifecycle, per-stream channels rule). Do not restate here.
+
 ## What It Does
 
 Owns every audio-policy decision and emits the ffmpeg argv that ships dual-track output on every encoded file. Two-knob normalization: TargetIntegratedLufs (inter-program consistency, default -23 LUFS) and TargetLra (intra-program dynamics, null = preserve source on Original / 11.0 on Dialog Boost). Every output ships two tracks per kept language: Original (LRA-preserved) + Dialog Boost (LRA-compressed, default-flagged in container). Settings hierarchy `item > folder > library > global`; per-scope override of every knob; mid-flight GUI changes observed by the next admission via fresh DB read.
