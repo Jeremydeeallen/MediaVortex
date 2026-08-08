@@ -312,6 +312,8 @@ def main():
         return 2
     if not StepEnsureFfmpeg(Target):
         return 2
+    # directive: deploy-gc-before-sync -- pre-sync GC frees disk before tar; prevents death-spiral when disk fills mid-deploy
+    StepGarbageCollect(Target)
     Ok, SrcPath = StepSyncSource(Target, Sha)
     if not Ok:
         return 2
