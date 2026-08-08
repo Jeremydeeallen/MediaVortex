@@ -6,6 +6,38 @@
 
 ### disposition
 
+### infra-hardware
+
+### [BUG-0091] dot host chronic hardware instability -- 10 hard crashes in 14 days, BERT hardware error record, 59 unsafe shutdowns on NVMe
+**Date:** 2026-08-08 | **Area:** infra-hardware
+
+**What breaks:** dot (`client-z490v-01`, Intel Z490 + 10-core CPU + Intel X540 10GbE + WD SN570 NVMe) hard-crashes recurrently under sustained transcode load. From outside: unpingable, workers stop heartbeating, appears "down." Physical console shows a hard reboot is needed. Wakko has a separate but coincident issue (r8169 driver TX watchdog); dot's failure mode is different -- ixgbe not r8169, no NIC error, log cuts off mid-stream without a shutdown or panic marker.
+
+**Evidence (2026-08-08):**
+- `journalctl --list-boots` shows 10 boots between 2026-07-25 and 2026-08-08; three crashes on 2026-07-28 alone.
+- Prior-boot log ends abruptly at `Aug 08 07:53:55 client-z490v-01 kernel: intel_powerclamp: Stop forced idle injection` -- no shutdown message, no panic. Journal database intact, so it's a hard power/wedge event, not a graceful shutdown.
+- `intel_powerclamp: Start/Stop idle injection` fires every few seconds for HOURS before the crash -- sustained thermal-throttle pressure.
+- `/sys/firmware/acpi/tables/BERT` present after this boot (48 bytes header + 3196 bytes data). BERT = Boot Error Record Table; BIOS captured a hardware error during the previous crash and handed it to the kernel. `dmesg` line: `BERT: [Hardware Error]: Skipped 1 error records` (kernel not configured to parse BERT payloads, but the record's existence is the signal).
+- NVMe SMART: PASSED, drive itself healthy (1% wear, 0 media errors, 44°C), BUT `Unsafe Shutdowns: 59` on 394 Power Cycles = ~15% of power-offs were hard crashes.
+- SATA disks (sda + sdb, ST4000DM000): PASSED, no reallocated sectors, no pending sectors, one lifetime uncorrectable on sdb (7.8 year drive, likely noise), not causal.
+- Current temps at idle post-reboot: package 69C, cores 55-69C, crit=100C -- fine at idle but the powerclamp behavior pre-crash suggests hot-under-load.
+
+**First place to look:**
+- Physical CPU cooler seat + thermal paste (5+ year old machine, degraded TIM is the cheapest possibility).
+- PSU under sustained load (voltage sag under NIC+CPU+NVMe peak = MCE + hard shutdown; explains BERT record). Old / undersized / dying capacitors on the PSU are the common z490-era failure.
+- RAM via memtest86+ (bootable USB, ~2-4h for full pass). MCE from IMC would produce this signature.
+- Motherboard VRM under load.
+
+**No feature doc:** physical worker host stability has no `*.feature.md` -- it's infrastructure, not application behavior. Flagging that gap for later (a `hosts-baremetal.feature.md` with C1: "each worker host completes a 48h sustained-transcode soak without a hard crash" would be the shape).
+
+**Proposed criterion (once feature doc exists):** "Each Linux worker host survives a 48h sustained transcode load without a hard shutdown, unsafe-shutdown counter delta==0, no BERT record on next boot, no MCE in dmesg."
+
+**Fix path:** not a `/t` code fix -- hardware triage. Suggested order: (a) memtest86+ full pass; (b) if clean, PSU swap ($80); (c) if crashes continue, CPU cooler reseat + repaste; (d) if still failing, suspect board/VRM.
+
+**Meantime:** avoid critical-path routing to dot workers until stabilized.
+
+---
+
 ### media-probe
 
 ### [BUG-0079] Requeue disposition never enqueues a new TranscodeQueue row; .inprogress orphans on disk
