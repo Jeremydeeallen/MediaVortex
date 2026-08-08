@@ -12,9 +12,9 @@ Entry point: `Features/TranscodeJob/Worker/JobProcessor.Process` (for the five m
 
 ST1. **Claim + setup.** Worker claims the queue row. `JobProcessor.Process` resolves the local input path via `SetupFilePreparation` and creates the TranscodeAttempt row.
 
-ST2. **Pre-encode audio (Demucs).** `AudioPreEncodeFacade.Prepare(FfmpegPath, InputPath, JobId, ProgressReporter)` runs for every ProcessingMode in `_AUDIO_EMIT_MODES = {Transcode, Remux, AudioFix, Quick, SubtitleFix}`. Substeps + progress emit per `PreEncodeAudioPipeline.Run`: (a) `SourceMeasure` 0->100 via streaming ffmpeg loudnorm on source; (b) `Downmix` 0->100 stereo WAV extract; (c) `Demucs` 0->100 vocal isolation, per-tqdm-tick percent from daemon stderr (>= 1 Hz on real workloads); (d) `Premix` 0->100 boosted-vocals + attenuated-instrumental mix; (e) `LoudnormMeasure` 0->100 via streaming ffmpeg loudnorm on premix. Each substep invokes `ProgressReporter(Phase, Percent, Info)`, which writes a `TranscodeProgress` row with `CurrentPhase=<Phase>` + `ProgressPercent=<pct>` -- `/Activity` reads these to render Phase + Progress cells during pre-encode. Returns `{DemucsPremixPath, VocalsRmsDbfs, PremixMeasuredI, PremixMeasuredLra, PremixMeasuredTp, PremixMeasuredThresh, ScratchDir}`. Failure sets premix path to None so Track 1 is skipped; encode still proceeds with Track 0 only.
+ST2. **Pre-encode audio (Demucs).** `AudioPreEncodeFacade.Prepare(FfmpegPath, InputPath, JobId, ProgressReporter)` runs when `MediaFile.AudioCompliant IS NOT TRUE` (compliance-driven gate; audiocompliant files stream-copy audio and skip Demucs entirely). Substeps + progress emit per `PreEncodeAudioPipeline.Run`: (a) `SourceMeasure` 0->100 via streaming ffmpeg loudnorm on source; (b) `Downmix` 0->100 stereo WAV extract; (c) `Demucs` 0->100 vocal isolation, per-tqdm-tick percent from daemon stderr (>= 1 Hz on real workloads); (d) `Premix` 0->100 boosted-vocals + attenuated-instrumental mix; (e) `LoudnormMeasure` 0->100 via streaming ffmpeg loudnorm on premix. Each substep invokes `ProgressReporter(Phase, Percent, Info)`, which writes a `TranscodeProgress` row with `CurrentPhase=<Phase>` + `ProgressPercent=<pct>` -- `/Activity` reads these to render Phase + Progress cells during pre-encode. Returns `{DemucsPremixPath, VocalsRmsDbfs, PremixMeasuredI, PremixMeasuredLra, PremixMeasuredTp, PremixMeasuredThresh, ScratchDir}`. Failure sets premix path to None so Track 1 is skipped; encode still proceeds with Track 0 only.
 
-ST3. **Command build.** `Strategy.BuildCommand` forwards Context (containing the ST2 premix keys) wholesale to `CommandComposer.Build(MediaFile, Job, Context)`. The composer derives a `Plan` via `PlanFactory.FromProcessingMode(Job.ProcessingMode)` and dispatches `AudioSlot.Emit('Reencode', MediaFile, Context)`, which calls `AudioFilterEmitter.EmitTracks(MediaFile, Policy, DemucsPremixPath=..., VocalsRmsDbfs=..., PremixMeasured...=...)`. The emitter decides Track 0 (Original) + Track 1 (Dialog Boost) shape; per-file measurements substitute at emit time. The composer emits all `-i` inputs (source + `AudioEmission.InputArgs` premix) BEFORE any `-map` args (ffmpeg parser is order-sensitive).
+ST3. **Command build.** `Strategy.BuildCommand` forwards Context (containing the ST2 premix keys) wholesale to `CommandComposer.Build(MediaFile, Job, Context)`. The composer derives a `Plan` via `PlanFactory.FromComplianceState(MediaFile)` (per transcode.flow.md D2). When `AudioCompliant=FALSE` the AudioOp is `Reencode` and `AudioSlot.Emit('Reencode', MediaFile, Context)` calls `AudioFilterEmitter.EmitTracks(MediaFile, Policy, DemucsPremixPath=..., VocalsRmsDbfs=..., PremixMeasured...=...)`; the emitter decides Track 0 (Original) + Track 1 (Dialog Boost) shape and per-file measurements substitute at emit time. When `AudioCompliant=TRUE` the AudioOp is `Copy` and `AudioSlot.Emit('Copy', ...)` emits `-map 0:a? -c:a copy` with no Demucs input. The composer emits all `-i` inputs (source + `AudioEmission.InputArgs` premix) BEFORE any `-map` args (ffmpeg parser is order-sensitive).
 
 ST4. **Encode.** ffmpeg subprocess runs. Progress reported via `UpdateTranscodeProgress`.
 
@@ -46,13 +46,19 @@ Track 0 per-channel bitrate has three defense layers per audio-normalization.C38
 
 Together the three layers close: BUG-0072 (21 kbps/ch 5.1 starvation), the operator-knob GUI-drop-to-zero vector, and the source-bitrate-inherit `-c:a copy` silo.
 
-## Mode coverage matrix
+## Compliance coverage matrix
 
-| ProcessingMode | Strategy | Plan (Video, Audio, Subtitle, Container) | Runs PreEncodeAudio | 2-track emit |
-|---|---|---|---|---|
-| Transcode | TranscodeJobStrategy | (Reencode, Reencode, Preserve, Mp4) | via `JobProcessor._RunPreEncodeAudio` | yes |
-| Remux | RemuxJobStrategy | (Copy, Reencode, Preserve, Mp4) | via `JobProcessor._RunPreEncodeAudio` | yes |
-| AudioFix | AudioFixJobStrategy | (Copy, Reencode, Preserve, Mp4) | via `JobProcessor._RunPreEncodeAudio` | yes |
-| Quick | QuickJobStrategy | (Copy, Reencode, Preserve, Mp4) | via `JobProcessor._RunPreEncodeAudio` | yes |
-| SubtitleFix | SubtitleFixJobStrategy | (Copy, Reencode, Preserve, Mp4) | via `JobProcessor._RunPreEncodeAudio` | yes |
-| TestVariant | VariantJobProcessor | (Reencode, Reencode, Preserve, Mp4) per variant | via `ProcessTranscodeQueueService._ProcessSingleVariant` -> `AudioPreEncodeFacade.Prepare` | yes |
+Plan is derived per-file from `(VideoCompliant, AudioCompliant, ContainerCompliant)` via `PlanFactory.FromComplianceState(MediaFile)`; `SubtitleOp=Preserve` always; `ProcessingMode` is a reporting tag only (transcode.flow.md D3).
+
+| (V,A,C) | Plan (Video, Audio, Subtitle, Container) | Runs PreEncodeAudio | 2-track emit |
+|---|---|---|---|
+| (F,F,F) | (Reencode, Reencode, Preserve, Mp4) | yes | yes |
+| (F,F,T) | (Reencode, Reencode, Preserve, Preserve) | yes | yes |
+| (F,T,F) | (Reencode, Copy, Preserve, Mp4) | no | no (`-c:a copy`) |
+| (F,T,T) | (Reencode, Copy, Preserve, Preserve) | no | no (`-c:a copy`) |
+| (T,F,F) | (Copy, Reencode, Preserve, Mp4) | yes | yes |
+| (T,F,T) | (Copy, Reencode, Preserve, Preserve) | yes | yes |
+| (T,T,F) | (Copy, Copy, Preserve, Mp4) | no | no (`-c:a copy`) |
+| (T,T,T) | (Copy, Copy, Preserve, Preserve) -- would not admit (WorkBucket=Compliant) | -- | -- |
+
+Diagnostic path: `VariantJobProcessor` -> `ProcessTranscodeQueueService._ProcessSingleVariant` -> `AudioPreEncodeFacade.Prepare` unconditionally (variant test intentionally exercises Demucs regardless of compliance).

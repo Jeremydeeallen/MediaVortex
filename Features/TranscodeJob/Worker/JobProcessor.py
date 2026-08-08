@@ -10,10 +10,6 @@ from Features.ServiceControl.JobPhase import JobPhase
 from Features.TranscodeJob.Emit.OutputFilenameBuilder import OutputFilenameBuilder
 from Features.TranscodeJob.Worker.JobResult import JobResult
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C8
-_AUDIO_EMIT_MODES = frozenset(('Transcode', 'Remux', 'AudioFix', 'Quick', 'SubtitleFix'))
-
-
 # directive: transcode-worker-unification | # see worker-loop.C2
 class JobProcessor:
     """Template Method: unified orchestration for every ProcessingMode; mode-specific BuildCommand + HandleResult delegated to ITranscodeJobStrategy."""
@@ -83,7 +79,7 @@ class JobProcessor:
             TargetLocalPath = LocalJoin(LocalDirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
 
             self.QueueService.DatabaseManager.SetJobPhase(ActiveJobId, JobPhase.PreEncode)
-            PreAudio = self._RunPreEncodeAudio(Mode, EffectiveInputPath, Job, TranscodeAttemptId)
+            PreAudio = self._RunPreEncodeAudio(MediaFile, EffectiveInputPath, Job, TranscodeAttemptId)
             AudioPreEncodeFacade.PersistSourceLoudness(MediaFile.Id, MediaFile, PreAudio)
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, f"Building {Mode} command...")
             # directive: ffmpeg-stderr-deadlock -- FfmpegLogLevel is required by CommandComposer for every ProcessingMode (Remux/Quick/AudioFix/SubtitleFix); read fresh per invocation.
@@ -185,10 +181,10 @@ class JobProcessor:
                     except Exception:
                         pass
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C8
-    def _RunPreEncodeAudio(self, Mode, InputPath, Job, TranscodeAttemptId):
-        """One-source-of-truth Demucs pre-encode via AudioPreEncodeFacade. Fires for every ProcessingMode that ships audio."""
-        if Mode not in _AUDIO_EMIT_MODES:
+    # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- gate is compliance-driven (AudioSlot decides Reencode vs Copy from AudioCompliant); Demucs skipped for audiocompliant files
+    def _RunPreEncodeAudio(self, MediaFile, InputPath, Job, TranscodeAttemptId):
+        """Demucs pre-encode via AudioPreEncodeFacade; skipped when AudioSlot will Copy (audiocompliant=TRUE)."""
+        if getattr(MediaFile, 'AudioCompliant', None) is True:
             return None
         def Reporter(Phase, Percent, Info):
             try:

@@ -24,7 +24,9 @@ _FULL_SELECT_COLS = (
     "AudioComplete, AudioCorruptSuspect, AudioCorruptReason, "
     "SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, "
     "SourceIntegratedThresholdLufs, AdmissionDeferReason, "
-    "AudioNormalizationMode"
+    "AudioNormalizationMode, "
+    # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2
+    "VideoCompliant, AudioCompliant, ContainerCompliant"
 )
 
 
@@ -95,6 +97,10 @@ class MediaFilesRepository(BaseRepository):
             SourceIntegratedThresholdLufs=(row.get('SourceIntegratedThresholdLufs') or row.get('sourceintegratedthresholdlufs')),
             AdmissionDeferReason=(row.get('AdmissionDeferReason') or row.get('admissiondeferreason')),
             AudioNormalizationMode=(row.get('AudioNormalizationMode') or row.get('audionormalizationmode')),
+            # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- three-bool cannot use `or` (False collapses); explicit None-guard
+            VideoCompliant=(row.get('VideoCompliant') if 'VideoCompliant' in row else row.get('videocompliant')),
+            AudioCompliant=(row.get('AudioCompliant') if 'AudioCompliant' in row else row.get('audiocompliant')),
+            ContainerCompliant=(row.get('ContainerCompliant') if 'ContainerCompliant' in row else row.get('containercompliant')),
         )
 
     # directive: path-schema-migration | # see path.S8

@@ -1,9 +1,7 @@
 from dataclasses import dataclass
 
-from Features.TranscodeJob import ProcessingModeMetadata
 
-
-# directive: transcode-flow-canonical | # see transcode.ST5
+# directive: plan-factory-driven-by-compliance-flags | # see transcode.D2
 @dataclass(frozen=True)
 class Plan:
     VideoOp: str
@@ -12,17 +10,24 @@ class Plan:
     ContainerOp: str
 
 
-# directive: transcode-flow-canonical | # see transcode.ST5
+# directive: plan-factory-driven-by-compliance-flags | # see transcode.D2
 class PlanFactory:
 
-    # directive: transcode-flow-canonical | # see transcode.ST5
-    def FromProcessingMode(self, ProcessingMode: str) -> Plan:
-        Meta = ProcessingModeMetadata.Get((ProcessingMode or '').strip())
-        if Meta is None:
-            raise ValueError(f"PlanFactory.FromProcessingMode: unknown ProcessingMode={ProcessingMode!r}")
+    # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- per-dimension compliance drives slot ops; ProcessingMode is a reporting tag (D3), not a shape input
+    def FromComplianceState(self, MediaFile) -> Plan:
+        VideoCompliant = getattr(MediaFile, 'VideoCompliant', None)
+        AudioCompliant = getattr(MediaFile, 'AudioCompliant', None)
+        ContainerCompliant = getattr(MediaFile, 'ContainerCompliant', None)
+        if VideoCompliant is None or AudioCompliant is None or ContainerCompliant is None:
+            raise ValueError(
+                f"PlanFactory.FromComplianceState: MediaFile.Id={getattr(MediaFile, 'Id', None)} "
+                f"has None compliance flag (VideoCompliant={VideoCompliant}, "
+                f"AudioCompliant={AudioCompliant}, ContainerCompliant={ContainerCompliant}); "
+                f"admission gate should have deferred this file to Unclassified."
+            )
         return Plan(
-            VideoOp=Meta['PlanVideoOp'],
-            AudioOp=Meta['PlanAudioOp'],
-            SubtitleOp=Meta['PlanSubtitleOp'],
-            ContainerOp=Meta['PlanContainerOp'],
+            VideoOp='Copy' if VideoCompliant else 'Reencode',
+            AudioOp='Copy' if AudioCompliant else 'Reencode',
+            SubtitleOp='Preserve',
+            ContainerOp='Preserve' if ContainerCompliant else 'Mp4',
         )

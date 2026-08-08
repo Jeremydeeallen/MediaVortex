@@ -28,7 +28,7 @@ C6. `Tests/Contract/TestNoLegacyResidue.py` grep-fence `RETIRED_SYMBOLS` returns
 
 C7. `ITranscodeJobStrategy.BuildCommand` delegates to `CommandComposer.Build`. No Shape-registry lookup by ProcessingMode remains at the Emit layer. Verifiable: `grep 'EncodeShapeRegistry' Features/**/*.py` returns 0.
 
-C8. `Plan` frozen dataclass + `PlanFactory.FromProcessingMode`: Transcode -> `(Reencode, Reencode, Preserve, Mp4)`; Remux / Quick / AudioFix / SubtitleFix -> `(Copy, Reencode, Preserve, Mp4)`. Verifiable: `TestCommandComposer::TestPlanFactory`.
+C8. `Plan` frozen dataclass + `PlanFactory.FromComplianceState(MediaFile)`: `VideoOp=Copy if VideoCompliant else Reencode`; `AudioOp=Copy if AudioCompliant else Reencode`; `SubtitleOp=Preserve` always; `ContainerOp=Preserve if ContainerCompliant else Mp4`. Any None compliance flag raises `ValueError`. Verifiable: `Tests/Contract/TestPlanFactoryFromComplianceState.py` (2^3 combos + 3 None guards).
 
 ## Seams
 

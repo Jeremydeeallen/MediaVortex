@@ -61,6 +61,10 @@ class MediaFileModel:
     LastFFprobeAttemptDate: Optional[datetime] = None
     WorkBucket: Optional[str] = None
     HasForcedSubtitles: Optional[bool] = None
+    # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- per-dimension flags drive slot strategy
+    VideoCompliant: Optional[bool] = None
+    AudioCompliant: Optional[bool] = None
+    ContainerCompliant: Optional[bool] = None
 
     # directive: path-schema-migration | # see path.S8
     def __post_init__(self):

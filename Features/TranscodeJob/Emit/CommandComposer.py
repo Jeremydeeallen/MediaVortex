@@ -102,7 +102,8 @@ class CommandComposer:
                 f"reaching CommandComposer means the classifier gate was bypassed."
             )
         try:
-            Plan_ = self.PlanFactory.FromProcessingMode(getattr(Job, 'ProcessingMode', None))
+            # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- compliance flags drive slot ops; ProcessingMode is reporting-only (D3)
+            Plan_ = self.PlanFactory.FromComplianceState(MediaFile)
             ProfileSettings = Context.get('ProfileSettings', {}) or {}
             CodecParameters = Context.get('CodecParameters', []) or []
             FFmpegPath = Context.get('FFmpegPath')
@@ -145,7 +146,8 @@ class CommandComposer:
             Parts.extend(AudioEmission_.StreamArgs)
             SubtitleFormats = getattr(MediaFile, 'SubtitleFormats', None)
             SubtitleStreams = self._ProbeSubtitleStreams(Context, InputPath)
-            Parts.extend(self.SubtitleSlot.Emit('mp4' if Plan_.ContainerOp == 'Mp4' else Plan_.ContainerOp.lower(), SubtitleFormats, SubtitleStreams))
+            # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- 'Preserve' maps to mp4 target (D5: container target = .mp4 always)
+            Parts.extend(self.SubtitleSlot.Emit('mp4' if Plan_.ContainerOp in ('Mp4', 'Preserve') else Plan_.ContainerOp.lower(), SubtitleFormats, SubtitleStreams))
             Parts.extend(self.ContainerSlot.Emit(Plan_.ContainerOp))
             Parts.extend(self._BuildProvenanceMetadata(MediaFile, Plan_, ProfileSettings))
             Parts.append('-y')

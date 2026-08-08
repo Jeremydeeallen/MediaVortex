@@ -16,7 +16,7 @@ from Features.TranscodeJob.Emit.Slots.SubtitleSlot import SubtitleSlot
 from Features.TranscodeJob.Emit.Slots.VideoSlot import VideoSlot
 
 
-# directive: transcode-flow-canonical | # see transcode.ST5
+# directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- default is fully non-compliant (Reencode+Reencode+Mp4) to preserve legacy test intent
 def _MediaFile(**Overrides):
     Mf = MagicMock()
     Mf.Id = 1
@@ -27,6 +27,9 @@ def _MediaFile(**Overrides):
     Mf.Resolution = '1920x1080'
     Mf.SubtitleFormats = Overrides.get('SubtitleFormats', 'subrip')
     Mf.IsInterlaced = None
+    Mf.VideoCompliant = Overrides.get('VideoCompliant', False)
+    Mf.AudioCompliant = Overrides.get('AudioCompliant', False)
+    Mf.ContainerCompliant = Overrides.get('ContainerCompliant', False)
     return Mf
 
 
@@ -43,6 +46,7 @@ def _Job(ProcessingMode='Transcode'):
 def _Context(**Overrides):
     Ctx = {
         'FFmpegPath': 'C:/ffmpeg.exe',
+        'FfmpegLogLevel': 'warning',
         'InputPath': 'T:/Test.mkv',
         'ProfileSettings': {
             'ContainerType': 'mp4',
@@ -61,32 +65,26 @@ def _Context(**Overrides):
     return Ctx
 
 
-# directive: transcode-flow-canonical | # see transcode.ST5
+# directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- 8-combo coverage lives in TestPlanFactoryFromComplianceState.py; smoke-check the flip here
 class TestPlanFactory(unittest.TestCase):
 
-    def test_transcode_mode_returns_reencode_plan(self):
-        P = PlanFactory().FromProcessingMode('Transcode')
+    def test_all_noncompliant_plan_is_fully_reencode(self):
+        P = PlanFactory().FromComplianceState(_MediaFile())
         self.assertEqual(P, Plan(VideoOp='Reencode', AudioOp='Reencode', SubtitleOp='Preserve', ContainerOp='Mp4'))
 
-    def test_remux_mode_returns_copy_plan(self):
-        P = PlanFactory().FromProcessingMode('Remux')
-        self.assertEqual(P, Plan(VideoOp='Copy', AudioOp='Reencode', SubtitleOp='Preserve', ContainerOp='Mp4'))
+    def test_all_compliant_plan_is_fully_copy(self):
+        P = PlanFactory().FromComplianceState(_MediaFile(VideoCompliant=True, AudioCompliant=True, ContainerCompliant=True))
+        self.assertEqual(P, Plan(VideoOp='Copy', AudioOp='Copy', SubtitleOp='Preserve', ContainerOp='Preserve'))
 
-    def test_quick_mode_returns_copy_plan(self):
-        P = PlanFactory().FromProcessingMode('Quick')
-        self.assertEqual(P.VideoOp, 'Copy')
+    def test_video_only_transcode_copies_audio(self):
+        P = PlanFactory().FromComplianceState(_MediaFile(VideoCompliant=False, AudioCompliant=True, ContainerCompliant=True))
+        self.assertEqual(P, Plan(VideoOp='Reencode', AudioOp='Copy', SubtitleOp='Preserve', ContainerOp='Preserve'))
 
-    def test_audiofix_mode_returns_copy_plan(self):
-        P = PlanFactory().FromProcessingMode('AudioFix')
-        self.assertEqual(P.VideoOp, 'Copy')
-
-    def test_subtitlefix_mode_returns_copy_plan(self):
-        P = PlanFactory().FromProcessingMode('SubtitleFix')
-        self.assertEqual(P.VideoOp, 'Copy')
-
-    def test_unknown_mode_raises_value_error(self):
+    def test_none_compliance_raises_value_error(self):
+        Mf = _MediaFile()
+        Mf.VideoCompliant = None
         with self.assertRaises(ValueError):
-            PlanFactory().FromProcessingMode('NotAMode')
+            PlanFactory().FromComplianceState(Mf)
 
 
 # directive: transcode-flow-canonical | # see transcode.ST5
@@ -209,7 +207,11 @@ class TestContainerSlot(unittest.TestCase):
 
     def test_mp4_emits_f_mp4_and_faststart(self):
         Argv = ContainerSlot().Emit('Mp4')
-        self.assertEqual(Argv, ['-f', 'mp4', '-movflags', '+faststart'])
+        self.assertEqual(Argv, ['-f', 'mp4', '-movflags', '+faststart+use_metadata_tags'])
+
+    # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- 'Preserve' emits same args as 'Mp4' (D5: output is mp4 always)
+    def test_preserve_emits_same_as_mp4(self):
+        self.assertEqual(ContainerSlot().Emit('Preserve'), ContainerSlot().Emit('Mp4'))
 
     def test_unknown_op_raises(self):
         with self.assertRaises(ValueError):
@@ -256,7 +258,8 @@ def _StubAudioSlot():
 # directive: transcode-flow-canonical | # see transcode.ST5
 class TestCommandComposer(unittest.TestCase):
 
-    def test_transcode_plan_produces_reencode_argv(self):
+    # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- Mode is a reporting tag; plan is derived from compliance flags on MediaFile
+    def test_all_noncompliant_produces_reencode_argv(self):
         Composer = _MakeComposer()
         Spec = Composer.Build(_MediaFile(), _Job('Transcode'), _Context())
         self.assertIsInstance(Spec, CommandSpec)
@@ -264,25 +267,33 @@ class TestCommandComposer(unittest.TestCase):
         self.assertIn('-b:v', Spec.Command)
         self.assertIn('2400k', Spec.Command)
 
-    def test_remux_plan_produces_stream_copy_argv(self):
+    def test_video_compliant_produces_stream_copy_argv(self):
         Composer = _MakeComposer()
-        Spec = Composer.Build(_MediaFile(), _Job('Remux'), _Context())
+        Spec = Composer.Build(_MediaFile(VideoCompliant=True), _Job('Transcode'), _Context())
         self.assertIn('-c:v copy', Spec.Command)
 
     def test_container_slot_always_emits_faststart(self):
         Composer = _MakeComposer()
         Spec1 = Composer.Build(_MediaFile(), _Job('Transcode'), _Context())
-        Spec2 = Composer.Build(_MediaFile(), _Job('Remux'), _Context())
+        Spec2 = Composer.Build(_MediaFile(VideoCompliant=True), _Job('Transcode'), _Context())
         for Spec in (Spec1, Spec2):
             self.assertIn('-f mp4', Spec.Command)
             self.assertIn('-movflags +faststart', Spec.Command)
 
     def test_subtitle_slot_always_fires_mov_text_on_mp4(self):
         Composer = _MakeComposer()
-        for Mode in ('Transcode', 'Remux', 'Quick', 'AudioFix', 'SubtitleFix'):
-            Spec = Composer.Build(_MediaFile(SubtitleFormats='subrip'), _Job(Mode), _Context())
-            self.assertIn('-map 0:s?', Spec.Command, f"SubtitleSlot missing on mode {Mode}")
-            self.assertIn('-c:s mov_text', Spec.Command, f"mov_text codec missing on mode {Mode}")
+        Cases = [
+            ('all-noncompliant', {}),
+            ('video-compliant', {'VideoCompliant': True}),
+            ('audio-compliant', {'AudioCompliant': True}),
+            ('container-compliant', {'ContainerCompliant': True}),
+            ('all-compliant', {'VideoCompliant': True, 'AudioCompliant': True, 'ContainerCompliant': True}),
+        ]
+        for Label, Overrides in Cases:
+            Overrides = dict(Overrides, SubtitleFormats='subrip')
+            Spec = Composer.Build(_MediaFile(**Overrides), _Job('Transcode'), _Context())
+            self.assertIn('-map 0:s?', Spec.Command, f"SubtitleSlot missing on {Label}")
+            self.assertIn('-c:s mov_text', Spec.Command, f"mov_text codec missing on {Label}")
 
     def test_subtitle_slot_drops_pgs_with_warn_on_mp4(self):
         Composer = _MakeComposer()
@@ -303,8 +314,14 @@ class TestCommandComposer(unittest.TestCase):
 
     def test_output_path_is_inprogress_side_by_side_for_streamcopy(self):
         Composer = _MakeComposer()
-        Spec = Composer.Build(_MediaFile(), _Job('Remux'), _Context())
+        Spec = Composer.Build(_MediaFile(VideoCompliant=True), _Job('Transcode'), _Context())
         self.assertTrue(Spec.OutputPath.endswith('-mv.mp4.inprogress'))
+
+    # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- audio-compliant file emits -c:a copy; no reencode inputs
+    def test_audio_compliant_emits_stream_copy_no_demucs_input(self):
+        Composer = _MakeComposer(AudioSlotOverride=AudioSlot())
+        Spec = Composer.Build(_MediaFile(VideoCompliant=False, AudioCompliant=True, ContainerCompliant=True), _Job('Transcode'), _Context())
+        self.assertIn('-c:a copy', Spec.Command)
 
 
 if __name__ == '__main__':
