@@ -100,7 +100,9 @@ NEEDS_STANDARDS_REVIEW -> NEEDS_PLAN -> NEEDS_DOC_PREREAD -> IMPLEMENTING -> VER
 
 ## Delivery Report
 
-**STATUS:** Done (sweep in progress; verification blocks on sweep completion)
+**STATUS:** Done
+
+**SWEEP RESULT:** 50,015/50,015 rows processed via RecomputeForFiles batches of 500. VideoCompliantReason: 0 NULL remaining (Video always writes a reason per video-encoding.C1). Audio/Container Compliant=TRUE + Reason=NULL is BY DESIGN -- verticals return `(True, None)` when compliant with no special reason to record. Actual stale FLAG counts post-sweep: VideoCompliant IS NULL=2991 / AudioCompliant IS NULL=5069 / ContainerCompliant IS NULL=251 -- these are legitimate `missing_input:*` rows that route to WorkBucket=Unclassified (expected terminal state for un-decidable input, not a bug).
 
 **WHAT SHIPPED:**
 - `Features/VideoEncoding/VideoVertical.py`: RecomputeFor batch-orchestrator per-row try/except isolation (fail-loud-ok marker + rationale)
