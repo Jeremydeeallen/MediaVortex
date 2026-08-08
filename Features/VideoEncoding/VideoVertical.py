@@ -20,12 +20,10 @@ class VideoVertical:
         self._Thresholds = Thresholds or VideoComplianceThresholdsRepository(self._Db)
         self._Tiers = Tiers or TierLadderRepository(self._Db)
 
-    # directive: video-compliance-multiplier | # see video-encoding.C1
+    # directive: mediavortex-output-terminal | # see transcode.flow.md D7 -- TranscodedByMediaVortex short-circuit lives at WorkBucket generated-column layer; VideoVertical only evaluates its own dimension
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
         if IsAudioOnlyContainer(Mf):
             return (None, 'non_video_scope')
-        if bool(getattr(Mf, 'TranscodedByMediaVortex', False)):
-            return (True, 'mediavortex_output_accepted')
 
         ResolutionCategory = getattr(Mf, 'ResolutionCategory', None)
         SrcKbps = getattr(Mf, 'VideoBitrateKbps', None)
