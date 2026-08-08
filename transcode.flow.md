@@ -34,6 +34,8 @@ Single source of truth for Transcode / Remux / Audio pipeline shape. Sibling doc
 
 **D12. Fail-loud everywhere.** Probe failure = LastFFprobeError + one-shot NeedsReprobe. No silent retry caps. Stuck-detect = progress-tick staleness, not wall-clock. Delete failures = raise, not LogWarning.
 
+**D13. Slot-independence fallback.** On ffmpeg failure inside a Reencode-Reencode attempt, up to two fallback ffmpeg invocations run with one Reencode slot replaced by Copy each pass (order picked by `PartialCompletion.SniffFirstFallback` scanning stderr for `libopus | demucs | loudnorm | audio` → audio-side first, else video-side first). Successful fallback lands `Success=TRUE, Disposition='Replace', DispositionReason='PartialSuccess_{Audio,Video}SlotCopied'` and enqueues one follow-up `TranscodeQueue` row (`ProcessingMode='AudioFix'` when audio was the copied slot, or `'Transcode' + AudioSlotOverride='Copy'` when video was the copied slot) via `QueueManagementBusinessService.EnqueuePartialCompletionFollowup`. Follow-up children carry `ParentTranscodeAttemptId` and cannot themselves partial-complete; child ffmpeg failure lands `Success=FALSE, DispositionReason='PartialRetryExhausted'`. Cap: 3 ffmpeg per parent + 3 per child = 6 worst-case invocations per file per chain. Every event logged (sniff INFO, fallback attempt INFO, success WARNING, both-fail ERROR, PartialRetryExhausted ERROR) so design flaws in the sniff or unknown failure signatures surface in the logs table.
+
 ## Stage Overview
 
 ```

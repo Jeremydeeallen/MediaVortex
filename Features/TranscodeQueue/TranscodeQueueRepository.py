@@ -37,6 +37,8 @@ class TranscodeQueueRepository(BaseRepository):
             MediaFileId=row.get('MediaFileId'),
             ClaimedBy=row.get('ClaimedBy'),
             TestVariantSetId=row.get('TestVariantSetId'),
+            ParentTranscodeAttemptId=row.get('ParentTranscodeAttemptId'),
+            AudioSlotOverride=row.get('AudioSlotOverride'),
             DateAdded=self.ConvertStringToDateTime(row['DateAdded']) if row.get('DateAdded') else None,
             DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row.get('DateStarted') else None,
             ProcessingMode=row.get('ProcessingMode') or 'Transcode'
@@ -281,7 +283,8 @@ class TranscodeQueueRepository(BaseRepository):
             ReturningCols = (
                 "Id, StorageRootId, RelativePath, FileName, Directory, "
                 "SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, "
-                "ProcessingMode, ClaimedBy, MediaFileId, TestVariantSetId"
+                "ProcessingMode, ClaimedBy, MediaFileId, TestVariantSetId, "
+                "ParentTranscodeAttemptId, AudioSlotOverride"
             )
             connection = self.DatabaseService.GetConnection()
             try:
@@ -354,6 +357,8 @@ class TranscodeQueueRepository(BaseRepository):
                         'ClaimedBy': row.get('claimedby'),
                         'MediaFileId': row.get('mediafileid'),
                         'TestVariantSetId': row.get('testvariantsetid'),
+                        'ParentTranscodeAttemptId': row.get('parenttranscodeattemptid'),
+                        'AudioSlotOverride': row.get('audioslotoverride'),
                     }
                     return self._MapRowToQueueItem(NormalizedRow)
                 return None

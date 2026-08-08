@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2
@@ -8,6 +8,14 @@ class Plan:
     AudioOp: str
     SubtitleOp: str
     ContainerOp: str
+
+    # directive: partial-pipeline-completion | # see transcode.D13
+    def WithSlotForcedToCopy(self, Side: str) -> 'Plan':
+        if Side == 'VideoSlot':
+            return replace(self, VideoOp='Copy')
+        if Side == 'AudioSlot':
+            return replace(self, AudioOp='Copy')
+        raise ValueError(f"WithSlotForcedToCopy: Side must be 'VideoSlot' or 'AudioSlot', got {Side!r}")
 
 
 # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2

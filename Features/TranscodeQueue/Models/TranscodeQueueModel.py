@@ -23,6 +23,9 @@ class TranscodeQueueModel:
     DateAdded: Optional[datetime] = None
     DateStarted: Optional[datetime] = None
     TestVariantSetId: Optional[int] = None
+    # directive: partial-pipeline-completion | # see transcode.D13
+    ParentTranscodeAttemptId: Optional[int] = None
+    AudioSlotOverride: Optional[str] = None
 
     # directive: path-schema-migration | # see path.S8
     def __post_init__(self):

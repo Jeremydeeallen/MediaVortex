@@ -2036,6 +2036,37 @@ class QueueManagementBusinessService:
             LoggingService.LogException(errorMsg, e, "QueueManagementBusinessService", "AddJobToQueue")
             return {"Success": False, "ErrorMessage": errorMsg}
 
+    # directive: partial-pipeline-completion | # see transcode.D13
+    def EnqueuePartialCompletionFollowup(self, MediaFileId: int, ProcessingMode: str,
+                                         AudioSlotOverride: Optional[str],
+                                         ParentTranscodeAttemptId: int) -> Dict[str, Any]:
+        """Enqueue the retry job for the slot that had to be copied in a partial-completion parent."""
+        Result = self.AddJobToQueue(
+            MediaFileId=MediaFileId,
+            ForceAdd=True,
+            ProcessingMode=ProcessingMode,
+        )
+        if not Result.get('Success'):
+            LoggingService.LogError(
+                f"EnqueuePartialCompletionFollowup: AddJobToQueue failed for MediaFileId={MediaFileId} "
+                f"ProcessingMode={ProcessingMode}: {Result.get('ErrorMessage')}",
+                "QueueManagementBusinessService", "EnqueuePartialCompletionFollowup",
+            )
+            return Result
+        ItemId = Result.get('ItemId')
+        if ItemId:
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                "UPDATE TranscodeQueue SET ParentTranscodeAttemptId = %s, AudioSlotOverride = %s WHERE Id = %s",
+                (int(ParentTranscodeAttemptId), AudioSlotOverride, int(ItemId)),
+            )
+            LoggingService.LogInfo(
+                f"Enqueued partial-completion follow-up: ItemId={ItemId} MediaFileId={MediaFileId} "
+                f"ProcessingMode={ProcessingMode} AudioSlotOverride={AudioSlotOverride!r} "
+                f"ParentTranscodeAttemptId={ParentTranscodeAttemptId}",
+                "QueueManagementBusinessService", "EnqueuePartialCompletionFollowup",
+            )
+        return Result
+
     def RemoveJobFromQueue(self, ItemId: int) -> Dict[str, Any]:
         """Remove a job from the transcoding queue. If the job is running, kill FFmpeg and clean up first."""
         try:

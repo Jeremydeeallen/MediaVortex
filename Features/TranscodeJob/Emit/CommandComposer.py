@@ -102,8 +102,9 @@ class CommandComposer:
                 f"reaching CommandComposer means the classifier gate was bypassed."
             )
         try:
-            # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- compliance flags drive slot ops; ProcessingMode is reporting-only (D3)
-            Plan_ = self.PlanFactory.FromComplianceState(MediaFile)
+            # directive: partial-pipeline-completion | # see transcode.D13
+            PlanOverride = Context.get('PlanOverride')
+            Plan_ = PlanOverride if PlanOverride is not None else self.PlanFactory.FromComplianceState(MediaFile)
             ProfileSettings = Context.get('ProfileSettings', {}) or {}
             CodecParameters = Context.get('CodecParameters', []) or []
             FFmpegPath = Context.get('FFmpegPath')
