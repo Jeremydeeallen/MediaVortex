@@ -1,7 +1,7 @@
 # Directive: plan-factory-driven-by-compliance-flags
 
 **Slug:** plan-factory-driven-by-compliance-flags
-**Status:** Paused -- draft awaiting operator resume
+**Status:** Closed
 **Opened:** 2026-08-08
 **Sequence:** Phase 4 of 4 (Phases 1-3 closed 2026-08-07; SSoT at transcode.flow.md D1-D12)
 
@@ -76,20 +76,29 @@ C8. **Existing contract tests still green.** Full audio suite + phase-detector s
 
 ## Call-Graph Audit
 
-Before starting, run these five checks per `.claude/rules/call-graph-audit.md`:
+Results per `.claude/rules/call-graph-audit.md`:
 
-- **Signal 1 (multiple flow docs):** audio-normalization.flow.md mode-coverage matrix + transcode.flow.md ST3 both describe slot selection. Confirm both align post-change; consider consolidation.
-- **Signal 2 (orchestration mode-branch):** `PlanFactory.FromProcessingMode` IS the orchestration mode-branch. This directive removes it.
-- **Signal 3 (mode-sparse output columns):** none anticipated.
-- **Signal 4 (OOS ambiguity):** categorize per (a) or (b).
-- **Signal 5 (config-driven graph shape):** none anticipated.
+- **Signal 1 (multiple flow docs):** audio-normalization.flow.md `## Mode coverage matrix` + transcode.flow.md D2 both describe slot selection. transcode.flow.md D2 is SSoT. audio-normalization.flow.md matrix rewritten at DELIVERING to compliance-axis (was ProcessingMode-axis). No divergent pair after DELIVERING.
+- **Signal 2 (orchestration mode-branch):** `PlanFactory.FromProcessingMode` at `CommandComposer.Build:105` IS the orchestration mode-branch. Directive DELETES it and every caller migrates to `FromComplianceState(mf)`. Second mode-branch: `JobProcessor._RunPreEncodeAudio` gate `if Mode not in _AUDIO_EMIT_MODES`. Directive replaces with `if MediaFile.AudioCompliant: return None` and deletes `_AUDIO_EMIT_MODES` frozenset. `TestNoModeBranchingAtOrchestration` regex only catches `Mode == 'literal'` -- both prior forms slipped it; new form uses no mode literals so it stays green.
+- **Signal 3 (mode-sparse output columns):** none. All modes converge on the same CommandComposer + TranscodeAttempts writers post-change.
+- **Signal 4 (OOS ambiguity):** categorized below.
+- **Signal 5 (config-driven graph shape):** none. Compliance flags drive DATA (which branch inside slot Emit); call graph static.
+
+Production callers of `PlanFactory.FromProcessingMode` (grep 2026-08-08):
+- `Features/TranscodeJob/Emit/CommandComposer.py:105` -- sole production call site. Migrated to FromComplianceState.
+- `Tests/Contract/TestCommandComposer.py:68-89` -- test-only; migrated to FromComplianceState.
+- `Features/TranscodeJob/ProcessTranscodeQueueService.py:145` + `Tests/*` -- instantiation only, not method call.
+
+Variant path (`_ProcessSingleVariant` -> `BuildTranscodeCommand` -> same `CommandComposer.Build`): has MediaFile in scope, uses same FromComplianceState. Diagnostic implication: variant test on a compliant file produces a stream-copy encode, which is an operator-error signal (variant results trivially identical). DD4's "TestVariant may keep FromProcessingMode" fallback proves unnecessary.
 
 ## Out of Scope
 
-- **(a) In-flight preserved:** ProcessingMode column in TranscodeQueue + TranscodeAttempts stays. Reporting/priority tag; unchanged.
+- **(a) In-flight preserved:** ProcessingMode column in TranscodeQueue + TranscodeAttempts stays. Reporting/priority tag; unchanged (D3).
 - **(a) In-flight preserved:** WorkBucket generated column (Phase 3 landed).
-- **(a) In-flight preserved:** SubtitleFix mode-specific behavior -- may need explicit intent tag for "operator wants subtitle rewrite even when subtitles are compliant".
-- **(b) Tolerated debt:** TestVariant mode may keep FromProcessingMode path (no per-file compliance flags for synthetic variants).
+- **(a) In-flight preserved:** SubtitleFix mode-specific behavior -- may need explicit intent tag for "operator wants subtitle rewrite even when subtitles are compliant". Defer to future directive.
+- **(a) In-flight collapsed:** FromProcessingMode DELETED entirely (not scoped to TestVariant). Variant path uses FromComplianceState because MediaFile is in scope.
+- **(a) In-flight preserved:** ContainerSlot.Emit output for `Preserve` = same args as `Mp4` (per D5 "container target = .mp4 always"). Preserve is a semantic label meaning "container was already compliant"; ffmpeg args identical.
+- **(a) In-flight fixed:** `_AUDIO_EMIT_MODES` frozenset deleted; audio pre-encode gate is now `if MediaFile.AudioCompliant`.
 
 ## Phase machine
 
@@ -97,16 +106,17 @@ NEEDS_STANDARDS_REVIEW -> NEEDS_PLAN -> NEEDS_DOC_PREREAD -> IMPLEMENTING -> VER
 
 ### Progress
 
-- [x] NEEDS_STANDARDS_REVIEW (auto-load at session start)
-- [ ] NEEDS_PLAN (this doc)
-- [ ] NEEDS_DOC_PREREAD: transcode.flow.md D1-D12 (SSoT), audio-normalization.flow.md mode-coverage matrix, PlanFactory source, VideoSlot / AudioSlot / ContainerSlot source
-- [ ] IMPLEMENTING: PlanFactory rewrite (FromComplianceState)
-- [ ] IMPLEMENTING: migrate call sites
-- [ ] IMPLEMENTING: verify AudioSlot.Copy + VideoSlot.Copy strategies exist (add if missing)
-- [ ] IMPLEMENTING: contract test (8 flag combinations)
-- [ ] VERIFYING: contract test PASS; full audio + phase suites still green
-- [ ] SMOKE-GATE: I9 restart; queue video-only-transcode file; ffmpeg cmd shows -c:a copy; no Demucs progress rows
-- [ ] DELIVERING: audio-normalization.flow.md mode-coverage matrix rewritten; close report
+- [x] All phases complete. Live smoke anchor: MFID 47355 attempt 58489 -- `-c:v av1_nvenc -c:a copy`, zero Demucs progress rows, 75.5% size reduction, Success=TRUE, file now WorkBucket=Compliant.
+
+## Delivery Report
+
+STATUS: Done. Committed 21273770. Fleet deploy in flight (bg task bmkafv8zb).
+
+CRITERIA: C1-C8 all met -- verification detail per Progress checkboxes above; live smoke attempt 58489 (MFID 47355) is the C7 anchor. 68/68 directive-scope tests green.
+
+DECISIONS: (a) Deleted FromProcessingMode entirely; variant path uses same FromComplianceState (MediaFile in scope). (b) Fixed preexisting TestCommandComposer FfmpegLogLevel fixture bug -- blocked C7 verification. (c) ContainerSlot 'Preserve' emits identical mp4 args to 'Mp4' (D5). (d) MediaFileModel + MediaFilesRepository gained compliance fields; other repos not updated (do not feed CommandComposer).
+
+KNOWN GAPS: 8 preexisting test failures unchanged (unrelated -- TestAudioComplianceBar ctor drift, TestAudioPipelineNoSilentFallback route path, TestPathDbRoundTripAllTables missing showsettings, TestProfileLifecycle/Ladder, TestScanNewSubtreesFirst, TestSharedColumnsPopulated 3-row historical AudioPolicyResolved gap). Fleet deploy async -- confirm completion.
 
 ### R13 overrides
 
@@ -120,7 +130,14 @@ NEEDS_STANDARDS_REVIEW -> NEEDS_PLAN -> NEEDS_DOC_PREREAD -> IMPLEMENTING -> VER
 
 | Source (directive) | Target (durable) |
 |---|---|
-| DD1-DD5 | `transcode.flow.md` D2 + D3 already cover; audio-normalization.flow.md matrix update lands here |
+| DD1 slot rules | `transcode.flow.md` D2 already SSoT -- no change |
+| DD2 ProcessingMode = reporting tag | `transcode.flow.md` D3 already SSoT -- no change |
+| DD3 structural idempotence | `transcode.flow.md` D11 already SSoT -- no change |
+| Slot strategy = compliance-driven | `Features/TranscodeJob/Emit/encode-emit.feature.md` C9 + S2 rewrite to `FromComplianceState(mf)` |
+| PlanFactory API change | `Features/TranscodeJob/Emit/command-composer.feature.md` C8 rewrite (drop mode-based clause) |
+| Mode coverage matrix rewrite | `Features/AudioNormalization/audio-normalization.flow.md` ST3 + `## Mode coverage matrix` swapped to compliance-axis |
+| Audio pre-encode gate rewrite | `Features/AudioNormalization/audio-normalization.flow.md` ST2 gate note swapped from `_AUDIO_EMIT_MODES` to `if MediaFile.AudioCompliant: return None` |
+| ContainerSlot 'Preserve' semantics | `Features/TranscodeJob/Emit/encode-emit.feature.md` C10 amended -- 'Preserve' alias emits identical mp4 args (D5 output-mp4-always) |
 
 ## Sequencing context (why Phase 4 last)
 
