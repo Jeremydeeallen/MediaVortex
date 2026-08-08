@@ -58,14 +58,20 @@ class AudioVertical:
             return (True, None)
         return (False, 'needs_normalization')
 
-    # directive: transcode-flow-canonical -- C33
+    # directive: compliance-reason-full-library-recompute -- batch orchestrator isolates per-row so one bad row does not abort a batch; Evaluate stays fail-loud
     def RecomputeFor(self, MediaFileIds: List[int]) -> None:
         for Id in MediaFileIds:
-            Mf = self._RepoMgr.GetMediaFileById(Id)
-            if Mf is None:
-                raise ValueError(f"MediaFileId {Id} not found")
-            Compliant, Reason = self.Evaluate(Mf)
-            self._WriteResult(Id, Compliant, Reason)
+            try:
+                Mf = self._RepoMgr.GetMediaFileById(Id)
+                if Mf is None:
+                    LoggingService.LogWarning(f"AudioVertical.RecomputeFor: MediaFileId {Id} not found; skipping", "AudioVertical", "RecomputeFor")
+                    continue
+                Compliant, Reason = self.Evaluate(Mf)
+                self._WriteResult(Id, Compliant, Reason)
+            # fail-loud-ok: batch-orchestrator per-row isolation; Evaluate stays fail-loud per audio-normalization contract; each row surfaces via LogException
+            except Exception as Ex:
+                LoggingService.LogException(f"AudioVertical.RecomputeFor: MediaFileId {Id} raised; skipping", Ex, "AudioVertical", "RecomputeFor")
+                continue
 
     # directive: transcode-flow-canonical -- C33
     def _WriteResult(self, MediaFileId: int, Compliant, Reason):

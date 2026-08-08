@@ -66,14 +66,20 @@ class VideoVertical:
         Family = Rows[0].get('family')
         return Family if Family else None
 
-    # directive: video-compliance-multiplier | # see video-encoding.C6
+    # directive: compliance-reason-full-library-recompute | # see video-encoding.C5 -- Evaluate stays fail-loud (raises); batch orchestrator isolates per-row so one bad row does not abort a 237-row batch (BUG discovered via RetierTvToTier1 2026-08-07).
     def RecomputeFor(self, MediaFileIds: List[int]) -> None:
         for Id in MediaFileIds:
-            Mf = self._RepoMgr.GetMediaFileById(Id)
-            if Mf is None:
-                raise ValueError(f"MediaFileId {Id} not found")
-            Compliant, Reason = self.Evaluate(Mf)
-            self._WriteResult(Id, Compliant, Reason)
+            try:
+                Mf = self._RepoMgr.GetMediaFileById(Id)
+                if Mf is None:
+                    LoggingService.LogWarning(f"VideoVertical.RecomputeFor: MediaFileId {Id} not found; skipping", "VideoVertical", "RecomputeFor")
+                    continue
+                Compliant, Reason = self.Evaluate(Mf)
+                self._WriteResult(Id, Compliant, Reason)
+            # fail-loud-ok: batch-orchestrator per-row isolation; Evaluate stays fail-loud per video-encoding.C5; each row surfaces via LogException
+            except Exception as Ex:
+                LoggingService.LogException(f"VideoVertical.RecomputeFor: MediaFileId {Id} raised; skipping", Ex, "VideoVertical", "RecomputeFor")
+                continue
 
     # directive: video-compliance-multiplier
     def _WriteResult(self, MediaFileId: int, Compliant, Reason):
