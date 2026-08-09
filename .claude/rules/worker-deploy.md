@@ -41,15 +41,14 @@ Set by the operator (2026-08-02); do NOT re-derive.
 
 Single worker + WebService, both from `C:\Code\MediaVortex` git tree. Drain-then-restart is sufficient (no cross-worker contention on same host). No versioning needed. Worker reads sha from `.git/HEAD` at boot (`worker-lifecycle-invariants.md` I3).
 
-## Per-worker deploy pipeline (5 steps)
+## Per-worker deploy pipeline (4 steps)
 
 Same shape for baremetal and windows-local; only step 3 mechanism differs.
 
 1. **Pause** -- `UPDATE Workers SET Status='Paused' WHERE WorkerName=<self>`.
 2. **Drain-wait** -- poll every 5s until `ActiveJobs WHERE WorkerName=<self>` == 0 AND `ScanJobs WHERE WorkerName=<self> AND Status IN ('Pending','Running','Stopping')` == 0. No hard timeout; drain is the contract.
-3. **Kill** -- hard kill is safe here (drain confirmed idle). Baremetal: `systemctl kill -s TERM <unit>`. Windows-local: `psutil.Process.terminate()`.
-4. **Start** -- baremetal: `systemctl start <unit>`. Windows-local: `subprocess.Popen(pythonw, WorkerService/Main.py)` + `Popen(pythonw, WebService/Main.py)`. Return code = verification (`worker-lifecycle-invariants.md` I4).
-5. **Online** -- `UPDATE Workers SET Status='Online'` if worker was Online before deploy; otherwise leave Paused.
+3. **Restart + verify PID rotated** -- baremetal: capture `MainPID` via `systemctl show -p MainPID --value <unit>`; run `systemctl restart <unit>` (atomic; stop-then-start via systemd's `TimeoutStopSec`, escalates to SIGKILL only on timeout); re-read `MainPID`; refuse to advance unless MainPID changed AND is nonzero (`worker-lifecycle-invariants.md` I4 -- fail-loud requires observable state change, not exit code). Windows-local: `psutil.Process.terminate()` on old procs, then `subprocess.Popen(pythonw, ...)` for new procs; verify new PID from Popen return value + `Popen.poll() is None` after 1s. Never use `systemctl kill -s TERM ... ; systemctl start ...` -- kill returns before process exits; start is a no-op on still-Active units; produces silent-success failures.
+4. **Online** -- `UPDATE Workers SET Status='Online'` if worker was Online before deploy; otherwise leave Paused.
 
 ## Fleet orchestration
 
@@ -64,7 +63,7 @@ Same shape for baremetal and windows-local; only step 3 mechanism differs.
 ## Forbidden
 
 - **`--no-drain`, `--skip-drain`, `--force`, `--include-stale`, or any flag on any deploy script that bypasses drain or narrows the target set.** Fleet script is zero-parameter by design.
-- **Making Windows and Linux deploy paths diverge in shape.** Same 5-step per-worker pipeline both places; only the kill+start mechanism differs.
+- **Making Windows and Linux deploy paths diverge in shape.** Same 4-step per-worker pipeline both places; only the restart mechanism differs (systemctl restart vs psutil terminate + Popen).
 - **`DELETE FROM Workers`** in any deploy script. Deploy preserves operator-owned columns across runs (`Status`, `TranscodeEnabled`, `RemuxEnabled`, `QualityTestEnabled`, `ScanEnabled`, `ProbeEnabled`, `LanguageEnabled`, `MaxConcurrentJobs`, `MaxConcurrentQualityTestJobs`, `MaxCpuThreads`, `AcceptsInterlaced`, `ForceDisposition`).
 - **`COALESCE(Status, 'Online')`** in any deploy script. Missing `Status` on a captured live worker is fail-loud (deploy exits non-zero rather than default an operator-owned column).
 - **Mutating `src-<sha>` or `host-venv-<fp>` after initial creation.** Every deploy writes to a NEW versioned dir. Draining workers must be able to trust that their startup version's files have not changed.

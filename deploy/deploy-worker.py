@@ -26,12 +26,12 @@ def PauseWorker(Db, WorkerName: str) -> None:
         "UPDATE Workers SET Status='Paused' WHERE WorkerName=%s AND Status<>'Paused'",
         (WorkerName,),
     )
-    print(f"[1/5] pause: {WorkerName}", flush=True)
+    print(f"[1/4] pause: {WorkerName}", flush=True)
 
 
 def DrainWorker(Db, WorkerName: str) -> float:
     T0 = time.time()
-    print(f"[2/5] drain: {WorkerName} (poll every {DrainPollSec}s)", flush=True)
+    print(f"[2/4] drain: {WorkerName} (poll every {DrainPollSec}s)", flush=True)
     LastReport = 0
     while True:
         ActiveJobs = Db.ExecuteQuery(
@@ -91,7 +91,7 @@ def _SpawnDetached(ServiceDir: str, LogPath: Path, WorkerName: str) -> subproces
 
 
 def RestartWindowsLocal(WorkerName: str) -> bool:
-    print(f"[3/5] restart backend: windows-local ({WorkerName})", flush=True)
+    print(f"[3/4] restart backend: windows-local ({WorkerName})", flush=True)
     try:
         import psutil
     except ImportError:
@@ -112,24 +112,47 @@ def RestartWindowsLocal(WorkerName: str) -> bool:
 
 
 def RestartBaremetal(WorkerName: str, Host: str) -> bool:
-    print(f"[3/5] restart backend: baremetal (host={Host})", flush=True)
+    print(f"[3/4] restart backend: baremetal (host={Host})", flush=True)
     _, Ip, User = ResolveInventory(Host)
     Unit = SystemdUnitFromWorkerName(WorkerName)
+    PidBefore = _GetMainPid(Ip, User, Unit)
     R = subprocess.run(
-        ["ssh", *SshOpts, f"{User}@{Ip}",
-         f"systemctl kill -s TERM {Unit}; systemctl start {Unit}"],
-        timeout=30,
+        ["ssh", *SshOpts, f"{User}@{Ip}", f"systemctl restart {Unit}"],
+        timeout=120,
     )
-    print(f"       systemctl kill+start {Unit} rc={R.returncode}", flush=True)
-    return R.returncode == 0
+    if R.returncode != 0:
+        print(f"       systemctl restart {Unit} rc={R.returncode} FAILED", flush=True)
+        return False
+    PidAfter = _GetMainPid(Ip, User, Unit)
+    if PidAfter == 0:
+        print(f"       systemctl restart {Unit} rc=0 BUT MainPID=0 (unit not running)", flush=True)
+        return False
+    if PidBefore != 0 and PidAfter == PidBefore:
+        print(f"       systemctl restart {Unit} rc=0 BUT MainPID unchanged ({PidBefore}) -- process did not rotate", flush=True)
+        return False
+    print(f"       systemctl restart {Unit} rc=0 MainPID {PidBefore} -> {PidAfter}", flush=True)
+    return True
+
+
+def _GetMainPid(Ip: str, User: str, Unit: str) -> int:
+    R = subprocess.run(
+        ["ssh", *SshOpts, f"{User}@{Ip}", f"systemctl show -p MainPID --value {Unit}"],
+        capture_output=True, text=True, timeout=10,
+    )
+    if R.returncode != 0:
+        return 0
+    try:
+        return int(R.stdout.strip() or "0")
+    except ValueError:
+        return 0
 
 
 def OnlineWorker(Db, WorkerName: str, WasOnline: bool) -> None:
     if WasOnline:
         Db.ExecuteNonQuery("UPDATE Workers SET Status='Online' WHERE WorkerName=%s", (WorkerName,))
-        print(f"[5/5] online: {WorkerName}", flush=True)
+        print(f"[4/4] online: {WorkerName}", flush=True)
     else:
-        print(f"[5/5] leaving Paused (was not Online pre-deploy)", flush=True)
+        print(f"[4/4] leaving Paused (was not Online pre-deploy)", flush=True)
 
 
 def DeployOne(WorkerName: str) -> int:
@@ -154,10 +177,8 @@ def DeployOne(WorkerName: str) -> int:
 
     Ok = RestartWindowsLocal(WorkerName) if IsWindowsLocal(Host) else RestartBaremetal(WorkerName, Host)
     if not Ok:
-        print(f"[FAIL] restart backend failed; leaving Status=Paused", flush=True)
+        print(f"[FAIL] restart failed (rc!=0 OR MainPID did not rotate); leaving Status=Paused", flush=True)
         return 4
-
-    print(f"[4/5] start returned rc=0 (fail-loud invariant satisfied)", flush=True)
     OnlineWorker(Db, WorkerName, WasOnline)
 
     print(f"=== OK {WorkerName} in {time.time()-TStart:.1f}s ===", flush=True)
