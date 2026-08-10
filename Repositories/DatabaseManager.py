@@ -185,47 +185,6 @@ class DatabaseManager(
     
 
     
-    def _ConvertPixelDimensionsToResolutionCategory(self, PixelDimensions: str) -> str:
-        """Convert pixel dimensions (e.g. '3840x2160') to resolution category.
-
-        Width-primary because mastering targets are width-fixed (1280 = 720p,
-        1920 = 1080p, 3840 = 4K) but heights vary with cropping/letterboxing
-        (e.g. 1280x718 is broadcast 720p; strict `height >= 720` misclassifies
-        it as 480p). Falls back to height for narrow/portrait video.
-
-        Same logic as MediaProbeBusinessService._DeriveResolutionCategory and
-        QueueManagementBusinessService._ResolutionCategoryFromPixels; should be
-        unified into a Core helper in a follow-up.
-        """
-        try:
-            if not PixelDimensions or 'x' not in PixelDimensions:
-                return PixelDimensions  # Return as-is if not in expected format
-
-            Parts = PixelDimensions.split('x', 1)
-            width = int(Parts[0])
-            height = int(Parts[1])
-
-            # Width-primary discrimination
-            if width >= 3000:
-                return "2160p"
-            if width >= 1700:
-                return "1080p"
-            if width >= 1100:
-                return "720p"
-            if width >= 600:
-                return "480p"
-            # Fall through to height for narrow/portrait content
-            if height >= 2000:
-                return "2160p"
-            if height >= 950:
-                return "1080p"
-            if height >= 650:
-                return "720p"
-            return "480p"
-
-        except (ValueError, IndexError):
-            return PixelDimensions
-    
 
     def ConvertStringToDateTime(self, DateString) -> Optional[datetime]:
         """Convert date string from database to datetime object. Pass through if already datetime."""

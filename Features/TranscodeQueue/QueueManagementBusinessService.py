@@ -10,6 +10,7 @@ from Features.TranscodeQueue.TranscodeQueueRepository import TranscodeQueueRepos
 from Features.TranscodeQueue.CrfBitrateEstimateRepository import CrfBitrateEstimateRepository
 from Features.TranscodeQueue.QueueAdmissionConfigRepository import QueueAdmissionConfigRepository
 from Features.TranscodeQueue.CodecCompatibilityRepository import CodecCompatibilityRepository
+from Core.Resolution.ResolutionTierRegistry import ResolutionTierRegistry
 from Core.Logging.LoggingService import LoggingService
 from Core.PathNormalize import ExtractShowFolder
 from Core.Path import Path, PathError
@@ -1390,53 +1391,6 @@ class QueueManagementBusinessService:
                     lookup[(pn, src_res)] = (vk, ak, src_res)
         return lookup
 
-    @staticmethod
-    def _ResolutionCategoryFromPixels(Resolution: Optional[str]) -> Optional[str]:
-        """Derive '480p' / '720p' / '1080p' / '2160p' from a 'WIDTHxHEIGHT' string.
-
-        Width-primary because mastering targets are width-fixed (1280 = 720p,
-        1920 = 1080p, 3840 = 4K) but heights vary with cropping/letterboxing
-        (1280x718 is real broadcast 720p with 2-pixel crop). A strict
-        height-based cutoff misclassifies thousands of real files (~7,300
-        files in the live DB had height 700-720 misclassified as 480p
-        before this fix).
-
-        Falls back to height-based discrimination for narrow/portrait video
-        where width-primary would give the wrong answer.
-
-        Returns None on bad input. Used as a fallback in the compliance
-        cascade when the cached ResolutionCategory column is NULL.
-
-        Same logic as MediaProbeBusinessService._DeriveResolutionCategory and
-        DatabaseManager._ConvertPixelDimensionsToResolutionCategory; the three
-        should be unified into a Core helper in a follow-up.
-        """
-        if not Resolution or 'x' not in Resolution:
-            return None
-        try:
-            Parts = Resolution.split('x', 1)
-            Width = int(Parts[0])
-            Height = int(Parts[1])
-        except (ValueError, IndexError):
-            return None
-        # Width-primary discrimination (handles broadcast cropping).
-        if Width >= 3000:
-            return '2160p'
-        if Width >= 1700:
-            return '1080p'
-        if Width >= 1100:
-            return '720p'
-        if Width >= 600:
-            return '480p'
-        # Fall through to height for narrow/portrait content.
-        if Height >= 2000:
-            return '2160p'
-        if Height >= 950:
-            return '1080p'
-        if Height >= 650:
-            return '720p'
-        return '480p'
-
     # directive: compliance-rip
     def EvaluateCandidateCompliance(self, CandidateRow: Dict[str, Any], EffectiveProfile: Optional[str] = None) -> Dict[str, Any]:
         """Pre-rename compliance check via three pure vertical Evaluate calls. Returns {IsCompliant, WorkBucket, RefusalReason} for ComplianceGate.Evaluate."""
@@ -1470,7 +1424,7 @@ class QueueManagementBusinessService:
             SizeMB=float(Row.get('SizeMB') or 0),
             DurationMinutes=Row.get('DurationMinutes'),
             Resolution=Row.get('Resolution'),
-            ResolutionCategory=Row.get('ResolutionCategory') or self._ResolutionCategoryFromPixels(Row.get('Resolution')),
+            ResolutionCategory=Row.get('ResolutionCategory') or ResolutionTierRegistry().CategoryStringFromResolution(Row.get('Resolution')),
             Codec=Row.get('Codec'),
             VideoBitrateKbps=Row.get('VideoBitrateKbps'),
             AudioCodec=Row.get('AudioCodec'),
@@ -1550,7 +1504,7 @@ class QueueManagementBusinessService:
         # or a pixel string ('1280x720'). The estimate table keys on category.
         ResolutionCategory = TargetResolution
         if 'x' in str(TargetResolution):
-            ResolutionCategory = self._ResolutionCategoryFromPixels(TargetResolution) or TargetResolution
+            ResolutionCategory = ResolutionTierRegistry().CategoryStringFromResolution(TargetResolution) or TargetResolution
 
         try:
             CrfInt = int(Crf)
@@ -1777,7 +1731,7 @@ class QueueManagementBusinessService:
                     # cascade uses).
                     ResKey = r.get('ResolutionCategory')
                     if not ResKey:
-                        ResKey = self._ResolutionCategoryFromPixels(r.get('Resolution'))
+                        ResKey = ResolutionTierRegistry().CategoryStringFromResolution(r.get('Resolution'))
                     TargetVideoKbps = None
                     TargetAudioKbps = None
                     if EffectiveProfile and ResKey:

@@ -33,6 +33,21 @@ class ResolutionTierRegistry:
                 return T
         return self._LowestRank
 
+    # directive: pre-encode-savings-gate | # see resolution-types.C1
+    def CategoryStringFromDims(self, Width: int, Height: int) -> str:
+        Tier = self.FromDims(Width, Height)
+        return Tier.Name[1:] if Tier.Name.startswith('T') else Tier.Name
+
+    # directive: pre-encode-savings-gate | # see resolution-types.C1
+    def CategoryStringFromResolution(self, Resolution: Optional[str]) -> Optional[str]:
+        if not Resolution or 'x' not in Resolution:
+            return None
+        try:
+            W, H = Resolution.split('x', 1)
+            return self.CategoryStringFromDims(int(W), int(H))
+        except (ValueError, IndexError):
+            return None
+
     # directive: resolution-types | # see resolution-types.C14
     def FromCategory(self, Category: Optional[str]) -> Optional[ResolutionTier]:
         """Map legacy category strings ('1080p', '720p', '4k', etc.) onto a tier by name. Returns None on unknown/empty input."""

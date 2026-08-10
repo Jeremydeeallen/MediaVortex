@@ -2,6 +2,7 @@ import os
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 from Core.Models.MediaFileModel import MediaFileModel
+from Core.Resolution.ResolutionTierRegistry import ResolutionTierRegistry
 from Features.MediaProbe.MediaProbeRepository import MediaProbeRepository
 from Services.FileManagerService import FileManagerService
 from Core.Logging.LoggingService import LoggingService
@@ -84,7 +85,7 @@ class MediaProbeBusinessService:
                 MediaFile.VideoBitrateKbps = MetadataResult.get('VideoBitrateKbps')
                 MediaFile.AudioBitrateKbps = MetadataResult.get('AudioBitrateKbps')
                 MediaFile.Resolution = MetadataResult.get('Resolution')
-                MediaFile.ResolutionCategory = self._DeriveResolutionCategory(MediaFile.Resolution)
+                MediaFile.ResolutionCategory = ResolutionTierRegistry().CategoryStringFromResolution(MediaFile.Resolution)
                 MediaFile.Codec = MetadataResult.get('VideoCodec')
                 MediaFile.DurationMinutes = MetadataResult.get('DurationMinutes')
                 MediaFile.FrameRate = MetadataResult.get('FrameRate')
@@ -185,44 +186,6 @@ class MediaProbeBusinessService:
             self.Repository.RecordProbeFailure(MediaFile.Id, ErrorMessage)
             LoggingService.LogException(f"Error in _ExecuteProbe for {FilePath}", Ex, "MediaProbeBusinessService", "_ExecuteProbe")
             return {'Success': False, 'Message': ErrorMessage}
-
-    def _DeriveResolutionCategory(self, Resolution: str) -> str:
-        """Convert pixel dimensions (e.g. '1920x1080') to resolution category.
-
-        Width-primary because mastering targets are width-fixed (1280 = 720p,
-        1920 = 1080p, 3840 = 4K) but heights vary with cropping/letterboxing
-        (e.g. 1280x718 is broadcast 720p with cropping; the strict
-        `height >= 720` cutoff misclassifies thousands of real files).
-
-        Same logic as DatabaseManager._ConvertPixelDimensionsToResolutionCategory
-        and QueueManagementBusinessService._ResolutionCategoryFromPixels; should
-        be unified into a Core helper in a follow-up.
-        """
-        try:
-            if not Resolution or 'x' not in Resolution:
-                return None
-            Parts = Resolution.split('x', 1)
-            Width = int(Parts[0])
-            Height = int(Parts[1])
-            # Width-primary discrimination
-            if Width >= 3000:
-                return "2160p"
-            if Width >= 1700:
-                return "1080p"
-            if Width >= 1100:
-                return "720p"
-            if Width >= 600:
-                return "480p"
-            # Fall through to height for narrow/portrait content
-            if Height >= 2000:
-                return "2160p"
-            if Height >= 950:
-                return "1080p"
-            if Height >= 650:
-                return "720p"
-            return "480p"
-        except Exception:
-            return None
 
     # ─── Failure Management ────────────────────────────────────────────
 

@@ -5,18 +5,21 @@ from Core.Logging.LoggingService import LoggingService
 from Core.Path.Path import Path, PathError
 from Core.Path.PathStorageRoots import GetPrefixMap
 from Core.Path.LocalPath import LocalExists
+from Core.Resolution.ResolutionTierRegistry import ResolutionTierRegistry
 
 
-# directive: path-schema-migration | # see path.S9
+# directive: pre-encode-savings-gate | # see path.S9
 class ComplianceGate:
     """Pre-rename cascade check; see compliance-gated-rename.feature.md."""
 
-    # directive: filereplacement-decompose
+    # directive: pre-encode-savings-gate
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  FileManagerInstance: FileManagerService = None,
-                 FFprobePath: str = None):
+                 FFprobePath: str = None,
+                 TierRegistry: Optional[ResolutionTierRegistry] = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or FileManagerService(FFprobePath=FFprobePath)
+        self._Registry = TierRegistry or ResolutionTierRegistry()
 
     # directive: path-schema-migration | # see path.S8 | filereplacement-decompose | compliance-gated-rename.C1, C4
     def Evaluate(self, LocalStagedPath: str, SourceMediaFileId: int,
@@ -59,22 +62,7 @@ class ComplianceGate:
             Src = SourceRows[0]
 
             Resolution = ProbeResult.get('Resolution')
-            ResolutionCategory = None
-            try:
-                Height = None
-                if Resolution and 'x' in Resolution:
-                    Height = int(Resolution.split('x')[1])
-                if Height is not None:
-                    if Height >= 2000:
-                        ResolutionCategory = '2160p'
-                    elif Height >= 1000:
-                        ResolutionCategory = '1080p'
-                    elif Height >= 700:
-                        ResolutionCategory = '720p'
-                    elif Height >= 400:
-                        ResolutionCategory = '480p'
-            except Exception:
-                pass
+            ResolutionCategory = self._Registry.CategoryStringFromResolution(Resolution)
 
             try:
                 SizeMB = LocalGetSize(LocalStagedPath) / (1024.0 * 1024.0)

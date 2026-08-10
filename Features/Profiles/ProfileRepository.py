@@ -612,27 +612,6 @@ class ProfileRepository(BaseRepository):
             )
             return None
 
-    def _ConvertPixelDimensionsToResolutionCategory(self, PixelDimensions: str) -> str:
-        """Convert pixel dimensions (e.g., '3840x2160') to resolution category (e.g., '2160p')."""
-        try:
-            if not PixelDimensions or 'x' not in PixelDimensions:
-                return PixelDimensions
-
-            height = int(PixelDimensions.split('x')[1])
-
-            if height >= 2160:
-                return "2160p"
-            elif height >= 1080:
-                return "1080p"
-            elif height >= 720:
-                return "720p"
-            elif height >= 480:
-                return "480p"
-            else:
-                return "480p"
-        except Exception:
-            return PixelDimensions
-
     def GetCodecFlagsByCodecName(self, CodecName: str) -> Optional[Dict[str, Any]]:
         """Get codec flags by codec name."""
         try:
