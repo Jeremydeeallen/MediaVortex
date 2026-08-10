@@ -16,7 +16,7 @@ Answers one question per MediaFile: is the video stream compliant (source bitrat
 
 ## Success Criteria
 
-C1. `VideoVertical.Evaluate` returns non-compliant iff `SourceKbps > Tier1TargetKbps * Multiplier(ResolutionCategory)`. Reason strings: `source_at_or_below_multiplier:<src><=<threshold>(tier1=<t>*<m>)` or `source_above_multiplier:<src>><threshold>(tier1=<t>*<m>)`. Tier1TargetKbps from `TierLadderRepository.GetTier1Target(Family, ContentClass, Resolution)`. Multiplier from `VideoComplianceThresholdsRepository.GetMultiplier(ResolutionCategory)`.
+C1. `VideoVertical.Evaluate` returns non-compliant iff `SourceKbps > AssignedProfile.TargetKbps * Multiplier(ResolutionCategory)`. Reason strings: `source_at_or_below_ceiling:<src><=<ceiling>(profile=<name>:<target>*<mult>)` or `source_above_ceiling:<src>><ceiling>(profile=<name>:<target>*<mult>)`. Target from `TierLadderRepository.GetProfileTarget(ProfileName, ContentClass, Resolution)`. Multiplier from `VideoComplianceThresholdsRepository.GetMultiplier(ResolutionCategory)`. Reason: Tier1-anchored formula (prior `GetTier1Target`) made every Tier 2+ profile designed to fail the gate; per-profile anchoring gives each tier its own ceiling slack (pre-encode-savings-gate 2026-08-10).
 
 C2. Codec is not a compliance input. `MediaFiles.Codec` value never influences `VideoCompliant`. Legacy `VideoComplianceRules` table + `acceptablevideocodecscsv` column dropped.
 
@@ -34,7 +34,7 @@ C6. **MediaVortex-output terminal state enforced at aggregate layer, not per-ver
 |---|---|---|---|---|---|
 | S1 | `RecomputeFor` -> `MediaFiles.VideoCompliant` | `VideoVertical._WriteResult` | `(VideoCompliant: bool/NULL, VideoCompliantReason: text/NULL)` | Generated column `WorkBucket` reflects the flag on next SELECT | Post-RecomputeFor SELECT |
 | S2 | `VideoComplianceThresholds` -> vertical | operator via `/settings` PUT | 4 rows `(ResolutionCategory TEXT, Multiplier NUMERIC(4,2))`; multiplier > 0 (CHECK) | `GetMultiplier` reads fresh per call; fail-loud on missing row | `TestVideoComplianceMultiplier` |
-| S3 | `Profiles` + `ProfileThresholds` -> `TierLadderRepository.GetTier1Target` | Backfill migration seeds Tier 1 rows | JOIN on `Family + QualityTier=1 + ContentClass + Resolution` -> INT kbps or None | vertical multiplies by multiplier; falls through to `(True, None)` on None | `TestVideoComplianceMultiplier` |
+| S3 | `Profiles` + `ProfileThresholds` -> `TierLadderRepository.GetProfileTarget` | Backfill + operator ladder edits | JOIN on `ProfileName + ContentClass + Resolution` -> INT kbps or None | vertical multiplies by multiplier; missing target returns `(None, 'missing_input:ProfileTargetKbps')` | `TestVideoComplianceMultiplier` |
 
 ## Cross-Vertical Contract
 
@@ -51,7 +51,7 @@ C6. **MediaVortex-output terminal state enforced at aggregate layer, not per-ver
 | Column | Read by | Owner |
 |---|---|---|
 | `MediaFiles.VideoBitrateKbps`, `TranscodedByMediaVortex`, `ResolutionCategory`, `AssignedProfile`, `ContentClass` | `Evaluate` | MediaProbe vertical + ContentClassifier |
-| `Profiles.Family`, `ProfileThresholds.TargetKbps` (Tier 1) | `TierLadderRepository.GetTier1Target` | Profiles vertical (operator via `/settings` bitrate ladder) |
+| `Profiles.ProfileName`, `ProfileThresholds.TargetKbps` (per assigned profile) | `TierLadderRepository.GetProfileTarget` | Profiles vertical (operator via `/settings` bitrate ladder) |
 
 ### Stable function entry points (cross-vertical callers)
 

@@ -47,7 +47,7 @@ C10. **Tier thresholds are operator-tunable via SQL.** `UPDATE ResolutionTiers S
 
 ## Status
 
-COMPLETE -- shipped via the `resolution-types` directive (2026-06-15).
+COMPLETE -- shipped via the `resolution-types` directive (2026-06-15). Adoption gap closed 2026-08-10 by `pre-encode-savings-gate`: the 4 inline classifier copies scattered across `MediaProbeBusinessService`, `QueueManagementBusinessService`, `Repositories/DatabaseManager` (orphan), `Features/Profiles/ProfileRepository`, and the inline block in `Features/FileReplacement/ComplianceGate.Evaluate` all deleted in favor of `ResolutionTierRegistry.CategoryStringFromDims` / `.CategoryStringFromResolution`. Two of the four were height-only; one directly caused the Ace Ventura Jr false-reject class (cinemascope 1280x534 misclassified as 480p under a 600 kbps ceiling instead of 720p under 1800 kbps).
 
 ## Scope
 

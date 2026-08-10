@@ -49,9 +49,10 @@ class QueueAdmissionConfigRepository(BaseRepository):
             )
             return QueueAdmissionConfigModel()
 
+    # directive: pre-encode-savings-gate
     def Update(self, MinTranscodeSavingsMB: Optional[int] = None,
-               MissingEstimatePolicy: Optional[str] = None) -> bool:
-        """Update one or more scalars on the Id=1 row. Stamps LastUpdated=NOW()."""
+               MissingEstimatePolicy: Optional[str] = None,
+               PreEncodeSavingsThresholdPercent: Optional[int] = None) -> bool:
         try:
             Sets = []
             Values = []
@@ -68,8 +69,25 @@ class QueueAdmissionConfigRepository(BaseRepository):
                     return False
                 Sets.append("MissingEstimatePolicy = %s")
                 Values.append(MissingEstimatePolicy)
+            if PreEncodeSavingsThresholdPercent is not None:
+                try:
+                    Pct = int(PreEncodeSavingsThresholdPercent)
+                except (TypeError, ValueError):
+                    LoggingService.LogError(
+                        f"Update rejected: PreEncodeSavingsThresholdPercent={PreEncodeSavingsThresholdPercent!r} not integer",
+                        "QueueAdmissionConfigRepository", "Update",
+                    )
+                    return False
+                if Pct < 1 or Pct > 99:
+                    LoggingService.LogError(
+                        f"Update rejected: PreEncodeSavingsThresholdPercent={Pct} out of range [1,99]",
+                        "QueueAdmissionConfigRepository", "Update",
+                    )
+                    return False
+                Sets.append("PreEncodeSavingsThresholdPercent = %s")
+                Values.append(Pct)
             if not Sets:
-                return True  # nothing to change
+                return True
             Sets.append("LastUpdated = NOW()")
             Query = f"UPDATE QueueAdmissionConfig SET {', '.join(Sets)} WHERE Id = 1"
             self.ExecuteNonQuery(Query, tuple(Values))

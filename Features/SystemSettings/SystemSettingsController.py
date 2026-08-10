@@ -253,6 +253,7 @@ class SystemSettingsController:
                         'Id': Cfg.Id,
                         'MinTranscodeSavingsMB': Cfg.MinTranscodeSavingsMB,
                         'MissingEstimatePolicy': Cfg.MissingEstimatePolicy,
+                        'PreEncodeSavingsThresholdPercent': Cfg.PreEncodeSavingsThresholdPercent,
                         'LastUpdated': Cfg.LastUpdated.isoformat() if Cfg.LastUpdated else None,
                     },
                 })
@@ -270,6 +271,7 @@ class SystemSettingsController:
                 Ok = Repo.Update(
                     MinTranscodeSavingsMB=Data.get('MinTranscodeSavingsMB'),
                     MissingEstimatePolicy=Data.get('MissingEstimatePolicy'),
+                    PreEncodeSavingsThresholdPercent=Data.get('PreEncodeSavingsThresholdPercent'),
                 )
                 if not Ok:
                     return jsonify({'Success': False, 'Error': 'Update rejected (see logs)'}), 400

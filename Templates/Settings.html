@@ -399,6 +399,12 @@
                             </td>
                         </tr>
                         <tr>
+                            <th>Post-encode savings threshold (%)
+                                <br><small class="text-muted">Encoded outputs below this % smaller than source are rejected (retires NoSavings 0% gate)</small>
+                            </th>
+                            <td><input type="number" id="PreEncodeSavingsThresholdPercent" class="form-control form-control-sm" min="1" max="99" style="max-width: 140px;"></td>
+                        </tr>
+                        <tr>
                             <th></th>
                             <td><button class="btn btn-sm btn-primary" onclick="SaveQueueAdmissionConfig()">Save threshold</button></td>
                         </tr>
@@ -2088,13 +2094,15 @@ function LoadQueueAdmissionConfig() {
         if (!R.Success) return;
         $('#MinTranscodeSavingsMB').val(R.Config.MinTranscodeSavingsMB);
         $('#MissingEstimatePolicy').val(R.Config.MissingEstimatePolicy);
+        $('#PreEncodeSavingsThresholdPercent').val(R.Config.PreEncodeSavingsThresholdPercent);
     });
 }
 
 function SaveQueueAdmissionConfig() {
     var Body = {
         MinTranscodeSavingsMB: parseInt($('#MinTranscodeSavingsMB').val()),
-        MissingEstimatePolicy: $('#MissingEstimatePolicy').val()
+        MissingEstimatePolicy: $('#MissingEstimatePolicy').val(),
+        PreEncodeSavingsThresholdPercent: parseInt($('#PreEncodeSavingsThresholdPercent').val())
     };
     $.ajax({
         url: '/api/SystemSettings/QueueAdmissionConfig',
