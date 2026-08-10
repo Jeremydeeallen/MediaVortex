@@ -1,6 +1,6 @@
 # Directive: pre-encode-savings-gate
 
-**Status:** Closed
+**Status:** Active -- phase: DELIVERING
 
 **Slug:** pre-encode-savings-gate
 
