@@ -12,6 +12,7 @@ def DefaultGate(**Overrides):
         'VmafAutoReplaceMinThreshold': 80.0,
         'VmafAutoReplaceMaxThreshold': 97.0,
         'WhenVmafUnavailable': 'block',
+        'SavingsThresholdPercent': 20,
     }
     Cfg.update(Overrides)
     return Cfg
@@ -44,21 +45,33 @@ class TestPostTranscodeDispositionDecider(unittest.TestCase):
         self.assertEqual(Result.Action, 'Replace')
         self.assertEqual(Result.Reason, 'QualityTestNotRequired')
 
-    # directive: transcode-flow-canonical | # see transcode.ST7
-    def test_no_savings_returns_reject(self):
-        """NewSize >= OldSize -> Reject/NoSavings."""
+    # directive: pre-encode-savings-gate
+    def test_insufficient_savings_at_zero_pct_returns_reject(self):
         Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 1000, 'QualityTestRequired': True, 'VmafScore': 90.0}
         Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate())
         self.assertEqual(Result.Action, 'Reject')
-        self.assertEqual(Result.Reason, 'NoSavings')
+        self.assertTrue(Result.Reason.startswith('InsufficientSavings_0pct_below_20pct'))
 
-    # directive: transcode-flow-canonical | # see transcode.ST7
-    def test_no_savings_newer_larger_returns_reject(self):
-        """NewSize > OldSize (encode grew the file) -> Reject/NoSavings."""
+    # directive: pre-encode-savings-gate
+    def test_insufficient_savings_negative_returns_reject(self):
         Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 1200, 'QualityTestRequired': True, 'VmafScore': 90.0}
         Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate())
         self.assertEqual(Result.Action, 'Reject')
-        self.assertEqual(Result.Reason, 'NoSavings')
+        self.assertTrue(Result.Reason.startswith('InsufficientSavings_-20pct_below_20pct'))
+
+    # directive: pre-encode-savings-gate
+    def test_savings_above_threshold_passes_to_vmaf_flow(self):
+        Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 700, 'QualityTestRequired': True, 'VmafScore': 90.0}
+        Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate(SavingsThresholdPercent=20))
+        self.assertEqual(Result.Action, 'Replace')
+        self.assertEqual(Result.Reason, 'VmafPassed')
+
+    # directive: pre-encode-savings-gate
+    def test_savings_boundary_at_threshold_passes(self):
+        Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 800, 'QualityTestRequired': True, 'VmafScore': 90.0}
+        Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate(SavingsThresholdPercent=20))
+        self.assertEqual(Result.Action, 'Replace')
+        self.assertEqual(Result.Reason, 'VmafPassed')
 
     # directive: transcode-flow-canonical | # see transcode.ST7
     def test_vmaf_below_min_returns_requeue(self):

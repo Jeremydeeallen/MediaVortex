@@ -42,6 +42,7 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
             VmafAutoReplaceMaxThreshold=float(GateCfg.VmafAutoReplaceMaxThreshold),
             WhenVmafUnavailable=GateCfg.WhenVmafUnavailable,
             QualityTestEnabled=True,
+            SavingsThresholdPercent=20,
         )
         Outcome = self.Decider.Decide(Defaults, GateInput)
         return (Outcome.Action, Outcome.Reason)
@@ -55,10 +56,10 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
     def test_Row1_TranscodeFailed(self):
         self._AssertDeterministic(('Reject', 'TranscodeFailed'), Success=False)
 
-    # Row 2: transcode succeeded but produced no savings -> Reject / NoSavings.
-    def test_Row2_NoSavings(self):
+    # directive: pre-encode-savings-gate -- Reset 9 reordering preserved; NoSavings retired -> InsufficientSavings at 20% threshold.
+    def test_Row2_InsufficientSavings(self):
         self._AssertDeterministic(
-            ('Reject', 'NoSavings'),
+            ('Reject', 'InsufficientSavings_-20pct_below_20pct'),
             Success=True, OldSize=500_000_000, NewSize=600_000_000,
         )
 
@@ -118,10 +119,10 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
             GateConfig=FakeGateConfig(WhenVmafUnavailable='bypass'),
         )
 
-    # Edge: NoSavings beats QualityTestNotRequired -- Reset 9 reordered decider so savings gate runs first.
-    def test_NoSavings_BeatsQualityTestNotRequired(self):
+    # directive: pre-encode-savings-gate -- InsufficientSavings beats QualityTestNotRequired (savings gate runs first).
+    def test_InsufficientSavings_BeatsQualityTestNotRequired(self):
         self._AssertDeterministic(
-            ('Reject', 'NoSavings'),
+            ('Reject', 'InsufficientSavings_-20pct_below_20pct'),
             Success=True, OldSize=500_000_000, NewSize=600_000_000,
             QualityTestRequired=False,
         )
