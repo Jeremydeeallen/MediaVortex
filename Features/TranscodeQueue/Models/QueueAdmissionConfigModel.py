@@ -16,4 +16,5 @@ class QueueAdmissionConfigModel:
     MinAudioBitrateKbpsMono: int = 64
     MinAudioBitrateKbpsStereo: int = 96
     MinAudioBitrateKbpsSurround: int = 128
+    PreEncodeSavingsThresholdPercent: int = 20
     LastUpdated: Optional[datetime] = None

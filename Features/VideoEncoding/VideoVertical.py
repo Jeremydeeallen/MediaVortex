@@ -8,10 +8,10 @@ from Features.VideoEncoding.VideoComplianceThresholdsRepository import VideoComp
 from Repositories.DatabaseManager import DatabaseManager
 
 
-# directive: video-compliance-multiplier | # see video-encoding.C1
+# directive: pre-encode-savings-gate | # see video-encoding.C1
 class VideoVertical:
 
-    # directive: video-compliance-multiplier
+    # directive: pre-encode-savings-gate
     def __init__(self, Db: Optional[DatabaseService] = None, RepoMgr: Optional[DatabaseManager] = None,
                  Thresholds: Optional[VideoComplianceThresholdsRepository] = None,
                  Tiers: Optional[TierLadderRepository] = None):
@@ -20,7 +20,7 @@ class VideoVertical:
         self._Thresholds = Thresholds or VideoComplianceThresholdsRepository(self._Db)
         self._Tiers = Tiers or TierLadderRepository(self._Db)
 
-    # directive: mediavortex-output-terminal | # see transcode.flow.md D7 -- TranscodedByMediaVortex short-circuit lives at WorkBucket generated-column layer; VideoVertical only evaluates its own dimension
+    # directive: pre-encode-savings-gate | # see transcode.flow.md D7 -- TranscodedByMediaVortex short-circuit lives at WorkBucket layer; VideoVertical evaluates its own dimension
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
         if IsAudioOnlyContainer(Mf):
             return (None, 'non_video_scope')
@@ -36,33 +36,18 @@ class VideoVertical:
         if not AssignedProfile:
             return (None, 'missing_input:AssignedProfile')
 
-        Family = self._ResolveFamily(AssignedProfile)
-        if not Family:
-            return (None, f'missing_input:Family(profile={AssignedProfile})')
-
         ContentClass = getattr(Mf, 'ContentClass', None) or 'live_action'
-        Tier1TargetKbps = self._Tiers.GetTier1Target(Family, ContentClass, ResolutionCategory)
-        if Tier1TargetKbps is None:
-            return (None, f'missing_input:Tier1TargetKbps(family={Family},class={ContentClass},res={ResolutionCategory})')
+        ProfileTargetKbps = self._Tiers.GetProfileTarget(AssignedProfile, ContentClass, ResolutionCategory)
+        if ProfileTargetKbps is None:
+            return (None, f'missing_input:ProfileTargetKbps(profile={AssignedProfile},class={ContentClass},res={ResolutionCategory})')
 
         Multiplier = self._Thresholds.GetMultiplier(ResolutionCategory)
-        Threshold = int(round(Tier1TargetKbps * Multiplier))
-
+        Ceiling = int(round(ProfileTargetKbps * Multiplier))
         Src = int(SrcKbps)
-        if Src <= Threshold:
-            return (True, f'source_at_or_below_multiplier:{Src}<={Threshold}(tier1={Tier1TargetKbps}*{Multiplier})')
-        return (False, f'source_above_multiplier:{Src}>{Threshold}(tier1={Tier1TargetKbps}*{Multiplier})')
 
-    # directive: video-compliance-multiplier
-    def _ResolveFamily(self, AssignedProfile: str) -> Optional[str]:
-        Rows = self._Db.ExecuteQuery(
-            "SELECT Family FROM Profiles WHERE ProfileName = %s",
-            (AssignedProfile,),
-        )
-        if not Rows:
-            return None
-        Family = Rows[0].get('family')
-        return Family if Family else None
+        if Src <= Ceiling:
+            return (True, f'source_at_or_below_ceiling:{Src}<={Ceiling}(profile={AssignedProfile}:{ProfileTargetKbps}*{Multiplier})')
+        return (False, f'source_above_ceiling:{Src}>{Ceiling}(profile={AssignedProfile}:{ProfileTargetKbps}*{Multiplier})')
 
     # directive: compliance-reason-full-library-recompute | # see video-encoding.C5 -- Evaluate stays fail-loud (raises); batch orchestrator isolates per-row so one bad row does not abort a 237-row batch (BUG discovered via RetierTvToTier1 2026-08-07).
     def RecomputeFor(self, MediaFileIds: List[int]) -> None:

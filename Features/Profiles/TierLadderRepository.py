@@ -43,6 +43,21 @@ class TierLadderRepository:
         Value = Row[0].get('targetkbps')
         return int(Value) if Value is not None else None
 
+    # directive: pre-encode-savings-gate | # see video-encoding.C1
+    def GetProfileTarget(self, ProfileName: str, ContentClass: str, Resolution: str) -> Optional[int]:
+        Row = self.Db.ExecuteQuery(
+            "SELECT pt.TargetKbps FROM Profiles p "
+            "JOIN ProfileThresholds pt ON pt.ProfileId = p.Id "
+            "WHERE p.ProfileName = %s AND pt.ContentClass = %s "
+            "  AND pt.Resolution = %s AND pt.TargetKbps IS NOT NULL "
+            "ORDER BY p.Id LIMIT 1",
+            (ProfileName, ContentClass, Resolution),
+        )
+        if not Row:
+            return None
+        Value = Row[0].get('targetkbps')
+        return int(Value) if Value is not None else None
+
     # directive: transcode-flow-canonical | # see profiles.C3
     def GetBitrateLadder(self) -> List[BitrateLadderCell]:
         Rows = self.Db.ExecuteQuery(

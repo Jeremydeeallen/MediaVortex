@@ -1,4 +1,4 @@
-# directive: video-compliance-multiplier | # see video-encoding.C1
+# directive: pre-encode-savings-gate | # see video-encoding.C1
 import unittest
 from dataclasses import dataclass
 from typing import Optional
@@ -14,27 +14,23 @@ class _FakeMf:
     ResolutionCategory: Optional[str] = '720p'
     VideoBitrateKbps: Optional[int] = 1500
     FrameRate: Optional[float] = 24.0
-    AssignedProfile: Optional[str] = 'NVENC AV1 CANARY Tier 1 -720p'
+    AssignedProfile: Optional[str] = 'AV1 Tier 1 Efficient'
     ContentClass: Optional[str] = 'live_action'
     TranscodedByMediaVortex: bool = False
 
 
 class _StubDb:
-    def __init__(self, Family: Optional[str] = 'NVENC AV1 CANARY',
-                 Tier1TargetKbps: Optional[int] = 900,
+    def __init__(self, ProfileTargetKbps: Optional[int] = 900,
                  Multiplier: Optional[float] = 2.0):
-        self._Family = Family
-        self._Tier1 = Tier1TargetKbps
+        self._Target = ProfileTargetKbps
         self._Multiplier = Multiplier
 
     def ExecuteQuery(self, Sql, Params=None):
         SqlLower = Sql.lower()
-        if 'from profiles ' in SqlLower and 'where profilename' in SqlLower:
-            return [{'family': self._Family}] if self._Family else []
-        if 'profilethresholds' in SqlLower and 'qualitytier = 1' in SqlLower:
-            if self._Tier1 is None:
+        if 'from profiles p' in SqlLower and 'profilethresholds' in SqlLower and 'profilename' in SqlLower:
+            if self._Target is None:
                 return []
-            return [{'targetkbps': self._Tier1}]
+            return [{'targetkbps': self._Target}]
         if 'videocompliancethresholds' in SqlLower:
             if self._Multiplier is None:
                 return []
@@ -42,75 +38,71 @@ class _StubDb:
         return []
 
 
-class TestVideoComplianceMultiplier(unittest.TestCase):
+class TestPreEncodeSavingsGate(unittest.TestCase):
 
-    def test_boundary_at_720p_multiplier_2x_compliant_at_target(self):
-        Db = _StubDb(Tier1TargetKbps=900, Multiplier=2.0)
+    def test_source_below_ceiling_compliant(self):
+        Db = _StubDb(ProfileTargetKbps=900, Multiplier=2.0)
+        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(VideoBitrateKbps=1500))
+        self.assertTrue(Compliant)
+        self.assertIn('source_at_or_below_ceiling:1500<=1800', Reason)
+        self.assertIn('profile=AV1 Tier 1 Efficient:900*2.0', Reason)
+
+    def test_source_at_ceiling_compliant(self):
+        Db = _StubDb(ProfileTargetKbps=900, Multiplier=2.0)
         Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(VideoBitrateKbps=1800))
         self.assertTrue(Compliant)
-        self.assertIn('source_at_or_below_multiplier:1800<=1800', Reason)
+        self.assertIn('source_at_or_below_ceiling:1800<=1800', Reason)
 
-    def test_boundary_at_720p_multiplier_2x_below_target(self):
-        Db = _StubDb(Tier1TargetKbps=900, Multiplier=2.0)
-        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(VideoBitrateKbps=1700))
-        self.assertTrue(Compliant)
-        self.assertIn('source_at_or_below_multiplier:1700<=1800', Reason)
-
-    def test_boundary_at_720p_multiplier_2x_above_target(self):
-        Db = _StubDb(Tier1TargetKbps=900, Multiplier=2.0)
-        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(VideoBitrateKbps=1900))
+    def test_source_above_ceiling_non_compliant(self):
+        Db = _StubDb(ProfileTargetKbps=900, Multiplier=2.0)
+        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(VideoBitrateKbps=5000))
         self.assertFalse(Compliant)
-        self.assertIn('source_above_multiplier:1900>1800', Reason)
+        self.assertIn('source_above_ceiling:5000>1800', Reason)
 
-    def test_boundary_at_480p_multiplier_1_5x(self):
-        Db = _StubDb(Tier1TargetKbps=400, Multiplier=1.5)
-        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(ResolutionCategory='480p', VideoBitrateKbps=560))
-        self.assertTrue(Compliant)
-        self.assertIn('source_at_or_below_multiplier:560<=600', Reason)
-        Compliant2, Reason2 = VideoVertical(Db=Db).Evaluate(_FakeMf(ResolutionCategory='480p', VideoBitrateKbps=640))
-        self.assertFalse(Compliant2)
-        self.assertIn('source_above_multiplier:640>600', Reason2)
+    def test_ace_ventura_case_still_transcoded(self):
+        Db = _StubDb(ProfileTargetKbps=900, Multiplier=2.0)
+        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(
+            ResolutionCategory='1080p', VideoBitrateKbps=2497,
+            AssignedProfile='AV1 Tier 1 Efficient',
+        ))
+        self.assertFalse(Compliant)
+        self.assertIn('source_above_ceiling:2497>1800', Reason)
 
-    def test_boundary_at_2160p_multiplier_3x(self):
-        Db = _StubDb(Tier1TargetKbps=4000, Multiplier=3.0)
-        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(ResolutionCategory='2160p', VideoBitrateKbps=11500))
+    def test_ceiling_uses_assigned_profile_not_tier1(self):
+        Db = _StubDb(ProfileTargetKbps=2400, Multiplier=2.0)
+        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(
+            ResolutionCategory='1080p', VideoBitrateKbps=4000,
+            AssignedProfile='AV1 Tier 2 Good',
+        ))
         self.assertTrue(Compliant)
-        self.assertIn('source_at_or_below_multiplier:11500<=12000', Reason)
-        Compliant2, Reason2 = VideoVertical(Db=Db).Evaluate(_FakeMf(ResolutionCategory='2160p', VideoBitrateKbps=15000))
-        self.assertFalse(Compliant2)
-        self.assertIn('source_above_multiplier:15000>12000', Reason2)
+        self.assertIn('source_at_or_below_ceiling:4000<=4800', Reason)
+        self.assertIn('profile=AV1 Tier 2 Good:2400*2.0', Reason)
 
     def test_codec_no_longer_a_signal(self):
-        Db = _StubDb(Tier1TargetKbps=900, Multiplier=2.0)
-        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(Codec='wmv3', VideoBitrateKbps=1700))
+        Db = _StubDb(ProfileTargetKbps=900, Multiplier=2.0)
+        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(Codec='wmv3', VideoBitrateKbps=1500))
         self.assertTrue(Compliant)
         self.assertNotIn('codec', Reason)
 
-    def test_no_profile_returns_none_with_missing_input_reason(self):
+    def test_no_profile_returns_none_missing_input(self):
         Db = _StubDb()
         Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(AssignedProfile=None))
         self.assertIsNone(Compliant)
         self.assertEqual(Reason, 'missing_input:AssignedProfile')
 
-    def test_missing_family_returns_none_with_missing_input_reason(self):
-        Db = _StubDb(Family=None)
+    def test_missing_profile_target_returns_none_missing_input(self):
+        Db = _StubDb(ProfileTargetKbps=None)
         Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf())
         self.assertIsNone(Compliant)
-        self.assertIn('missing_input:Family', Reason)
+        self.assertIn('missing_input:ProfileTargetKbps', Reason)
 
-    def test_missing_tier1_returns_none_with_missing_input_reason(self):
-        Db = _StubDb(Tier1TargetKbps=None)
-        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf())
-        self.assertIsNone(Compliant)
-        self.assertIn('missing_input:Tier1TargetKbps', Reason)
-
-    def test_missing_bitrate_returns_none_with_missing_input_reason(self):
+    def test_missing_bitrate_returns_none_missing_input(self):
         Db = _StubDb()
         Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(VideoBitrateKbps=None))
         self.assertIsNone(Compliant)
         self.assertEqual(Reason, 'missing_input:VideoBitrateKbps')
 
-    def test_missing_resolution_category_returns_none_with_missing_input_reason(self):
+    def test_missing_resolution_category_returns_none_missing_input(self):
         Db = _StubDb()
         Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(ResolutionCategory=None))
         self.assertIsNone(Compliant)
@@ -119,14 +111,8 @@ class TestVideoComplianceMultiplier(unittest.TestCase):
     def test_missing_multiplier_fail_loud(self):
         Db = _StubDb(Multiplier=None)
         with self.assertRaises(RuntimeError) as Ctx:
-            VideoVertical(Db=Db).Evaluate(_FakeMf())
+            VideoVertical(Db=Db).Evaluate(_FakeMf(VideoBitrateKbps=5000))
         self.assertIn('VideoComplianceThresholds', str(Ctx.exception))
-
-    def test_mediavortex_output_exempt(self):
-        Db = _StubDb()
-        Compliant, Reason = VideoVertical(Db=Db).Evaluate(_FakeMf(TranscodedByMediaVortex=True))
-        self.assertTrue(Compliant)
-        self.assertEqual(Reason, 'mediavortex_output_accepted')
 
 
 if __name__ == '__main__':

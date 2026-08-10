@@ -19,12 +19,11 @@ class QueueAdmissionConfigRepository(BaseRepository):
         """
         try:
             Rows = self.ExecuteQuery(
-                """
-                SELECT Id, MinTranscodeSavingsMB, MissingEstimatePolicy,
-                       MinAudioBitrateKbpsMono, MinAudioBitrateKbpsStereo,
-                       MinAudioBitrateKbpsSurround, LastUpdated
-                FROM QueueAdmissionConfig WHERE Id = 1
-                """
+                "SELECT Id, MinTranscodeSavingsMB, MissingEstimatePolicy, "
+                "       MinAudioBitrateKbpsMono, MinAudioBitrateKbpsStereo, "
+                "       MinAudioBitrateKbpsSurround, PreEncodeSavingsThresholdPercent, "
+                "       LastUpdated "
+                "FROM QueueAdmissionConfig WHERE Id = 1"
             )
             if not Rows:
                 LoggingService.LogWarning(
@@ -41,6 +40,7 @@ class QueueAdmissionConfigRepository(BaseRepository):
                 MinAudioBitrateKbpsMono=R['MinAudioBitrateKbpsMono'],
                 MinAudioBitrateKbpsStereo=R['MinAudioBitrateKbpsStereo'],
                 MinAudioBitrateKbpsSurround=R['MinAudioBitrateKbpsSurround'],
+                PreEncodeSavingsThresholdPercent=R['PreEncodeSavingsThresholdPercent'],
                 LastUpdated=R.get('LastUpdated'),
             )
         except Exception as Ex:
