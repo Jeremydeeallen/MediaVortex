@@ -231,6 +231,7 @@ def StepRenderSystemdUnit(Target: str, Friendly: str, Count: int, SrcPath: str, 
         "RestartSec=10\n"
         "TimeoutStopSec=1800\n"
         "KillSignal=SIGTERM\n"
+        "MemoryMax=14G\n"
         "LimitNOFILE=65536\n"
         "\n"
         "[Install]\n"
