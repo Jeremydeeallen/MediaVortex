@@ -32,15 +32,15 @@ class PreEncodeAudioPipeline:
         self._RulesRepo = RulesRepo or AudioComplianceRulesRepository()
         self._Report = ProgressReporter or (lambda Phase, Percent, Info: None)
 
-    # directive: pre-encode-pipeline-parallel -- SourceMeasure runs concurrent with Downmix->Demucs->Premix->LoudnormMeasure chain. Loudnorm outputs (SourceI/Lra/Tp/Thresh + PremixI/Lra/Tp/Thresh) byte-identical to sequential predecessor; ordering swap is orchestration-only.
-    def Run(self, SourceFilePath, JobId):
+    # directive: preencode-loudness-cache-hit -- SourceMeasure runs concurrent with Downmix->Demucs->Premix->LoudnormMeasure chain AND skips ffmpeg entirely when MediaFiles already carries the four source-loudness columns.
+    def Run(self, SourceFilePath, JobId, MediaFileId=None):
         ScratchDir = LocalJoin(self.ScratchRoot, f"mv_audio_{JobId}")
         try:
             R = self._RulesRepo.GetRules()
             SourceBox = _ThreadResult()
             SourceThread = threading.Thread(
                 target=self._RunSourceMeasureTask,
-                args=(SourceFilePath, R, SourceBox),
+                args=(SourceFilePath, R, SourceBox, MediaFileId),
                 name=f"PreEncodeSourceMeasure-{JobId}",
                 daemon=True,
             )
@@ -76,12 +76,25 @@ class PreEncodeAudioPipeline:
             # see audio-normalization.C39
             return {'DemucsPremixPath': None, 'VocalsRmsDbfs': None, 'ScratchDir': None, 'DemucsFailed': True, 'DemucsFailureReason': f"{type(Ex).__name__}: {str(Ex)[:200]}"}
 
-    # directive: pre-encode-pipeline-parallel -- source-loudness measurement runs on its own thread; independent of the Demucs chain since it only reads source
-    def _RunSourceMeasureTask(self, SourceFilePath, R, ResultBox):
+    # directive: preencode-loudness-cache-hit -- cache-hit skips ffmpeg pass; cache-miss falls through to MeasureSourceLoudnorm (persistence handled by AudioPreEncodeFacade.PersistSourceLoudness in caller)
+    def _RunSourceMeasureTask(self, SourceFilePath, R, ResultBox, MediaFileId=None):
         try:
+            if MediaFileId is not None:
+                from Features.MediaFiles.MediaFilesRepository import MediaFilesRepository
+                Cached = MediaFilesRepository().GetSourceLoudness(int(MediaFileId))
+                if Cached is not None:
+                    self._Report('SourceMeasure', 100.0, f'cache-hit MediaFileId={MediaFileId}')
+                    LoggingService.LogDebug(
+                        f"SourceMeasure cache-hit MediaFileId={MediaFileId}",
+                        "PreEncodeAudioPipeline", "_RunSourceMeasureTask",
+                    )
+                    ResultBox.value = Cached
+                    return
             self._Report('SourceMeasure', 0.0, 'Measuring source loudness for Track 0 linear loudnorm')
             SrcTargetTp = float(R['TargetTruePeakDbtp']) - float(R['SampleLimitHeadroomDb'])
             SourceMeasureCallback = lambda Pct: self._Report('SourceMeasure', float(Pct), 'ffmpeg scanning source')
+            import time as _TimeMod
+            _MissStart = _TimeMod.perf_counter()
             ResultBox.value = self.DemucsService.MeasureSourceLoudnorm(
                 SourceFilePath,
                 TargetLufs=R['TargetIntegratedLufs'],
@@ -89,7 +102,12 @@ class PreEncodeAudioPipeline:
                 TargetTruePeakDbtp=SrcTargetTp,
                 ProgressCallback=SourceMeasureCallback,
             )
+            _MissElapsed = _TimeMod.perf_counter() - _MissStart
             self._Report('SourceMeasure', 100.0, 'Source loudness measured')
+            LoggingService.LogInfo(
+                f"SourceMeasure cache-miss MediaFileId={MediaFileId}; ran ffmpeg loudnorm scan ({_MissElapsed:.1f}s)",
+                "PreEncodeAudioPipeline", "_RunSourceMeasureTask",
+            )
         except Exception as Ex:
             ResultBox.exception = Ex
 

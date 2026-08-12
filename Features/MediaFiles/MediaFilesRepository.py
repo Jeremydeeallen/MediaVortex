@@ -147,6 +147,25 @@ class MediaFilesRepository(BaseRepository):
         )
         return affected > 0
 
+    # directive: preencode-loudness-cache-hit | # see audio-normalization.C7
+    def GetSourceLoudness(self, MediaFileId: int) -> Optional[tuple]:
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT SourceIntegratedLufs, SourceLoudnessRangeLU, "
+            "SourceTruePeakDbtp, SourceIntegratedThresholdLufs "
+            "FROM MediaFiles WHERE Id = %s",
+            (int(MediaFileId),),
+        )
+        if not Rows:
+            return None
+        R = Rows[0]
+        I = R.get('SourceIntegratedLufs') if R.get('SourceIntegratedLufs') is not None else R.get('sourceintegratedlufs')
+        Lra = R.get('SourceLoudnessRangeLU') if R.get('SourceLoudnessRangeLU') is not None else R.get('sourceloudnessrangelu')
+        Tp = R.get('SourceTruePeakDbtp') if R.get('SourceTruePeakDbtp') is not None else R.get('sourcetruepeakdbtp')
+        Thresh = R.get('SourceIntegratedThresholdLufs') if R.get('SourceIntegratedThresholdLufs') is not None else R.get('sourceintegratedthresholdlufs')
+        if I is None or Lra is None or Tp is None or Thresh is None:
+            return None
+        return (float(I), float(Lra), float(Tp), float(Thresh))
+
     # directive: path-schema-migration | # see path.S8
     def SaveMediaFile(self, MediaFile: MediaFileModel) -> int:
         """Insert or update by Id when set; else dedupe on typed pair; returns the row Id."""

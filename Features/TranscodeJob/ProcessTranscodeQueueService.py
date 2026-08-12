@@ -441,6 +441,7 @@ class ProcessTranscodeQueueService:
         VariantPreAudio = AudioPreEncodeFacade.Prepare(
             FfmpegPath=self.FFmpegPath, InputPath=EffectiveInputPath,
             JobId=getattr(Job, 'Id', 'unknown'), ProgressReporter=_VariantProgress,
+            MediaFileId=getattr(MediaFile, 'Id', None),
         )
         AudioPreEncodeFacade.EnrichContext(TranscodingSettings, VariantPreAudio)
 

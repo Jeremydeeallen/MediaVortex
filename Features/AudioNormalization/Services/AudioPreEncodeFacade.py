@@ -7,8 +7,8 @@ from Core.Logging.LoggingService import LoggingService
 _PREMIX_KEYS = ('DemucsPremixPath', 'VocalsRmsDbfs', 'PremixMeasuredI', 'PremixMeasuredLra', 'PremixMeasuredTp', 'PremixMeasuredThresh')
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C8
-def Prepare(FfmpegPath, InputPath, JobId, ProgressReporter=None):
+# directive: preencode-loudness-cache-hit | # see audio-normalization.C8
+def Prepare(FfmpegPath, InputPath, JobId, ProgressReporter=None, MediaFileId=None):
     """Run Demucs pre-encode pipeline; return dict with premix path + measurements. None on empty input."""
     if not InputPath:
         return None
@@ -16,7 +16,7 @@ def Prepare(FfmpegPath, InputPath, JobId, ProgressReporter=None):
         from Features.AudioNormalization.Services.PreEncodeAudioPipeline import PreEncodeAudioPipeline
         return PreEncodeAudioPipeline(
             FfmpegPath=FfmpegPath, PythonExe=sys.executable, ProgressReporter=ProgressReporter,
-        ).Run(InputPath, JobId)
+        ).Run(InputPath, JobId, MediaFileId=MediaFileId)
     except Exception as Ex:
         LoggingService.LogException(
             f"AudioPreEncodeFacade.Prepare failed for JobId={JobId}; Dialog Boost will be skipped",

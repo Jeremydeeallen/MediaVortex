@@ -210,6 +210,7 @@ class JobProcessor:
             InputPath=InputPath,
             JobId=getattr(Job, 'Id', 'unknown'),
             ProgressReporter=Reporter,
+            MediaFileId=getattr(MediaFile, 'Id', None),
         )
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C8
