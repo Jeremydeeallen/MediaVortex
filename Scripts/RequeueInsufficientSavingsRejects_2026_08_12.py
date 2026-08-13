@@ -30,7 +30,8 @@ def Main():
     for MediaFileId, WorkBucket in Candidates:
         ProcessingMode = WorkBucket
         SrcRow = Db.ExecuteQuery(
-            "SELECT StorageRootId, RelativePath FROM MediaFiles WHERE Id = %s",
+            "SELECT StorageRootId, RelativePath, FileName, FileSize, SizeMB "
+            "FROM MediaFiles WHERE Id = %s",
             (MediaFileId,),
         )
         if not SrcRow:
@@ -38,15 +39,22 @@ def Main():
             continue
         StorageRootId = SrcRow[0].get('storagerootid')
         RelativePath = SrcRow[0].get('relativepath')
-        if StorageRootId is None or not RelativePath:
+        FileName = SrcRow[0].get('filename')
+        FileSize = SrcRow[0].get('filesize')
+        SizeMB = SrcRow[0].get('sizemb')
+        if StorageRootId is None or not RelativePath or not FileName:
             Skipped += 1
             continue
+        Directory = RelativePath[:-len(FileName)].rstrip('\\/') if RelativePath.endswith(FileName) else ''
         Affected = Db.ExecuteNonQuery(
             "INSERT INTO TranscodeQueue "
-            "(MediaFileId, StorageRootId, RelativePath, ProcessingMode, Status, DateAdded, AudioPolicyJson) "
-            "VALUES (%s, %s, %s, %s, 'Pending', NOW(), NULL) "
-            "ON CONFLICT (MediaFileId) WHERE Status='Pending' AND TestVariantSetId IS NULL DO NOTHING",
-            (MediaFileId, StorageRootId, RelativePath, ProcessingMode),
+            "(MediaFileId, StorageRootId, RelativePath, FileName, Directory, "
+            " SizeBytes, SizeMB, ProcessingMode, Status, DateAdded, AudioPolicyJson) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pending', NOW(), NULL) "
+            "ON CONFLICT (MediaFileId) WHERE Status='Pending' AND TestVariantSetId IS NULL "
+            "DO NOTHING",
+            (MediaFileId, StorageRootId, RelativePath, FileName, Directory,
+             FileSize or 0, SizeMB or 0.0, ProcessingMode),
         )
         if Affected and int(Affected) > 0:
             Admitted += 1
