@@ -25,7 +25,23 @@ if _HasDialogBoostTrack(Mf.Id): return (True, None)
 return (False, 'no_dialog_boost')
 ```
 
-`_HasDialogBoostTrack(MediaFileId)` reads latest successful `TranscodeAttempts.AudioTracksEmittedJson` for that MediaFileId + returns TRUE iff any track has `Label='Dialog Boost'` (matches AudioFilterEmitter's write shape).
+`_HasDialogBoostTrack(MediaFileId)` reads latest successful `TranscodeAttempts.AudioTracksEmittedJson` for that MediaFileId + returns TRUE iff any track entry has `Label='Dialog Boost'`.
+
+**Correction on feature doc marker wording:** the feature doc (C1, out-of-scope note) refers to `title=Dialog Boost`. Actual code emits `TrackBlock(Label='Dialog Boost', Language=..., Strategy='demucs_boost')` at `Features/AudioNormalization/AudioFilterEmitter.py:194`. The JSON field is **`Label`** (capital L), not `title`. Concrete sample from live DB (attempt 60922):
+
+```json
+[{"Label": "Dialog Boost", "Language": "eng", "Strategy": "measured", "TrackIndex": 1,
+  "AchievedLra": 4.3, "demucs_failed": false, "vocals_rms_dbfs": -23.594822,
+  "AchievedTruePeakDbtp": -6.2, "dialog_boost_emitted": true, ...}]
+```
+
+Two plausible detection predicates:
+- `AudioTracksEmittedJson::jsonb @> '[{"Label": "Dialog Boost"}]'::jsonb` -- structural
+- `AudioTracksEmittedJson::jsonb @> '[{"dialog_boost_emitted": true}]'::jsonb` -- explicit flag from PostEncodeMeasurementService
+
+Both should coincide; pick one. Explicit flag is more defensive against future label renames. Structural match survives if PostEncodeMeasurementService's flag-write path changes.
+
+**No prior implementation artifacts.** Grep of `_HasDialogBoost` / `HasDialogBoostTrack` in production tree returns 0 matches. Git log of directive slug shows only the 2 initial commits (feature doc + pause snapshot). Clean slate.
 
 `AudioComplete` column preserved for metadata (LUFS-at-target signal) but no longer read by `AudioVertical.Evaluate`. Grep of `AudioVertical.py` for `AudioComplete` returns 0 after change.
 
