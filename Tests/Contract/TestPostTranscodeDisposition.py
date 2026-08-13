@@ -35,6 +35,7 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
             QualityTestRequired=True,
             VmafScore=None,
             VmafCapableWorkerOnline=True,
+            VideoSlotStrategy='Reencode',
         )
         Defaults.update(Kwargs)
         GateInput = dict(

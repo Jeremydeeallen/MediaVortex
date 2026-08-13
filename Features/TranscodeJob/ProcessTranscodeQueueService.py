@@ -931,7 +931,7 @@ class ProcessTranscodeQueueService:
             Spec = self.CommandComposer.Build(MediaFile, Job, TranscodingSettings)
             if Spec is None:
                 return None
-            return {'Command': Spec.Command, 'OutputPath': Spec.OutputPath}
+            return {'Command': Spec.Command, 'OutputPath': Spec.OutputPath, 'VideoSlotStrategy': getattr(Spec, 'VideoSlotStrategy', '')}
         except Exception as e:
             LoggingService.LogException("Exception building transcode command", e, "ProcessTranscodeQueueService", "BuildTranscodeCommand")
             return None

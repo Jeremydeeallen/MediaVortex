@@ -115,9 +115,10 @@ class JobProcessor:
             TemporaryFilePathId = self.QueueService.PrivateCreateTemporaryFilePathRecord(
                 TranscodeAttemptId, SrcId, SrcRel, OutId, OutRel)
 
-            # directive: e2e-bug-fixes | # see e2e-bug-fixes.C32 -- AttemptDate is immutable after CreateTranscodeAttempt; only FfpmpegCommand is new information here (built post-BuildCommand). Every other field is already set at INSERT.
+            # directive: videoslotstrategy-persisted -- VideoSlotStrategy stamped alongside FfpmpegCommand; both known at post-BuildCommand.
             self.QueueService.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                 'FfpmpegCommand': CommandResult.Command,
+                'VideoSlotStrategy': getattr(CommandResult, 'VideoSlotStrategy', ''),
             })
 
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, Mode, 0.0, f"Running {Mode}...")

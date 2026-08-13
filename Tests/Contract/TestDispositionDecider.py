@@ -45,19 +45,33 @@ class TestPostTranscodeDispositionDecider(unittest.TestCase):
         self.assertEqual(Result.Action, 'Replace')
         self.assertEqual(Result.Reason, 'QualityTestNotRequired')
 
-    # directive: pre-encode-savings-gate
-    def test_insufficient_savings_at_zero_pct_returns_reject(self):
-        Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 1000, 'QualityTestRequired': True, 'VmafScore': 90.0}
+    # directive: videoslotstrategy-persisted -- gate fires only when VideoSlotStrategy='Reencode'
+    def test_insufficient_savings_reencode_zero_pct_returns_reject(self):
+        Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 1000, 'QualityTestRequired': True, 'VmafScore': 90.0, 'VideoSlotStrategy': 'Reencode'}
         Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate())
         self.assertEqual(Result.Action, 'Reject')
         self.assertTrue(Result.Reason.startswith('InsufficientSavings_0pct_below_20pct'))
 
-    # directive: pre-encode-savings-gate
-    def test_insufficient_savings_negative_returns_reject(self):
-        Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 1200, 'QualityTestRequired': True, 'VmafScore': 90.0}
+    # directive: videoslotstrategy-persisted
+    def test_insufficient_savings_reencode_negative_returns_reject(self):
+        Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 1200, 'QualityTestRequired': True, 'VmafScore': 90.0, 'VideoSlotStrategy': 'Reencode'}
         Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate())
         self.assertEqual(Result.Action, 'Reject')
         self.assertTrue(Result.Reason.startswith('InsufficientSavings_-20pct_below_20pct'))
+
+    # directive: videoslotstrategy-persisted -- Copy strategy skips savings gate (remux/audiofix don't shrink)
+    def test_savings_gate_skipped_for_copy_strategy(self):
+        Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 1000, 'QualityTestRequired': True, 'VmafScore': 90.0, 'VideoSlotStrategy': 'Copy'}
+        Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate())
+        self.assertEqual(Result.Action, 'Replace')
+        self.assertEqual(Result.Reason, 'VmafPassed')
+
+    # directive: videoslotstrategy-persisted -- NULL strategy skips gate (safe default per D2)
+    def test_savings_gate_skipped_for_null_strategy(self):
+        Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 1200, 'QualityTestRequired': True, 'VmafScore': 90.0, 'VideoSlotStrategy': None}
+        Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate())
+        self.assertEqual(Result.Action, 'Replace')
+        self.assertEqual(Result.Reason, 'VmafPassed')
 
     # directive: pre-encode-savings-gate
     def test_savings_above_threshold_passes_to_vmaf_flow(self):

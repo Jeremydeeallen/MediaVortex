@@ -22,7 +22,7 @@ class TranscodeJobStrategy(ITranscodeJobStrategy):
         CommandDict = QueueService.BuildTranscodeCommand(Job, MediaFile, TranscodingSettings)
         if not CommandDict:
             return None
-        return CommandSpec(Command=CommandDict['Command'], OutputPath=CommandDict['OutputPath'])
+        return CommandSpec(Command=CommandDict['Command'], OutputPath=CommandDict['OutputPath'], VideoSlotStrategy=CommandDict.get('VideoSlotStrategy', ''))
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
     def HandleResult(self, Job, Result: Dict[str, Any], TranscodeAttemptId: int, ActiveJobId: int, OutputPath: str, QueueService=None) -> None:

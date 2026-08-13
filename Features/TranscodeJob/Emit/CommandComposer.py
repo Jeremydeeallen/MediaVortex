@@ -153,7 +153,7 @@ class CommandComposer:
             Parts.extend(self._BuildProvenanceMetadata(MediaFile, Plan_, ProfileSettings))
             Parts.append('-y')
             Parts.append(f'"{OutputPath}"')
-            return CommandSpec(Command=' '.join(Parts), OutputPath=OutputPath)
+            return CommandSpec(Command=' '.join(Parts), OutputPath=OutputPath, VideoSlotStrategy=Plan_.VideoOp)
         except Exception as Ex:
             JobId = getattr(Job, 'Id', None)
             FilePath = getattr(Job, 'FilePath', None)

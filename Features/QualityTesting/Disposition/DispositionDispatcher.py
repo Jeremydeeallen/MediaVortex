@@ -84,7 +84,8 @@ class DispositionDispatcher:
         """Read the attempt row needed for the disposition decision; returns None if not found."""
         Rows = self.DatabaseService.ExecuteQuery(
             "SELECT Success, OldSizeBytes, NewSizeBytes, QualityTestRequired, VMAF, "
-            "Disposition, DispositionReason, TestVariantSetId, MediaFileId, ProfileName "
+            "Disposition, DispositionReason, TestVariantSetId, MediaFileId, ProfileName, "
+            "VideoSlotStrategy "
             "FROM TranscodeAttempts WHERE Id = %s",
             (TranscodeAttemptId,),
         )
@@ -155,6 +156,7 @@ class DispositionDispatcher:
             'VmafCapableWorkerOnline': VmafCapableWorkerOnline,
             'MediaFileId': Row.get('MediaFileId'),
             'BucketKey': self._BuildBucketKey(Row),
+            'VideoSlotStrategy': Row.get('VideoSlotStrategy'),
         }
 
     # directive: transcode-flow-canonical | # see transcode.ST7 -- C14 BucketKey wire-up

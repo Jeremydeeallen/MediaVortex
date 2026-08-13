@@ -3,14 +3,12 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
 
-# directive: transcode-worker-unification | # see worker-loop.C2
+# directive: videoslotstrategy-persisted | # see worker-loop.C2
 class CommandSpec:
-
-    # directive: transcode-worker-unification | # see worker-loop.C2
-    def __init__(self, Command, OutputPath):
-        # see worker-loop.C2
+    def __init__(self, Command, OutputPath, VideoSlotStrategy=''):
         self.Command = Command
         self.OutputPath = OutputPath
+        self.VideoSlotStrategy = VideoSlotStrategy
 
 
 # directive: transcode-worker-unification | # see worker-loop.C3

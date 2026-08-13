@@ -325,7 +325,7 @@ class TranscodeJobRepository(BaseRepository):
                 'VideoBitrateKbps', 'ProfileName', 'VMAF', 'FileReplaced', 'FileReplacedDate',
                 'ReplacementType', 'StartTime', 'PreferredAttempt', 'WorkerName',
                 'CompletedDate', 'QualityTestRequired', 'QualityTestCompleted',
-                'TestVariantSetId', 'TestVariantName'
+                'TestVariantSetId', 'TestVariantName', 'VideoSlotStrategy'
             ]
 
             set_clauses = []

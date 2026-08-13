@@ -1,10 +1,10 @@
-# Directive: preencode-loudness-cache-hit
+# Directive: videoslotstrategy-persisted
 
 **Status:** Active -- phase: IMPLEMENTING
 
-**Slug:** preencode-loudness-cache-hit
+**Slug:** videoslotstrategy-persisted
 
-**Interrupts:** worker-memorymax-cgroup (top of `.claude/current-feature` stack) -- MemoryMax=14G is deployed to wakko; observation ongoing. Pausing to fix upstream root cause.
+**Interrupts:** preencode-loudness-cache-hit (top of `.claude/current-feature` stack; shipped + deployed, delivery report pending).
 
 ### Promotions
 
@@ -12,100 +12,119 @@
 
 ## What / Why
 
-`PreEncodeAudioPipeline.Run._RunSourceMeasureTask` unconditionally invokes `DemucsService.MeasureSourceLoudnorm(SourceFilePath)` on every Dialog Boost job. This runs a full ffmpeg loudnorm-analysis pass on the source (~30-90s of ffmpeg wall + subprocess RAM footprint).
+`PostTranscodeDispositionDecider.Decide` applies the `InsufficientSavings_<pct>pct_below_<threshold>pct` gate universally on every successful transcode attempt. This is wrong for attempts whose video slot is Copy (Remux, AudioFix, some TestVariant paths). Those attempts NEVER shrink the video stream by design -- their job is container fix, audio fix, or Dialog Boost, not video re-encode. My 20% savings threshold rejects them, `.inprogress` is deleted, MediaFile stays in Remux WorkBucket, queue never drains.
 
-The measurement it produces (`SourceIntegratedLufs`, `SourceLoudnessRangeLU`, `SourceTruePeakDbtp`, `SourceIntegratedThresholdLufs`) is already persisted on `MediaFiles` from prior runs. Once a source has been measured, the values are stable (source file is bit-exact-unchanged per audio-normalization.C7). Re-measuring wastes ffmpeg time + RAM.
+Damage window: since `04377aa5` (2026-08-11 InsufficientSavings gate landed). **468 rejected InsufficientSavings attempts in 48h; 467 still WorkBucket='Remux' with no queue row** (queue rows deleted during reject cleanup, no auto-re-admit). Source files intact on disk; encoder work wasted.
 
-**Historical context:** commit `6856ac70 2026-08-06 perf(probe): remove EBU R128 loudness measurement from probe path` correctly removed the probe-time measurement (SRP win) but the corresponding cache-hit in `PreEncodeAudioPipeline.Run` was never added. Every Dialog Boost job now re-measures at transcode-time. This is the root cause of the wakko-worker-1 OOM cadence that started 2026-08-06 (30-50 crashes since; documented in the paused `worker-memorymax-cgroup` directive).
+Per `transcode.flow.md` D3: **ProcessingMode is a reporting/priority tag only. Does not decide slot behavior.** Filtering the gate on ProcessingMode would work today by coincidence but breaks when future modes have per-slot combinations. The correct signal is: was the video slot Reencode or Copy for THIS attempt.
 
-Fix: check `MediaFiles` row for populated source-loudness columns before invoking `MeasureSourceLoudnorm`. Cache-hit path skips the ffmpeg subprocess entirely; cache-miss path (fresh probe or missing columns) runs the measurement + persists it.
+Fix: persist `VideoSlotStrategy` ('Copy' | 'Reencode') on `TranscodeAttempts` (symmetric with existing `AudioPolicyResolved` column). Decider reads it; applies `InsufficientSavings` only when strategy = 'Reencode'.
 
 ## Domain Decisions (operator, 2026-08-12)
 
-D1. Cache-hit predicate: all four columns non-NULL on the `MediaFiles` row → skip ffmpeg pass, use cached values. Any column NULL → run ffmpeg pass, persist to MediaFiles.
+D1. VideoSlotStrategy is the SoT for "was video re-encoded on this attempt." Neither ProcessingMode nor MediaFiles.VideoCompliant at decision-time are valid substitutes (D3 in transcode.flow.md).
 
-D2. No new measurement invalidation gate (e.g. LoudnessMeasuredAt age check) -- the source file is bit-exact-unchanged invariant (audio-normalization.C7 + MediaFilesArchive semantics), so cached measurements never go stale unless the file itself is replaced. Replace-path MUST reset the 4 source-loudness columns to NULL (existing behavior per prior probe-loudness design; NEEDS_PLAN grep task verifies this + adds reset if missing -- in-scope guardrail).
+D2. Historical rows (attempts written before this directive lands) keep `VideoSlotStrategy = NULL`. Decider treats NULL as "unknown" and DEFAULTS to skipping the gate to avoid breaking historical audit queries. Reason: safer to skip once for an unknown-strategy attempt than to falsely reject.
 
-D3. Persistence sink: cache-miss path must write measurements back to `MediaFiles` (SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, SourceIntegratedThresholdLufs, LoudnessMeasuredAt) so the next job hits the cache. Existing writer at `Features/AudioNormalization/Services/AudioPreEncodeFacade.py:80` (per probe.feature.md C5 reference) already does this -- confirm still wired; add if not.
+D3. One-shot recovery script re-queues the 467 Remux MediaFileIds that got InsufficientSavings-rejected. Idempotent: skips MediaFileIds that already have a Pending TranscodeQueue row.
 
 ## Scope
 
-1. `PreEncodeAudioPipeline._RunSourceMeasureTask` accepts `MediaFileId` (new arg). Reads `MediaFiles` row; if all four source-loudness columns are non-NULL, returns the cached tuple without running ffmpeg.
-2. `PreEncodeAudioPipeline.Run` passes `MediaFileId` through from its caller (`AudioPreEncodeFacade.Prepare`).
-3. `AudioPreEncodeFacade.Prepare` signature already carries `SourceFilePath` + `JobId`; add `MediaFileId` param or lookup via JobId.
-4. Cache-miss path unchanged from today (ffmpeg pass + persist).
-5. Contract test: mocked repo returns fully-populated row → `MeasureSourceLoudnorm` NOT invoked, tuple returned matches DB values. Mocked repo returns partial row → `MeasureSourceLoudnorm` IS invoked, DB write occurs.
-6. Live smoke on I9 (or wakko): run one Dialog Boost job whose MediaFile already has loudness columns → confirm `SourceMeasure` phase completes in <1s (cache hit) instead of ~30-90s (ffmpeg pass). Log line differentiates hit vs miss.
-7. `audio-normalization.feature.md` amended at DELIVERING with the cache-hit criterion + reference to attempt 60358 baseline (or whatever the smoke job is).
-8. Observation on wakko-worker-1: OOM cadence should lengthen dramatically after this ships (SourceMeasure ffmpeg subprocess memory removed from peak; my parallelization no longer stacks that footprint with Demucs).
+1. Migration: `ALTER TABLE TranscodeAttempts ADD COLUMN IF NOT EXISTS VideoSlotStrategy TEXT`. Idempotent per R11.
+2. Writer: identify the layer that emits the video slot decision (`CommandComposer` / `VideoSlot._EmitCopy` vs `_EmitReencode`, or `JobProcessor.Process` after Strategy resolved) and persist 'Copy' or 'Reencode' onto the attempt at the same commit that writes `AudioPolicyResolved`. Single writer per code path.
+3. Reader: `PostTranscodeDispositionDecider.Decide` reads `VideoSlotStrategy` from Attempt dict; if `'Copy'`: skip InsufficientSavings entirely; if `'Reencode'`: apply gate as today; if `None`/missing: skip (D2 safe default).
+4. `DispositionDispatcher._BuildDeciderInput` projects VideoSlotStrategy from the row into the dict.
+5. Contract tests:
+    - `test_savings_gate_skipped_for_copy`: attempt dict with VideoSlotStrategy='Copy' + 0% savings → Replace/QualityTestingGloballyDisabled (or VMAF path), NOT Reject.
+    - `test_savings_gate_fires_for_reencode`: attempt dict with VideoSlotStrategy='Reencode' + 0% savings + threshold=20 → Reject/InsufficientSavings_0pct_below_20pct.
+    - `test_null_strategy_skips_gate_safe_default`: VideoSlotStrategy=None + 0% savings → Replace path (no false reject).
+6. Recovery script `Scripts/RequeueInsufficientSavingsRejects_2026_08_12.py`: SELECT MediaFileIds from TranscodeAttempts where DispositionReason LIKE 'InsufficientSavings%' in past 72h AND MediaFiles.WorkBucket='Remux' AND no existing Pending TranscodeQueue row for that MediaFileId. INSERT one Pending Remux queue row per matching MediaFile. Idempotent. Prints count admitted + count skipped.
+7. Live smoke on I9: after deploy, one Remux job with `VideoSlotStrategy='Copy'` completes → observe Disposition=Replace + FileReplaced=TRUE (not Reject/InsufficientSavings). Confirm log line differentiates skip vs apply.
 
 ## Out of Scope
 
-(a) Reverting commit `6856ac70` (probe loudness removal) -- category (c) unrelated: probe should stay metadata-only per SRP. This directive adds the missing cache-hit at the transcode-time consumer.
-(b) `worker-memorymax-cgroup` refinement -- category (b) deferred: complete observation on paused directive after this ships; may become unnecessary if cache-hit alone drops wakko OOM to zero.
-(c) LoudnessMeasuredAt staleness check -- category (a) tolerated per D2: source-file-immutable invariant makes staleness impossible in normal flow.
+(a) Historical retroactive VideoSlotStrategy backfill for existing TranscodeAttempts rows -- category (a) tolerated: NULL is safe default per D2; no queryable value lost.
+(b) Per-mode savings threshold configuration -- category (b) deferred: single global 20% threshold applied when strategy=Reencode is fine for now; if operator later wants different thresholds per mode, add per-mode column to QueueAdmissionConfig.
+(c) Removing ProcessingMode column -- category (c) unrelated: ProcessingMode remains a reporting/priority tag per D3.
 
 ## Call-Graph Audit
 
-- **Multiple flow docs.** `transcode.flow.md` remains SoT. No new flow.
-- **Orchestration mode-branching.** Cache-hit vs cache-miss is a DATA branch inside `_RunSourceMeasureTask`; same function returns same tuple shape either way. Not an orchestration mode branch.
-- **Mode-sparse columns.** Source-loudness columns already written by every mode's audio path via `AudioPreEncodeFacade` (per audio-normalization.C37). No new sparsity.
+- **Multiple flow docs.** `transcode.flow.md` remains SoT for pipeline shape. `audio-normalization.flow.md` remains SoT for audio pipeline. No new flow doc.
+- **Orchestration mode-branching.** No new mode branch. VideoSlotStrategy is a DATA field consumed by the Decider's existing branch; the branch changes from "always apply savings" to "apply savings when strategy=Reencode." Same code path, data-driven condition.
+- **Mode-sparse columns.** New column `VideoSlotStrategy` MUST be populated by every writer path that inserts/updates a TranscodeAttempts row post-encode. Symmetric with `AudioPolicyResolved`. Contract test verifies every mode's writer populates it.
 - **OOS clarity.** (a)/(b)/(c) each explicitly typed.
-- **Config-driven graph shape.** No new flag. Data-driven cache-check; same functions called either way.
+- **Config-driven graph shape.** No new flag. Same functions called; data flow changes based on VideoSlotStrategy value.
 
 ## Acceptance Criteria
 
-C1. `_RunSourceMeasureTask` accepts `MediaFileId: int` param. Before invoking `MeasureSourceLoudnorm`, reads `MediaFiles` row via existing repository; if `SourceIntegratedLufs`, `SourceLoudnessRangeLU`, `SourceTruePeakDbtp`, `SourceIntegratedThresholdLufs` are all non-NULL, returns `(SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, SourceIntegratedThresholdLufs)` and emits a DEBUG log line: `SourceMeasure cache-hit MediaFileId=<id>` (DEBUG because hits will be the majority path -- avoid log flood).
+C1. `TranscodeAttempts.VideoSlotStrategy TEXT` column exists (nullable). Migration idempotent (`ADD COLUMN IF NOT EXISTS`).
 
-C2. Cache-miss path (any column NULL) runs the existing `MeasureSourceLoudnorm` ffmpeg pass, returns the fresh tuple, and persists to `MediaFiles` via the existing writer path (`AudioPreEncodeFacade` or equivalent). INFO log line: `SourceMeasure cache-miss MediaFileId=<id>; ran ffmpeg loudnorm scan (took <n>s)` (INFO because miss should be rare once cache warms).
+C2. Every writer that persists a TranscodeAttempts row post-encode populates VideoSlotStrategy with `'Copy'` or `'Reencode'` for that attempt. Verifiable: post-directive live SQL `SELECT COUNT(*) FROM TranscodeAttempts WHERE VideoSlotStrategy IS NULL AND CompletedDate > <directive-close-date>` returns 0.
 
-C3. Contract test `Tests/Contract/TestSourceMeasureCacheHit.py` (NEW) covers: (a) fully-populated row → mock `DemucsService.MeasureSourceLoudnorm` NOT called (assert 0 invocations), returned tuple equals DB values. (b) partial row (any column NULL) → mock IS called (assert 1 invocation), returned tuple equals mock return. (c) all-NULL row → cache miss (same as partial).
+C3. `PostTranscodeDispositionDecider.Decide` reads `VideoSlotStrategy` from the Attempt dict:
+    - `'Copy'` → InsufficientSavings check skipped; flow falls through to QualityTestingGloballyDisabled / QualityTestNotRequired / VMAF branches.
+    - `'Reencode'` → InsufficientSavings check applied at `SavingsThresholdPercent` from GateConfig.
+    - `None` / missing → skipped (safe default per D2).
 
-C4. `PreEncodeAudioPipeline.Run` signature updated to accept `MediaFileId` param (already has `SourceFilePath, JobId`); caller `AudioPreEncodeFacade.Prepare` passes it through.
+C4. Contract test `Tests/Contract/TestVideoSlotStrategyGate.py` (NEW):
+    - `test_copy_strategy_skips_savings_gate`
+    - `test_reencode_strategy_applies_savings_gate`
+    - `test_null_strategy_skips_savings_gate`
+    - `test_reencode_strategy_ships_when_savings_above_threshold` (regression guard: gate still catches real overshoot on Reencode)
 
-C5. Live smoke on I9: pick one MediaFile with all four source-loudness columns populated + queue a Dialog Boost job (Transcode or Remux mode) → observe log line `SourceMeasure cache-hit for MediaFileId=<id>` fires; `TranscodeProgress.SourceMeasure` completes within 2 seconds instead of 30-90s. Compare `TranscodeAttempts.CompletedDate - AttemptDate` vs a baseline cache-miss job on similar-length source.
+C5. `DispositionDispatcher._BuildDeciderInput` projects `VideoSlotStrategy` from Row into GateInput dict.
 
-C6. Live observation on wakko-worker-1 post-deploy: over 2h, count OOM events via `journalctl -u mediavortex-worker@1.service --since='2h ago' | grep 'killed by'`. Ship-gate: OOM cadence extends to >=30 min between kills (vs current ~10 min with 14G cap).
+C6. `Scripts/RequeueInsufficientSavingsRejects_2026_08_12.py` runs cleanly against live DB. Prints `Admitted: <N>, Skipped (already queued): <M>`. Idempotent -- second run admits 0 (all already queued).
+
+C7. Live smoke on I9 (mandatory per `ceo-mode.md#smoke-gate-verifying---delivering`):
+    - Deploy fix + restart I9.
+    - Wait for one Remux completion where VideoSlotStrategy='Copy'.
+    - Confirm attempt shows `Disposition=Replace`, `FileReplaced=TRUE`, `DispositionReason != InsufficientSavings_*`.
+    - Confirm target MediaFile's WorkBucket flipped to Compliant (or AudioFix if audio-only leak persists).
+    - Run recovery script; observe TranscodeQueue Remux Pending count increase by ~467; observe wakko-worker-1 + I9-2024 start draining the recovered backlog.
+
+C8. `Features/QualityTesting/post-transcode-disposition.feature.md` amended at DELIVERING: C10 vocabulary already includes `InsufficientSavings_*` -- add note that gate is scoped to `VideoSlotStrategy='Reencode'`. Add new criterion C42 (or next) documenting the VideoSlotStrategy column + Decider read.
 
 ## Principle Analysis
 
-**KISS.** One function signature change + one if-branch inside `_RunSourceMeasureTask`. No new subsystems. No new dependencies.
+**KISS.** One column + one writer + one reader if-branch. Symmetric with existing `AudioPolicyResolved` pattern -- reuse of established shape, not invention.
 
-**DDD.** Change stays in `Features/AudioNormalization/Services/`. Repository read uses existing `MediaFileRepository` interface. No cross-context bleed.
+**DDD.** VideoSlotStrategy is an encoder-plan concept that belongs on TranscodeAttempts alongside audio-slot decision state. Not tangled in decider or command composer. Cross-context read via existing repository interface.
 
-**DRY.** Cache-hit path reuses existing DB row shape. Cache-miss path reuses existing `MeasureSourceLoudnorm` + `AudioPreEncodeFacade` persistence. No duplicate code.
+**DRY.** One SoT for "was video re-encoded on this attempt." Gate + audit queries + future analysis all read same column. No parsing of FfpmpegCommand string, no cross-referencing MediaFiles.VideoCompliant.
 
 **SOLID.**
-- SRP: `_RunSourceMeasureTask` still has one responsibility (produce source-loudness tuple); its input surface widens to include a cache lookup, but the output contract is unchanged.
-- OCP: cache-hit predicate is a new branch inside the task, not a new subclass or hook. Not a violation.
+- SRP: Decider evaluates gates given known slot decisions -- doesn't guess from mode. Writer stamps strategy at the layer that decides it. Each responsibility isolated.
+- OCP: adding new ProcessingMode / new slot combinations only requires the writer to populate VideoSlotStrategy correctly. Decider unchanged.
 - LSP: n/a.
 - ISP: no new interface.
-- DIP: repository injected via existing DI path.
+- DIP: Decider depends on Attempt dict shape (existing contract); dispatcher populates. No new dependency direction.
 
-**SSoT.** `MediaFiles` source-loudness columns remain the SoT for per-file loudness. Cache-hit READS from SoT; cache-miss WRITES to SoT then reads. No parallel data path.
+**SSoT.** `TranscodeAttempts.VideoSlotStrategy` IS the SoT for video slot strategy per attempt. Downstream (audit queries, disposition, future analysis) reads it directly. No inference required.
 
 ## Files
 
-- `Features/AudioNormalization/Services/PreEncodeAudioPipeline.py` (add MediaFileId param + cache-hit branch in `_RunSourceMeasureTask`; `Run` plumbs MediaFileId through)
-- `Features/AudioNormalization/Services/AudioPreEncodeFacade.py` (pass MediaFileId from caller into `PreEncodeAudioPipeline.Run`)
-- `Features/MediaFile/Repositories/MediaFileRepository.py` (if a targeted 4-column read helper doesn't exist, add `GetSourceLoudness(MediaFileId) -> Optional[Tuple[float, float, float, float]]`)
-- `Tests/Contract/TestSourceMeasureCacheHit.py` (NEW, per C3)
-- `Features/AudioNormalization/audio-normalization.feature.md` (amend at DELIVERING with new criterion C43 covering cache-hit shape)
+- `Scripts/SQLScripts/AddVideoSlotStrategy_2026_08_12.py` (NEW, idempotent ALTER TABLE)
+- `Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.py` (add VideoSlotStrategy read; scope savings gate)
+- `Features/QualityTesting/Disposition/DispositionDispatcher.py` (project VideoSlotStrategy into GateInput dict; SELECT VideoSlotStrategy from attempt row)
+- `Features/TranscodeJob/Worker/JobProcessor.py` (persist VideoSlotStrategy at same commit as AudioPolicyResolved OR CommandComposer stamps it)
+- Wherever `CommandComposer.Build` returns / `VideoSlot._EmitCopy` vs `_EmitReencode` decides: NEEDS_PLAN identifies the exact writer surface + call site.
+- `Tests/Contract/TestVideoSlotStrategyGate.py` (NEW, per C4)
+- `Scripts/RequeueInsufficientSavingsRejects_2026_08_12.py` (NEW, per C6)
+- `Features/QualityTesting/post-transcode-disposition.feature.md` (amend at DELIVERING)
 
 ## Progress
 
 - [ ] NEEDS_STANDARDS_REVIEW: rules + standards index (already loaded).
 - [ ] NEEDS_PLAN:
-    - Confirm caller chain has MediaFileId available (search `PreEncodeAudioPipeline.Run` call sites).
-    - Confirm existing MediaFileRepository shape for 4-column source-loudness read; add `GetSourceLoudness(MediaFileId)` method if missing.
-    - **Verify existing writer at `AudioPreEncodeFacade.py:80` (per probe.feature.md C5 reference) still persists all 4 source-loudness columns.** If drifted or removed, add writer (SSoT preserved but scope +1 file).
-    - **Verify `FileReplacementBusinessService` (or wherever source-replacement lands) RESETS the 4 loudness columns to NULL when a source file is replaced.** If not, stale cache could return old-source loudness for a new source → wrong Track 1 loudnorm → wrong output. If gap exists, add reset (in-scope guardrail; not a new directive).
-    - Query DB for a real MediaFile with all 4 columns populated to use as the C5 live-smoke fixture (`SELECT Id, Filename FROM MediaFiles WHERE SourceIntegratedLufs IS NOT NULL AND SourceLoudnessRangeLU IS NOT NULL AND SourceTruePeakDbtp IS NOT NULL AND SourceIntegratedThresholdLufs IS NOT NULL AND ... LIMIT 5`).
-- [ ] NEEDS_DOC_PREREAD: Read colocated docs for touched files (audio-normalization.feature.md sections covering C7/C37/C42).
-- [ ] IMPLEMENTING: refactor + contract test.
-- [ ] VERIFYING: contract test + live smoke per C5 + wakko observation per C6.
+    - Identify exact code path that decides VideoSlot=Copy vs Reencode (grep `_EmitCopy` / `_EmitReencode` / `AudioSlot` writer pattern).
+    - Identify exact persistence layer (which UpdateTranscodeAttempt call sets AudioPolicyResolved? Add VideoSlotStrategy alongside).
+    - Confirm DispositionDispatcher's SELECT columns for `_ReadAttemptRow` include VideoSlotStrategy after migration (or extend query).
+- [ ] NEEDS_DOC_PREREAD: Read `Features/QualityTesting/Disposition/disposition.feature.md` sections covering C2 (pure Decider), audio-normalization sections covering AudioPolicyResolved writer pattern (symmetry reference).
+- [ ] IMPLEMENTING: migration + writer + reader + contract test + recovery script.
+- [ ] VERIFYING: contract test + live smoke on I9 per C7 + recovery script execution.
 - [ ] DELIVERING: Promotions, feature-doc amendment, delivery report.
 
 ## Deviation from conventions
 
-No new `preencode-loudness-cache-hit.feature.md` file. This is an incremental optimization to the audio pre-encode pipeline (owned by `audio-normalization.feature.md`); a new feature doc would fragment the contract. Change lands as a new criterion (C43 or next available) in the existing feature doc at DELIVERING per doc-layering promotions rule.
+No new `videoslotstrategy-persisted.feature.md`. Change amends existing `post-transcode-disposition.feature.md` at DELIVERING (Decider is the primary consumer). Persistence details land in `audio-normalization.feature.md` C42 addendum or similar since it symmetric with AudioPolicyResolved. Doc-layering rule: promotions move durable content into existing feature docs.

@@ -18,7 +18,7 @@ class RemuxJobStrategy(ITranscodeJobStrategy):
         _Spec = QueueService.CommandComposer.Build(MediaFile, Job, Context=Context)
         if not _Spec:
             return None
-        return CommandSpec(Command=_Spec.Command, OutputPath=_Spec.OutputPath)
+        return CommandSpec(Command=_Spec.Command, OutputPath=_Spec.OutputPath, VideoSlotStrategy=getattr(_Spec, 'VideoSlotStrategy', ''))
 
     # directive: transcode-worker-unification | # see worker-loop.C3
     def HandleResult(self, Job, Result: Dict[str, Any], TranscodeAttemptId: int, ActiveJobId: int, OutputPath: str, QueueService=None) -> None:
