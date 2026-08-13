@@ -21,7 +21,7 @@ _FULL_SELECT_COLS = (
     "HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate, "
     "AudioSampleFormat, AudioChannelLayout, AudioCodec, AudioLanguages, HasExplicitEnglishAudio, "
     "SubtitleFormats, ContainerFormat, OverallBitrate, TranscodedByMediaVortex, "
-    "AudioComplete, AudioCorruptSuspect, AudioCorruptReason, "
+    "AudioComplete, HasDialogBoostTrack, AudioCorruptSuspect, AudioCorruptReason, "
     "SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, "
     "SourceIntegratedThresholdLufs, AdmissionDeferReason, "
     "AudioNormalizationMode, "
@@ -89,6 +89,7 @@ class MediaFilesRepository(BaseRepository):
             OverallBitrate=(row.get('OverallBitrate') or row.get('overallbitrate')),
             TranscodedByMediaVortex=row.get('TranscodedByMediaVortex') if 'TranscodedByMediaVortex' in row else row.get('transcodedbymediavortex'),
             AudioComplete=row.get('AudioComplete') if 'AudioComplete' in row else row.get('audiocomplete'),
+            HasDialogBoostTrack=row.get('HasDialogBoostTrack') if 'HasDialogBoostTrack' in row else row.get('hasdialogboosttrack'),
             AudioCorruptSuspect=row.get('AudioCorruptSuspect') if 'AudioCorruptSuspect' in row else row.get('audiocorruptsuspect'),
             AudioCorruptReason=(row.get('AudioCorruptReason') or row.get('audiocorruptreason')),
             SourceIntegratedLufs=(row.get('SourceIntegratedLufs') or row.get('sourceintegratedlufs')),

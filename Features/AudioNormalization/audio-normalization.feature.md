@@ -27,7 +27,7 @@ The vertical absorbed the loudnorm measurement vertical (`Features/LoudnessAnaly
 
 ## Success Criteria
 
-C1. Every encoded output ships >=2 audio streams per kept language with one carrying the `Dialog Boost` title tag.
+C1. `AudioVertical.Evaluate` returns `Compliant=True` iff `MediaFiles.HasDialogBoostTrack=TRUE`. `HasDialogBoostTrack` is derived from `TranscodeAttempts.AudioTracksEmittedJson::jsonb @> '[{"dialog_boost_emitted": true}]'::jsonb` for the latest successful attempt, written by `TranscodedOutputPlacement` post-loudnorm (writer-owns-cascade). Untranscoded sources return `(False, 'no_dialog_boost')`. Every encoded output ships >=2 audio streams per kept language with one carrying the `Dialog Boost` `Label` marker; PostEncodeMeasurementService stamps `dialog_boost_emitted=true` on that track's JSON entry.
 
 C2. Dialog Boost stream carries `disposition.default=1`; Original carries `=0`.
 

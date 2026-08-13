@@ -34,7 +34,7 @@ class AudioVertical:
             'AllowedCodecs': AllowedCodecs,
         }
 
-    # directive: transcode-flow-canonical -- C34 audio-only containers are out of pipeline scope
+    # directive: audio-vertical-dialog-boost-enforcement
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
         if IsAudioOnlyContainer(Mf):
             return (None, 'non_video_scope')
@@ -42,21 +42,16 @@ class AudioVertical:
             return (None, 'audio_corrupt_suspect')
         if not getattr(Mf, 'AudioCodec', None) and getattr(Mf, 'Resolution', None):
             return (None, 'no_audio_stream')
-
         Rules = self._LoadRules()
-
         SrcCodec = (getattr(Mf, 'AudioCodec', None) or '').lower()
         if SrcCodec and Rules['AllowedCodecs'] and SrcCodec not in Rules['AllowedCodecs']:
             return (False, f'codec:{SrcCodec}')
-
         Decision = self._Gate.AdmitOrDefer(Mf)
         if Decision.Outcome != 'admitted':
             return (None, Decision.DeferReason)
-
-        AudioComplete = getattr(Mf, 'AudioComplete', None)
-        if AudioComplete is True:
+        if getattr(Mf, 'HasDialogBoostTrack', None) is True:
             return (True, None)
-        return (False, 'needs_normalization')
+        return (False, 'no_dialog_boost')
 
     # directive: compliance-reason-full-library-recompute -- batch orchestrator isolates per-row so one bad row does not abort a batch; Evaluate stays fail-loud
     def RecomputeFor(self, MediaFileIds: List[int]) -> None:

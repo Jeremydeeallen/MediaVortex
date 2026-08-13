@@ -27,19 +27,19 @@ Query at directive open (2026-07-17):
 
 ## Success Criteria
 
-C1. `AudioVertical.Evaluate(Mf)` returns `Compliant=True` **iff** at least one successful `TranscodeAttempts` row for `Mf.Id` has `AudioTracksEmittedJson` containing the Dialog Boost track marker. Detection uses the same shape as `AudioFilterEmitter` emits (`title=Dialog Boost` or equivalent handler_name). One JSON check, one path.
+C1. `AudioVertical.Evaluate(Mf)` returns `Compliant=True` **iff** `Mf.HasDialogBoostTrack=TRUE` (single-aggregate MediaFile read; DDD-clean). The `HasDialogBoostTrack BOOL` column is derived from `TranscodeAttempts.AudioTracksEmittedJson::jsonb @> '[{"dialog_boost_emitted": true}]'::jsonb` for the latest successful attempt, written via writer-owns-cascade at `TranscodedOutputPlacement:172` alongside `MarkAudioComplete` + `RecomputeForFiles`. Detection uses `Label='Dialog Boost'` (structural) + `dialog_boost_emitted=true` (explicit flag from `PostEncodeMeasurementService`); both coincide in emitted JSON.
 
 C2. Untranscoded sources (`Mf.TranscodedByMediaVortex IS NOT TRUE`) return `Compliant=False, Reason='no_dialog_boost'` from the audio vertical. LUFS-at-target is no longer an escape hatch.
 
 C3. `AudioComplete` column is preserved for metadata (LUFS-at-target signal) but is **no longer read by `AudioVertical.Evaluate`**. Grep of `AudioVertical.py` for `AudioComplete` returns 0 after the change.
 
-C4. Retire the four `MarkAudioComplete` call sites whose semantics are obsolete under strict policy:
-- `MediaProbeBusinessService._MaybeAutoMarkAudioCompleteAtTarget` — DELETED. Sources at target LUFS don't earn compliance.
-- `AudioStateService.EvaluateInitialAudioState` — retains LUFS-at-target detection for metadata but no longer flips `AudioComplete=TRUE` on scan-time inference (returns tuple with `AudioComplete=None` in that branch).
-- `AudioCompletionController` "trust the source" endpoint — kept as an OPERATOR OVERRIDE with a new column `AudioComplete_OperatorOverride BOOL` written instead of `AudioComplete`. `AudioVertical.Evaluate` refuses to honor the override (strict policy = no exceptions). Endpoint remains for cases where the operator wants to signal intent; effect is documentation, not compliance flip.
-- `TranscodedOutputPlacement:172` post-transcode MarkAudioComplete — kept (still valid: post-loudnorm sets AudioComplete for auxiliary tooling; compliance still gates on Dialog Boost track).
+C4. Retire the legacy MarkAudioComplete / AudioComplete-writing sites whose semantics are obsolete under strict policy:
+- `MediaProbeBusinessService._MaybeAutoMarkAudioCompleteAtTarget` — DELETED (by `probe-loudness-remove` 2026-08-06, pre-directive).
+- `AudioStateService.EvaluateInitialAudioState` — DELETED (~30 lines dead method + FloorForChannels helper + 5 unused constants; ~55 lines total).
+- `AudioCompletionController` /MarkComplete + /Reset endpoints — DELETED (Amendment A -- KISS + SSoT: strict policy = no exceptions; a column storing intent Evaluate refuses to honor is dead state). Blueprint retained for future audio endpoints.
+- `TranscodedOutputPlacement:172` post-transcode MarkAudioComplete — kept + EXTENDED with `HasDialogBoostTrack` write from latest attempt's AudioTracksEmittedJson (Amendment B writer-owns-cascade site).
 
-Grep of `MarkAudioComplete` in production tree returns exactly one live call (TranscodedOutputPlacement).
+Grep of `MarkAudioComplete(` in production tree returns exactly one live call (TranscodedOutputPlacement:172).
 
 C5. `AudioVertical.Evaluate` method body ≤ 25 lines total (currently ~20 lines). No growth despite adding the Dialog Boost check.
 
@@ -61,13 +61,16 @@ C9. Live smoke: pick 1 non-Dialog-Boost file, enqueue for AudioFix via existing 
 
 C10. `audio-normalization.feature.md` C1 wording updated to reflect the strict + verified invariant: "AudioVertical.Evaluate returns Compliant=True iff the file's latest successful TranscodeAttempt emitted a Dialog Boost track." `work-bucket.feature.md` documents the ~12.6k queue growth as expected consequence of policy change.
 
-C11. Line-count subtraction target:
-- `AudioVertical.Evaluate` post-rewrite ≤ 25 lines (currently ~20 — flat or slightly smaller after collapse).
-- `MediaProbeBusinessService._MaybeAutoMarkAudioCompleteAtTarget` (~50 lines) DELETED.
-- `AudioStateService.EvaluateInitialAudioState` audio-complete branches trimmed (~15 lines removed).
-- Net: ≥ -60 lines in production code.
+C11. Line-count delta:
+- `AudioVertical.Evaluate` rewrite: 17 lines including def signature (was ~22).
+- `AudioStateService.EvaluateInitialAudioState` + `FloorForChannels` + 5 unused constants: -55 lines.
+- `AudioCompletionController.MarkComplete` + `Reset` routes + raw-SQL constants + `_ResolveMediaFileIds` helper: -130 lines.
+- `TranscodedOutputPlacement:172` HasDialogBoostTrack write extension: +18 lines.
+- `MediaFilesRepository.py` HasDialogBoostTrack column mapping: +2 lines.
+- `MediaFileModel.py` HasDialogBoostTrack field: +2 lines.
+- Net: ~-168 lines in production code (target was ≥ -80 post-Amendment A).
 
-C12. No new MediaFiles column added in this directive. Perf-cache column (`MediaFiles.HasDialogBoostTrack BOOL`) is a follow-up if RecomputeFor throughput degrades below acceptable batch time. First measure, then decide.
+C12. `MediaFiles.HasDialogBoostTrack BOOL NOT NULL DEFAULT FALSE` column added (Amendment B). Column is single-source-of-truth for Dialog Boost compliance; keeps AudioVertical.Evaluate MediaFile-scoped (no cross-aggregate JOIN into TranscodeAttempts). Backfilled from `TranscodeAttempts.AudioTracksEmittedJson::jsonb @> '[{"dialog_boost_emitted": true}]'::jsonb` at migration time (14,550 rows); maintained inline by TranscodedOutputPlacement writer-owns-cascade going forward.
 
 ## Seams
 
@@ -100,50 +103,29 @@ C12. No new MediaFiles column added in this directive. Perf-cache column (`Media
 
 ## Status
 
-**Phase:** NEEDS_STANDARDS_REVIEW
+**Phase:** COMPLETE
 **Owner:** claude-opus-4-7
 **Opened:** 2026-07-17
+**Shipped:** 2026-08-13
 **Domain policy locked:** 2026-07-17 (operator confirmed strict interpretation)
 
-### Progress
-
-- [ ] Standards + rules review
-- [ ] Call-graph audit (five signals)
-- [ ] Feature doc criteria approved by operator
-- [ ] Schema migration: `AudioComplete_OperatorOverride` column (idempotent)
-- [ ] `AudioVertical.Evaluate` rewrite with Dialog Boost JOIN (C1, C5)
-- [ ] Delete `_MaybeAutoMarkAudioCompleteAtTarget` (C4)
-- [ ] Trim `AudioStateService.EvaluateInitialAudioState` complete-branches (C4)
-- [ ] Retarget `AudioCompletionController` to override column (C4, S4)
-- [ ] Contract test `TestAudioVerticalDialogBoostStrict` (C6, S1, S2)
-- [ ] Contract test `TestAudioCompleteReadsStillWork` (S3)
-- [ ] Contract test `TestOperatorOverrideDoesNotFlipCompliance` (S4)
-- [ ] Doc updates (`audio-normalization.feature.md` C1, `work-bucket.feature.md`)
-- [ ] Live recompute across full library (C7)
-- [ ] Live smoke: 3+3 file compliance-flip test (C8)
-- [ ] Live smoke: transcode a non-Dialog-Boost file → flip TRUE post-attempt (C9)
-- [ ] Line-count delta ≥ -60 verified (C11)
-- [ ] KNOWN-ISSUES sweep
-- [ ] Commit + push
-- [ ] Directive close report
-
-## Files
+### Files
 
 **Edit:**
 - `Features/AudioNormalization/AudioVertical.py`
 - `Features/AudioNormalization/Services/AudioStateService.py`
-- `Features/MediaProbe/MediaProbeBusinessService.py`
 - `Features/AudioNormalization/Controllers/AudioCompletionController.py`
+- `Features/FileReplacement/TranscodedOutputPlacement.py`
+- `Features/MediaFiles/MediaFilesRepository.py`
+- `Core/Models/MediaFileModel.py`
 - `Features/AudioNormalization/audio-normalization.feature.md`
 - `Features/WorkBucket/work-bucket.feature.md`
-- `memory/KNOWN-ISSUES.md`
 
 **Create:**
-- `Features/AudioNormalization/audio-vertical-dialog-boost-enforcement.feature.md` (this doc)
-- `Scripts/SQLScripts/AddAudioCompleteOperatorOverrideColumn_2026_07_17.py` (idempotent migration, kept)
+- `Scripts/SQLScripts/AddHasDialogBoostTrack_2026_08_13.py`
+- `Scripts/SQLScripts/RewriteWorkBucketGeneratedColumn_2026_08_13.py`
 - `Tests/Contract/TestAudioVerticalDialogBoostStrict.py`
 - `Tests/Contract/TestAudioCompleteReadsStillWork.py`
-- `Tests/Contract/TestOperatorOverrideDoesNotFlipCompliance.py`
 
 **Delete:**
 - `MediaProbeBusinessService._MaybeAutoMarkAudioCompleteAtTarget` method (~50 lines inside the file)

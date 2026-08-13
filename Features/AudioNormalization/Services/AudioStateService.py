@@ -34,19 +34,11 @@ MARK_SUSPECT_SQL = (
 )
 
 
-# directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
+# directive: audio-vertical-dialog-boost-enforcement
 class AudioStateService:
-    """Audio-state machine on MediaFile: AudioComplete flag, suspect routing, normalize-history detection (S2 rename of AudioCompletionService)."""
+    """Audio-state machine on MediaFile: AudioComplete flag, suspect routing, normalize-history detection."""
 
-    MP4_COMPAT_AUDIO_CODECS = ('aac', 'ac3', 'eac3', 'mp3')
-
-    REASON_NO_AUDIO_STREAM = 'no_audio_stream'
     REASON_BELOW_BITRATE_FLOOR = 'below_bitrate_floor'
-    REASON_INCOMPATIBLE_CODEC_UNSUPPORTED = 'incompatible_codec_unsupported'
-    REASON_ALREADY_AT_TARGET_LOUDNESS = 'already_at_target_loudness'
-
-    TARGET_LUFS = -23.0
-    TARGET_LUFS_TOLERANCE = 1.0
 
     # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
     @staticmethod
@@ -76,48 +68,6 @@ class AudioStateService:
         if bool(getattr(MediaFile, 'AudioCorruptSuspect', False)):
             return True
         return getattr(MediaFile, 'AudioComplete', None) is True
-
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
-    @classmethod
-    def FloorForChannels(cls, Channels: Optional[int], FloorCfg: Any) -> int:
-        """Resolve the bitrate floor (kbps) for the channel count; defaults to Stereo when unknown."""
-        if not Channels or Channels < 1:
-            return int(getattr(FloorCfg, 'MinAudioBitrateKbpsStereo', 96))
-        if Channels == 1:
-            return int(getattr(FloorCfg, 'MinAudioBitrateKbpsMono', 64))
-        if Channels == 2:
-            return int(getattr(FloorCfg, 'MinAudioBitrateKbpsStereo', 96))
-        return int(getattr(FloorCfg, 'MinAudioBitrateKbpsSurround', 128))
-
-    # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
-    @classmethod
-    def EvaluateInitialAudioState(cls, Row, FloorCfg, HasLoudnormHistory):
-        """Pure cascade returning (AudioComplete, AudioCorruptSuspect, AudioCorruptReason) from probe metadata."""
-        HasProbed = Row.get('HasExplicitEnglishAudio') is not None
-        if not HasProbed:
-            return (None, False, None)
-
-        AudioCodec = (Row.get('AudioCodec') or '').strip().lower()
-        Resolution = Row.get('Resolution')
-        if not AudioCodec and Resolution:
-            return (None, True, cls.REASON_NO_AUDIO_STREAM)
-
-        if HasLoudnormHistory:
-            return (True, False, None)
-
-        SourceLufs = Row.get('SourceIntegratedLufs')
-        if SourceLufs is not None and AudioCodec in cls.MP4_COMPAT_AUDIO_CODECS:
-            if abs(float(SourceLufs) - cls.TARGET_LUFS) <= cls.TARGET_LUFS_TOLERANCE:
-                return (True, False, cls.REASON_ALREADY_AT_TARGET_LOUDNESS)
-
-        AudioBitrate = Row.get('AudioBitrateKbps')
-        Channels = Row.get('AudioChannels')
-        if AudioBitrate is not None and AudioCodec in cls.MP4_COMPAT_AUDIO_CODECS:
-            Floor = cls.FloorForChannels(Channels, FloorCfg)
-            if int(AudioBitrate) <= Floor:
-                return (True, False, cls.REASON_BELOW_BITRATE_FLOOR)
-
-        return (False, False, None)
 
     # directive: audio-vertical-perfection-and-self-healing | # see audio-normalization.S2
     @staticmethod

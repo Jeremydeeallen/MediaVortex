@@ -48,6 +48,8 @@ class MediaFileModel:
     AudioLanguages: Optional[str] = None
     HasExplicitEnglishAudio: Optional[bool] = None
     AudioComplete: Optional[bool] = None
+    # directive: audio-vertical-dialog-boost-enforcement
+    HasDialogBoostTrack: Optional[bool] = None
     AudioCorruptSuspect: Optional[bool] = None
     AudioCorruptReason: Optional[str] = None
     SourceIntegratedLufs: Optional[float] = None
