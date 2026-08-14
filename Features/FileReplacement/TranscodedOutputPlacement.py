@@ -184,7 +184,7 @@ class TranscodedOutputPlacement:
                             "UPDATE MediaFiles SET HasDialogBoostTrack = COALESCE(("
                             "  SELECT (AudioTracksEmittedJson::jsonb @> %s::jsonb) "
                             "  FROM TranscodeAttempts "
-                            "  WHERE MediaFileId = %s AND Success = TRUE "
+                            "  WHERE MediaFileId = %s AND (Success IS NULL OR Success = TRUE) "
                             "  ORDER BY Id DESC LIMIT 1"
                             "), FALSE) WHERE Id = %s",
                             ('[{"dialog_boost_emitted": true}]', RecomputeMediaFileId, RecomputeMediaFileId),
