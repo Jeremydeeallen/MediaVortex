@@ -36,6 +36,7 @@
 
 **Edit:**
 - `Features/FileReplacement/ComplianceGate.py` (add HasDialogBoostTrack read from in-flight attempt)
+- `Features/TranscodeQueue/QueueManagementBusinessService.py` (thread HasDialogBoostTrack through `_RowToMediaFileForCompliance` -- root-cause fix; ComplianceGate write-through is useless without this)
 - `Features/FileReplacement/compliance-gated-rename.feature.md` (S2 wire shape amendment; DELIVERING)
 
 ## Status

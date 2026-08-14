@@ -1443,6 +1443,8 @@ class QueueManagementBusinessService:
             SourceIntegratedThresholdLufs=Row.get('SourceIntegratedThresholdLufs'),
             # directive: mv-trust-savings-and-clamp -- AC3 wiring.
             TranscodedByMediaVortex=bool(Row.get('TranscodedByMediaVortex')) if Row.get('TranscodedByMediaVortex') is not None else None,
+            # directive: compliance-gate-dialog-boost-signal
+            HasDialogBoostTrack=Row.get('HasDialogBoostTrack') if Row.get('HasDialogBoostTrack') is not None else None,
         )
 
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C12
