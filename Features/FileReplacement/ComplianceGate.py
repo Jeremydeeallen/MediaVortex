@@ -101,6 +101,25 @@ class ComplianceGate:
             except Exception:
                 pass
 
+            # directive: compliance-gate-dialog-boost-signal
+            try:
+                AttemptRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                    "SELECT (AudioTracksEmittedJson::jsonb @> %s::jsonb) AS has_boost "
+                    "FROM TranscodeAttempts "
+                    "WHERE MediaFileId = %s AND Success IS NULL "
+                    "ORDER BY Id DESC LIMIT 1",
+                    ('[{"dialog_boost_emitted": true}]', SourceMediaFileId),
+                )
+                if AttemptRows:
+                    Row0 = AttemptRows[0]
+                    CandidateRow['HasDialogBoostTrack'] = bool(
+                        Row0.get('has_boost')
+                        if 'has_boost' in Row0
+                        else Row0.get('HasBoost')
+                    )
+            except Exception:
+                pass
+
             # directive: audio-vertical-live-encode-gaps | # see audio-normalization.C11
             try:
                 import re as _ReAVC
