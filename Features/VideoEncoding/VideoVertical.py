@@ -20,7 +20,7 @@ class VideoVertical:
         self._Thresholds = Thresholds or VideoComplianceThresholdsRepository(self._Db)
         self._Tiers = Tiers or TierLadderRepository(self._Db)
 
-    # directive: pre-encode-savings-gate | # see transcode.flow.md D7 -- TranscodedByMediaVortex short-circuit lives at WorkBucket layer; VideoVertical evaluates its own dimension
+    # directive: video-vertical-codec-match-skip
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
         if IsAudioOnlyContainer(Mf):
             return (None, 'non_video_scope')
@@ -35,6 +35,11 @@ class VideoVertical:
             return (None, 'missing_input:VideoBitrateKbps')
         if not AssignedProfile:
             return (None, 'missing_input:AssignedProfile')
+
+        SrcCodec = (getattr(Mf, 'Codec', None) or '').strip().lower()
+        TargetCodec = self._Tiers.GetProfileCodec(AssignedProfile)
+        if SrcCodec and TargetCodec and SrcCodec == TargetCodec:
+            return (True, f'source_codec_matches_target:{SrcCodec}(profile={AssignedProfile})')
 
         ContentClass = getattr(Mf, 'ContentClass', None) or 'live_action'
         ProfileTargetKbps = self._Tiers.GetProfileTarget(AssignedProfile, ContentClass, ResolutionCategory)

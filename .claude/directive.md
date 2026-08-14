@@ -1,39 +1,63 @@
-# Directive: compliance-gate-dialog-boost-signal
+# Directive: video-vertical-codec-match-skip
 
-**Status:** Closed
+**Status:** Active -- phase: IMPLEMENTING
 
-**Slug:** compliance-gate-dialog-boost-signal
+**Slug:** video-vertical-codec-match-skip
 
-**Interrupts:** audio-vertical-dialog-boost-enforcement (Closed 2026-08-13; introduced the gap this directive closes).
+**Interrupts:** compliance-gate-dialog-boost-signal (Closed).
+
+## Context
+
+Recent cartoon data (Animaniacs, 12 samples) shows we're re-encoding files whose source codec is ALREADY AV1 (Tier 1 target). Sources 183-656 kbps at 28-69 MB. Outputs 6-24 MB. Real 52-83% savings BUT:
+
+1. **Second-generation AV1 compression** -- quality compounds on repeated passes.
+2. **Compute cost > storage payoff** -- ~1-3 min/file for ~30 MB per-file savings.
+3. **No architectural stop** -- ceiling gate is bitrate-only; nothing checks src_codec vs target_codec.
+
+Operator's ceiling gate was raised to 400 * 4.0 = 1600 for 480p live_action / 350 * 4.0 = 1400 for 480p animation. AV1 sources at 183-656 kbps pass ceiling easily -- but they're already AT the target codec and should never be reencoded.
+
+## Domain policy (locked by operator 2026-08-14)
+
+- **If source codec == target codec, video is compliant.** No re-encode. Period.
+- KISS: one predicate. No size floor, no per-minute math. Codec match alone.
+- Target codec derived from AssignedProfile's ProfileThresholds row (existing `TierLadderRepository` lookup).
+
+## Acceptance Criteria
+
+- C1: `VideoVertical.Evaluate` returns `(True, 'source_codec_matches_target')` when normalized(`Mf.Codec`) == normalized(target codec from ProfileThresholds for `AssignedProfile` + `ContentClass` + `ResolutionCategory`), ahead of the ceiling check. Ceiling check runs only when codecs differ.
+- C2: Existing ceiling behavior unchanged when codecs differ (e.g. h264 source targeting AV1 still gates on 400*multiplier).
+- C3: Recompute across full library flips MV-output files (`-mv.mp4` = av1 source, av1 target) to `VideoCompliant=TRUE, VideoCompliantReason='source_codec_matches_target'`.
+- C4: Contract test `Tests/Contract/TestVideoVerticalCodecMatch.py` covers 4 cases: (a) src=target -> Compliant; (b) src!=target, src<=ceiling -> Compliant; (c) src!=target, src>ceiling -> non-Compliant; (d) src=target but src>ceiling -> Compliant (codec match wins).
+- C5: `video-encoding.feature.md` amended: codec-match short-circuit named in Evaluate contract.
+- C6: `TierLadderRepository` exposes a `GetProfileCodec(ProfileName)` helper if not already present; else Evaluate reads codec inline from the profile row.
+
+## Call-Graph Audit
+
+1. Multiple flow docs -- clean. VideoVertical is single-purpose.
+2. Mode-branching -- clean. Evaluate is mode-agnostic; new predicate is data-driven, not orchestration.
+3. Shared output columns -- `VideoCompliant` written by VideoVertical.RecomputeFor only. No sparse population.
+4. Config-driven call-graph -- clean. Same functions run regardless of codec.
+5. OOS explicit below.
+
+## Out of Scope
+
+- (a) Absolute size floor for Pinky-class small h264 files -- separate concern; operator has not directed a threshold. Filed for follow-up.
+- (a) Multi-codec target profiles (Tier 2, Tier 3 h264-family) -- Tier 1 is AV1-only; other tiers if they exist follow the same rule structurally.
+- (b) Second-generation encode QUALITY audit of existing MV outputs already re-encoded -- historical damage; not this directive's scope.
+- (a) Stale queue-row purge for MV-source Transcode rows -- run post-recompute as part of verification.
 
 ## Files
 
 **Edit:**
-- `Features/FileReplacement/ComplianceGate.py`
-- `Features/TranscodeQueue/QueueManagementBusinessService.py` (root-cause: threaded HasDialogBoostTrack through `_RowToMediaFileForCompliance`)
-- `Features/FileReplacement/TranscodedOutputPlacement.py` (mid-flight: widened cascade query to include in-flight attempt via `Success IS NULL OR Success = TRUE`)
-- `Features/FileReplacement/compliance-gated-rename.feature.md` (S2 amendment)
+- `Features/VideoEncoding/VideoVertical.py` (add codec-match early return)
+- `Features/Profiles/TierLadderRepository.py` (if `GetProfileCodec` helper doesn't exist yet)
+- `Features/VideoEncoding/video-encoding.feature.md` (C1/C2 amendments at DELIVERING)
 
-### Promotions
+**Create:**
+- `Tests/Contract/TestVideoVerticalCodecMatch.py`
 
-- ComplianceGate CandidateRow now carries HasDialogBoostTrack read from in-flight TranscodeAttempts.AudioTracksEmittedJson (same predicate as backfill + writer-owns-cascade) -> `Features/FileReplacement/compliance-gated-rename.feature.md` S2.
-- Root-cause row-mapper fix (`_RowToMediaFileForCompliance`) threads HasDialogBoostTrack through to MediaFileModel -- pattern-parallel to MediaFilesRepository._MapRowToMediaFile.
-- Cascade write query in TranscodedOutputPlacement widened to include in-flight attempt (Success IS NULL OR Success = TRUE) so the current attempt's Dialog Boost signal fires the flag before RecomputeForFiles reads it.
+## Status
 
-### Delivery Report
-
-- DIRECTIVE: fix wakko-worker-1 100% ComplianceGateFailed:no_dialog_boost failure caused by parent directive's HasDialogBoostTrack gap in the ComplianceGate row-mapper.
-- STATUS: Done. Live-verified.
-- WHAT SHIPPED: 3 code fixes across ComplianceGate.py + QueueManagementBusinessService.py + TranscodedOutputPlacement.py + feature-doc S2 amendment. Backfilled 480 stale HasDialogBoostTrack rows + recomputed 497 AudioCompliant.
-- HOW TO USE IT: no operator action required. Reencode-path attempts now cascade correctly: ComplianceGate accepts Dialog-Boost outputs -> TranscodedOutputPlacement flips HasDialogBoostTrack=TRUE -> RecomputeForFiles flips AudioCompliant=TRUE -> WorkBucket=Compliant.
-- WHAT YOU NEED TO EXECUTE: nothing. Fleet already redeployed to sha 562a4f5491.
-- CRITERIA VERIFICATION:
-  - C1 + C2 verified live: attempts 61758 (wakko) + 61759 (dot) post-restart, both Reencode + Dialog Boost emitted, both Success=TRUE + HasDialogBoostTrack=TRUE + AudioCompliant=TRUE + WorkBucket=Compliant.
-  - C3 (no-boost outputs still refuse) not exercised in verification (no such attempts observed post-fix); behavior structurally preserved.
-  - C4 wakko end-to-end Transcode pass confirmed.
-  - C5 feature doc S2 amended.
-- DECISIONS I MADE:
-  - Two mid-flight scope expansions (Amendments A/B in-directive): QMBS row-mapper fix, TranscodedOutputPlacement cascade-query widening. Neither could be omitted without leaving the fix chain incomplete.
-- KNOWN GAPS / DEFERRED:
-  - Wakko Arc XPU Demucs reliability audit -- separate concern.
-  - Contract test TestComplianceGate.py -- still deferred; live smoke covers.
+Phase: NEEDS_STANDARDS_REVIEW
+Opened: 2026-08-14
+Owner: claude-opus-4-7

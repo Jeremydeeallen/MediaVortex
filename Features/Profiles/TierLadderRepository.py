@@ -43,6 +43,17 @@ class TierLadderRepository:
         Value = Row[0].get('targetkbps')
         return int(Value) if Value is not None else None
 
+    # directive: video-vertical-codec-match-skip
+    def GetProfileCodec(self, ProfileName: str) -> Optional[str]:
+        Row = self.Db.ExecuteQuery(
+            "SELECT Codec FROM Profiles WHERE ProfileName = %s LIMIT 1",
+            (ProfileName,),
+        )
+        if not Row:
+            return None
+        Value = Row[0].get('codec')
+        return str(Value).strip().lower() if Value else None
+
     # directive: pre-encode-savings-gate | # see video-encoding.C1
     def GetProfileTarget(self, ProfileName: str, ContentClass: str, Resolution: str) -> Optional[int]:
         Row = self.Db.ExecuteQuery(
