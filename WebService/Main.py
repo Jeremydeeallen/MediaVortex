@@ -592,8 +592,17 @@ class WebServiceApp:
         except Exception as Ex:
             LoggingService.LogException("Failed to start AudioRemeasurementRunner", Ex, "WebService", "PrivateStartAudioRemeasurementRunner")
 
+    # directive: audio-remeasurement-runner-bind | # see startup.ST7
     def PrivateAudioRemeasurementRunnerLoop(self):
+        import os as _Os
+        from Core.WorkerContext import WorkerContext
         from Features.AudioNormalization.Services.AudioRemeasurementRunner import AudioRemeasurementRunner
+        try:
+            Ctx = WorkerContext.Bind()
+            LoggingService.LogInfo(f"AudioRemeasurementRunner thread bound WorkerContext pid={_Os.getpid()} worker={Ctx.WorkerName}", "WebService", "PrivateAudioRemeasurementRunnerLoop")
+        except Exception as _BindEx:
+            LoggingService.LogException(f"AudioRemeasurementRunner Bind failed pid={_Os.getpid()}", _BindEx, "WebService", "PrivateAudioRemeasurementRunnerLoop")
+            return
         AudioRemeasurementRunner(BatchSize=20, PollSec=30).RunForever()
 
     def PrivateServiceStatusLoop(self):

@@ -3,6 +3,7 @@ import time
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.Path import Path, PathError
 from Core.Path.PathStorageRoots import GetStorageRoots
+from Core.Path.Worker import Worker as _PathWorker
 from Core.WorkerContext import WorkerContext
 from Features.AudioNormalization.Services.AudioRemeasurementService import AudioRemeasurementService, REASON_INVALID_LOUDNESS
 
@@ -31,7 +32,7 @@ class AudioRemeasurementRunner:
         if Ctx is None:
             LoggingService.LogInfo("AudioRemeasurementRunner: no WorkerContext bound, skipping cycle", "AudioRemeasurementRunner", "RunOneCycle")
             return 0
-        Prefixes = {Sr['Id']: Sr['CanonicalPrefix'] for Sr in GetStorageRoots()}
+        PathWorker = _PathWorker.Current()
         Processed = 0
         for Row in Candidates:
             MediaFileId = int(Row['id'])
@@ -40,7 +41,7 @@ class AudioRemeasurementRunner:
             if Sid is None or Rel is None:
                 continue
             try:
-                LocalPath = Path(int(Sid), Rel).Resolve(Ctx)
+                LocalPath = Path(int(Sid), Rel).Resolve(PathWorker)
             except PathError as Ex:
                 LoggingService.LogWarning(f"AudioRemeasurementRunner: path resolution failed for MediaFileId={MediaFileId}: {Ex}", "AudioRemeasurementRunner", "RunOneCycle")
                 continue
