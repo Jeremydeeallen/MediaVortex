@@ -195,6 +195,13 @@ class JobProcessor:
                         self.QueueService.DatabaseManager.DeleteTemporaryFilePath(TranscodeAttemptId)
                     except Exception:
                         pass
+            # directive: local-staging-cleanup-restore | # see local-staging.S5
+            if MediaFile is not None and getattr(MediaFile, 'Id', None) is not None:
+                try:
+                    from Features.TranscodeJob.LocalStagingService import LocalStagingService
+                    LocalStagingService(self.QueueService.DatabaseManager.DatabaseService).CleanupJobScratchDir(self.QueueService.WorkerName, MediaFile.Id)
+                except Exception as _ScratchEx:
+                    LoggingService.LogException(f"Local scratch cleanup failed for MediaFileId={getattr(MediaFile, 'Id', None)}", _ScratchEx, "JobProcessor", "Process")
 
     # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- gate is compliance-driven (AudioSlot decides Reencode vs Copy from AudioCompliant); Demucs skipped for audiocompliant files
     def _RunPreEncodeAudio(self, MediaFile, InputPath, Job, TranscodeAttemptId):

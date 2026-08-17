@@ -1,37 +1,55 @@
-# Directive: audio-remeasurement-runner-bind
+# Directive: local-staging-cleanup-restore
 
-**Status:** Closed
+**Status:** Active -- phase: IMPLEMENTING
 
-**Slug:** audio-remeasurement-runner-bind
+**Slug:** local-staging-cleanup-restore
 
-**Interrupts:** video-vertical-codec-match-skip (Closed).
+**Interrupts:** audio-remeasurement-runner-bind (Closed).
+
+## Context
+
+`C:\MediaVortex\` on I9 has accumulated 29 per-job scratch dirs (~55GB) with source files + `.inprogress` outputs from Aug 11+ Since June 11. Local-staging (`Workers.LocalStagingEnabled=TRUE`) copies each source to `<LocalScratchDir>\<MediaFileId>\<basename>`, encodes there, ships output back to canonical, then was supposed to remove the per-job dir.
+
+Root cause: commit `945021c0` (2026-06-11) `refactor(worker-loop-method-extraction)` deleted the four `Process*Job` methods on `ProcessTranscodeQueueService` and moved bodies to `JobProcessor` strategies. The refactor removed the `self._CleanupLocalScratchForAttempt(Job.MediaFileId)` call sites from the deleted methods but never re-added them to the new `JobProcessor.Process` finally path. Function still exists at `ProcessTranscodeQueueService.py:1662` -- zero external callers (dead).
+
+Second dead-code path: `TemporaryFilePathsService.CleanupLocalScratch` (line 115) same shape, zero external callers.
+
+## Acceptance Criteria
+
+- C1: `JobProcessor.Process` calls `LocalStagingService.CleanupJobScratchDir(WorkerName, MediaFileId)` at attempt terminal state (both Success and Exception paths). Idempotent -- no-ops when local-staging inactive for the worker.
+- C2: New I9 attempts leave no residue at `C:\MediaVortex\<MediaFileId>\` post-finalization.
+- C3: Existing 29 stale dirs on I9 -- one-shot cleanup script `Scripts/CleanupOrphanLocalScratch.py` walks `<LocalScratchDir>`, cross-references `TranscodeAttempts` for that MediaFileId's terminal state, removes only-terminal subdirs. Safe against in-flight jobs.
+- C4: `ProcessTranscodeQueueService._CleanupLocalScratchForAttempt` (dead-code shim) deleted since `JobProcessor` calls the service directly.
+- C5: `TemporaryFilePathsService.CleanupLocalScratch` (dead-code shim) deleted for the same reason.
+- C6: Contract test `Tests/Contract/TestJobProcessorScratchCleanup.py` covers Success + Exception paths + no-op-when-staging-disabled.
+
+## Call-Graph Audit
+
+1. Multiple flow docs -- clean. transcode.flow.md is single owner.
+2. Mode-branching -- clean. Cleanup runs uniformly across all modes that JobProcessor handles.
+3. Shared-column sparse -- root cause is dead-code call sites; N/A.
+4. Config-driven graph -- clean. `LocalStagingEnabled` flag changes DATA (whether staging fires) not orchestration -- cleanup calls into LocalStagingService which no-ops when config off.
+5. OOS explicit below.
+
+## Out of Scope
+
+- (a) `WorkerService.PrivateOrphanCleanupLoop` catch-all sweep. Existing sweep is DB-orphan focused; adding a directory-orphan sweep is a defense-in-depth follow-up.
+- (a) VariantJobProcessor scratch dirs (test-mode variants) -- follow separate code path; not affected by this bug.
+- (b) Historical 55GB on I9 -- one-shot script (C3) drains; not a design change.
 
 ## Files
 
 **Edit:**
-- `WebService/Main.py` (bind WorkerContext in runner thread; debug log on Bind)
-- `Features/AudioNormalization/Services/AudioRemeasurementRunner.py` (Path.Resolve expects Core.Path.Worker.Worker, not WorkerContext -- use `Worker.Current()`)
+- `Features/TranscodeJob/Worker/JobProcessor.py` (call CleanupJobScratchDir in finally block)
+- `Features/TranscodeJob/ProcessTranscodeQueueService.py` (delete `_CleanupLocalScratchForAttempt` shim)
+- `Features/TranscodeJob/Worker/TemporaryFilePathsService.py` (delete `CleanupLocalScratch` shim)
 
-### Promotions
+**Create:**
+- `Scripts/CleanupOrphanLocalScratch.py`
+- `Tests/Contract/TestJobProcessorScratchCleanup.py`
 
-- `PrivateAudioRemeasurementRunnerLoop` now binds WorkerContext + logs pid/worker so future runner-thread failures are diagnosable from log alone.
-- `AudioRemeasurementRunner.RunOneCycle` uses `Core.Path.Worker.Worker.Current()` for `Path.Resolve` -- matches Protocol expected shape (previously silently type-mismatched with WorkerContext).
+## Status
 
-### Delivery Report
-
-- DIRECTIVE: unstick the 5,386 (grown to 8,788) files with `AdmissionDeferReason='invalid_loudness_measurement'` that were piling up because `AudioRemeasurementRunner` was skipping every cycle.
-- STATUS: Done. Runner draining live at ~14 files/min.
-- WHAT SHIPPED: 2-file fix. WebService restart applied on I9.
-- HOW TO USE IT: no operator action. Runner drains automatically. Files with valid remeasure clear `AdmissionDeferReason` -> AudioVertical recomputes them out of Unclassified.
-- WHAT YOU NEED TO EXECUTE: nothing. WebService already restarted on I9.
-- CRITERIA VERIFICATION:
-  - C1 verified: Bind called in runner thread. Log line `AudioRemeasurementRunner thread bound WorkerContext pid=5288 worker=I9-2024`.
-  - C2 verified: "no WorkerContext bound" log line stopped appearing post-restart.
-  - C3 verified: 8 files processed in 22s post-restart (MediaFileId=176, 180, 245, 279, 285, 295, 524, 528 all ok=True reason=None).
-  - C4 will flow naturally as Runner drains + AudioVertical.RecomputeFor runs on scan cycles.
-- DECISIONS I MADE:
-  - Kept debug log on Bind permanently (`AudioRemeasurementRunner thread bound WorkerContext pid=<N> worker=<name>`). Future Runner-thread failures will be diagnosable from that log line alone -- if it's absent post-restart, the thread never started.
-  - Used `Worker.Current()` inside RunOneCycle instead of caching once at Runner instantiation. Cheap enough (per-cycle) + resilient to WorkerContext rebinds.
-- KNOWN GAPS / DEFERRED:
-  - Runner only runs on WebService (I9). If remeasure throughput becomes a bottleneck, expand to WorkerService fleet-wide. Not needed at 14/min = 840/hour = 8,788 file backlog drains in ~10h.
-  - 3,374 Z:\ files still stuck (mount inaccessible on I9). Separate concern.
+Phase: NEEDS_STANDARDS_REVIEW
+Opened: 2026-08-17
+Owner: claude-opus-4-7

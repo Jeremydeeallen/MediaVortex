@@ -1658,16 +1658,6 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException(f"_CopyBackStagedOutput failed for MediaFileId={MediaFileId}", Ex, "ProcessTranscodeQueueService", "_CopyBackStagedOutput")
             return False
 
-    # directive: local-staging | # see local-staging.C11
-    def _CleanupLocalScratchForAttempt(self, MediaFileId: int) -> bool:
-        """Idempotent removal of the per-job scratch subdir (source + any leftover output)."""
-        try:
-            from Features.TranscodeJob.LocalStagingService import LocalStagingService
-            return LocalStagingService(self.DatabaseManager.DatabaseService).CleanupJobScratchDir(self.WorkerName, MediaFileId)
-        except Exception as Ex:
-            LoggingService.LogException(f"_CleanupLocalScratchForAttempt failed for MediaFileId={MediaFileId}", Ex, "ProcessTranscodeQueueService", "_CleanupLocalScratchForAttempt")
-            return False
-
     # directive: path-schema-migration, local-staging | # see path.S8, local-staging.C7
     def PrivateCreateTemporaryFilePathRecord(self, TranscodeAttemptId: int,
                                               SourceStorageRootId: int, SourceRelativePath: str,

@@ -111,12 +111,3 @@ class TemporaryFilePathsService:
             LoggingService.LogException(f"Exception cleaning up failed attempt files for TranscodeAttempt {TranscodeAttemptId}",
                                        e, "TemporaryFilePathsService", "CleanupFailedAttempt")
 
-    # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C10
-    def CleanupLocalScratch(self, MediaFileId: int) -> bool:
-        """Cleanup the worker-local scratch dir for the MediaFileId; returns True iff any file was removed."""
-        try:
-            from Features.TranscodeJob.LocalStagingService import LocalStagingService
-            return LocalStagingService(self.DatabaseManager.DatabaseService).CleanupJobScratchDir(self.WorkerName, MediaFileId)
-        except Exception as Ex:
-            LoggingService.LogException(f"CleanupLocalScratch failed for MediaFileId={MediaFileId}", Ex, "TemporaryFilePathsService", "CleanupLocalScratch")
-            return False
