@@ -27,7 +27,7 @@ Query at directive open (2026-07-17):
 
 ## Success Criteria
 
-C1. `AudioVertical.Evaluate(Mf)` returns `Compliant=True` **iff** `Mf.HasDialogBoostTrack=TRUE` (single-aggregate MediaFile read; DDD-clean). The `HasDialogBoostTrack BOOL` column is derived from `TranscodeAttempts.AudioTracksEmittedJson::jsonb @> '[{"dialog_boost_emitted": true}]'::jsonb` for the latest successful attempt, written via writer-owns-cascade at `TranscodedOutputPlacement:172` alongside `MarkAudioComplete` + `RecomputeForFiles`. Detection uses `Label='Dialog Boost'` (structural) + `dialog_boost_emitted=true` (explicit flag from `PostEncodeMeasurementService`); both coincide in emitted JSON.
+C1. `AudioVertical.Evaluate(Mf)` returns `Compliant=True` **iff** `Mf.HasDialogBoostTrack=TRUE` (single-aggregate MediaFile read; DDD-clean). The `HasDialogBoostTrack BOOL` column is derived from `TranscodeAttempts.DialogBoostEmitted BOOL` (the canonical per-attempt marker, written by `AudioPreEncodeFacade.PersistMeta`) for the latest successful attempt, written via writer-owns-cascade at `TranscodedOutputPlacement` alongside `MarkAudioComplete` + `RecomputeForFiles`. See `dialog-boost-marker-unify` for the column + rationale.
 
 C2. Untranscoded sources (`Mf.TranscodedByMediaVortex IS NOT TRUE`) return `Compliant=False, Reason='no_dialog_boost'` from the audio vertical. LUFS-at-target is no longer an escape hatch.
 
@@ -70,7 +70,7 @@ C11. Line-count delta:
 - `MediaFileModel.py` HasDialogBoostTrack field: +2 lines.
 - Net: ~-168 lines in production code (target was ≥ -80 post-Amendment A).
 
-C12. `MediaFiles.HasDialogBoostTrack BOOL NOT NULL DEFAULT FALSE` column added (Amendment B). Column is single-source-of-truth for Dialog Boost compliance; keeps AudioVertical.Evaluate MediaFile-scoped (no cross-aggregate JOIN into TranscodeAttempts). Backfilled from `TranscodeAttempts.AudioTracksEmittedJson::jsonb @> '[{"dialog_boost_emitted": true}]'::jsonb` at migration time (14,550 rows); maintained inline by TranscodedOutputPlacement writer-owns-cascade going forward.
+C12. `MediaFiles.HasDialogBoostTrack BOOL NOT NULL DEFAULT FALSE` column added (Amendment B). Column is single-source-of-truth for Dialog Boost compliance; keeps AudioVertical.Evaluate MediaFile-scoped (no cross-aggregate JOIN into TranscodeAttempts). Post `dialog-boost-marker-unify` (2026-08-22), maintained inline by `TranscodedOutputPlacement` reading `TranscodeAttempts.DialogBoostEmitted BOOL` for the latest successful attempt.
 
 ## Seams
 

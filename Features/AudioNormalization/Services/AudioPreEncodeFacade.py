@@ -34,34 +34,25 @@ def EnrichContext(Context, PreAudio):
         Context[Key] = (PreAudio or {}).get(Key)
 
 
-# directive: audio-dialog-boost-real | # see audio-normalization.C8
+# directive: dialog-boost-marker-unify | # see dialog-boost-marker-unify.C2
 def PersistMeta(TranscodeAttemptId, PreAudio):
-    """G5: stamp vocals_rms_dbfs + dialog_boost_emitted onto TranscodeAttempts.AudioTracksEmittedJson."""
     if not PreAudio:
         return
     VocalsRms = PreAudio.get('VocalsRmsDbfs')
     PremixPath = PreAudio.get('DemucsPremixPath')
     DemucsFailed = bool(PreAudio.get('DemucsFailed'))
-    DemucsFailureReason = PreAudio.get('DemucsFailureReason')
     if VocalsRms is None and not PremixPath and not DemucsFailed:
         return
-    try:
-        from Features.AudioNormalization.Repositories.AudioComplianceRulesRepository import AudioComplianceRulesRepository
-        from Features.AudioNormalization.Services.PostEncodeMeasurementService import PostEncodeMeasurementService
-        FallbackDbfs = AudioComplianceRulesRepository().GetRules().get('Track1VocalsRmsFallbackDbfs')
-        DialogBoostEmitted = bool(PremixPath) and not (
-            VocalsRms is not None and FallbackDbfs is not None and float(VocalsRms) <= float(FallbackDbfs)
-        )
-        # see audio-normalization.C39
-        PostEncodeMeasurementService().PersistPreEncodeMeta(
-            TranscodeAttemptId, VocalsRms, DialogBoostEmitted, FallbackDbfs,
-            DemucsFailed=DemucsFailed, DemucsFailureReason=DemucsFailureReason,
-        )
-    except Exception as Ex:
-        LoggingService.LogException(
-            f"AudioPreEncodeFacade.PersistMeta failed for AttemptId={TranscodeAttemptId}",
-            Ex, "AudioPreEncodeFacade", "PersistMeta",
-        )
+    from Features.AudioNormalization.Repositories.AudioComplianceRulesRepository import AudioComplianceRulesRepository
+    from Core.Database.DatabaseService import DatabaseService
+    FallbackDbfs = AudioComplianceRulesRepository().GetRules().get('Track1VocalsRmsFallbackDbfs')
+    DialogBoostEmitted = bool(PremixPath) and not (
+        VocalsRms is not None and FallbackDbfs is not None and float(VocalsRms) <= float(FallbackDbfs)
+    )
+    DatabaseService().ExecuteNonQuery(
+        "UPDATE TranscodeAttempts SET DialogBoostEmitted = %s WHERE Id = %s",
+        (bool(DialogBoostEmitted), int(TranscodeAttemptId)),
+    )
 
 
 # directive: transcode-flow-canonical

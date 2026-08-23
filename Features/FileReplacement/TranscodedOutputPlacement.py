@@ -177,24 +177,17 @@ class TranscodedOutputPlacement:
                             f"replacement still succeeded; next admin recompute will reconcile",
                             AudioEx, "TranscodedOutputPlacement", "Execute"
                         )
-                    # directive: audio-vertical-dialog-boost-enforcement
-                    try:
-                        from Core.Database.DatabaseService import DatabaseService as _DbSvc
-                        _DbSvc().ExecuteNonQuery(
-                            "UPDATE MediaFiles SET HasDialogBoostTrack = COALESCE(("
-                            "  SELECT (AudioTracksEmittedJson::jsonb @> %s::jsonb) "
-                            "  FROM TranscodeAttempts "
-                            "  WHERE MediaFileId = %s AND (Success IS NULL OR Success = TRUE) "
-                            "  ORDER BY Id DESC LIMIT 1"
-                            "), FALSE) WHERE Id = %s",
-                            ('[{"dialog_boost_emitted": true}]', RecomputeMediaFileId, RecomputeMediaFileId),
-                        )
-                        StepsCompleted.append("Updated HasDialogBoostTrack from latest attempt")
-                    except Exception as HdbEx:
-                        LoggingService.LogException(
-                            f"HasDialogBoostTrack update failed for MediaFileId={RecomputeMediaFileId}",
-                            HdbEx, "TranscodedOutputPlacement", "Execute"
-                        )
+                    # directive: dialog-boost-marker-unify | # see dialog-boost-marker-unify.C4
+                    from Core.Database.DatabaseService import DatabaseService as _DbSvc
+                    _DbSvc().ExecuteNonQuery(
+                        "UPDATE MediaFiles SET HasDialogBoostTrack = COALESCE(("
+                        "  SELECT DialogBoostEmitted FROM TranscodeAttempts "
+                        "  WHERE MediaFileId = %s AND Success = TRUE "
+                        "  ORDER BY Id DESC LIMIT 1"
+                        "), FALSE) WHERE Id = %s",
+                        (RecomputeMediaFileId, RecomputeMediaFileId),
+                    )
+                    StepsCompleted.append("Updated HasDialogBoostTrack from latest attempt")
                     try:
                         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
                         Updated = QueueManagementBusinessService().RecomputeForFiles([RecomputeMediaFileId])
