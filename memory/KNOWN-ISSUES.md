@@ -2,6 +2,33 @@
 
 ## Active
 
+### contract-tests
+
+### [BUG-0092] Contract tests leak Running TranscodeQueue rows on tearDown; abandonment sweeper does not catch them
+**Date:** 2026-08-22 | **Area:** contract-tests
+
+**What breaks:** `Tests/Contract/TestClaimAuthority.py` + `Tests/Contract/TestNvencRouting` claim TranscodeQueue rows via hardcoded test-worker names (`_test-claim-authority-worker`, `_test-nvenc-routing-not-capable`) and never release them on tearDown. Rows sit `Status='Running'` with `ClaimedBy='_test-*'` forever. `AttemptAbandonmentSweeper.SweepStaleOwners` only touches `TranscodeAttempts` rows whose `WorkerName IN (SELECT WorkerName FROM Workers WHERE Status <> 'Online' AND LastHeartbeat < NOW() - 5min)` -- test workers do not exist in `Workers` at all, so invisible to sweeper. Also scope-limited to `TranscodeAttempts`, not `TranscodeQueue`. UI counters (`/Queue` page + AggregateStats endpoint) count the DB `Status='Running'` -- operator sees phantom running jobs that do not correspond to any ActiveJobs row.
+
+**Repro:** run `py -m pytest Tests/Contract/TestClaimAuthority.py -v` -- after tests finish, `SELECT id, mediafileid, status, claimedby, claimedat FROM TranscodeQueue WHERE claimedby LIKE '_test-%'` returns 3+ rows in `Status='Running'`.
+
+**Evidence:**
+- 2026-08-22 observation: 3 stale queue rows dating back to 2026-08-22 16:39 (12h old at time of manual cleanup). All showed `Status='Running'`, `ClaimedBy IN ('_test-claim-authority-worker', '_test-nvenc-routing-not-capable')`, no matching ActiveJobs row.
+- Operator-facing symptom: `/Queue` AudioFix card showed "6 running" while ActiveJobs showed 3 legit jobs.
+- Manual cleanup: `UPDATE TranscodeQueue SET Status='Pending', ClaimedBy=NULL, ClaimedAt=NULL WHERE claimedby LIKE '_test-%'` (3 rows).
+
+**First place to look:**
+- `Tests/Contract/TestClaimAuthority.py` -- tearDown missing or incomplete (should DELETE test rows or UPDATE Status back)
+- `Tests/Contract/TestClaimAuthority.TestNvencRouting` -- same
+- `Features/ServiceControl/AttemptAbandonmentSweeper.SweepStaleOwners` -- scope-limited; consider widening to sweep TranscodeQueue rows whose ClaimedBy has no matching Workers row (or workers with heartbeat stale)
+
+**Proposed criterion:** Contract tests that claim queue rows either (a) DELETE the row on tearDown, or (b) release it back to `Status='Pending'` with `ClaimedBy=NULL`. And/or the abandonment sweeper widens to catch `TranscodeQueue.ClaimedBy` values that do not correspond to any Workers row (or heartbeat-stale worker). Verifiable: `SELECT COUNT(*) FROM TranscodeQueue WHERE ClaimedBy LIKE '_test-%'` returns 0 after any pytest run + a fresh sweep cycle.
+
+**Out of scope for /b:** implementation of tearDown fixes + sweeper widening -- lands with `/t BUG-0092`.
+
+**Fix with:** `/t BUG-0092`.
+
+---
+
 ### deploy
 
 ### disposition
