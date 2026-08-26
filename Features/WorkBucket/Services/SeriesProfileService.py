@@ -1,45 +1,44 @@
+# directive: tv-tier1-classifier-pin | # see work-bucket.feature.md C3
 from typing import Optional
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Features.MediaFiles.MediaFilesRepository import MediaFilesRepository
+from Features.MediaFiles.ProfileAssignmentService import ProfileAssignmentService
 from Features.WorkBucket.Domain.ProfileName import ProfileName
 from Features.WorkBucket.Domain.SeriesIdentity import SeriesIdentity
 from Features.WorkBucket.Repositories.SeriesProfileRepository import SeriesProfileRepository
 
 
-# directive: work-transcode-unified | # see work-bucket.C3
 class SeriesProfileService:
-    """Orchestrates per-series profile assignment -- validate -> persist sticky -> propagate to untranscoded MediaFiles."""
 
-    # directive: work-transcode-unified | # see work-bucket.C3
+    # directive: tv-tier1-classifier-pin
     def __init__(
         self,
         Db: Optional[DatabaseService] = None,
         ProfileRepo: Optional[SeriesProfileRepository] = None,
         MediaFilesRepo: Optional[MediaFilesRepository] = None,
+        ProfileWriter: Optional[ProfileAssignmentService] = None,
     ):
-        # see work-bucket.C3
         self.Db = Db or DatabaseService()
         self.ProfileRepo = ProfileRepo or SeriesProfileRepository(self.Db)
         self.MediaFilesRepo = MediaFilesRepo or MediaFilesRepository(self.Db)
+        self.ProfileWriter = ProfileWriter or ProfileAssignmentService(Db=self.Db, Repo=self.MediaFilesRepo)
 
-    # directive: work-transcode-unified | # see work-bucket.C3
+    # directive: tv-tier1-classifier-pin | # see writer-owns-cascade.md
     def SetProfile(self, Identity: SeriesIdentity, RawProfileName: str) -> int:
-        # see work-bucket.C3
         Profile = ProfileName(RawProfileName, Db=self.Db)
         self.ProfileRepo.UpsertProfile(Identity, Profile.Value)
-        Affected = self.MediaFilesRepo.PropagateSeriesProfile(Identity, Profile.Value)
+        Ids = self.MediaFilesRepo.SelectUntranscodedInSeries(Identity)
+        WrittenIds = self.ProfileWriter.Assign(Ids, Profile.Value, 'series', IfUnsetOnly=False)
         LoggingService.LogInfo(
-            f"Series profile set: {Identity.ToCompositeKey()} -> {Profile.Value}, {Affected} files updated",
+            f"Series profile set: {Identity.ToCompositeKey()} -> {Profile.Value}, {len(WrittenIds)} files updated",
             "SeriesProfileService",
             "SetProfile",
         )
-        return Affected
+        return len(WrittenIds)
 
-    # directive: work-transcode-unified | # see work-bucket.C3
+    # directive: tv-tier1-classifier-pin
     def ClearProfile(self, Identity: SeriesIdentity) -> None:
-        """Remove the sticky series profile. Does NOT clear MediaFiles.AssignedProfile -- those rows keep the historical assignment."""
-        # see work-bucket.C3
         self.ProfileRepo.DeleteProfile(Identity)
         LoggingService.LogInfo(
             f"Series profile cleared: {Identity.ToCompositeKey()}",

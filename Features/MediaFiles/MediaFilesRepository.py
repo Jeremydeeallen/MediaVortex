@@ -379,28 +379,24 @@ class MediaFilesRepository(BaseRepository):
         rows = self.DatabaseService.ExecuteQuery(query, (StorageRootId, likePattern))
         return [self._MapRowToMediaFile(r) for r in rows]
 
-    # directive: path-schema-migration | # see path.S8
-    def UpdateMediaFilesProfileByRootFolder(self, RootFolderPath: str, ProfileId: int) -> int:
-        """Bulk-assign profile name to all MediaFiles whose RelativePath starts with the root prefix."""
-        profileRows = self.DatabaseService.ExecuteQuery(
-            "SELECT ProfileName FROM Profiles WHERE Id = %s", (ProfileId,)
-        )
-        profileName = profileRows[0]['ProfileName'] if profileRows else f"ProfileId_{ProfileId}"
+    # directive: tv-tier1-classifier-pin | # see profiles.W9 -- select-only; writer goes through ProfileAssignmentService
+    def SelectMediaFileIdsByRootFolder(self, RootFolderPath: str):
+        """Return MediaFile Ids under a root folder prefix; caller cascades via ProfileAssignmentService."""
         P = _ParsePath(RootFolderPath)
         if P is None:
             LoggingService.LogWarning(
-                f"UpdateMediaFilesProfileByRootFolder: could not parse {RootFolderPath!r}",
-                "MediaFilesRepository", "UpdateMediaFilesProfileByRootFolder"
+                f"SelectMediaFileIdsByRootFolder: could not parse {RootFolderPath!r}",
+                "MediaFilesRepository", "SelectMediaFileIdsByRootFolder",
             )
-            return 0
+            return []
         prefix = (P.RelativePath or '').rstrip('/').rstrip('\\')
         escaped = EscapeLikePattern(prefix)
         likePattern = f"{escaped}%" if not prefix else f"{escaped}/%"
-        return self.DatabaseService.ExecuteNonQuery(
-            "UPDATE MediaFiles SET AssignedProfile = %s "
-            "WHERE StorageRootId = %s AND RelativePath LIKE %s ESCAPE '!'",
-            (profileName, P.StorageRootId, likePattern)
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT Id FROM MediaFiles WHERE StorageRootId = %s AND RelativePath LIKE %s ESCAPE '!'",
+            (P.StorageRootId, likePattern),
         )
+        return [int(R['Id']) for R in (Rows or [])]
 
     # directive: path-schema-migration | # see path.S8
     def GetMediaFileByFileName(self, FileName: str) -> Optional[Dict[str, Any]]:
@@ -543,32 +539,36 @@ class MediaFilesRepository(BaseRepository):
         )
         return affected > 0
 
-    # directive: work-transcode-unified | # see work-bucket.C3
-    def SetAssignedProfileForFile(self, MediaFileId: int, ProfileName: str, Source: str = 'series') -> None:
-        """Set AssignedProfile + AssignedProfileSource for ONE MediaFile by Id. Only updates if currently NULL (idempotent)."""
-        self.DatabaseService.ExecuteNonQuery(
+    # directive: tv-tier1-classifier-pin
+    def WriteAssignedProfile(self, MediaFileIds, ProfileName, Source: str, IfUnsetOnly: bool = False):
+        """Bulk UPDATE AssignedProfile; IfUnsetOnly adds sticky-guard; returns RETURNING Ids."""
+        Ids = [int(I) for I in (MediaFileIds or [])]
+        if not Ids:
+            return []
+        Sql = (
             "UPDATE MediaFiles "
             "   SET AssignedProfile = %s, "
             "       AssignedProfileSource = %s, "
             "       LastModifiedDate = NOW() "
-            " WHERE Id = %s AND AssignedProfile IS NULL",
-            (ProfileName, Source, int(MediaFileId)),
+            " WHERE Id = ANY(%s)"
         )
+        if IfUnsetOnly:
+            Sql += " AND AssignedProfile IS NULL"
+        Sql += " RETURNING Id"
+        Rows = self.DatabaseService.ExecuteReturning(Sql, (ProfileName, Source, Ids))
+        return [int(R.get('Id')) for R in (Rows or [])]
 
-    # directive: work-transcode-unified | # see work-bucket.G1
-    def PropagateSeriesProfile(self, Identity, ProfileName: str) -> int:
-        """UPDATE MediaFiles.AssignedProfile for every untranscoded file in the series. Returns rowcount."""
-        Affected = self.DatabaseService.ExecuteNonQuery(
-            "UPDATE MediaFiles "
-            "   SET AssignedProfile = %s, "
-            "       AssignedProfileSource = 'series', "
-            "       LastModifiedDate = NOW() "
+    # directive: tv-tier1-classifier-pin
+    def SelectUntranscodedInSeries(self, Identity):
+        """Return Ids of untranscoded MediaFiles in a series (StorageRootId + top RelativePath segment)."""
+        Rows = self.DatabaseService.ExecuteQuery(
+            "SELECT Id FROM MediaFiles "
             " WHERE StorageRootId = %s "
             "   AND split_part(RelativePath, '/', 1) = %s "
             "   AND TranscodedByMediaVortex IS NOT TRUE",
-            (ProfileName, Identity.StorageRootId, Identity.RelativePath),
+            (Identity.StorageRootId, Identity.RelativePath),
         )
-        return int(Affected) if Affected is not None else 0
+        return [int(R.get('Id')) for R in (Rows or [])]
 
     # directive: ingest-pipeline-kiss
     def GetStaleComplianceRows(self, Limit: Optional[int] = None) -> List[Dict[str, Any]]:

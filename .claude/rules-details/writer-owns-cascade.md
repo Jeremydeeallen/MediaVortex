@@ -45,6 +45,33 @@ Classifier runs BEFORE compliance so compliance sees `AssignedProfile` populated
 2. Greps the production tree for `UPDATE MediaFiles SET <col>` or equivalent psycopg2 patterns.
 3. For each hit, verifies the enclosing function body also calls `RecomputeForFiles`.
 4. Whitelist entries carry inline `# cascade-ok: <reason>` marker within 3 lines (e.g. one-shot repair scripts).
+5. **Single exemption:** `Features/MediaFiles/MediaFilesRepository.py` (the sanctioned raw writer per `mediafiles-uniqueness-owner.C6`). Every other Repository file is checked. Reason: SSoT writer pattern below eliminates the need for repo-layer cascade -- repos hand back Ids, the service layer owns the cascade.
+
+## SSoT writer pattern (AssignedProfile case study)
+
+Post `tv-tier1-classifier-pin` (2026-08-25), `MediaFiles.AssignedProfile` has exactly one production writer: `Features/MediaFiles/ProfileAssignmentService.Assign(Ids, ProfileName, Source, IfUnsetOnly=False)`.
+
+```
+Caller               -> ProfileAssignmentService.Assign
+                         |-> MediaFilesRepository.WriteAssignedProfile (raw UPDATE ... RETURNING Id)
+                         |-> QueueManagementBusinessService.RecomputeForFiles(WrittenIds)
+```
+
+Callers routed through it:
+- `ContentClassifierService.ClassifyAndAssign` + `ClassifyAndAssignBatch` (`Source='classifier'`, `IfUnsetOnly=True`)
+- `SeriesProfileService.SetProfile` (`Source='series'`)
+- `ProfileService.AssignProfileToRootFolder` (`Source='root_folder'`)
+- `QueueManagementBusinessService.GetMediaFilesByFolderAndResolutionFilter` (`Source='root_folder'`)
+- `Scripts/SQLScripts/BackfillProfileAssignments.py` (`Source='series'`, `IfUnsetOnly=True`)
+- `Scripts/SQLScripts/BackfillTvTier1AndCascade_2026_08_25.py` (`Source='backfill_tv_tier1_2026_08_25'`)
+
+Why this works: cascade cannot be forgotten because the service method IS the write. Repositories return Ids; they do not cascade. The enforcement test's Repository.py exemption is safe because no service-layer bypass path exists.
+
+## Repository-layer non-exemption
+
+`Repository.py` files are NOT blanket-exempt from cascade enforcement (unless they are the sanctioned raw writer per `mediafiles-uniqueness-owner`). A repo that writes an AssignedProfile column outside the SSoT service is a violation the test refuses.
+
+Prior blanket-skip (`*Repository.py`) caught a real bug on removal: `ProfileRepository.UpdateMediaFilesProfileByRootFolder` (~40 days undetected) wrote AssignedProfile with priority-only recompute, no compliance cascade. Refactored to `SelectMediaFileIdsByRootFolder` (repo) + `ProfileAssignmentService.Assign` (service) during `tv-tier1-classifier-pin`.
 
 Anti-pattern the test refuses:
 

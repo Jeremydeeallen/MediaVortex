@@ -1,8 +1,4 @@
-"""Read/write for ContentClassificationRules and MediaFiles.AssignedProfile.
-
-See Features/ContentClassifier/content-classifier.feature.md.
-"""
-
+# directive: tv-tier1-classifier-pin | # see classifier.feature.md
 from typing import List, Optional
 
 from Core.Database.DatabaseService import DatabaseService
@@ -43,25 +39,8 @@ class ContentClassifierRepository:
             ))
         return Rules
 
-    def WriteAssignment(self, MediaFileId: int, ProfileName: Optional[str], Source: str) -> bool:
-        try:
-            self.Db.ExecuteNonQuery(
-                "UPDATE MediaFiles "
-                "SET AssignedProfile = %s, AssignedProfileSource = %s "
-                "WHERE Id = %s AND AssignedProfile IS NULL",
-                (ProfileName, Source, MediaFileId),
-            )
-            return True
-        except Exception as Ex:
-            LoggingService.LogException(
-                f"WriteAssignment failed for MediaFileId {MediaFileId}", Ex,
-                "ContentClassifierRepository", "WriteAssignment",
-            )
-            return False
-
-    # directive: path-schema-migration | # see content-classifier.C5 -- typed-pair SELECT; FilePath synthesized for FolderPathPattern matching
+    # directive: tv-tier1-classifier-pin | # see path.S8 -- FilePath synthesized for FolderPathPattern matching
     def GetMediaFileForClassification(self, MediaFileId: int) -> Optional[dict]:
-        """Return row dict for the classifier; FilePath is computed via PathStorageRoots, not the renamed column."""
         Rows = self.Db.ExecuteQuery(
             "SELECT Id, StorageRootId, RelativePath, Codec, ResolutionCategory, VideoBitrateKbps, "
             "       AssignedProfile "

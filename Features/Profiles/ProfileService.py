@@ -168,7 +168,12 @@ class ProfileService:
                 LoggingService.LogError(errorMsg, "ProfileService", "AssignProfileToRootFolder")
                 return {"Success": False, "ErrorMessage": errorMsg, "FilesUpdated": 0}
 
-            filesUpdated = self.Repository.UpdateMediaFilesProfileByRootFolder(RootFolderPath.strip(), ProfileId)
+            # directive: tv-tier1-classifier-pin -- route through ProfileAssignmentService (writes + cascades)
+            from Features.MediaFiles.MediaFilesRepository import MediaFilesRepository
+            from Features.MediaFiles.ProfileAssignmentService import ProfileAssignmentService
+            Ids = MediaFilesRepository().SelectMediaFileIdsByRootFolder(RootFolderPath.strip())
+            WrittenIds = ProfileAssignmentService().Assign(Ids, profile.ProfileName, 'root_folder', IfUnsetOnly=False)
+            filesUpdated = len(WrittenIds)
 
             if filesUpdated > 0:
                 successMsg = f"Successfully assigned profile '{profile.ProfileName}' to {filesUpdated} files in root folder '{RootFolderPath}'"

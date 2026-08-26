@@ -64,7 +64,8 @@ class TestWriterOwnsCascadeEnforcement(unittest.TestCase):
                 if '__pycache__' in PyFile.parts:
                     continue
                 Name = PyFile.name
-                if Name.endswith('Repository.py') or Name.endswith('Repo.py'):
+                # directive: tv-tier1-classifier-pin -- MediaFilesRepository is the sanctioned raw writer; service layer (ProfileAssignmentService, ProbeStage) owns cascade.
+                if PyFile.resolve() == (_ROOT / 'Features' / 'MediaFiles' / 'MediaFilesRepository.py').resolve():
                     continue
                 try:
                     Text = PyFile.read_text(encoding='utf-8', errors='ignore')

@@ -357,65 +357,6 @@ class ProfileRepository(BaseRepository):
         affected_rows = self.ExecuteNonQuery("DELETE FROM ProfileThresholds WHERE Id = %s", (ThresholdId,))
         return affected_rows > 0
 
-    def UpdateMediaFilesProfileByRootFolder(self, RootFolderPath: str, ProfileId: int) -> int:
-        """Bulk-assign profile by folder + trigger PriorityScore recompute (recompute failure does NOT roll back). See priority-materialization.feature.md C8."""
-        try:
-            LoggingService.LogFunctionEntry("UpdateMediaFilesProfileByRootFolder", "ProfileRepository", RootFolderPath, ProfileId)
-
-            profile = self.GetProfileById(ProfileId)
-            profileName = profile.ProfileName if profile else f"ProfileId_{ProfileId}"
-
-            # directive: path-schema-migration | # see path.S8 | # see profiles.W9
-            from Core.Path.Path import Path, PathError
-            from Core.Path.PathStorageRoots import GetStorageRoots
-            def LookupTypedPair(c):
-                if not c: return (None, None)
-                try:
-                    P = Path.FromLegacyString(c, GetStorageRoots())
-                    return (P.StorageRootId, P.RelativePath)
-                except PathError:
-                    return (None, None)
-            Sid, RelPrefix = LookupTypedPair(RootFolderPath)
-            if Sid is None or RelPrefix is None:
-                LoggingService.LogError(
-                    f"UpdateMediaFilesProfileByRootFolder: RootFolderPath {RootFolderPath!r} did not match any StorageRoots prefix",
-                    "ProfileRepository", "UpdateMediaFilesProfileByRootFolder"
-                )
-                return 0
-            escapedRel = EscapeLikePattern(RelPrefix)
-            affectedRows = self.ExecuteQuery(
-                "SELECT Id FROM MediaFiles WHERE StorageRootId = %s AND RelativePath LIKE %s || '%%' ESCAPE '!'",
-                (Sid, escapedRel)
-            )
-            affectedIds = [r['Id'] for r in affectedRows]
-
-            query = (
-                "UPDATE MediaFiles "
-                "SET AssignedProfile = %s "
-                "WHERE StorageRootId = %s AND RelativePath LIKE %s || '%%' ESCAPE '!'"
-            )
-            filesUpdated = self.ExecuteNonQuery(query, (profileName, Sid, escapedRel))
-            LoggingService.LogInfo(f"Updated {filesUpdated} media files in root folder '{RootFolderPath}' to use profile '{profileName}'", "ProfileRepository", "UpdateMediaFilesProfileByRootFolder")
-
-            if affectedIds:
-                try:
-                    from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
-                    Service = QueueManagementBusinessService()
-                    # Process in batches to keep the bulk UPDATE VALUES clause manageable.
-                    BatchSize = 1000
-                    for i in range(0, len(affectedIds), BatchSize):
-                        Service.ComputePriorityScoresForFiles(affectedIds[i:i+BatchSize])
-                except Exception as PriorityEx:
-                    LoggingService.LogException(
-                        f"Priority recompute after AssignedProfile bulk-update failed for {len(affectedIds)} files in '{RootFolderPath}' -- profile is assigned, scores stale",
-                        PriorityEx, "ProfileRepository", "UpdateMediaFilesProfileByRootFolder"
-                    )
-
-            return filesUpdated
-
-        except Exception as e:
-            LoggingService.LogException("Exception updating media files profile by root folder", e, "ProfileRepository", "UpdateMediaFilesProfileByRootFolder")
-            return 0
 
     def GetProfileQuality(self, ProfileName: str) -> Optional[int]:
         """Get the Quality value from ProfileThresholds for a given profile name."""

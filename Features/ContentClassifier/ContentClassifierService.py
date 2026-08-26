@@ -1,12 +1,4 @@
-"""Walks ContentClassificationRules in priority order; first match wins.
-Writes MediaFiles.AssignedProfile + AssignedProfileSource.
-
-Operator overrides (AssignedProfile already non-NULL) always win -- the
-service short-circuits without writing.
-
-See Features/ContentClassifier/content-classifier.feature.md.
-"""
-
+# directive: tv-tier1-classifier-pin | # see classifier.feature.md
 from typing import List, Optional
 
 from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
@@ -15,7 +7,7 @@ from Features.ContentClassifier.ContentClassifierRepository import ContentClassi
 from Features.ContentClassifier.Models.ContentClassificationRuleModel import (
     ContentClassificationRuleModel,
 )
-from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+from Features.MediaFiles.ProfileAssignmentService import ProfileAssignmentService
 
 
 _SKIP_SENTINEL = "__skip__"
@@ -81,9 +73,11 @@ def _RuleMatches(Rule: ContentClassificationRuleModel, Media: dict, Db: Database
 
 
 class ContentClassifierService:
-    def __init__(self):
+    # directive: tv-tier1-classifier-pin
+    def __init__(self, ProfileWriter: Optional[ProfileAssignmentService] = None):
         self.Repository = ContentClassifierRepository()
         self.Db = DatabaseService()
+        self.ProfileWriter = ProfileWriter or ProfileAssignmentService(Db=self.Db)
 
     def _Walk(self, Rules: List[ContentClassificationRuleModel], Media: dict) -> Optional[ContentClassificationRuleModel]:
         for Rule in Rules:
@@ -91,6 +85,7 @@ class ContentClassifierService:
                 return Rule
         return None
 
+    # directive: tv-tier1-classifier-pin | # see writer-owns-cascade.md
     def ClassifyAndAssign(self, MediaFileId: int) -> Optional[str]:
         try:
             Media = self.Repository.GetMediaFileForClassification(MediaFileId)
@@ -116,16 +111,14 @@ class ContentClassifierService:
                 return None
 
             if Matched.AssignProfileName == _SKIP_SENTINEL:
-                self.Repository.WriteAssignment(MediaFileId, None, _SKIP_SOURCE)
-                QueueManagementBusinessService().RecomputeForFiles([MediaFileId])
+                self.ProfileWriter.Assign([MediaFileId], None, _SKIP_SOURCE, IfUnsetOnly=True)
                 LoggingService.LogInfo(
                     f"ContentClassifier: rule '{Matched.RuleName}' skipped MediaFileId {MediaFileId} (codec={Media.get('Codec')})",
                     "ContentClassifierService", "ClassifyAndAssign",
                 )
                 return None
 
-            self.Repository.WriteAssignment(MediaFileId, Matched.AssignProfileName, _CLASSIFIER_SOURCE)
-            QueueManagementBusinessService().RecomputeForFiles([MediaFileId])
+            self.ProfileWriter.Assign([MediaFileId], Matched.AssignProfileName, _CLASSIFIER_SOURCE, IfUnsetOnly=True)
             LoggingService.LogInfo(
                 f"ContentClassifier: matched rule '{Matched.RuleName}' -> profile '{Matched.AssignProfileName}' for MediaFileId {MediaFileId}",
                 "ContentClassifierService", "ClassifyAndAssign",
@@ -138,12 +131,14 @@ class ContentClassifierService:
             )
             return None
 
+    # directive: tv-tier1-classifier-pin
     def ClassifyAndAssignBatch(self, MediaFileIds: List[int]) -> dict:
         Rules = self.Repository.GetActiveRules()
         HitCounts = {}
         Skipped = 0
         Unmatched = 0
-        WrittenIds = []
+        ProfileToIds = {}
+        SkipIds = []
         for MfId in MediaFileIds:
             try:
                 Media = self.Repository.GetMediaFileForClassification(MfId)
@@ -155,16 +150,17 @@ class ContentClassifierService:
                     Unmatched += 1
                     continue
                 if Matched.AssignProfileName == _SKIP_SENTINEL:
-                    self.Repository.WriteAssignment(MfId, None, _SKIP_SOURCE)
+                    SkipIds.append(MfId)
                 else:
-                    self.Repository.WriteAssignment(MfId, Matched.AssignProfileName, _CLASSIFIER_SOURCE)
-                WrittenIds.append(MfId)
+                    ProfileToIds.setdefault(Matched.AssignProfileName, []).append(MfId)
                 HitCounts[Matched.RuleName] = HitCounts.get(Matched.RuleName, 0) + 1
             except Exception as Ex:
                 LoggingService.LogException(
                     f"ClassifyAndAssignBatch: failure on MediaFileId {MfId}", Ex,
                     "ContentClassifierService", "ClassifyAndAssignBatch",
                 )
-        if WrittenIds:
-            QueueManagementBusinessService().RecomputeForFiles(WrittenIds)
+        if SkipIds:
+            self.ProfileWriter.Assign(SkipIds, None, _SKIP_SOURCE, IfUnsetOnly=True)
+        for ProfileName, Ids in ProfileToIds.items():
+            self.ProfileWriter.Assign(Ids, ProfileName, _CLASSIFIER_SOURCE, IfUnsetOnly=True)
         return {"HitCounts": HitCounts, "Skipped": Skipped, "Unmatched": Unmatched}

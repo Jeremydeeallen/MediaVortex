@@ -190,6 +190,40 @@
             </div>
         </div>
 
+        <!-- =============== SECTION: Content classification rules =============== -->
+        <!-- directive: tv-tier1-classifier-pin -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#ClassificationRulesSection">
+                <span><i class="fas fa-filter me-2"></i> Content classification rules &mdash; how the classifier picks a profile for new files</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="ClassificationRulesSection" class="collapse">
+                <div class="settings-block">
+                    <small class="text-muted d-block mb-2">Rules evaluated by priority (lowest first). First match wins. Empty match fields = wildcard. Assign profile <code>__skip__</code> for &quot;leave AssignedProfile NULL&quot; (e.g. AV1-already-optimal).</small>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped align-middle" id="ClassificationRulesTable">
+                            <thead>
+                                <tr>
+                                    <th style="width:70px">Priority</th>
+                                    <th>Rule name</th>
+                                    <th>Folder pattern</th>
+                                    <th style="width:100px">Resolution</th>
+                                    <th>Codec(s)</th>
+                                    <th style="width:110px">Bitrate min</th>
+                                    <th style="width:110px">Bitrate max</th>
+                                    <th>Assign profile</th>
+                                    <th style="width:70px">Active</th>
+                                    <th style="width:110px">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ClassificationRulesTbody"></tbody>
+                        </table>
+                    </div>
+                    <button class="btn btn-sm btn-primary" id="ClassificationRulesAddBtn"><i class="fas fa-plus me-1"></i>Add rule</button>
+                </div>
+            </div>
+        </div>
+
         <!-- =============== SECTION: FFmpeg paths =============== -->
         <div class="settings-section">
             <div class="card-header" data-bs-toggle="collapse" data-bs-target="#FFmpegPathSection">
@@ -765,6 +799,7 @@ function SaveWorkerConcurrency(WorkerName) {
 // Add event listeners for Quality fields
 $(document).ready(function() {
     LoadProfiles();
+    LoadClassificationRules();
     LoadScanDirectories();
     LoadFFmpegPaths();
     LoadExcludedDirectories();
@@ -801,7 +836,143 @@ $(document).ready(function() {
         const Path = $(this).data('path');
         DeleteScanDirectory(Key, Path);
     });
+
+    // directive: tv-tier1-classifier-pin -- classification rules CRUD
+    $('#ClassificationRulesAddBtn').on('click', ClassificationRulesAddBlankRow);
+    $(document).on('click', '.classrule-save-btn', function() { ClassificationRulesSaveRow($(this).data('rowid')); });
+    $(document).on('click', '.classrule-delete-btn', function() { ClassificationRulesDeleteRow($(this).data('ruleid')); });
 });
+
+// directive: tv-tier1-classifier-pin
+let ClassificationRulesProfileOptions = [];
+
+function LoadClassificationRules() {
+    $.when(
+        $.get('/api/ContentClassification/Rules'),
+        $.get('/api/profiles')
+    ).done(function(RulesResp, ProfilesResp) {
+        const RulesBody = RulesResp[0];
+        const ProfilesBody = ProfilesResp[0];
+        if (!RulesBody || !RulesBody.Success) {
+            showToastAlert('Failed to load classification rules', 'danger');
+            return;
+        }
+        ClassificationRulesProfileOptions = (ProfilesBody.profiles || []).map(function(P) { return P.profilename; });
+        ClassificationRulesRender(RulesBody.Data || []);
+    }).fail(function() { showToastAlert('Failed to load classification rules', 'danger'); });
+}
+
+function ClassificationRulesRender(Rules) {
+    const Tbody = $('#ClassificationRulesTbody');
+    Tbody.empty();
+    (Rules || []).forEach(function(R) {
+        Tbody.append(ClassificationRulesRowHtml(R, R.Id));
+    });
+}
+
+function ClassificationRulesRowHtml(R, RowId) {
+    const ProfileOptions = ['__skip__'].concat(ClassificationRulesProfileOptions);
+    const ProfileSelect = ProfileOptions.map(function(P) {
+        const Sel = (R && R.AssignProfileName === P) ? ' selected' : '';
+        return '<option value="' + P + '"' + Sel + '>' + P + '</option>';
+    }).join('');
+    const ResOptions = ['', '480p', '720p', '1080p', '2160p'];
+    const ResSelect = ResOptions.map(function(V) {
+        const Label = V || '(any)';
+        const Sel = ((R && R.ResolutionCategory) || '') === V ? ' selected' : '';
+        return '<option value="' + V + '"' + Sel + '>' + Label + '</option>';
+    }).join('');
+    const IsActive = (R && R.IsActive) ? 'checked' : '';
+    const Priority = (R && R.Priority != null) ? R.Priority : '';
+    const RuleName = (R && R.RuleName) || '';
+    const Folder = (R && R.FolderPathPattern) || '';
+    const Codec = (R && R.CodecIn) || '';
+    const BMin = (R && R.BitrateKbpsMin != null) ? R.BitrateKbpsMin : '';
+    const BMax = (R && R.BitrateKbpsMax != null) ? R.BitrateKbpsMax : '';
+    const DeleteBtn = R && R.Id
+        ? '<button class="btn btn-sm btn-outline-danger classrule-delete-btn" data-ruleid="' + R.Id + '"><i class="fas fa-trash"></i></button>'
+        : '';
+    return '<tr data-rowid="' + RowId + '" data-ruleid="' + (R && R.Id ? R.Id : '') + '">' +
+        '<td><input type="number" class="form-control form-control-sm classrule-priority" value="' + Priority + '"></td>' +
+        '<td><input type="text" class="form-control form-control-sm classrule-rulename" value="' + RuleName + '"></td>' +
+        '<td><input type="text" class="form-control form-control-sm classrule-folder" value="' + Folder + '" placeholder="e.g. T:\\%"></td>' +
+        '<td><select class="form-select form-select-sm classrule-resolution">' + ResSelect + '</select></td>' +
+        '<td><input type="text" class="form-control form-control-sm classrule-codec" value="' + Codec + '" placeholder="e.g. h264,hevc"></td>' +
+        '<td><input type="number" class="form-control form-control-sm classrule-bmin" value="' + BMin + '"></td>' +
+        '<td><input type="number" class="form-control form-control-sm classrule-bmax" value="' + BMax + '"></td>' +
+        '<td><select class="form-select form-select-sm classrule-profile">' + ProfileSelect + '</select></td>' +
+        '<td class="text-center"><input type="checkbox" class="form-check-input classrule-active" ' + IsActive + '></td>' +
+        '<td>' +
+            '<button class="btn btn-sm btn-primary classrule-save-btn me-1" data-rowid="' + RowId + '"><i class="fas fa-save"></i></button>' +
+            DeleteBtn +
+        '</td>' +
+        '</tr>';
+}
+
+function ClassificationRulesAddBlankRow() {
+    const NewRowId = 'new-' + Date.now();
+    $('#ClassificationRulesTbody').append(ClassificationRulesRowHtml({IsActive: true}, NewRowId));
+}
+
+function ClassificationRulesReadRow(Row) {
+    const Codec = Row.find('.classrule-codec').val().trim();
+    const Folder = Row.find('.classrule-folder').val().trim();
+    const Resolution = Row.find('.classrule-resolution').val();
+    const BMin = Row.find('.classrule-bmin').val();
+    const BMax = Row.find('.classrule-bmax').val();
+    const Profile = Row.find('.classrule-profile').val();
+    return {
+        Priority: parseInt(Row.find('.classrule-priority').val(), 10),
+        RuleName: Row.find('.classrule-rulename').val().trim(),
+        FolderPathPattern: Folder || null,
+        ResolutionCategory: Resolution || null,
+        CodecIn: Codec || null,
+        BitrateKbpsMin: BMin === '' ? null : parseInt(BMin, 10),
+        BitrateKbpsMax: BMax === '' ? null : parseInt(BMax, 10),
+        AssignProfileName: Profile || null,
+        IsActive: Row.find('.classrule-active').is(':checked'),
+    };
+}
+
+function ClassificationRulesSaveRow(RowId) {
+    const Row = $('#ClassificationRulesTbody tr[data-rowid="' + RowId + '"]');
+    if (!Row.length) return;
+    const Payload = ClassificationRulesReadRow(Row);
+    const RuleId = Row.data('ruleid');
+    const IsUpdate = RuleId && String(RuleId).length > 0;
+    const Url = IsUpdate ? '/api/ContentClassification/Rules/' + RuleId : '/api/ContentClassification/Rules';
+    $.ajax({
+        url: Url,
+        method: IsUpdate ? 'PUT' : 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(Payload),
+    }).done(function(Resp) {
+        if (Resp && Resp.Success) {
+            showToastAlert(IsUpdate ? 'Rule updated' : 'Rule created', 'success');
+            LoadClassificationRules();
+        } else {
+            showToastAlert('Save failed: ' + ((Resp && Resp.Message) || 'unknown'), 'danger');
+        }
+    }).fail(function(Xhr) {
+        const Msg = (Xhr.responseJSON && Xhr.responseJSON.Message) || Xhr.statusText || 'server error';
+        showToastAlert('Save failed: ' + Msg, 'danger');
+    });
+}
+
+function ClassificationRulesDeleteRow(RuleId) {
+    if (!confirm('Delete this classification rule?')) return;
+    $.ajax({
+        url: '/api/ContentClassification/Rules/' + RuleId,
+        method: 'DELETE',
+    }).done(function(Resp) {
+        if (Resp && Resp.Success) {
+            showToastAlert('Rule deleted', 'success');
+            LoadClassificationRules();
+        } else {
+            showToastAlert('Delete failed: ' + ((Resp && Resp.Message) || 'unknown'), 'danger');
+        }
+    }).fail(function() { showToastAlert('Delete failed', 'danger'); });
+}
 
 function ShowAlert(Message, Type = 'info') {
     showToastAlert(Message, Type);

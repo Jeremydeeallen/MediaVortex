@@ -12,7 +12,7 @@ Pipeline stage `ST5` in `ingest.flow.md`.
 
 | # | User action | Surface element | Handler | Backing class.method |
 |---|---|---|---|---|
-| W1 | View / edit rules | `/SQLQueries` (initial) | direct SQL on `ContentClassificationRules` | operator; future `/settings` card deferred |
+| W1 | View / edit rules | `/settings` "Content classification rules" section | GET/POST/PUT/DELETE `/api/ContentClassification/Rules[/<id>]` | `Features/ContentClassifier/ContentClassificationRulesController.py` |
 | W2 | Trigger classification for one file | curl (or /Failures Retry after ResetFailures) | `POST /api/MediaProbe/Probe/<id>` (triggers full probe hook chain incl. classifier) | `MediaProbeController.ProbeFile` |
 | W3 | Backfill classification for NULL-profile rows | operator script | `Scripts/SQLScripts/BackfillProfileAssignments.py` | existing |
 | W4 | View classification-source breakdown | `/SQLQueries` | `SELECT AssignedProfileSource, COUNT(*) FROM MediaFiles GROUP BY 1` | operator |
@@ -23,17 +23,19 @@ C1. **Runs on every probe write via `_ExecuteProbe` post-flight.** Sticky-guarde
 
 C2. **First-match rules walk.** Loads `ContentClassificationRules WHERE IsActive=TRUE ORDER BY Priority ASC` fresh per call (no cache). Evaluates all non-NULL matchers; first rule where all match wins. Contract test.
 
-C3. **Sticky-guard preserves operator intent.** `WriteAssignment` SQL: `UPDATE MediaFiles SET AssignedProfile=%s, AssignedProfileSource='classifier' WHERE Id=%s AND AssignedProfile IS NULL`. Concurrent operator write via `/Scanning` or SQL wins the race. Contract test.
+C3. **Sticky-guard preserves operator intent.** Classifier calls `ProfileAssignmentService.Assign(Ids, ProfileName, 'classifier', IfUnsetOnly=True)`. Repo layer emits `UPDATE MediaFiles SET AssignedProfile=%s, AssignedProfileSource='classifier', LastModifiedDate=NOW() WHERE Id = ANY(%s) AND AssignedProfile IS NULL RETURNING Id`. Concurrent operator write via `/Scanning` or SQL wins the race. Contract test.
 
 C4. **AssignedProfileSource tracks origin.** `'classifier'` for auto-assigned; `'operator'` for Scanning-page assignments; `'manual_sql'` for direct SQL; `'classifier_skip_av1'` when rule matched a codec-skip sentinel (leaves AssignedProfile NULL). Contract test.
 
-C5. **Cascade before return (writer-owns-cascade).** After `WriteAssignment` succeeds, service calls `QueueManagementBusinessService().RecomputeForFiles([Id])`. This is the root-cause fix for Full Circle S1 stuck rows -- see `.claude/rules-details/writer-owns-cascade.md`. Contract: `TestClassifierCascade.py`.
+C5. **Cascade before return (writer-owns-cascade).** Classifier delegates write to `Features/MediaFiles/ProfileAssignmentService.Assign` which UPDATEs AssignedProfile via `MediaFilesRepository.WriteAssignedProfile` then calls `QueueManagementBusinessService().RecomputeForFiles(WrittenIds)`. Single writer path across the codebase; test-grep + type-boundary enforcement. See `.claude/rules-details/writer-owns-cascade.md`. Contract: `TestClassifierCascade.py`, `TestProfileAssignmentServiceCascade.py`.
 
 C6. **No-match logs WARNING + leaves AssignedProfile NULL.** `WorkBucket` will derive to `Unclassified` via trigger. Operator sees; adds a rule; next classify run via NULL-profile backfill covers.
 
-C7. **Two rules at same Priority refused at INSERT.** UNIQUE constraint on `Priority`. Operator error surfaced by DB, not silently ordered.
+C7. **Two rules at same Priority refused at INSERT.** UNIQUE constraint on `Priority` (`idx_contentclassrules_priority_unique`). REST layer returns HTTP 409 on conflict (`TestContentClassificationRulesAPI.test_create_duplicate_priority_returns_409`).
 
 C8. **Rule references a non-existent ProfileName.** Classifier writes the name; downstream queue admission fails with `MissingProfile` in reason; visible in marginal-savings-gate rollup log. Operator fixes rule or sets `IsActive=FALSE`.
+
+C9. **TV storage root pinned to Tier 1.** `ContentClassificationRules` seed row `TvPinTier1Efficient` at `Priority=20` with `FolderPathPattern='T:\%'` -> `AssignProfileName='AV1 Tier 1 Efficient'`. Wins before any resolution-based default rule. Contract: `TestTvPinTier1Classification.py`. Verifiable via SELECT + `/settings` "Content classification rules" section.
 
 ## Seams
 
@@ -41,9 +43,10 @@ C8. **Rule references a non-existent ProfileName.** Classifier writes the name; 
 |---|---|---|---|---|---|
 | S1 | Probe hook -> Classifier | `_ExecuteProbe` post-flight | invokes `ClassifyAndAssign(Id)` in-process | classifier reads populated probe columns | contract test |
 | S2 | Classifier -> Repository (rules load) | `ClassifyAndAssign` | `GetActiveRules()` -> `List[Rule]` | rules ordered by Priority ASC | contract test |
-| S3 | Classifier -> Repository (write) | matched rule | `WriteAssignment(Id, ProfileName, 'classifier')` -- single UPDATE with sticky-guard WHERE clause | `MediaFiles.(AssignedProfile, AssignedProfileSource)` populated | contract test |
-| S4 | Classifier -> cascade | after WriteAssignment succeeds | `QueueManagementBusinessService.RecomputeForFiles([Id])` | compliance verticals recompute; WorkBucket derives | `TestClassifierCascade.py` |
-| S5 | Operator write path | Scanning page / SQL | `UPDATE MediaFiles SET AssignedProfile=?, AssignedProfileSource='operator'` (or `'manual_sql'`) | classifier's sticky-guard preserves this on next probe | contract test |
+| S3 | Classifier -> ProfileAssignmentService.Assign | matched rule | `Assign(Ids, ProfileName, 'classifier', IfUnsetOnly=True)` -- writes via `MediaFilesRepository.WriteAssignedProfile` (RETURNING Id) | `MediaFiles.(AssignedProfile, AssignedProfileSource)` populated for actually-written Ids | `TestClassifierCascade.py` |
+| S4 | ProfileAssignmentService -> cascade | after WriteAssignedProfile returns written Ids | `QueueManagementBusinessService.RecomputeForFiles(WrittenIds)` | compliance verticals recompute; WorkBucket derives | `TestProfileAssignmentServiceCascade.py` |
+| S5 | Operator write path | Scanning page / SQL / `/Work/<bucket>` series-profile dropdown | routes through `ProfileAssignmentService.Assign` with `Source='operator'/'series'/'root_folder'/'manual_sql'` | classifier's `IfUnsetOnly=True` preserves this on next probe | contract test |
+| S6 | Rules CRUD | `/settings` "Content classification rules" section | GET/POST/PUT/DELETE `/api/ContentClassification/Rules[/<id>]` -> `ContentClassificationRulesController` -> `ContentClassificationRules` table | Priority collision returns 409 | `TestContentClassificationRulesAPI.py` |
 
 ## AssignedProfileSource semantics
 

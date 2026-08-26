@@ -541,6 +541,10 @@ class WebServiceApp:
         self.App.register_blueprint(IngestWebhookBlueprint)
         self.App.register_blueprint(FailuresBlueprint)
 
+        # directive: tv-tier1-classifier-pin | # see startup.ST5
+        from Features.ContentClassifier.ContentClassificationRulesController import ContentClassificationRulesBlueprint
+        self.App.register_blueprint(ContentClassificationRulesBlueprint)
+
         # directive: activity-admin-and-worker-telemetry | # see startup.ST5
         @self.App.route('/Compliance')
         def redirect_compliance_legacy():

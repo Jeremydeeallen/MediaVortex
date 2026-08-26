@@ -841,8 +841,11 @@ class QueueManagementBusinessService:
 
             LoggingService.LogInfo(f"Normalized root folder path: '{RootFolderPath}' -> '{normalizedRootPath}'", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
 
-            # Step 2: Update all files in folder to selected profile (bulk update)
-            filesUpdated = self.DatabaseManager.UpdateMediaFilesProfileByRootFolder(normalizedRootPath, ProfileId)
+            # directive: tv-tier1-classifier-pin -- select Ids then route through ProfileAssignmentService (writes + cascades)
+            from Features.MediaFiles.ProfileAssignmentService import ProfileAssignmentService
+            Ids = self.DatabaseManager.SelectMediaFileIdsByRootFolder(normalizedRootPath)
+            WrittenIds = ProfileAssignmentService().Assign(Ids, profile.ProfileName, 'root_folder', IfUnsetOnly=False)
+            filesUpdated = len(WrittenIds)
             LoggingService.LogInfo(f"Updated {filesUpdated} files in folder {normalizedRootPath} to profile {profile.ProfileName}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
 
             # Step 3: Get all media files in the folder (they now all have the profile)

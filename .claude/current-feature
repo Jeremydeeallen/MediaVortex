@@ -4,3 +4,4 @@ concurrency-cap-live-reload
 probe-loudness-remove
 worker-memorymax-cgroup
 preencode-loudness-cache-hit
+tv-tier1-classifier-pin
