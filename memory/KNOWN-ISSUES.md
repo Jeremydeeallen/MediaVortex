@@ -2,6 +2,75 @@
 
 ## Active
 
+### activity-page
+
+### [BUG-0094] /Activity Reset button throws `ReferenceError: LoadActivity is not defined` -- refactor left dead reference
+**Date:** 2026-08-26 | **Area:** activity-page
+
+**What breaks:** Clicking the Reset button on the "Hung encodes detected" banner on `/Activity` fires a `POST /api/TeamStatus/ResetStuckJob` then calls `LoadActivity()`. Function no longer exists -- commit `2f2b7d6f` (2026-06-29, "L2 HTMX partial-page nav + L3 SSE") renamed the render pipeline; new entry is `RenderSnapshot`. Original `LoadActivity` reference was added by commit `c3741bf02` (2026-06-23) and never updated when render pipeline was refactored 6 days later. UI symptom: reset request succeeds (banner clears next poll) but browser console shows `Uncaught ReferenceError: LoadActivity is not defined (at http://<host>:5000/Activity:<line>)` and the immediate visual refresh does not happen.
+
+**Repro:** open `/Activity` with a "hung encode" banner visible, click Reset, watch browser console.
+
+**Evidence:**
+- 2026-08-25 23:31:06 ClientLog entry: `[/Activity] Uncaught ReferenceError: LoadActivity is not defined (at http://10.0.0.7:5000/Activity:471:15)`
+- git blame: line 362 of `Templates/Activity.html` still holds `.then(LoadActivity).catch(function() {});` from commit c3741bf02 (2026-06-23)
+- grep `LoadActivity` in Templates/Activity.html: single reference, zero definitions
+- Function that should be called post-reset: probably `RenderSnapshot` (via existing snapshot poll) or the SSE stream picks it up next tick
+
+**First place to look:**
+- `Templates/Activity.html` line 362 (reset button handler `.then(LoadActivity)` -> should be either `.then(RenderSnapshot)` (if snapshot fetch happens elsewhere) OR the correct fetch-then-render call chain; check how other handlers refresh state
+- Look for other dead references in the same file from the HTMX/SSE refactor (git log commit `2f2b7d6f`)
+
+**Proposed criterion (Activity page feature doc if exists, else needs one):** "Every JS handler on `/Activity` that mutates server state calls a defined refresh function on completion. Verifiable: browser console `Error` count == 0 during: (a) initial page load, (b) Reset button click on hung banner, (c) worker capability toggle, (d) job cancel action."
+
+**Fix scope:** trivial one-line replacement; likely `.then(function() { RenderSnapshot(<fresh-snapshot>); })` or drop the callback entirely if the SSE snapshot poll already refreshes within 5s.
+
+**Out of scope for /b:** the actual fix + broader Activity page JS handler audit. Lands with `/t BUG-0094`.
+
+**Fix with:** `/t BUG-0094`.
+
+---
+
+### audio-pipeline
+
+### [BUG-0093] Demucs daemon repeatedly closes stdout / times out; blocks Dialog Boost track emission -> ComplianceGate refuses TV Transcode replacements
+**Date:** 2026-08-26 | **Area:** audio-pipeline
+
+**What breaks:** `PreEncodeAudioPipeline` (via `DemucsDaemonClient` long-lived subprocess from the BUG-0081 fix) is producing two failure modes:
+- `Demucs daemon closed stdout unexpectedly. Stderr tail: Separating track /tmp/mv_audio_<jobid>/source_downmix.wav`
+- `Demucs daemon response timeout after 1800s`
+
+Consequence: no Dialog Boost pre-mix WAV emitted -> transcode continues without `dialog_boost_premix.wav` map -> ffmpeg output has no Dialog Boost track -> `TranscodeAttempts.DialogBoostEmitted=FALSE` -> `ComplianceGate.Evaluate` refuses replacement with `ComplianceGateFailed: no_dialog_boost` -> `TranscodeAttempts.Success=FALSE`. Whole transcode pipeline blocked for any TV file that requires Dialog Boost.
+
+Amplification: `tv-tier1-classifier-pin` directive (2026-08-25) retiered 188 TV files to Tier 1 Efficient (720p target). Files that were previously WorkBucket=Remux/AudioFix now need real video re-encode + Dialog Boost -> hit this daemon bug on every attempt. Bug existed pre-directive but was quieter because fewer TV files entered the Transcode pipeline.
+
+**Repro:** enqueue any TV file for real Transcode (av1_nvenc / av1_qsv) on I9-2024 / dot / wakko. Watch worker logs for `Demucs daemon` errors. Attempt completes with `Success=FALSE, ErrorMessage='Post-encode pipeline failed: ProcessFileReplacement returned failure for TranscodeAttempt <id>: ComplianceGateFailed: no_dialog_boost'`.
+
+**Evidence:**
+- 2026-08-25 23:36-23:44: attempts 73451, 73454, 73459 (Dog Whisperer S06E10 / S03E15 / S03E09, av1_nvenc, I9-2024) all failed with `ComplianceGateFailed: no_dialog_boost`. All 3 had `DialogBoostEmitted=FALSE`.
+- 2026-08-26 02:02-02:56: PreEncodeAudioPipeline errors across TV files (Outlander, Lord of the Rings, Doctor Who, Love Is Blind, Masters of Sex, Riverdale) with mix of `daemon closed stdout unexpectedly` + `daemon response timeout after 1800s`.
+- Not intermittent: recurrent across worker restarts + multiple files.
+- Log function name: `PreEncodeAudioPipeline`. Exception: `Demucs daemon closed stdout unexpectedly. Stderr tail: Separating track /tmp/mv_audio_<jobid>/source_downmix.wav` OR `Demucs daemon response timeout after 1800s`.
+
+**First place to look:**
+- `Features/AudioNormalization/Services/DemucsDaemonClient.py` -- daemon subprocess mgmt (stdin/stdout protocol, timeout handling, restart-on-crash)
+- `Features/AudioNormalization/Services/AudioPreEncodeFacade.py` -- caller of daemon; how it responds to daemon failures + whether it should fall back to per-job Demucs invocation or fail loud with actionable ErrorMessage
+- Daemon process lifetime: how long has it been alive? Model cache validity? GPU device state (torch.xpu / cuda re-init after long idle)?
+- Whether the "1800s timeout" is proportional to source duration (25min episode should not take 30min separation on GPU; 1800s implies CPU fallback or GPU wedge)
+- `Features/AudioNormalization/audio-vertical-dialog-boost-enforcement.feature.md` C1 (Dialog Boost required for TV output) + `ComplianceGate.Evaluate` `no_dialog_boost` refusal path
+
+**Proposed criterion (audio-normalization.feature.md or dialog-boost-enforcement.feature.md):** "Every TranscodeAttempt whose profile requires a Dialog Boost track produces `TranscodeAttempts.DialogBoostEmitted=TRUE` within the encoder wall-time budget, OR fails loud with an actionable error naming the pre-encode failure mode (daemon crash / timeout / model load) so the operator can distinguish a Demucs infrastructure failure from a transcode failure. Verifiable: over any rolling 24h window, `SELECT COUNT(*) FROM TranscodeAttempts WHERE ErrorMessage LIKE '%no_dialog_boost%'` = 0 OR every such row has a matching `PreEncodeAudioPipeline` error log entry with a distinct failure taxonomy (`daemon_crash`, `daemon_timeout`, `demucs_model_load_failed`)."
+
+**Related:**
+- BUG-0081 (resolved 2026-07-15) introduced `DemucsDaemonClient` to fix the phase-blind stuck-detection bug. That fix made Demucs faster but seems to have introduced daemon-lifecycle instability. This bug is the flip side.
+- Amplified by `tv-tier1-classifier-pin` (2026-08-25) directive traffic. Fix reduces blast radius across all TV Transcodes.
+
+**Out of scope for /b:** root-cause investigation of Demucs daemon crashes + timeout tuning + fallback pathway. Lands with `/t BUG-0093`.
+
+**Fix with:** `/t BUG-0093`.
+
+---
+
 ### contract-tests
 
 ### [BUG-0092] Contract tests leak Running TranscodeQueue rows on tearDown; abandonment sweeper does not catch them

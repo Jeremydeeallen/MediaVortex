@@ -1,6 +1,6 @@
 # Directive: tv-tier1-classifier-pin
 
-**Status:** Active -- phase: DELIVERING
+**Status:** Closed
 
 **Slug:** tv-tier1-classifier-pin
 
