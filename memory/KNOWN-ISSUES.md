@@ -4,28 +4,49 @@
 
 ### activity-page
 
-### [BUG-0094] /Activity Reset button throws `ReferenceError: LoadActivity is not defined` -- refactor left dead reference
+### [BUG-0094] /Activity JS mutation handlers hard-couple to render-impl names -- rename left dead reference; symptom of a design bug, not a typo
 **Date:** 2026-08-26 | **Area:** activity-page
 
-**What breaks:** Clicking the Reset button on the "Hung encodes detected" banner on `/Activity` fires a `POST /api/TeamStatus/ResetStuckJob` then calls `LoadActivity()`. Function no longer exists -- commit `2f2b7d6f` (2026-06-29, "L2 HTMX partial-page nav + L3 SSE") renamed the render pipeline; new entry is `RenderSnapshot`. Original `LoadActivity` reference was added by commit `c3741bf02` (2026-06-23) and never updated when render pipeline was refactored 6 days later. UI symptom: reset request succeeds (banner clears next poll) but browser console shows `Uncaught ReferenceError: LoadActivity is not defined (at http://<host>:5000/Activity:<line>)` and the immediate visual refresh does not happen.
+**No bandaid.** Do NOT close this by renaming `LoadActivity` -> `RenderSnapshot`. That hides the class of bug and guarantees recurrence on the next render-pipeline refactor. This ticket is the design-level fix per MEMORY `feedback_no_bandaids_ever` + KISS/DDD/DRY/SOLID mandate. STABILITY FIRST: fix the root, then stop changing this area.
 
-**Repro:** open `/Activity` with a "hung encode" banner visible, click Reset, watch browser console.
+**What breaks (symptom):** Reset button on `/Activity` hung banner throws `Uncaught ReferenceError: LoadActivity is not defined`. `POST /api/TeamStatus/ResetStuckJob` succeeds server-side; console error blocks the follow-on visual refresh; SSE snapshot picks up the state change on the next tick (~5s) so the banner eventually clears anyway.
+
+**What actually broke (root class -- SOLID / DDD violation):**
+1. **Mutation handlers know the concrete name of the render function.** `.then(LoadActivity).catch(...)` at `Templates/Activity.html:362` collapses two responsibilities: (a) mutate server state, (b) name-and-invoke a specific UI refresh function. SRP + OCP violation. Any render-layer rename breaks every button.
+2. **Render layer already owns state refresh.** `RenderSnapshot` is driven by the SSE snapshot stream + HTMX partial-page nav (commit 2f2b7d6f 2026-06-29). That layer is the SSoT for UI state. Handler-level explicit render calls duplicate ownership. DRY + DDD boundary violation.
+3. **Rename-without-audit is the second-order failure.** Commit c3741bf02 (2026-06-23) wired `.then(LoadActivity)`; commit 2f2b7d6f (2026-06-29) renamed the render entry; missed this call site. Rename was safe by contract, unsafe by grep. No test caught it. No linter would either -- JS refs are runtime-resolved.
+
+**Principled fix (KISS + DDD + DRY + SOLID):**
+- **Delete the `.then(LoadActivity)` callback.** Reset button's job is the mutation; refresh belongs to the render layer. SSE snapshot already refreshes within 5s. If sub-second visual response is required, the handler emits a domain event (`document.dispatchEvent(new CustomEvent('activity:state-changed'))`) and the render layer subscribes. Handler declares "state moved"; it does not know how UI updates.
+- **Audit every `.then(...)` on `/Activity`** for the same coupling. Fix same way.
+- **Audit `/Queue`, `/Operations`, `/Failures`, `/Admin/*`, `/Settings`** for the same pattern. Same fix.
+- **Add a contract test** in `Tests/Contract/TestOperatorUIHandlersDecoupled.py` that greps `Templates/*.html` for the anti-pattern and fails if found. Rule: `grep -nP "\.then\(Render|\.then\(Load[A-Z]|\.then\(Refresh" Templates/*.html` returns 0. Contract test freezes the discipline so the next refactor cannot regress.
+
+**Anti-fix (REFUSED):**
+- Renaming `LoadActivity` -> `RenderSnapshot` at line 362. Fixes console, leaves class intact, sets up next symptom on next refactor. Bandaid.
+- Defining a `LoadActivity` shim calling `RenderSnapshot`. Adds indirection without decoupling. Bandaid.
+
+**Repro (symptom):** open `/Activity` with a hung-encode banner, click Reset, observe console error.
 
 **Evidence:**
-- 2026-08-25 23:31:06 ClientLog entry: `[/Activity] Uncaught ReferenceError: LoadActivity is not defined (at http://10.0.0.7:5000/Activity:471:15)`
-- git blame: line 362 of `Templates/Activity.html` still holds `.then(LoadActivity).catch(function() {});` from commit c3741bf02 (2026-06-23)
-- grep `LoadActivity` in Templates/Activity.html: single reference, zero definitions
-- Function that should be called post-reset: probably `RenderSnapshot` (via existing snapshot poll) or the SSE stream picks it up next tick
+- ClientLog 2026-08-25 23:31:06: `[/Activity] Uncaught ReferenceError: LoadActivity is not defined (at http://10.0.0.7:5000/Activity:471:15)`
+- `Templates/Activity.html:362`: `.then(LoadActivity).catch(function() {});` from commit c3741bf02 (2026-06-23)
+- `grep -n "function LoadActivity\|LoadActivity =" Templates/Activity.html`: zero definitions
+- `grep -n "RenderSnapshot" Templates/Activity.html`: single definition (current SSoT for UI refresh)
 
-**First place to look:**
-- `Templates/Activity.html` line 362 (reset button handler `.then(LoadActivity)` -> should be either `.then(RenderSnapshot)` (if snapshot fetch happens elsewhere) OR the correct fetch-then-render call chain; check how other handlers refresh state
-- Look for other dead references in the same file from the HTMX/SSE refactor (git log commit `2f2b7d6f`)
+**Proposed criterion (Activity page feature doc -- create if absent):** "No JS mutation handler on any operator UI page (`/Activity`, `/Queue`, `/Operations`, `/Failures`, `/Admin/*`, `/Settings`) invokes a concrete render / refresh function by name. Handlers dispatch domain events; render layer subscribes. Verifiable: `grep -nP '\.then\(Render|\.then\(Load[A-Z]|\.then\(Refresh' Templates/*.html` returns 0. Contract test `Tests/Contract/TestOperatorUIHandlersDecoupled.py` asserts across whole tree."
 
-**Proposed criterion (Activity page feature doc if exists, else needs one):** "Every JS handler on `/Activity` that mutates server state calls a defined refresh function on completion. Verifiable: browser console `Error` count == 0 during: (a) initial page load, (b) Reset button click on hung banner, (c) worker capability toggle, (d) job cancel action."
+**Fix order (fixes root, then stops):**
+1. Delete `.then(LoadActivity).catch(...)` at `Templates/Activity.html:362` (or convert to `document.dispatchEvent` if a sub-5s refresh is required after operator confirms need).
+2. Audit `Templates/Activity.html` for other coupled handlers. Fix same way.
+3. Audit `Templates/*.html` tree-wide. Fix same way.
+4. Add `Tests/Contract/TestOperatorUIHandlersDecoupled.py` with the grep rule.
+5. Create Activity page feature doc if absent; add the criterion.
+6. Done. Do not add more UI JS refactoring on top -- stability first.
 
-**Fix scope:** trivial one-line replacement; likely `.then(function() { RenderSnapshot(<fresh-snapshot>); })` or drop the callback entirely if the SSE snapshot poll already refreshes within 5s.
+**Related principle:** MEMORY entry `feedback_no_bandaids_ever` -- every bug fix names + removes the architectural violation. This ticket exemplifies why: the one-line rename is the bandaid; the design decoupling + contract-test lock is the fix.
 
-**Out of scope for /b:** the actual fix + broader Activity page JS handler audit. Lands with `/t BUG-0094`.
+**Out of scope for /b:** the audit + code + contract test + feature-doc criterion. Lands with `/t BUG-0094`.
 
 **Fix with:** `/t BUG-0094`.
 
