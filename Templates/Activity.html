@@ -359,7 +359,7 @@ function RenderHungBanner(Hung) {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({AttemptId: Number(Aid)})
-      }).then(LoadActivity).catch(function() {});
+      }).catch(function() {});
     });
   });
 }

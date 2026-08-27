@@ -4,8 +4,8 @@
 
 ### activity-page
 
-### [BUG-0094] /Activity JS mutation handlers hard-couple to render-impl names -- rename left dead reference; symptom of a design bug, not a typo
-**Date:** 2026-08-26 | **Area:** activity-page
+### [BUG-0094 -- RESOLVED 2026-08-26] /Activity JS mutation handlers hard-couple to render-impl names -- rename left dead reference; symptom of a design bug, not a typo
+**Date:** 2026-08-26 | **Area:** activity-page | **Resolved:** 2026-08-26 by directive `bug-0094-activity-handler-decouple` -- deleted `.then(LoadActivity)` at Activity.html:362; WorkBucket.html:353 bootstrap -> async IIFE; `Tests/Contract/TestOperatorUIHandlersDecoupled.py` 1/1 PASS; `activity.feature.md` C9 + S2 + `activity-dashboard.flow.md` ST1 promoted; WebService restarted + served HTML clean (0 LoadActivity refs).
 
 **No bandaid.** Do NOT close this by renaming `LoadActivity` -> `RenderSnapshot`. That hides the class of bug and guarantees recurrence on the next render-pipeline refactor. This ticket is the design-level fix per MEMORY `feedback_no_bandaids_ever` + KISS/DDD/DRY/SOLID mandate. STABILITY FIRST: fix the root, then stop changing this area.
 

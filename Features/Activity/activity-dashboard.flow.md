@@ -10,7 +10,7 @@
 
 | ID | Stage | Code | What it does |
 |---|---|---|---|
-| ST1 | Page poll | `Templates/Activity.html:LoadActivity` | Fires `/api/Activity/Snapshot`; renders Active Jobs + Active Scans tables; updates queue-counts strip. |
+| ST1 | Page poll | `Templates/Activity.html:PollOnce` + `EventSource('/api/Activity/Stream').onmessage` -> `RenderSnapshot` | Fires `/api/Activity/Snapshot` on a 5s fallback interval; SSE `/api/Activity/Stream` pushes snapshots when open. Both call `RenderSnapshot(Data)` which owns updating Active Jobs + Active Scans tables + queue-counts strip. Mutation handlers do NOT call `RenderSnapshot` directly (BUG-0094); refresh is the render layer's job. |
 | ST2 | Snapshot assembly | `DashboardSnapshotService.BuildSnapshot` | Reads `StaleProgressThresholdSec` fresh from SystemSettings, then calls `_BuildActiveJobs / _BuildActiveScans / _BuildQueueCounts / _BuildBadgeState` in a single in-process pass. |
 | ST3 | Active jobs | `_BuildActiveJobs` | `ActiveJobs LEFT JOIN TranscodeQueue + TranscodeAttempts + TranscodeProgress on QueueId/AttemptId; WHERE Success IS NULL`. Each row gets smoothed Speed/ETA via `ProgressSmoothingService`. Per-row enrichment: TargetResolution / CodecChange / EstimatedSavings. `CurrentPhase` projected from the joined `TranscodeProgress` row so `/Activity` renders pre-encode substep names (`SourceMeasure` / `Downmix` / `Demucs` / `LoudnormMeasure` / `Premix`) as they emit. `Elapsed` computed server-side as `NOW() - TranscodeAttempts.AttemptDate` and formatted via `Core.DateTimeHelpers.FormatDuration` (`hh:mm:ss`, `HHH:MM:SS` at >= 100 h) so the same helper serves `/Activity` and `/FailedJobs`. |
 | ST4 | Active scans | `_BuildActiveScans` | `SELECT FROM ScanJobs WHERE Status IN ('Running')`. Joins ScanProgress for phase + processed/total file counts. |
@@ -46,4 +46,4 @@
 | `Features/Activity/Services/ProgressSmoothingService.py:SmoothForAttempt` | `# see activity-dashboard.ST5` |
 | `Features/Activity/ActivityController.py:Snapshot` | `# see activity-dashboard.S1` |
 | `Features/Activity/ActivityRepository.py:_EnrichActiveJob` | `# see activity-dashboard.S4` |
-| `Templates/Activity.html:LoadActivity` | `# see activity-dashboard.ST1` |
+| `Templates/Activity.html:RenderSnapshot` (invoked by `PollOnce` + EventSource `onmessage`) | `# see activity-dashboard.ST1` |

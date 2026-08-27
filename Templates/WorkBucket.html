@@ -350,7 +350,10 @@
   const BulkBtn = document.getElementById('btn-bulk-queue');
   if (BulkBtn) BulkBtn.addEventListener('click', BulkQueue);
 
-  Promise.all([FetchProfiles(), FetchDrives()]).then(LoadSeries);
+  (async function InitWorkBucket() {
+    await Promise.all([FetchProfiles(), FetchDrives()]);
+    LoadSeries();
+  })();
 })();
 </script>
 {% endblock %}
