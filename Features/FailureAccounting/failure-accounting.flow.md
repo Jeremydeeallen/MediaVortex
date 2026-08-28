@@ -42,6 +42,7 @@ All three resolve `MaxEncodeFailures` through `FailureBudgetConfig` -- one row, 
 | Producer cannot resolve `MediaFileId` on a TranscodeAttempts INSERT | `MediaFileId=0` sentinel + WARN log `TranscodeAttempts INSERT could not resolve MediaFileId; using sentinel 0 ... see failure-accounting.C5` | Grep logs for `using sentinel 0`; fix the producer's `Job.MediaFileId` -- the audit row was preserved |
 | Operator wants to bulk-reset | No bulk endpoint (by design) | Per-file friction -- operator must look at the failure before re-allowing it |
 | `FailureBudgetConfig` table missing | `BuildCapPredicate` SQL falls back to default `3` via `COALESCE` | Run `Scripts/SQLScripts/AddFailureBudgetConfig.py` |
+| Operator `AddJobToQueue(ForceAdd=True)` on a cap-hit MediaFile | Was: row lands Pending; claim `BuildCapPredicate` refuses forever; silent stall. Now: `AddJobToQueue` auto-calls `FailedJobsRepository.ResetFailureBudget(MediaFileId, 'ForceAdd')` before INSERT so the counter resets and the claim proceeds. Audit row records the auto-reset with `OperatorName='ForceAdd'`. | By design; log line `ForceAdd auto-reset failure budget for ...` records it |
 
 ## Out of Scope
 

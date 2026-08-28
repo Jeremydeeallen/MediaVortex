@@ -1938,11 +1938,15 @@ class QueueManagementBusinessService:
                 else:
                     LoggingService.LogInfo(f"Force adding {mediaFile.FileName} to queue (admission gate overridden)", "QueueManagementBusinessService", "AddJobToQueue")
 
-                # directive: transcode-flow-canonical -- failure-budget cap check (single-file admission was missing this; bulk paths already had it)
-                if not ForceAdd:
-                    from Features.FailureAccounting.Services.FailureBudgetService import FailureBudgetService
-                    Budget = FailureBudgetService(Db=self.DatabaseManager.DatabaseService)
-                    if not Budget.HasBudgetRemaining(mediaFile.Id):
+                # directive: bug-0061-remediation -- ForceAdd auto-resets budget so claim doesn't silently skip an over-cap row.
+                from Features.FailureAccounting.Services.FailureBudgetService import FailureBudgetService
+                Budget = FailureBudgetService(Db=self.DatabaseManager.DatabaseService)
+                if not Budget.HasBudgetRemaining(mediaFile.Id):
+                    if ForceAdd:
+                        from Features.FailureAccounting.Repositories.FailedJobsRepository import FailedJobsRepository
+                        FailedJobsRepository().ResetFailureBudget(mediaFile.Id, 'ForceAdd')
+                        LoggingService.LogInfo(f"ForceAdd auto-reset failure budget for {mediaFile.FileName} (MediaFileId={mediaFile.Id})", "QueueManagementBusinessService", "AddJobToQueue")
+                    else:
                         errorMsg = f"Cannot add {mediaFile.FileName} to queue: failure budget exhausted. Reset via /FailedJobs."
                         LoggingService.LogInfo(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                         return {"Success": False, "ErrorMessage": errorMsg, "CanOverride": True, "FailureCapReached": True}

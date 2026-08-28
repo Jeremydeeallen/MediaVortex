@@ -123,6 +123,66 @@ Amplification: `tv-tier1-classifier-pin` directive (2026-08-25) retiered 188 TV 
 
 ### disposition
 
+### failure-accounting
+
+### [BUG-0095] Failure-class taxonomy so `/FailedJobs` shows operator-actionable remediation instead of raw ffmpeg stderr
+**Date:** 2026-08-27 | **Area:** failure-accounting | **Follows:** BUG-0061 (cap + FailedJobs surface must ship first)
+
+**What breaks (operator experience):** BUG-0061 (in-flight) surfaces the LAST raw `ErrorMessage` per capped MediaFile. Operator has to eyeball ffmpeg stderr to know what to DO about each stuck file. Today's snapshot (2026-08-27, 15 files with 3+ fails in 30d) revealed 4 distinct root classes needing 4 different remediations: 4 need new sources (source corruption -- DTS bit-alloc / H.264 decode / mid-encode crash), 9 need mechanical cleanup (orphan `-mv.mp4` files on disk from partial replacement, `Refusing to overwrite existing file at target`), 1 waits for BUG-0093 (Demucs daemon crash -> ComplianceGate `no_dialog_boost`), 1 needs remux-config investigation (`Tag hvc1 incompatible with output codec id '27' (avc1)`). Raw-stderr surface makes the operator do this decoding for every file, forever. Does not scale.
+
+**Design (KISS, data-driven, per gui-editable-knobs.md):**
+
+1. `ALTER TABLE TranscodeAttempts ADD COLUMN FailureClass TEXT NULL;` -- populated at INSERT time when `Success=FALSE`. Historic rows stay NULL (surface as `unclassified`).
+2. `CREATE TABLE FailureClasses (ClassName TEXT PRIMARY KEY, Priority INT NOT NULL, ErrorPattern TEXT NOT NULL, Remediation TEXT NOT NULL);` -- SSoT for the taxonomy. Operator tunes via `/settings`.
+3. One classifier function: `ClassifyFailure(ErrorMessage: str) -> str` queries `SELECT ClassName FROM FailureClasses WHERE %s ~* ErrorPattern ORDER BY Priority LIMIT 1`. First-match-wins. Default `'unclassified'` on no match. Called once at every failure INSERT path (`Worker/AttemptRecordService.Create`, `ProcessTranscodeQueueService.HandleJobFailure`, etc).
+4. `/FailedJobs` page groups by `FailureClass` -- one card per class with count + remediation text + expandable file list. Sort: mechanical remediations (orphan cleanup) at top, "wait for bug" at bottom.
+5. `/settings` gains a "Failure Classes" table for CRUD (add/edit/delete rows; POSIX-regex validation).
+
+**Seed rows (cover today's 15 stuck files):**
+
+| Priority | ClassName | ErrorPattern | Remediation |
+|---|---|---|---|
+| 10 | `orphan_output` | `Refusing to overwrite existing file at target` | Delete orphan `-mv.mp4` at named path; retry |
+| 20 | `source_audio_corrupt_dts` | `dca @.*Invalid bit allocation\|3199971767` | Grab new source (DTS audio corrupt) |
+| 30 | `source_video_corrupt_h264` | `h264 @.*Reference \d+ >= \d+\|error while decoding MB` | Grab new source (H.264 video corrupt) |
+| 40 | `demucs_daemon_down` | `no_dialog_boost\|DemucsDaemonUnavailableError` | Wait for BUG-0093 fix; do NOT retry |
+| 50 | `codec_map_mismatch` | `Tag hvc1 incompatible with output codec id` | Investigate remux profile for HEVC source |
+| 60 | `ffmpeg_crash_midencode` | `return code 4294967262` | Try new source; if same, file encoder bug |
+| 999 | `unclassified` | `.*` | Read stderr manually |
+
+**Anti-goals (do NOT ship):**
+- Auto-remediation (auto-delete orphans, auto-mark-skip). Manual first.
+- Multi-class per attempt. One error = one class.
+- ML classification. Regex.
+- Historic backfill of 36k+ rows at migration time. Only classify new fails; historic = `unclassified` until a one-shot backfill script runs at operator's discretion.
+
+**Repro (evidence-of-need):**
+```
+py Scripts/SQLScripts/QueryDatabase.py sql "SELECT ta.mediafileid, mf.filename, count(*) AS fails FROM TranscodeAttempts ta JOIN MediaFiles mf ON mf.id=ta.mediafileid WHERE ta.success=FALSE AND ta.attemptdate > NOW() - INTERVAL '30 days' GROUP BY 1,2 HAVING count(*) >= 3 ORDER BY fails DESC"
+```
+Returns 15 rows; the operator has no automated way to know which of the 15 need `Grab new source` vs `Delete orphan` vs `Wait for BUG-0093` without opening each row's raw error message individually.
+
+**Evidence:**
+- Session 2026-08-27: 4 DTS/video-corrupt (Heroes S02E07, Heroes S02E01, Re:Zero S01E08 -- probably, Slime S03E11 -- probably); 9 orphan-output (Naked Attraction x5, One Piece x2, Pokemon S20E28, SpongeBob S03E22); 1 Demucs (Avatar Fire and Ash); 1 hvc1/avc1 mismatch (Pokemon S14E48).
+- BUG-0061 spec (`memory/KNOWN-ISSUES.md#BUG-0061` item 3) exposes `LastErrorMessage TEXT` -- no `FailureClass`, no `Remediation`.
+- `Features/FailureAccounting/failure-accounting.feature.md` current C1-C9 do not include a taxonomy dimension.
+
+**Feature/flow docs affected:**
+- `Features/FailureAccounting/failure-accounting.feature.md` -- add success criterion for FailureClass column + classifier + FailureClasses table + `/FailedJobs` grouping + `/settings` tuner (tagged `[BUG-0095]`).
+- `Features/FailureAccounting/failure-accounting.flow.md` -- add stage `ST<n>` for classification (Encode failure write -> `ClassifyFailure` -> populate `FailureClass`) between existing ST1 (Encode failure write) and ST2 (FailureBudgetService eval).
+
+**First place to look:**
+- `Features/FailureAccounting/Services/FailureBudgetService.py` (created by BUG-0061) -- add sibling `FailureClassifierService.py` for the classifier function.
+- `Features/FailureAccounting/Repositories/FailedJobsRepository.py` (created by BUG-0061) -- extend row projection to include `FailureClass`; add `GetCappedJobsGrouped()` variant that groups by class alongside the existing group-by-series.
+- `Templates/FailedJobs.html` (created by BUG-0061) -- add class-grouped tab; reuse existing renderer.
+- Every `INSERT INTO TranscodeAttempts (..., Success, ErrorMessage, ...)` path in `Features/TranscodeJob/Worker/AttemptRecordService.py`, `Features/TranscodeJob/Services/ProcessTranscodeQueueService.py` -- add `FailureClass=ClassifyFailure(ErrorMessage)` in the payload when Success=FALSE.
+
+**Fix with:** `/t BUG-0095` (only AFTER BUG-0061 lands).
+
+**Out of scope for /b:** any code, any migration, any classifier implementation. Capture only.
+
+---
+
 ### infra-hardware
 
 ### [BUG-0091] dot host chronic hardware instability -- 10 hard crashes in 14 days, BERT hardware error record, 59 unsafe shutdowns on NVMe
@@ -612,8 +672,8 @@ The principle: each pick decision must either (a) be a single explicit rule with
 
 ---
 
-### [BUG-0061] CLUSTER -- Failure accounting (FailureBudgetService + FailedJobs surface + TranscodeAttempts accountability)
-**Date:** 2026-06-12 | **Area:** failure-accounting | **Subsumes:** BUG-0055, BUG-0060, BUG-0029
+### [BUG-0061 -- RESOLVED 2026-08-27] CLUSTER -- Failure accounting (FailureBudgetService + FailedJobs surface + TranscodeAttempts accountability)
+**Date:** 2026-06-12 | **Area:** failure-accounting | **Subsumes:** BUG-0055, BUG-0060, BUG-0029 | **Resolved:** 2026-08-27 by directive `bug-0061-remediation` -- 3/14 remaining failing contract tests were G1 (MediaFileId nullable), G2 (1075 orphan rows), G3 (ForceAdd stall). Closed by (a) running CleanupOrphanFailedAttempts.py (1067 archived + 8 backfilled -> 0 orphans), (b) running SetTranscodeAttemptsMediaFileIdNotNull.py (col now NOT NULL), (c) ForceAdd auto-reset in AddJobToQueue (writes FailureBudgetResets audit + bumps LastFailureResetAt so claim can proceed), (d) BackfillForceAddResets_2026_08_27.py retro-resetting 29 existing over-cap Pending rows. All 14 contract tests PASS.
 
 **Why bundled:** Three current bugs share one root pathology: `TranscodeAttempts` rows are not held accountable for their identity, their owner, or their retry budget. (a) Failed encodes have NO cap analogous to `RetryBudgetService.MaxRequeueAttempts` for VMAF -- failing jobs re-queue indefinitely via the compliance recompute (15 fails on Mune Guardian; 1455 orphan-MediaFileId rows back to 2025-10-15). (b) The failure INSERT path can drop `MediaFileId` AND `ProfileName`, leaving rows that can't be diagnosed from the table alone. (c) There is no operator surface for "what's stuck" -- the operator has to grep DB logs to find files that ate the worker pool. The SOLID fix is a new `Features/FailureAccounting/` vertical with its own Repository + Service + Controller + ViewModel, mirroring the existing `Features/QualityTesting/Disposition/` SOLID shape that capped VMAF retries cleanly.
 
