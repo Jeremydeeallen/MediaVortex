@@ -51,6 +51,8 @@ C14. **Concurrent scan on same rootfolder refused.** `StartScanning` rejects wit
 
 C15. **[BUG-0096] Genuine-deletion preserves attempt history via archival cascade.** `TranscodeAttempts.mediafileid` is nullable + FK `ON DELETE SET NULL` (matches `transcodefiles` archival pattern). BUG-0061's INSERT-time accountability requirement (every new attempt names a MediaFile) is enforced at the app layer, not at the schema layer -- see `Tests/Contract/TestTranscodeAttemptInsertRequiresMediaFileId.py`. Verifiable: seed one MediaFile with one TranscodeAttempt, delete the source file, run scan; ScanJob completes without error, the attempt row survives with `MediaFileId IS NULL`. Contract test: `TestTranscodeAttemptInsertRequiresMediaFileId.py`.
 
+C16. **[BUG-0097] Scan preserves Unicode filenames end-to-end.** Filenames containing non-ASCII characters (e.g. U+200E LEFT-TO-RIGHT MARK, U+FF1F FULLWIDTH QUESTION MARK, other BMP chars) survive the scan write path without lossy ASCII coercion. Verifiable: seed a synthetic disk file with U+200E in its name, run scan, `SELECT FileName FROM MediaFiles WHERE Id = ?` returns the exact Unicode string emitted by `os.scandir` (no `?` replacement). Contract test: `TestScanUnicodeFilenamePreservation.py`.
+
 ## Seams
 
 Intra-feature seams. Cross-stage seams (scan -> probe, scan -> compliance) live in `ingest.flow.md` `## Seams`.

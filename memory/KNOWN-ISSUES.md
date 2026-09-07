@@ -185,6 +185,43 @@ Returns 15 rows; the operator has no automated way to know which of the 15 need 
 
 ### file-scanning
 
+### [BUG-0097] Scan write path ASCII-coerces non-ASCII filename chars to literal `?`, producing Windows-invalid FileName rows that break every downstream `os.stat`
+**Date:** 2026-09-06 | **Area:** file-scanning | **Criterion:** `Features/FileScanning/scan.feature.md` C16
+
+**What breaks:** MediaFiles rows written by scan against disk files whose real names contain non-ASCII characters (e.g. Sonarr-generated titles with U+200E LEFT-TO-RIGHT MARK) land in DB with the offending char replaced by literal ASCII `?`. Windows NTFS forbids `?` in filenames, so every downstream `os.stat` against the DB value fails with `WinError 123`. AudioRemeasurementRunner (`ca441da2` 2026-07-16) polls stale/failing rows every tick and floods logs with `stat_failed: [WinError 123] The filename, directory name, or volume label syntax is incorrect`.
+
+**Repro:**
+1. Sonarr writes `Riverdale S07E17` with title `Chapter One Hundred Thirty-Four - A Different Kind of Cat‎ SDTV-mv.mp4` (invisible U+200E between "Cat" and " SDTV").
+2. Trigger scan on `T:\Riverdale\Season 7` via `/api/Scan/Start` or `/Scanning` "Scan Now".
+3. Query: `SELECT FileName FROM MediaFiles WHERE FileName LIKE '%A Different Kind%'`.
+4. Observe: FileName has `?` where disk has U+200E; version tag differs; row does not match any real file.
+
+**Evidence:**
+- 2026-09-06 rescan of `T:\Riverdale\Season 7` post-BUG-0096 landed FileName `Riverdale - S07E17 - Chapter One Hundred Thirty-Four A Different Kind of Cat? WEBDL-480p-mv.mp4` (Id=704029) + `.mkv` sibling (Id=704031). Disk truth per `Get-ChildItem 'T:\Riverdale\Season 7\'`: `... - A Different Kind of Cat‎ SDTV-mv.mp4`.
+- Current `SELECT COUNT(*) FROM MediaFiles WHERE FileName LIKE '%!?%' ESCAPE '!'`: 4 rows (2x Riverdale S07E17, 1x Riverdale S07E19, 1x SPY x FAMILY S01E17). Small blast radius today; every future Sonarr episode with a non-ASCII title regenerates the pattern.
+- WinError 123 floods surfaced by AudioRemeasurementRunner every poll tick (2026-09-05 log flood observed by operator on MediaFileIds 691786 + 698709, since re-inserted as 704029 + 704031).
+
+**First place to look:**
+- Grep for `.encode('ascii'` + `errors='replace'` + `errors='ignore'` across `Features/FileScanning/`, `Core/Path/`, and `Features/MediaFiles/`.
+- `FileScanningBusinessService.PerformScan` disk-to-canonical conversion (any place where `os.scandir` output is round-tripped through str encoding).
+- `Core.Path.LocalPath` + `Core.Path.Path` normalization.
+- `MediaFilesRepository.BatchUpsert` write parameters + psycopg2 parameter binding (verify psycopg2 client_encoding = UTF8).
+- `DatabaseService` connection kwargs.
+
+**Not the fix:** running rescan again -- the same coercion re-writes the same broken FileName. Fix must land in the coercion site itself. Post-fix, one fleet rescan sweeps the 4 known + any Sonarr-generated future rows into their true names.
+
+**Related:**
+- `.claude/rules/writer-owns-cascade.md` -- scan is a writer of MediaFiles; the write must be faithful.
+- `.claude/rules/fail-loud.md` -- silent `.encode('ascii', errors='replace')` is a bandaid pattern that hides Unicode paths behind fake-success `?` characters.
+- `MEMORY feedback_paths_must_be_shape_agnostic` -- path values in DB must survive round-trip.
+- AudioRemeasurementRunner (`ca441da2` 2026-07-16) amplifies the symptom.
+
+**Fix with:** `/t BUG-0097`.
+
+**Out of scope for /b:** locating the exact coercion site or writing the fix. Capture only.
+
+---
+
 ### [BUG-0096 -- RESOLVED 2026-09-04] Scan aborts on stale MediaFiles delete -- `transcodeattempts.mediafileid` is NOT NULL but FK is ON DELETE SET NULL (impossible cascade). FIX: column reverted to nullable (`RevertTranscodeAttemptsMediaFileIdToNullable_2026_09_04.py`); FK ON DELETE SET NULL retained; BUG-0061 accountability preserved via app-layer contract `Tests/Contract/TestTranscodeAttemptInsertRequiresMediaFileId.py` (3/3 PASS). Live verification: rescan of Real Housewives Orange County S15 completed with `DeletedFilesCount=2` + one attempt row now carries `MediaFileId=NULL` via cascade.
 **Date:** 2026-09-04 | **Area:** file-scanning | **Resolved:** 2026-09-04
 
