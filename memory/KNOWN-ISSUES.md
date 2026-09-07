@@ -1719,6 +1719,10 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 ### [BUG-0098] Worker share mappings not GUI-editable + scan-time call site bypasses translation
 **Date:** 2026-09-07 | **Area:** path-storage | **Criterion:** `scan.feature.md#C17` + `WorkerContext.feature.md#6`
 
+**Problem 1 RESOLVED 2026-09-07** by directive `canonical-path-definition`. SSoT public API `Core.Path.PathFs.CanonicalExists(str, worker)` + `CanonicalGetSize(str, worker)` added. `GetCanonicalPathFromFilesystem` rewritten to translate ONCE via `Path.FromLegacyString` + `worker.ResolveStorageRoot`, walk LOCAL filesystem for case correction, rebuild canonical output via `Path.CanonicalDisplay`. Private `FileScanning._CanonicalExists` / `_CanonicalGetSize` collapsed to 1-line delegates. `LocalPath.py:15` error message points at public API. `path.feature.md` gained S16 (seam) + C28 (invariant). Contract test `Tests/Contract/TestPathFsCanonicalExists.py` 6/6 PASS. Live smoke on I9-2024 (WorkerShareMappings `Z -> X:\`): 7 canonical Z: RootFolders returned canonical-shape outputs; zero new `Path does not exist, cannot get canonical case: Z:%` warns.
+
+**Problem 2 ACTIVE**: WorkerShareMappings still not GUI-editable. Deferred to directive `config-gui-editable-testable` -- generalizes gui-editable-knobs.md enforcement across all operator-tunable config, WorkerShareMappings as first target.
+
 **Umbrella:** BUG-0027 (path-storage OS-coupled). This is a discrete, actionable slice; BUG-0027 stays open as the full-cutover umbrella.
 
 **Two coupled problems, one fix directive:**
@@ -1754,6 +1758,44 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 **Flow doc:** `ingest.flow.md` covers the scan pipeline; the call-site fix is intra-stage and does not change stage seams. No new flow doc needed.
 
 **Feature docs:** `scan.feature.md` (C17 added), `WorkerContext.feature.md` (C6 added). `Features/Admin/ShareMappings.feature.md` -- gap; may be created during `/t` if the CRUD surface deserves its own vertical.
+
+---
+
+### [BUG-0099] Canonical-input drift audit -- ~9 suspect `LocalExists(<possibly-canonical>)` sites
+**Date:** 2026-09-07 | **Area:** path-storage | **Criterion:** `path.feature.md#C28`
+
+**Umbrella:** BUG-0027 (path-storage OS-coupled). Direct follow-up to BUG-0098 problem 1 fix (SSoT `PathFs.CanonicalExists` public API landed).
+
+**Problem:** BUG-0098 fixed ONE confirmed-bleeding call site (`GetCanonicalPathFromFilesystem`). Grep of production tree for `LocalExists(` returns 44 sites (`grep -rn 'LocalExists(' --include='*.py'`). Rough classification (surface pass, not audit):
+- ~35 legitimate -- local temp paths (Demucs output, scratch dirs), binary paths (ffmpeg.exe), startup drive probes, cache paths.
+- ~9 suspect -- fed a `FilePath` param of unknown provenance; if callers pass canonical `MediaFile.FilePath`, that is silent drift on any worker whose `WorkerShareMappings.LocalMountPrefix` differs from the canonical drive letter (I9 today; any future baremetal Linux worker mapping T: -> /mnt/media).
+
+**Suspect sites (surface):**
+- `Core/Database/BaseRepository.py:53` `AddProblemFile(FilePath, ...)` -- 3 callers in `Features/TranscodeQueue/QueueManagementBusinessService.py`, `Features/MediaProbe/MediaProbeBusinessService.py`, `Features/QualityTesting/QualityTestingBusinessService.py`. If any caller passes `MediaFile.FilePath` (canonical), that is drift.
+- `Features/FileReplacement/TranscodedOutputPlacement.py` -- `LocalExists` calls near source/output path handling; confirm each is post-`Path.Resolve(worker)`.
+- `Features/FileReplacement/ComplianceGate.py` -- same.
+- `Features/TranscodeJob/Worker/JobProcessor.py` -- same.
+- `Features/TranscodeQueue/QueueManagementBusinessService.py` -- same.
+
+**Repro:** each suspect site is either safe (already translated) or silently drifts. Confirmation requires per-site trace: grep every `LocalExists(X)`, confirm X is worker-local (output of `Path.Resolve(worker)` or a locally-produced temp/binary path), NOT canonical (`MediaFile.FilePath`, `RootFolder.CanonicalPath`, etc).
+
+**Evidence:** none currently. Latent bug class -- no log spam yet because most callers hold local paths, but future divergence (new drive-letter swap, new Linux worker mapping) will surface additional cases. The point of the audit + contract test is to prevent future drift, not to fix existing warns (BUG-0098 problem 1 handled the one confirmed warn source).
+
+**First place to look:**
+- `Core/Database/BaseRepository.py:47-65` `AddProblemFile` -- classify each caller's FilePath source.
+- `Features/FileReplacement/TranscodedOutputPlacement.py` -- trace every `LocalExists(...)` call back to producer.
+- `Core/Path/PathFs.py` `CanonicalExists` / `CanonicalGetSize` -- the migration target (SSoT public API landed by BUG-0098 fix).
+- `Tests/Contract/TestLocalPathCanonicalGuard.py` -- shape reference for the new grep-based contract test.
+
+**Fix scope (for `/t BUG-0099` -- opens directive `canonical-input-drift-audit`):**
+1. Per-site audit of ~9 suspects: classify (already-translated / silent-drift / legitimate-local).
+2. Migrate silent-drift sites to `PathFs.CanonicalExists` / `PathFs.CanonicalGetSize`.
+3. Add contract test `Tests/Contract/TestLocalExistsCanonicalInputForbidden.py`: grep-based whitelist of legitimate `LocalExists(` call sites; refuses new call sites unless whitelisted or the argument is provably post-`Path.Resolve(worker)`.
+4. Optional: extend `TestLocalPathCanonicalGuard` to fire on Windows when a canonical drive letter differs from the worker's `LocalMountPrefix` -- deferred if per-worker mapping lookup at guard-time proves overweight.
+
+**Flow doc:** `ingest.flow.md` covers scan; other suspects touch `transcode.flow.md` (file replacement + queue admission). Neither needs a new stage; changes are intra-stage.
+
+**Feature docs:** `path.feature.md#C28` names the invariant. Audit + migration adds evidence but does not add new criteria.
 
 ---
 

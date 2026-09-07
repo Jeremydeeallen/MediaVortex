@@ -12,7 +12,7 @@ def _AssertLocalShape(Value):
     if not Value or _IS_WINDOWS:
         return
     if _CANONICAL_DRIVE_RE.match(Value):
-        raise ValueError(f"LocalPath op refused canonical drive-letter path on non-Windows worker: {Value!r}. Route through Path.FromLegacyString(...).Resolve(worker) first, or use the canonical-namespace helper (_CanonicalExists / _CanonicalGetSize).")
+        raise ValueError(f"LocalPath op refused canonical drive-letter path on non-Windows worker: {Value!r}. Route through Path.FromLegacyString(...).Resolve(worker) first, or use the canonical-namespace public API (Core.Path.PathFs.CanonicalExists / CanonicalGetSize).")
 
 
 # directive: path-schema-migration | # see path.S3

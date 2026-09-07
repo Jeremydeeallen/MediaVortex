@@ -52,20 +52,16 @@ def _CanonicalToPath(CanonicalValue: str) -> Optional[Path]:
         return None
 
 
-# directive: path-class-perfection | # see path.C21
+# directive: canonical-path-definition | # see path.S16
 def _CanonicalExists(CanonicalValue: str) -> bool:
-    from Core.Path.PathFs import Exists as _FsExists
-    P = _CanonicalToPath(CanonicalValue)
-    return False if P is None else _FsExists(P, _GetWorker())
+    from Core.Path.PathFs import CanonicalExists as _FsCanonicalExists
+    return _FsCanonicalExists(CanonicalValue, _GetWorker())
 
 
-# directive: path-class-perfection | # see path.C21
+# directive: canonical-path-definition | # see path.S16
 def _CanonicalGetSize(CanonicalValue: str) -> int:
-    from Core.Path.PathFs import GetSize as _FsGetSize
-    P = _CanonicalToPath(CanonicalValue)
-    if P is None:
-        raise PathError(f"_CanonicalGetSize: cannot parse canonical {CanonicalValue!r}")
-    return _FsGetSize(P, _GetWorker())
+    from Core.Path.PathFs import CanonicalGetSize as _FsCanonicalGetSize
+    return _FsCanonicalGetSize(CanonicalValue, _GetWorker())
 
 
 # directive: paths-canonical-completion
@@ -789,74 +785,71 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error managing root folder", e)
             raise
 
-    # directive: paths-canonical-completion
+    # directive: canonical-path-definition | # see path.S16
     def GetCanonicalPathFromFilesystem(self, Path: str) -> str:
         # see filescanning.ST1
-        """Get the actual case-sensitive path as it exists on the filesystem."""
+        """Return canonical-display path with per-segment case matching worker-local FS (BUG-0098)."""
+        normalized_canonical = ntpath.normpath(Path or "") if Path else Path
         try:
             if not Path:
                 return Path
 
-            normalized_path = ntpath.normpath(Path or "")
+            from Core.Path.Path import Path as _Path, PathError as _PE
+            from Core.Path.PathStorageRoots import GetStorageRoots as _GSR, GetPrefixMap as _GPM
 
-            # Check if path exists
-            if not LocalExists(normalized_path):
-                LoggingService.LogWarning(f"Path does not exist, cannot get canonical case: {Path}",
-                                         'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
-                return normalized_path
+            try:
+                P = _Path.FromLegacyString(normalized_canonical, _GSR())
+            except _PE:
+                LoggingService.LogWarning(
+                    f"Path does not match any StorageRoot canonical prefix, cannot get canonical case: {Path}",
+                    'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
+                return normalized_canonical
 
-            # normalized_path is canonical display (Windows backslash) -- literal "\\" keeps splitting correct on Linux workers
-            if len(normalized_path) >= 2 and normalized_path[1] == ':':
-                drive = normalized_path[0:2]
-                remainder = normalized_path[2:].lstrip("\\")
-                result_path = drive + "\\"
-                if remainder:
-                    parts = remainder.split("\\")
-                else:
-                    parts = []
-            else:
-                parts = normalized_path.split("\\")
-                result_path = parts[0] if parts else ''
-                parts = parts[1:] if parts else []
+            worker = _GetWorker()
+            local_root = worker.ResolveStorageRoot(P.StorageRootId)
+            if not local_root:
+                LoggingService.LogWarning(
+                    f"No StorageRootResolution for StorageRootId={P.StorageRootId} on worker={worker.Name}: {Path}",
+                    'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
+                return normalized_canonical
 
-            # Resolve each component by listing parent directory
-            current_path = result_path
-            for part in parts:
-                if not part:  # Skip empty parts
-                    continue
+            if not LocalExists(local_root):
+                LoggingService.LogWarning(
+                    f"Local mount does not exist, cannot get canonical case: {Path} -> {local_root}",
+                    'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
+                return normalized_canonical
 
+            # RelativePath is forward-slash normalized per path.D9; segment split is not path-shape ambiguous.
+            segments = [s for s in P.RelativePath.split('/') if s]
+            corrected_segments = []
+            current_local = local_root
+            for part in segments:
+                actual_name = part
                 try:
-                    # current_path stays canonical display through the walk -- use ntpath.join, not LocalJoin
-                    if LocalIsDir(current_path):
-                        dir_contents = os.listdir(current_path)
-                        actual_name = None
-                        for item in dir_contents:
+                    if LocalIsDir(current_local):
+                        for item in os.listdir(current_local):
                             if item.upper() == part.upper():
                                 actual_name = item
                                 break
+                except Exception:
+                    LoggingService.LogWarning(
+                        f"Could not list directory '{current_local}' to get actual case, using: {part}",
+                        'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
+                corrected_segments.append(actual_name)
+                current_local = LocalJoin(current_local, actual_name)
 
-                        if actual_name:
-                            current_path = ntpath.join(current_path, actual_name)
-                        else:
-                            current_path = ntpath.join(current_path, part)
-                    else:
-                        current_path = ntpath.join(current_path, part)
-                except Exception as e:
-                    LoggingService.LogWarning(f"Could not list directory '{current_path}' to get actual case, using: {part}",
-                                             'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
-                    current_path = ntpath.join(current_path, part)
+            corrected = _Path(P.StorageRootId, '/'.join(corrected_segments))
+            result = corrected.CanonicalDisplay(_GPM())
 
-            # Log if case changed
-            if current_path != normalized_path:
-                LoggingService.LogInfo(f"Normalized path case: '{normalized_path}' -> '{current_path}'",
+            if result != normalized_canonical:
+                LoggingService.LogInfo(f"Normalized path case: '{normalized_canonical}' -> '{result}'",
                                      'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
-
-            return current_path
+            return result
 
         except Exception as e:
             LoggingService.LogWarning(f"Could not resolve canonical path for {Path}, using original: {str(e)}",
                                      'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
-            return Path if Path else normalized_path
+            return Path if Path else normalized_canonical
 
 
     def GetScanStatus(self) -> Dict[str, Any]:
