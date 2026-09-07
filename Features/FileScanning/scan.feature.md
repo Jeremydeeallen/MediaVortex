@@ -49,6 +49,8 @@ C13. **ContinuousScanService cadence unchanged.** Existing `ScanIntervalMinutes`
 
 C14. **Concurrent scan on same rootfolder refused.** `StartScanning` rejects with `Error='ScanAlreadyRunning'` when partial UNIQUE index `sj_one_active_per_root` (existing) conflicts.
 
+C15. **[BUG-0096] Genuine-deletion preserves attempt history via archival cascade.** `TranscodeAttempts.mediafileid` is nullable + FK `ON DELETE SET NULL` (matches `transcodefiles` archival pattern). BUG-0061's INSERT-time accountability requirement (every new attempt names a MediaFile) is enforced at the app layer, not at the schema layer -- see `Tests/Contract/TestTranscodeAttemptInsertRequiresMediaFileId.py`. Verifiable: seed one MediaFile with one TranscodeAttempt, delete the source file, run scan; ScanJob completes without error, the attempt row survives with `MediaFileId IS NULL`. Contract test: `TestTranscodeAttemptInsertRequiresMediaFileId.py`.
+
 ## Seams
 
 Intra-feature seams. Cross-stage seams (scan -> probe, scan -> compliance) live in `ingest.flow.md` `## Seams`.

@@ -11,22 +11,18 @@ from Features.FailureAccounting.Repositories.FailedJobsRepository import FailedJ
 from Core.Database.FailureBudgetPredicate import BuildCapPredicate
 
 
-# directive: failure-accounting | # see failure-accounting.C3
-class TestTranscodeAttemptsMediaFileIdNotNull(unittest.TestCase):
-    """AC3: MediaFileId is NOT NULL post-migration; CleanupOrphanFailedAttempts archived the historical orphans."""
+# directive: bug-0096-scan-delete-restore-archival | # see scan.C15
+class TestTranscodeAttemptsMediaFileIdAccountability(unittest.TestCase):
+    # see scan.C15 (BUG-0061 schema-NOT-NULL replaced by app-layer INSERT contract; NULLs allowed only via ON DELETE SET NULL)
 
-    # directive: failure-accounting | # see failure-accounting.C3
-    def test_no_null_mediafileid_rows(self):
-        n = int(DatabaseService().ExecuteQuery("SELECT COUNT(*) AS n FROM TranscodeAttempts WHERE MediaFileId IS NULL")[0]['n'])
+    # directive: bug-0096-scan-delete-restore-archival | # see scan.C15
+    def test_no_orphan_mediafileid_rows(self):
+        n = int(DatabaseService().ExecuteQuery(
+            "SELECT COUNT(*) AS n FROM TranscodeAttempts ta "
+            "WHERE ta.MediaFileId IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM MediaFiles mf WHERE mf.Id = ta.MediaFileId)"
+        )[0]['n'])
         self.assertEqual(n, 0)
-
-    # directive: failure-accounting | # see failure-accounting.C3
-    def test_column_is_not_null_constraint(self):
-        Rows = DatabaseService().ExecuteQuery(
-            "SELECT is_nullable FROM information_schema.columns "
-            "WHERE table_name = 'transcodeattempts' AND column_name = 'mediafileid'"
-        )
-        self.assertEqual(str(Rows[0]['is_nullable']).upper(), 'NO')
 
 
 # directive: failure-accounting | # see failure-accounting.C5

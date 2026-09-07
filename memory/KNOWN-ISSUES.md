@@ -54,7 +54,7 @@
 
 ### audio-pipeline
 
-### [BUG-0093] Demucs daemon repeatedly closes stdout / times out; blocks Dialog Boost track emission -> ComplianceGate refuses TV Transcode replacements
+### [BUG-0093 -- RESOLVED 2026-09-01] Demucs daemon repeatedly closes stdout / times out; blocks Dialog Boost track emission -> ComplianceGate refuses TV Transcode replacements. FIX: pre-encode swallowers deleted; failure raises to JobProcessor; routed via `transcode.D13` partial-completion (AudioSlot=Copy fallback + AudioFix follow-up); FileReplacementBusinessService bypasses ComplianceGate on `DispositionReason` startswith `PartialSuccess_`. Directive `bug-0093-preencode-fail-loud-via-d13`.
 **Date:** 2026-08-26 | **Area:** audio-pipeline
 
 **What breaks:** `PreEncodeAudioPipeline` (via `DemucsDaemonClient` long-lived subprocess from the BUG-0081 fix) is producing two failure modes:
@@ -180,6 +180,60 @@ Returns 15 rows; the operator has no automated way to know which of the 15 need 
 **Fix with:** `/t BUG-0095` (only AFTER BUG-0061 lands).
 
 **Out of scope for /b:** any code, any migration, any classifier implementation. Capture only.
+
+---
+
+### file-scanning
+
+### [BUG-0096 -- RESOLVED 2026-09-04] Scan aborts on stale MediaFiles delete -- `transcodeattempts.mediafileid` is NOT NULL but FK is ON DELETE SET NULL (impossible cascade). FIX: column reverted to nullable (`RevertTranscodeAttemptsMediaFileIdToNullable_2026_09_04.py`); FK ON DELETE SET NULL retained; BUG-0061 accountability preserved via app-layer contract `Tests/Contract/TestTranscodeAttemptInsertRequiresMediaFileId.py` (3/3 PASS). Live verification: rescan of Real Housewives Orange County S15 completed with `DeletedFilesCount=2` + one attempt row now carries `MediaFileId=NULL` via cascade.
+**Date:** 2026-09-04 | **Area:** file-scanning | **Resolved:** 2026-09-04
+
+**What breaks:** Any manual or continuous scan that discovers a MediaFiles row whose source file is gone aborts the entire scan transaction. Symptom: `Error during scan: null value in column "mediafileid" of relation "transcodeattempts" violates not-null constraint`. Occurs whenever a previously-transcoded file is re-added, moved, or deleted -- the delete branch fires, cascade tries `SET NULL` on the historical attempt row, column refuses.
+
+**Root cause (schema contradiction):**
+- Column: `transcodeattempts.mediafileid NOT NULL` (tightened by `SetTranscodeAttemptsMediaFileIdNotNull` migration under BUG-0061 close, 2026-08-27, to close the orphan-accounting gap).
+- Constraint: `fk_transcodeattempts_mediafileid ON DELETE SET NULL` (pre-existing, retained through the BUG-0061 close).
+- These two invariants are mutually exclusive. Any DELETE on MediaFiles whose Id is referenced by a TranscodeAttempts row will fail every time.
+
+This is an architectural violation, not a typo: BUG-0061's fix tightened the column but the FK was not brought in line with either the new invariant OR with `scan.feature.md` C6 ("Genuine deletion removes MediaFiles row only. TranscodeAttempts + MediaFilesArchive rows referencing the deleted MediaFileId persist"). C6 is currently unimplementable.
+
+**Principled fix candidates (need one design decision, not a bandaid):**
+- (a) **Soft-delete MediaFiles.** Add `MediaFiles.DeletedAt TIMESTAMP NULL`; scan filters `WHERE DeletedAt IS NULL`; delete rewrites to UPDATE. Attempts keep their FK to a surviving row. Preserves BOTH BUG-0061's NOT NULL invariant AND C6's "attempts survive" contract. No cascade fires. Preferred: no invariant compromised.
+- (b) **Cascade delete attempts.** Change FK to `ON DELETE CASCADE`. Attempts die with MediaFiles. Preserves NOT NULL, breaks C6, loses transcode history. Regressive.
+- (c) **Nullable column.** Revert column to NULL-permitted, keep SET NULL. Regresses BUG-0061's accountability gain (orphan attempts return). Bandaid.
+- (d) **Reassign before delete.** No target to reassign to on genuine delete (rename already handled by C5). Not viable for the deletion path.
+
+**Repro:**
+1. Pick any MediaFile that has a TranscodeAttempts row (`SELECT MediaFileId FROM TranscodeAttempts GROUP BY MediaFileId LIMIT 1`).
+2. Delete or move the underlying file on disk.
+3. Trigger scan on that RootFolder subtree via `/Scanning` "Scan Now" or `POST /api/Scan/Start`.
+4. Scan transaction aborts with the NOT NULL error.
+
+**Evidence:**
+- 2026-09-03 22:35 UTC: manual scan of `T:\The Real Housewives of Orange County\Season 15` aborted.
+- Failing row: TranscodeAttempts.Id=82801, MediaFileId of the stale row being deleted, Success=TRUE, VMAF=82.92, Disposition=Replace, DispositionReason=QualityTestingGloballyDisabled, WorkerName=I9-2024, completed 2026-09-03 22:35:58.
+- Error text: `null value in column "mediafileid" of relation "transcodeattempts" violates not-null constraint DETAIL: Failing row contains (82801, ...). CONTEXT: SQL statement "UPDATE ONLY "public"."transcodeattempts" SET "mediafileid" = NULL WHERE $1 OPERATOR(pg_catalog.=) "mediafileid""`.
+- Schema audit (2026-09-04): `information_schema.referential_constraints` confirms `fk_transcodeattempts_mediafileid` DELETE RULE = `SET NULL`; `information_schema.columns` confirms `transcodeattempts.mediafileid IS_NULLABLE = 'NO'`.
+
+**First place to look:**
+- Scan delete path: `Features/FileScanning/FileScanningRepository.BatchSoftDelete` (or the DELETE call inside `PerformScan` diff step) -- currently issues raw DELETE which fires the FK cascade.
+- FK definition history: search `Scripts/SQLScripts/*MediaFileId*` for the ADD CONSTRAINT that set `ON DELETE SET NULL`.
+- BUG-0061 close migration: `Scripts/SQLScripts/SetTranscodeAttemptsMediaFileIdNotNull*.py` -- the NOT NULL tightening that made the FK contradictory.
+- `scan.feature.md` C6 (constraint that attempts must survive) + C15 (new [BUG-0096] tag added 2026-09-04, requires schema-implementable delete path).
+
+**No bandaid:** do NOT close by silently making the column nullable again or by adding a defensive filter around the DELETE call. The FK contradiction IS the bug; either the delete semantic (soft-delete) or the FK semantic (CASCADE) must move.
+
+**Related:**
+- `.claude/rules/writer-owns-cascade.md` -- writers of MediaFiles must maintain consistent derived state; deletion is a write and must not corrupt referrers.
+- `.claude/rules/fail-loud.md` -- the crash IS fail-loud (good); the bandaid instinct (swallow with try/except in scan) is refused.
+- `MEMORY feedback_no_bandaids_ever` -- every bug fix names + removes the architectural violation.
+- `feedback_polymorphic_fk_no_cascade.md` -- this is NOT a polymorphic FK (single ref -> MediaFiles.Id), so CASCADE is technically allowed if that path is chosen; but soft-delete (option a) is the DDD/SSoT-clean answer.
+
+**Proposed criterion (scan.feature.md):** C15 added 2026-09-04. See scan.feature.md.
+
+**Fix with:** `/t BUG-0096`.
+
+**Out of scope for /b:** any code, any migration, any schema decision. Capture only.
 
 ---
 

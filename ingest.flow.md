@@ -102,6 +102,7 @@ Full-library cycle over unchanged fleet: target < 5 min, budget 20 min per opera
 | Cascade error mid-write | Exception propagates per fail-loud | Writer transaction rolls back; next scan or manual retry recovers |
 | Sonarr webhook malformed | 400 response; no ScanJobs row | Endpoint fails loud on unrecognized shape (per Fail Loud rule); operator inspects payload |
 | Rename detection false-positive | Wrong row's RelativePath reassigned | Rare: requires same `(filesize, filename)` collision AND single-tick disk state. Detection: run scan twice; consistent output means no collision. |
+| Genuine delete of previously-transcoded file | `MediaFiles` row removed by `BatchDeleteMediaFiles`; historical `TranscodeAttempts` rows survive with `MediaFileId=NULL` via FK `ON DELETE SET NULL`; aggregate stats (worker/profile/VMAF/date) preserved for reporting | Attempt history retained; archival cascade pattern mirrors `transcodefiles`. Restored by BUG-0096 fix (2026-09-04). |
 
 ## State Surface
 
