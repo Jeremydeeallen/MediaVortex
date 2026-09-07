@@ -23,6 +23,8 @@ Internal API only -- no UI or HTTP surface. Consumed by FFmpegService, FileRepla
 4. FileReplacementBusinessService resolves worker-local paths via `Path.Resolve(Worker.FromWorkerContext())` for the typed-pair source + output rows read from TemporaryFilePaths. Post-transcode re-probe and file operations use the correct worker-local paths; existence checks go through `PathFs.Exists(P, Worker)` per `path.S10`.
 5. A Linux worker running WorkerService gets FFprobe/FFmpeg paths from the Workers table (via WorkerContext), not from SystemSettings. MediaFiles records are updated correctly after file replacement.
 
+6. **[BUG-0098] WorkerShareMappings tunable via GUI, verifiable per row, single source of truth.** Every `(WorkerName, StorageRootId)` share mapping (Linux mount prefix + Windows drive letter) is editable at `/Admin/Workers` -- create, update, delete without SQL and without redeploy. A per-row Test button hits `POST /api/Admin/ShareMappings/Verify` -> `{WorkerName, StorageRootId}` -> `{Exists, ResolvedPath, Error}`; the endpoint resolves the canonical prefix on the target worker via `Path.Resolve(Worker)` and calls `PathFs.Exists`. On success, `WorkerShareMappings.LastVerifiedAt` (timestamp) + `WorkerShareMappings.LastVerifiedOk` (bool) columns are set. The `MEDIAVORTEX_SHARE_MAPPINGS` env var seeding is removed once GUI ships -- one config location per `gui-editable-knobs.md`. Verifiable: swap a worker's local mount prefix through the GUI, click Test, confirm status flips green + `LastVerifiedAt` updates; delete the env var, restart worker, confirm mappings still resolve from DB. Contract test: `TestShareMappingsGuiCrud.py` + `TestShareMappingsVerifyEndpoint.py`.
+
 ## Status
 
 COMPLETE

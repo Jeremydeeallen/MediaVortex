@@ -53,6 +53,8 @@ C15. **[BUG-0096] Genuine-deletion preserves attempt history via archival cascad
 
 C16. **[BUG-0097] Scan preserves Unicode filenames end-to-end.** Filenames containing non-ASCII characters (e.g. U+200E LEFT-TO-RIGHT MARK, U+FF1F FULLWIDTH QUESTION MARK, other BMP chars) survive the scan write path without lossy ASCII coercion. Verifiable: seed a synthetic disk file with U+200E in its name, run scan, `SELECT FileName FROM MediaFiles WHERE Id = ?` returns the exact Unicode string emitted by `os.scandir` (no `?` replacement). Contract test: `TestScanUnicodeFilenamePreservation.py`.
 
+C17. **[BUG-0098] Scan-time canonical existence checks route through worker translation.** `FileScanningBusinessService.GetCanonicalPathFromFilesystem` must resolve canonical prefixes (`Z:\`, `T:\`, `M:\`) to the worker's local mount before calling `LocalExists`. Match the pattern already used by sibling helper `_CanonicalExists` (same file, line 56) which routes through `Core.Path.PathFs.Exists` + `_CanonicalToPath` + `_GetWorker`. Verifiable: on a worker whose `WorkerShareMappings.LocalMountPrefix` differs from the canonical prefix (e.g. I9 maps `Z` canonical -> `X:\` local), `GetCanonicalPathFromFilesystem('Z:\\Videos')` returns the case-corrected path via the local mount and emits zero `Path does not exist, cannot get canonical case` warnings when the underlying local path exists. Contract test: `TestScanCanonicalCaseUsesWorkerMapping.py`.
+
 ## Seams
 
 Intra-feature seams. Cross-stage seams (scan -> probe, scan -> compliance) live in `ingest.flow.md` `## Seams`.

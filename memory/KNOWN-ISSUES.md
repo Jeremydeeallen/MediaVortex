@@ -1716,6 +1716,47 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 
 ---
 
+### [BUG-0098] Worker share mappings not GUI-editable + scan-time call site bypasses translation
+**Date:** 2026-09-07 | **Area:** path-storage | **Criterion:** `scan.feature.md#C17` + `WorkerContext.feature.md#6`
+
+**Umbrella:** BUG-0027 (path-storage OS-coupled). This is a discrete, actionable slice; BUG-0027 stays open as the full-cutover umbrella.
+
+**Two coupled problems, one fix directive:**
+
+(1) **Call-site drift.** `Features/FileScanning/FileScanningBusinessService.py:793` `GetCanonicalPathFromFilesystem` calls `LocalExists(normalized_path)` directly on the canonical prefix, bypassing `WorkerContext.PathTranslation`. Sibling helper `_CanonicalExists` (same file, line 56) already implements the correct pattern via `Core.Path.PathFs.Exists` + `_CanonicalToPath` + `_GetWorker`. Fix = align the buggy function with the sibling pattern.
+
+(2) **`WorkerShareMappings` not GUI-editable.** Table is only writable via SQL or the `MEDIAVORTEX_SHARE_MAPPINGS` env var seed at worker registration. When the operator changes a physical drive letter on a Windows worker (or a mount point on Linux), there is no `/Admin` surface to update the row or verify the new path resolves. Violates `gui-editable-knobs.md`.
+
+**Repro (problem 1):** on I9 with `WorkerShareMappings.LocalMountPrefix='X:\\'` for `WorkerName='I9-2024', DriveLetter='Z'`, run a continuous scan tick that touches the xxx StorageRoot. Look for `Path does not exist, cannot get canonical case: Z:\...` warnings in `Logs`. Last 7d: 7 identical warns across `Z:\`, `Z:\Videos`, `Z:\Videos\{Anal,Couple,Lesbian,Test,Threesome}`.
+
+**Repro (problem 2):** attempt to edit any `WorkerShareMappings` row through the WebService UI. There is no surface. Only SQL and env-var seeding write the table.
+
+**Evidence:**
+- Log query: `SELECT COUNT(*) FROM Logs WHERE Message LIKE 'Path does not exist, cannot get canonical case: Z:%' AND CreatedAt > NOW() - INTERVAL '7 days'` returns 7.
+- Callers amplifying: `GetOrCreateRootFolder` lines 736 + 753 hit `GetCanonicalPathFromFilesystem` on every scan tick.
+- Config surface: `grep -rn "MEDIAVORTEX_SHARE_MAPPINGS" WebService/ Templates/` returns zero -- no UI touches this env var.
+
+**First place to look:**
+- `Features/FileScanning/FileScanningBusinessService.py:793` (`GetCanonicalPathFromFilesystem`) vs line 56 (`_CanonicalExists`) -- pattern to copy.
+- `Repositories/DatabaseManager.py:RegisterWorkerShareMappings` -- current env-var seeding path.
+- `Templates/Admin/Workers.html` -- likely home for the CRUD UI expansion.
+- `Core/Path/PathFs.py:Exists` + `Path.Resolve(Worker)` -- reuse in the Verify endpoint.
+- `Core/WorkerContext.feature.md` C6 (added this ticket) -- criterion for the CRUD + Verify surface.
+- `Features/FileScanning/scan.feature.md` C17 (added this ticket) -- criterion for the call-site fix.
+
+**Fix scope (for `/t BUG-0098`):**
+1. Route `GetCanonicalPathFromFilesystem` through the same translation layer as `_CanonicalExists`.
+2. Build `/Admin/Workers` CRUD surface for `WorkerShareMappings` -- per-`(WorkerName, StorageRootId)` `LocalMountPrefix` + `DriveLetter`.
+3. Test button per row -> `POST /api/Admin/ShareMappings/Verify` -> `{WorkerName, StorageRootId}` -> `{Exists, ResolvedPath, Error}`.
+4. Add `WorkerShareMappings.LastVerifiedAt` (timestamp) + `LastVerifiedOk` (bool) columns; write on successful Test.
+5. Delete `MEDIAVORTEX_SHARE_MAPPINGS` env-var seeding once GUI is authoritative (single config location per `gui-editable-knobs.md`).
+
+**Flow doc:** `ingest.flow.md` covers the scan pipeline; the call-site fix is intra-stage and does not change stage seams. No new flow doc needed.
+
+**Feature docs:** `scan.feature.md` (C17 added), `WorkerContext.feature.md` (C6 added). `Features/Admin/ShareMappings.feature.md` -- gap; may be created during `/t` if the CRUD surface deserves its own vertical.
+
+---
+
 ## Resolved
 
 ### [BUG-0042] Active Jobs list view omits VMAF runs while header badge counts them -- operator misreads as "stuck", kills workers, orphans claimed rows
