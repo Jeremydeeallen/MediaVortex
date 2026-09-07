@@ -32,49 +32,42 @@ class PreEncodeAudioPipeline:
         self._RulesRepo = RulesRepo or AudioComplianceRulesRepository()
         self._Report = ProgressReporter or (lambda Phase, Percent, Info: None)
 
-    # directive: preencode-loudness-cache-hit -- SourceMeasure runs concurrent with Downmix->Demucs->Premix->LoudnormMeasure chain AND skips ffmpeg entirely when MediaFiles already carries the four source-loudness columns.
+    # directive: bug-0093-preencode-fail-loud-via-d13 -- pre-encode failure raises; caller (JobProcessor) routes via transcode.D13 partial-completion (AudioSlot=Copy fallback + AudioFix follow-up). Silent-fallback sentinel removed.
     def Run(self, SourceFilePath, JobId, MediaFileId=None):
         ScratchDir = LocalJoin(self.ScratchRoot, f"mv_audio_{JobId}")
+        R = self._RulesRepo.GetRules()
+        SourceBox = _ThreadResult()
+        SourceThread = threading.Thread(
+            target=self._RunSourceMeasureTask,
+            args=(SourceFilePath, R, SourceBox, MediaFileId),
+            name=f"PreEncodeSourceMeasure-{JobId}",
+            daemon=True,
+        )
+        SourceThread.start()
         try:
-            R = self._RulesRepo.GetRules()
-            SourceBox = _ThreadResult()
-            SourceThread = threading.Thread(
-                target=self._RunSourceMeasureTask,
-                args=(SourceFilePath, R, SourceBox, MediaFileId),
-                name=f"PreEncodeSourceMeasure-{JobId}",
-                daemon=True,
-            )
-            SourceThread.start()
-            try:
-                ChainResult = self._RunDemucsChain(SourceFilePath, ScratchDir, R)
-            except Exception:
-                SourceThread.join()
-                raise
+            ChainResult = self._RunDemucsChain(SourceFilePath, ScratchDir, R)
+        except Exception:
             SourceThread.join()
-            if SourceBox.exception is not None:
-                raise SourceBox.exception
-            SourceI, SourceLra, SourceTp, SourceThresh = SourceBox.value
-            return {
-                'DemucsPremixPath': ChainResult['PremixWavPath'],
-                'VocalsRmsDbfs': ChainResult['VocalsRmsDbfs'],
-                'PremixMeasuredI': ChainResult['PremixI'],
-                'PremixMeasuredLra': ChainResult['PremixLra'],
-                'PremixMeasuredTp': ChainResult['PremixTp'],
-                'PremixMeasuredThresh': ChainResult['PremixThresh'],
-                'SourceMeasuredI': SourceI,
-                'SourceMeasuredLra': SourceLra,
-                'SourceMeasuredTp': SourceTp,
-                'SourceMeasuredThresh': SourceThresh,
-                'ScratchDir': ScratchDir,
-            }
-        except Exception as Ex:
-            LoggingService.LogException(
-                f"PreEncodeAudioPipeline failed for {SourceFilePath} (job {JobId}); Dialog Boost track will be skipped",
-                Ex, "PreEncodeAudioPipeline", "Run",
-            )
             self.Cleanup(ScratchDir)
-            # see audio-normalization.C39
-            return {'DemucsPremixPath': None, 'VocalsRmsDbfs': None, 'ScratchDir': None, 'DemucsFailed': True, 'DemucsFailureReason': f"{type(Ex).__name__}: {str(Ex)[:200]}"}
+            raise
+        SourceThread.join()
+        if SourceBox.exception is not None:
+            self.Cleanup(ScratchDir)
+            raise SourceBox.exception
+        SourceI, SourceLra, SourceTp, SourceThresh = SourceBox.value
+        return {
+            'DemucsPremixPath': ChainResult['PremixWavPath'],
+            'VocalsRmsDbfs': ChainResult['VocalsRmsDbfs'],
+            'PremixMeasuredI': ChainResult['PremixI'],
+            'PremixMeasuredLra': ChainResult['PremixLra'],
+            'PremixMeasuredTp': ChainResult['PremixTp'],
+            'PremixMeasuredThresh': ChainResult['PremixThresh'],
+            'SourceMeasuredI': SourceI,
+            'SourceMeasuredLra': SourceLra,
+            'SourceMeasuredTp': SourceTp,
+            'SourceMeasuredThresh': SourceThresh,
+            'ScratchDir': ScratchDir,
+        }
 
     # directive: preencode-loudness-cache-hit -- cache-hit skips ffmpeg pass; cache-miss falls through to MeasureSourceLoudnorm (persistence handled by AudioPreEncodeFacade.PersistSourceLoudness in caller)
     def _RunSourceMeasureTask(self, SourceFilePath, R, ResultBox, MediaFileId=None):

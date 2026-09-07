@@ -85,3 +85,12 @@ def LogPartialRetryExhausted(MediaFileId: int, ParentAttemptId: int, ChildStderr
         f"child_stderr={(ChildStderr or '')[:1000]!r}",
         "PartialCompletion", "LogPartialRetryExhausted",
     )
+
+
+# directive: bug-0093-preencode-fail-loud-via-d13 -- pre-encode Demucs failure logs its own line at WARNING before entering D13 fallback loop; distinguishes pre-encode-origin from ffmpeg-origin fallback in operator scans.
+def LogPreEncodeFallback(MediaFileId: int, PreEncodeError: str) -> None:
+    LoggingService.LogWarning(
+        f"PreEncodePartialFallback MediaFileId={MediaFileId} pre_encode_error={(PreEncodeError or '')[:500]!r} "
+        f"first_fallback=AudioSlot (sniff bypassed; side known a priori)",
+        "PartialCompletion", "LogPreEncodeFallback",
+    )

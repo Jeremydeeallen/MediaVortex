@@ -7,22 +7,14 @@ from Core.Logging.LoggingService import LoggingService
 _PREMIX_KEYS = ('DemucsPremixPath', 'VocalsRmsDbfs', 'PremixMeasuredI', 'PremixMeasuredLra', 'PremixMeasuredTp', 'PremixMeasuredThresh')
 
 
-# directive: preencode-loudness-cache-hit | # see audio-normalization.C8
+# directive: bug-0093-preencode-fail-loud-via-d13 -- pre-encode failure raises; caller (JobProcessor) routes via transcode.D13. Silent swallower removed.
 def Prepare(FfmpegPath, InputPath, JobId, ProgressReporter=None, MediaFileId=None):
-    """Run Demucs pre-encode pipeline; return dict with premix path + measurements. None on empty input."""
     if not InputPath:
         return None
-    try:
-        from Features.AudioNormalization.Services.PreEncodeAudioPipeline import PreEncodeAudioPipeline
-        return PreEncodeAudioPipeline(
-            FfmpegPath=FfmpegPath, PythonExe=sys.executable, ProgressReporter=ProgressReporter,
-        ).Run(InputPath, JobId, MediaFileId=MediaFileId)
-    except Exception as Ex:
-        LoggingService.LogException(
-            f"AudioPreEncodeFacade.Prepare failed for JobId={JobId}; Dialog Boost will be skipped",
-            Ex, "AudioPreEncodeFacade", "Prepare",
-        )
-        return {'DemucsPremixPath': None, 'VocalsRmsDbfs': None, 'ScratchDir': None}
+    from Features.AudioNormalization.Services.PreEncodeAudioPipeline import PreEncodeAudioPipeline
+    return PreEncodeAudioPipeline(
+        FfmpegPath=FfmpegPath, PythonExe=sys.executable, ProgressReporter=ProgressReporter,
+    ).Run(InputPath, JobId, MediaFileId=MediaFileId)
 
 
 # directive: audio-dialog-boost-real | # see audio-normalization.C8
@@ -34,14 +26,13 @@ def EnrichContext(Context, PreAudio):
         Context[Key] = (PreAudio or {}).get(Key)
 
 
-# directive: dialog-boost-marker-unify | # see dialog-boost-marker-unify.C2
+# directive: bug-0093-preencode-fail-loud-via-d13 -- pre-encode failure never reaches PersistMeta (JobProcessor routes to D13 before this call); DemucsFailed sentinel key removed.
 def PersistMeta(TranscodeAttemptId, PreAudio):
     if not PreAudio:
         return
     VocalsRms = PreAudio.get('VocalsRmsDbfs')
     PremixPath = PreAudio.get('DemucsPremixPath')
-    DemucsFailed = bool(PreAudio.get('DemucsFailed'))
-    if VocalsRms is None and not PremixPath and not DemucsFailed:
+    if VocalsRms is None and not PremixPath:
         return
     from Features.AudioNormalization.Repositories.AudioComplianceRulesRepository import AudioComplianceRulesRepository
     from Core.Database.DatabaseService import DatabaseService

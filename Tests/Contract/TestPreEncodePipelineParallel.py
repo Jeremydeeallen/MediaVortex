@@ -121,19 +121,18 @@ class TestPreEncodePipelineParallel(unittest.TestCase):
         # Sequential predecessor would be ~0.60s (0.30 + 0.30). Parallel should be near 0.30s + orchestration overhead. Allow 0.55s cap.
         self.assertLess(Elapsed, 0.55, f"parallel wall {Elapsed:.3f}s should beat sequential 0.60s")
 
-    # directive: pre-encode-pipeline-parallel -- C4 failure propagation: SourceMeasure raise surfaces after chain completes
+    # directive: bug-0093-preencode-fail-loud-via-d13 -- C4 failure propagation: SourceMeasure raise propagates to caller (JobProcessor routes via transcode.D13)
     def test_source_measure_exception_propagates_after_chain_join(self):
         Demucs = _FakeDemucs(
             SourceMeasureDelay=0.05,
             SourceMeasureExc=RuntimeError("loudnorm subprocess exit 1"),
         )
         P = _BuildPipeline(Demucs, ScratchRoot='/tmp')
-        Result = P.Run('/src/movie.mkv', JobId=1)
-        # Per C39, exception is caught by Run's outer try/except and returned as DemucsFailed dict
-        self.assertTrue(Result.get('DemucsFailed'))
-        self.assertIn('RuntimeError', Result.get('DemucsFailureReason', ''))
+        with self.assertRaises(RuntimeError) as Ctx:
+            P.Run('/src/movie.mkv', JobId=1)
+        self.assertIn("loudnorm subprocess exit 1", str(Ctx.exception))
 
-    # directive: pre-encode-pipeline-parallel -- C4 failure propagation: chain exception waits for peer join then propagates
+    # directive: bug-0093-preencode-fail-loud-via-d13 -- C4 failure propagation: chain exception waits for peer join then raises to caller
     def test_chain_exception_waits_for_source_measure_before_raising(self):
         Demucs = _FakeDemucs(
             SourceMeasureDelay=0.20,
@@ -141,10 +140,10 @@ class TestPreEncodePipelineParallel(unittest.TestCase):
         )
         P = _BuildPipeline(Demucs, ScratchRoot='/tmp')
         Start = time.perf_counter()
-        Result = P.Run('/src/movie.mkv', JobId=1)
+        with self.assertRaises(RuntimeError) as Ctx:
+            P.Run('/src/movie.mkv', JobId=1)
         Elapsed = time.perf_counter() - Start
-        self.assertTrue(Result.get('DemucsFailed'))
-        self.assertIn('demucs daemon', Result.get('DemucsFailureReason', ''))
+        self.assertIn("demucs daemon", str(Ctx.exception))
         # Chain fails immediately; SourceMeasure needs its 0.20s. Peer join means total >= 0.20s.
         self.assertGreaterEqual(Elapsed, 0.19)
 

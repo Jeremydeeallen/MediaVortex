@@ -245,6 +245,9 @@ class FileReplacementBusinessService:
 
             self._ArchiveOriginalFileDetails(OriginalPath, TranscodeAttemptId)
 
+            # directive: bug-0093-preencode-fail-loud-via-d13 -- D13 PartialSuccess_* dispositions bypass ComplianceGate: the gate would re-refuse an intentionally-partial output (e.g. AudioSlotCopied lacks Dialog Boost) and defeat the "preserve the good half; enqueue a follow-up for the bad half" contract. D13 IS the compliance decision for partial-success outputs.
+            DisposReason = str(DispositionRow.get('DispositionReason') or '')
+            IsPartialSuccess = DisposReason.startswith('PartialSuccess_')
             from Features.FileReplacement.TranscodedOutputPlacement import TranscodedOutputPlacement
             replacement_result = TranscodedOutputPlacement(
                 self.DatabaseManager, self.FileManager, WorkerName=self.WorkerName
@@ -253,7 +256,7 @@ class FileReplacementBusinessService:
                 FFmpegCommand=getattr(transcode_attempt, 'FfpmpegCommand', None),
                 SourceMediaFileId=SourceMediaFileId,
                 Mode=AttemptMode,
-                RunComplianceGate=ModeMeta['RequiresProfileGates'],
+                RunComplianceGate=ModeMeta['RequiresProfileGates'] and not IsPartialSuccess,
             )
 
             if replacement_result.get('Success', False):
