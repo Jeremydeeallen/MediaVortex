@@ -548,10 +548,12 @@ Detector fires -> HandleJobFailure marks attempt failed -> re-set queue row to P
 
 ---
 
-### [BUG-0090] Subtitle streams with codec_name=none crash encode via -map 0:s?
-**Date:** 2026-08-07 | **Area:** subtitle-stream
+### [BUG-0090 -- RESOLVED 2026-09-08] Subtitle streams with codec_name=none crash encode via -map 0:s?
+**Date:** 2026-08-07 -> 2026-09-08 | **Area:** subtitle-stream
 
-**What breaks:** `-map 0:s?` includes every subtitle stream unconditionally; the `?` guards "no matching stream", not "matching-but-undecodable stream". When ffprobe reports a subtitle stream with `codec_name=none` (data stream mistagged as subtitle, or codec not registered), ffmpeg crashes on transcode: `[sist#0:23/none @ ...] Decoding requested, but no decoder found for: none / [sost#0:24/mov_text @ ...]`. Linux exit code 234.
+**Resolution:** Directive `bug-0090-subtitle-codec-filter`. `SubtitleSlot` now whitelists `TEXT_SUB_CODECS` (subrip / srt / ass / ssa / mov_text / tx3g / webvtt / vtt / microdvd / text) and drops `IMAGE_SUB_CODECS`, `UNDECODABLE_SUB_CODECS` = {'unknown', 'none', 'null', ''}, and any other codec name. Per-stream `-map 0:<idx>?` for survivors when `SubtitleStreams=[(idx,codec),...]` present; legacy shortcut retained for all-text sources without per-stream probe. Each drop logs `(index, codec)` at INFO level. Live smoke on I9-2024 with MediaFileId 701985 (Tom & Jerry S02E18, 3x undecodable subs): attempt 89361 completed Success=TRUE in 20.5s; output MP4 has zero subtitle streams (previously crashed rc=234). `Tests/Contract/TestSubtitleSlotCodecFilter.py` 8/8 PASS.
+
+**What broke:** `-map 0:s?` includes every subtitle stream unconditionally; the `?` guards "no matching stream", not "matching-but-undecodable stream". When ffprobe reports a subtitle stream with `codec_name=none` (data stream mistagged as subtitle, or codec not registered), ffmpeg crashes on transcode: `[sist#0:23/none @ ...] Decoding requested, but no decoder found for: none / [sost#0:24/mov_text @ ...]`. Linux exit code 234.
 
 **Repro:** 2026-08-07, attempt 57447 on dot-worker-1, MediaFileId 692213. Recurs on any source carrying a subtitle stream with codec_name in {'none', 'unknown', 'null'}.
 
