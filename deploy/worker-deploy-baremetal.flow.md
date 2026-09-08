@@ -119,6 +119,7 @@ Restart=always
 RestartSec=10
 TimeoutStopSec=1800
 KillSignal=SIGTERM
+MemoryMax=18G
 LimitNOFILE=65536
 
 [Install]
