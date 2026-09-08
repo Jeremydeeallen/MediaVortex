@@ -264,9 +264,9 @@ def StepGarbageCollect(Target: str) -> bool:
     # see .claude/rules/worker-deploy.md
     Script = (
         f"cd /opt/mediavortex && "
-        f"ls -1t src-* 2>/dev/null | grep -v -- '-legacy-' | tail -n +{KeepVersions + 1} | "
+        f"ls -1td src-*/ 2>/dev/null | grep -v -- '-legacy-' | tail -n +{KeepVersions + 1} | "
         f"  xargs -r -I {{}} rm -rf {{}} && "
-        f"ls -1t host-venv-* 2>/dev/null | grep -v -- '-legacy-' | tail -n +{KeepVersions + 1} | "
+        f"ls -1td host-venv-*/ 2>/dev/null | grep -v -- '-legacy-' | tail -n +{KeepVersions + 1} | "
         f"  xargs -r -I {{}} rm -rf {{}} && "
         "echo GC_OK"
     )
