@@ -122,8 +122,8 @@ class TestG5VocalsBelowFallbackSkip(unittest.TestCase):
             DemucsPremixPath='/tmp/premix.wav', VocalsRmsDbfs=-30.0,
         )
         self.assertEqual(len(Blocks), 2)
-        self.assertEqual(Blocks[0].Label, 'Original')
-        self.assertEqual(Blocks[1].Label, 'Dialog Boost')
+        self.assertEqual(Blocks[0].Label, 'Dialog Boost')
+        self.assertEqual(Blocks[1].Label, 'Original')
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C8
     def test_emit_tracks_track0_is_default_when_track1_skipped(self):
@@ -147,8 +147,8 @@ class TestG5VocalsBelowFallbackSkip(unittest.TestCase):
             DemucsPremixPath='/tmp/premix.wav', VocalsRmsDbfs=-20.0,
         )
         self.assertEqual(len(Blocks), 2)
-        self.assertIn('0', Blocks[0].DispositionArgs)
-        self.assertIn('1', Blocks[1].DispositionArgs)
+        self.assertIn('1', Blocks[0].DispositionArgs)
+        self.assertIn('0', Blocks[1].DispositionArgs)
 
 
 if __name__ == '__main__':

@@ -41,6 +41,10 @@ class AudioSlot:
                 None,
             )
         SourceStreams = self.StreamProbe.Probe(Context.get('InputPath')) or None
+        if SourceStreams:
+            # directive: dialog-boost-emission-integrity | # see .claude/directive.md C2
+            from Features.AudioNormalization.SourceAudioTrackSelector import SelectTrueSourceStreams
+            SourceStreams = SelectTrueSourceStreams(SourceStreams)
         Blocks = self.Emitter.EmitTracks(
             MediaFile, Policy, AudioStreams=SourceStreams,
             DemucsPremixPath=Context.get('DemucsPremixPath'),

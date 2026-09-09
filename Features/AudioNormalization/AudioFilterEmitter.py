@@ -139,17 +139,15 @@ class AudioFilterEmitter:
         EmitDialogBoost = self._ShouldEmitDialogBoost(DemucsPremixPath, VocalsRmsDbfs, R['Track1VocalsRmsFallbackDbfs'])
         Blocks = []
         OutputIndex = 0
+        # directive: dialog-boost-emission-integrity | # see .claude/directive.md C1 -- boost is per-file, emit once before per-stream Original loop.
+        if EmitDialogBoost:
+            Blocks.append(self._BuildDialogBoostBlock(DefaultLanguage, OutputIndex, DemucsPremixPath, R, PremixMeasuredI, PremixMeasuredLra, PremixMeasuredTp, PremixMeasuredThresh))
+            OutputIndex += 1
         for Stream in AudioStreams:
             StreamIdx = Stream.get('index', 0)
             Language = StreamLanguageMap.get(StreamIdx, 'und')
-            IsDefaultLanguage = (Language == DefaultLanguage)
-            # directive: e2e-bug-fixes | # see e2e-bug-fixes.C26 -- Boost at Track 0 so index-blind TVs get it; default flag on Track 0 stays consistent.
-            if EmitDialogBoost and IsDefaultLanguage:
-                Blocks.append(self._BuildDialogBoostBlock(Language, OutputIndex, DemucsPremixPath, R, PremixMeasuredI, PremixMeasuredLra, PremixMeasuredTp, PremixMeasuredThresh))
-                OutputIndex += 1
-                Blocks.append(self._BuildOriginalBlock(MediaFile, Stream, Language, StreamIdx, OutputIndex, False, R))
-            else:
-                Blocks.append(self._BuildOriginalBlock(MediaFile, Stream, Language, StreamIdx, OutputIndex, IsDefaultLanguage, R))
+            IsDefault = (Language == DefaultLanguage) and not EmitDialogBoost
+            Blocks.append(self._BuildOriginalBlock(MediaFile, Stream, Language, StreamIdx, OutputIndex, IsDefault, R))
             OutputIndex += 1
         return Blocks
 

@@ -159,20 +159,31 @@ class PreEncodeAudioPipeline:
                     Ex, "PreEncodeAudioPipeline", "Cleanup",
                 )
 
-    # directive: audio-dialog-boost-real | # see audio-normalization.C14
+    # directive: dialog-boost-emission-integrity | # see .claude/directive.md C2 -- raises PriorBoostSourceError when source is prior-boost-only.
     def _SelectPreferredAudioIndex(self, SourceFilePath):
-        # Pick English track if present; fall back to first audio. Multi-language sources (Bluray with fre+eng) used to blindly grab a:0 -- Dialog Boost then contained boosted French mislabeled 'Dialog Boost (eng)'.
+        from Features.AudioNormalization.Services.AudioStreamProbe import AudioStreamProbe
+        from Features.AudioNormalization.SourceAudioTrackSelector import SelectTrueSourceStreams
+        Streams = AudioStreamProbe(FFprobePath=self.FFprobePath).Probe(SourceFilePath)
+        TrueStreams = SelectTrueSourceStreams(Streams)
+        if not TrueStreams:
+            return 0
+        AllowedIndices = {int(S.get('index')) for S in TrueStreams if S.get('index') is not None}
         try:
             from Services.FFmpegAnalysisService import FFmpegAnalysisService
             Analysis = FFmpegAnalysisService(FFprobePath=self.FFprobePath).AnalyzeMediaFile(SourceFilePath)
-            if Analysis is not None and getattr(Analysis, 'AudioStreamIndex', None) is not None:
-                return int(Analysis.AudioStreamIndex)
+            Preferred = getattr(Analysis, 'AudioStreamIndex', None) if Analysis is not None else None
+            if Preferred is not None and int(Preferred) in AllowedIndices:
+                return int(Preferred)
         except Exception as Ex:
             LoggingService.LogWarning(
-                f"PreEncodeAudioPipeline: preferred-audio probe failed for {SourceFilePath}: {Ex}; falling back to a:0",
+                f"PreEncodeAudioPipeline: FFmpegAnalysisService preference lookup failed for {SourceFilePath}: {Ex}; picking first true-source stream",
                 "PreEncodeAudioPipeline", "_SelectPreferredAudioIndex",
             )
-        return 0
+        for S in TrueStreams:
+            Tags = S.get('tags') or {}
+            if str(Tags.get('language') or '').lower() in ('eng', 'en'):
+                return int(S.get('index'))
+        return int(TrueStreams[0].get('index'))
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
     def _ExtractStereoDownmix(self, SourceFilePath, ScratchDir):

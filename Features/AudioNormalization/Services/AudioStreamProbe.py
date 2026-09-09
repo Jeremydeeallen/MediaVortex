@@ -27,7 +27,7 @@ class AudioStreamProbe:
             return []
         Cmd = [
             Ffprobe, '-v', 'error', '-select_streams', 'a',
-            '-show_entries', 'stream=index,channels,channel_layout:stream_tags=language:stream_disposition=default',
+            '-show_entries', 'stream=index,channels,channel_layout:stream_tags=language,title,handler_name:stream_disposition=default',
             '-of', 'json', LocalSourcePath,
         ]
         try:
