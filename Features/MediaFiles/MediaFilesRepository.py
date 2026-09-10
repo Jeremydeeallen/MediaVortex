@@ -731,22 +731,38 @@ class MediaFilesRepository(BaseRepository):
         )
         return int(Affected) if Affected is not None else 0
 
-    def SelectPurgeCandidates(self, StorageRootId: int, Categories: List[str], LandscapeOnly: bool, ExcludeFilenamePrefixes: Optional[List[str]] = None) -> list:
-        """Select Id + canonical-path + SizeMb for MediaFiles matching (storage root, resolution categories, optional landscape width>=height), with optional case-insensitive filename-prefix exclusions."""
+    def SelectPurgeCandidates(self, StorageRootId: int, Categories: Optional[List[str]] = None, Orientation: str = "any", ExcludeFilenamePrefixes: Optional[List[str]] = None, MaxShortSide: Optional[int] = None) -> list:
+        """Select Id + canonical-path + SizeMb for MediaFiles filtered by storage root + optional categories (post-classifier bin) + Orientation {'landscape','portrait','any'} + optional MaxShortSide (LEAST(w,h) < N) + optional case-insensitive filename-prefix exclusions."""
+        if Orientation not in ("landscape", "portrait", "any"):
+            raise ValueError(f"Orientation must be landscape|portrait|any, got {Orientation!r}")
         Q = (
             "SELECT mf.Id AS Id, "
             "sr.CanonicalPrefix || replace(mf.RelativePath, '/', '\\') AS CanonicalPath, "
             "mf.SizeMB AS SizeMb "
             "FROM MediaFiles mf "
             "JOIN StorageRoots sr ON sr.Id = mf.StorageRootId "
-            "WHERE mf.StorageRootId = %s "
-            "  AND mf.ResolutionCategory = ANY(%s)"
+            "WHERE mf.StorageRootId = %s"
         )
-        Params: list = [StorageRootId, list(Categories)]
-        if LandscapeOnly:
+        Params: list = [StorageRootId]
+        if Categories:
+            Q = Q + " AND mf.ResolutionCategory = ANY(%s)"
+            Params.append(list(Categories))
+        if MaxShortSide is not None:
+            Q = Q + (
+                " AND LEAST("
+                "CAST(split_part(mf.Resolution, 'x', 1) AS INTEGER), "
+                "CAST(split_part(mf.Resolution, 'x', 2) AS INTEGER)) < %s"
+            )
+            Params.append(int(MaxShortSide))
+        if Orientation == "landscape":
             Q = Q + (
                 " AND CAST(split_part(mf.Resolution, 'x', 1) AS INTEGER) "
                 ">= CAST(split_part(mf.Resolution, 'x', 2) AS INTEGER)"
+            )
+        elif Orientation == "portrait":
+            Q = Q + (
+                " AND CAST(split_part(mf.Resolution, 'x', 1) AS INTEGER) "
+                "< CAST(split_part(mf.Resolution, 'x', 2) AS INTEGER)"
             )
         if ExcludeFilenamePrefixes:
             Patterns = [f"{EscapeLikePattern(P)}%" for P in ExcludeFilenamePrefixes]

@@ -32,6 +32,7 @@ def Main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--delete-disk", action="store_true")
+    ap.add_argument("--orientation", choices=["landscape", "portrait", "any"], default="landscape")
     args = ap.parse_args()
 
     if args.delete_disk and not args.commit:
@@ -39,14 +40,14 @@ def Main():
         sys.exit(2)
 
     mode = "COMMIT" if args.commit else "DRY-RUN"
-    print(f"=== PurgeXxxLandscapeLe720p [{mode}] ===")
+    print(f"=== PurgeXxxLe720p [{mode}] orientation={args.orientation} ===")
 
     repo = MediaFilesRepository()
 
     rows = repo.SelectPurgeCandidates(
         STORAGE_ROOT_ID_XXX,
         CATEGORIES,
-        LandscapeOnly=True,
+        Orientation=args.orientation,
         ExcludeFilenamePrefixes=EXCLUDE_FILENAME_PREFIXES,
     )
     ids = [int(r["Id"]) for r in rows]
