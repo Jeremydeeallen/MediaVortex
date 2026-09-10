@@ -22,6 +22,9 @@ Logs/
 /admin-workers-*.png
 /*.png
 
+# One-shot purge candidate CSVs (ephemeral, path lists at repo root)
+/*_delete_candidates.csv
+
 # Pipeline test harness mutable spool (real file backups + Jellyfin capture)
 Tests/Pipeline/_backup/*
 !Tests/Pipeline/_backup/.gitkeep

@@ -41,6 +41,18 @@ def _ParsePath(CanonicalString: str) -> Optional[Path]:
         return None
 
 
+_PURGE_TARGETS = [
+    ("FailureBudgetResets",         "MediaFileId"),
+    ("MediaFileLanguageDetections", "MediaFileId"),
+    ("ProblemFiles",                "MediaFileId"),
+    ("TranscodeQueue",              "MediaFileId"),
+    ("TranscodeAttempts",           "MediaFileId"),
+    ("TranscodeFiles",              "MediaFileId"),
+    ("MediaFilesArchive",           "Id"),
+    ("MediaFiles",                  "Id"),
+]
+
+
 # directive: path-schema-migration | # see path.S8
 class MediaFilesRepository(BaseRepository):
     """SQL for MediaFiles, MediaFilesArchive, and Seasons; typed pair (StorageRootId, RelativePath) is canonical."""
@@ -718,6 +730,63 @@ class MediaFilesRepository(BaseRepository):
             (list(Ids),),
         )
         return int(Affected) if Affected is not None else 0
+
+    def SelectPurgeCandidates(self, StorageRootId: int, Categories: List[str], LandscapeOnly: bool, ExcludeFilenamePrefixes: Optional[List[str]] = None) -> list:
+        """Select Id + canonical-path + SizeMb for MediaFiles matching (storage root, resolution categories, optional landscape width>=height), with optional case-insensitive filename-prefix exclusions."""
+        Q = (
+            "SELECT mf.Id AS Id, "
+            "sr.CanonicalPrefix || replace(mf.RelativePath, '/', '\\') AS CanonicalPath, "
+            "mf.SizeMB AS SizeMb "
+            "FROM MediaFiles mf "
+            "JOIN StorageRoots sr ON sr.Id = mf.StorageRootId "
+            "WHERE mf.StorageRootId = %s "
+            "  AND mf.ResolutionCategory = ANY(%s)"
+        )
+        Params: list = [StorageRootId, list(Categories)]
+        if LandscapeOnly:
+            Q = Q + (
+                " AND CAST(split_part(mf.Resolution, 'x', 1) AS INTEGER) "
+                ">= CAST(split_part(mf.Resolution, 'x', 2) AS INTEGER)"
+            )
+        if ExcludeFilenamePrefixes:
+            Patterns = [f"{EscapeLikePattern(P)}%" for P in ExcludeFilenamePrefixes]
+            Q = Q + " AND NOT EXISTS (SELECT 1 FROM unnest(%s::text[]) AS pat WHERE mf.FileName ILIKE pat ESCAPE '!')"
+            Params.append(Patterns)
+        return self.DatabaseService.ExecuteQuery(Q, tuple(Params))
+
+    def CountMediaFileReferences(self, Ids: List[int]) -> dict:
+        """Return per-table row counts referencing the given MediaFile Ids across every purge target."""
+        if not Ids:
+            return {T: 0 for T, _ in _PURGE_TARGETS}
+        Out = {}
+        for Table, Key in _PURGE_TARGETS:
+            Out[Table] = int(self.DatabaseService.ExecuteScalar(
+                f"SELECT count(*) FROM {Table} WHERE {Key} = ANY(%s)",
+                (list(Ids),),
+            ) or 0)
+        return Out
+
+    def PurgeMediaFilesById(self, Ids: List[int]) -> dict:
+        """Atomically DELETE rows across every MediaFile-referencing table + archive + MediaFiles itself in one TX. Returns per-table affected counts."""
+        Out = {T: 0 for T, _ in _PURGE_TARGETS}
+        if not Ids:
+            return Out
+        Connection = self.DatabaseService.GetConnection()
+        try:
+            Cursor = Connection.cursor()
+            for Table, Key in _PURGE_TARGETS:
+                Cursor.execute(
+                    f"DELETE FROM {Table} WHERE {Key} = ANY(%s)",
+                    (list(Ids),),
+                )
+                Out[Table] = Cursor.rowcount
+            Connection.commit()
+            return Out
+        except Exception:
+            Connection.rollback()
+            raise
+        finally:
+            self.DatabaseService.CloseConnection(Connection)
 
     # directive: ingest-pipeline-kiss
     def SetNeedsReprobe(self, MediaFileId: int) -> bool:
