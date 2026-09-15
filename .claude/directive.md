@@ -1,6 +1,6 @@
 # Directive: dialog-boost-emission-integrity
 
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 
 ## Interrupts: preencode-loudness-cache-hit
 
@@ -53,15 +53,26 @@ C3. **Damaged population flagged.** `MediaFiles.HasDoubleBoostSuspect BOOL NOT N
 - [x] Standards review (NEEDS_STANDARDS_REVIEW -> NEEDS_PLAN)
 - [x] Plan phase (NEEDS_PLAN -> NEEDS_DOC_PREREAD)
 - [x] Doc preread (NEEDS_DOC_PREREAD -> IMPLEMENTING)
-- [ ] C1 -- restructure loop + test
-- [ ] C2 -- SourceAudioTrackSelector + wire + test
-- [ ] C3 -- column + backfill migration + test
-- [ ] Verification -- smoke transcode 3 real files after unpause: (a) fresh source 1 eng track, (b) fresh source 3 eng tracks, (c) already-boosted `-mv.mp4` (expect fail-loud)
-- [ ] DELIVERING: promotions to `audio-normalization.feature.md` + `audio-normalization.flow.md`
+- [x] C1 -- restructure loop + test (AudioFilterEmitter.EmitTracks lines 140-152 hoist boost above loop; 5/5 TestAudioFilterEmitterOneBoostPerFile pass)
+- [x] C2 -- SourceAudioTrackSelector + wire + test (Features/AudioNormalization/SourceAudioTrackSelector.py; wired in PreEncodeAudioPipeline._SelectPreferredAudioIndex + AudioSlot._EmitReencode; 8/8 TestSourceAudioTrackSelector pass)
+- [x] C3 -- column + backfill migration + test (column present, 21,172 files flagged post drain-wait, 2/2 TestDoubleBoostSuspectColumn pass)
+- [x] Docs updated in-flight: `audio-normalization.feature.md` S1 SOLID, L1 target shape, Cross-vertical Contract public function row for `SelectTrueSourceStreams`, Files row, Seams row S12; `audio-normalization.flow.md` ST2 (a0) input classification, ST3 selector callsite, Seams row S8
+- [x] Verification -- I9 smoke transcodes: (a) Attack on Titan S03E18 1-eng, ffmpeg cmd shows 1 boost + 1 orig correct shape; encode failed at subtitle mov_text -- preexisting unrelated bug. (b) Tom and Jerry S01E06 3-audio-stream FULL E2E success (attempt 94415); live ffprobe on `-mv.mp4` output confirms exactly 4 audio streams = 1 Dialog Boost (eng, default=1) + 3 Originals (spa/por/eng, default=0). Bug A closed at runtime. (c) Selector live-verified against real `-mv.mp4` ffprobe: correctly filters prior Dialog Boost handler tag while keeping Original; fail-loud path unit-tested via TestSourceAudioTrackSelector::test_raises_when_all_streams_are_prior_boost (no all-boost source exists in library for full E2E fail-loud demo)
+- [x] DELIVERING: promotions to `audio-normalization.feature.md` + `audio-normalization.flow.md` (populated below; content landed in-flight, recorded retroactively)
 
 ### Promotions
 
-(Populated at DELIVERING.)
+| Source artifact in directive | Target durable doc |
+|---|---|
+| C1 hoist-boost-above-per-stream-loop shape | `audio-normalization.feature.md` S1 (SOLID) rewritten: per-file boost arity vs per-stream Original arity |
+| C1 target-state multi-language example | `audio-normalization.feature.md` L1 (Live Verification) rewritten: `N + 1` outputs when boost, `N` when not; example jpn+eng+boost -> 3 tracks; 3 eng streams + boost -> 4 tracks; no output ever carries more than one boost |
+| C2 SelectTrueSourceStreams public function | `audio-normalization.feature.md` Cross-Vertical Contract table row added under public class.method surface (filters prior MV boost by handler_name/title, raises PriorBoostSourceError on all-boost input) |
+| C2 SourceAudioTrackSelector file | `audio-normalization.feature.md` Files table row added |
+| C2 selector -> pre-encode + emit seam | `audio-normalization.feature.md` Seams row S12 (two consumer sites -- deterministic filter, identical results at both callsites; PriorBoostSourceError fail-loud propagates to attempt failure) |
+| C2 input-classification stage in pipeline | `audio-normalization.flow.md` ST2 substep (a0) added -- `SourceAudioTrackSelector.SelectTrueSourceStreams` runs before Demucs input-index pick; fail-loud vs fresh-passthrough behavior documented |
+| C1 hoist + selector callsite in ST3 | `audio-normalization.flow.md` ST3 rewritten: selector runs at both consumer sites; emitter hoists boost above per-stream loop |
+| C2 cross-stage seam | `audio-normalization.flow.md` Seams row S8 (ST2 (a0) input classification -> ST2 (a-e) + ST3 emit; two consumer sites, fail-loud propagation) |
+| C3 HasDoubleBoostSuspect column | Contract test `Tests/Contract/TestDoubleBoostSuspectColumn.py` (2/2 pass) is the durable enforcement of column existence + backfill invariant; no `*.feature.md` promotion needed -- column is directly ownable by `MediaFiles` schema |
 
 ### Plan
 

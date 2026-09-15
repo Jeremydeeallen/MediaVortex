@@ -109,11 +109,17 @@ C42. PARALLEL_PREENCODE_ORCHESTRATION. `PreEncodeAudioPipeline.Run` MUST run `So
 
 ## SOLID Compliance
 
-S1. `AudioFilterEmitter.EmitTracks` orchestrates two per-block builders --
-`_BuildOriginalBlock` (Track 0) + `_BuildDialogBoostBlock` (Track 1). Each
-block owns its map / codec / filter / metadata / disposition slots via
-the `TrackBlock` dataclass. Shapes concatenate slots without knowing per-
-block internals. SRP at the block level.
+S1. `AudioFilterEmitter.EmitTracks` orchestrates two builders with distinct
+emission arity: `_BuildDialogBoostBlock` is per-FILE (0 or 1 call, hoisted
+ABOVE the per-stream loop; the block's `Language` is the resolved
+default-language for the file); `_BuildOriginalBlock` is per-STREAM (N
+calls, one per kept language stream, inside the loop). When a boost
+block is emitted, boost carries `disposition.default=1` and every
+Original block carries `=0`; when no boost, the default-language Original
+carries `=1`. Each block owns its map / codec / filter / metadata /
+disposition slots via the `TrackBlock` dataclass; shapes concatenate
+slots without knowing per-block internals. SRP at the block level;
+per-file vs per-stream separation is SRP at the emission-arity level.
 
 S2. The audio-state machine (`MarkAudioComplete`, `ResetAudioComplete`,
 `MarkAudioCorruptSuspect`, `EvaluateInitialAudioState`,
@@ -149,20 +155,26 @@ H1 cycle.
 
 ## Live Verification
 
-L1. Multi-language live encode -- a source MediaFile with 2 distinct
-language audio streams encodes through the emitter and produces 4 output
-streams (2 emit-tracks x 2 source languages). Each Original output tagged
-with its source language; each Dialog Boost output tagged with its source
-language. Exactly ONE output track carries `disposition.default=1`: the
-Dialog Boost in the source's per-stream default-language, falling back to
-library default, falling back to first present language. `EmitTracks`
-calls `_PickDefaultLanguage(AudioStreams, StreamLanguageMap,
-LibraryDefault)` once per emission and passes the per-track
-`IsDefaultLanguage` flag into `_BuildDispositionArgs`. Verified live on
-MediaFile 579 (Black Butler S01E06 Bluray-1080p.mkv, source: jpn opus
-stereo + eng opus 5.1; eng marked default): output had Original (jpn,
-default=0) / Original (eng, default=0) / Dialog Boost (jpn, default=0) /
-Dialog Boost (eng, default=1).
+L1. Multi-language live encode -- a source MediaFile with N distinct
+language audio streams encodes through the emitter and produces `N + 1`
+output streams when a boost is emitted (`N` Originals + 1 Dialog Boost),
+or `N` output streams when no boost. Every Original output is tagged
+with its source language; the single Dialog Boost output is tagged with
+the resolved default-language. Exactly ONE output track carries
+`disposition.default=1`: the Dialog Boost when emitted (its `Language`
+is the source's per-stream default, falling back to library default,
+falling back to first present language); otherwise the Original in the
+default-language. `EmitTracks` calls `_PickDefaultLanguage(AudioStreams,
+StreamLanguageMap, LibraryDefault)` once per emission and hoists the
+`_BuildDialogBoostBlock` call ABOVE the per-stream loop -- boost is a
+per-file artifact and cannot be emitted more than once per file
+regardless of how many source streams share the default language.
+Target-shape example: source with jpn + eng streams, eng default,
+boost enabled -> Original (jpn, default=0) / Original (eng, default=0) /
+Dialog Boost (eng, default=1). Source with 3 eng streams, boost
+enabled -> Original (eng, default=0) x 3 / Dialog Boost (eng,
+default=1). No emitted output ever carries more than one Dialog Boost
+track.
 
 Production wiring (so live transcode flow actually triggers the
 multi-language path): `AudioSlot` constructor-injects an
@@ -265,6 +277,7 @@ requires a directive.
 | Class.method | External caller(s) |
 |---|---|
 | `AudioFilterEmitter.EmitTracks(MediaFile, Policy, AudioStreams=None, LibraryDefault=None) -> List[TrackBlock]` | `Features/TranscodeJob/Emit/{Transcode,Remux,SubtitleFix}Shape.py` |
+| `SourceAudioTrackSelector.SelectTrueSourceStreams(Streams: List[dict]) -> List[dict]` (filters prior MediaVortex Dialog Boost tracks by `tags.handler_name` startswith `Dialog Boost` OR `tags.title == 'Dialog Boost'`; raises `PriorBoostSourceError` when input is non-empty but all streams are prior-boost) | `Features/TranscodeJob/Emit/Slots/AudioSlot._EmitReencode` (filters `AudioStreams` before invoking `EmitTracks`); `Features/AudioNormalization/Services/PreEncodeAudioPipeline._SelectPreferredAudioIndex` (filters before picking Demucs input index) |
 | `AudioPolicyResolver.GetEffectivePolicy(MediaFile) -> dict` | same three shapes |
 | `AudioStreamProbe.Probe(LocalSourcePath: str) -> list[dict]` (audio-only-indexed) | same three shapes |
 | `AudioPolicyAdmissionGate.AdmitOrDefer(MediaFile, IntendedProcessingMode=None) -> AdmissionDecision` | `Features/TranscodeQueue/QueueManagementBusinessService` |
@@ -328,6 +341,7 @@ vertical changes these freely:
 | S8 | Post-Encode Probe -> Dashboard | `PostEncodeMeasurementService.Probe` writes `TranscodeAttempts.AudioTracksEmittedJson` | `v_audio_consistency_summary` view aggregates per-StorageRootId bands; dashboard renders | `TestPostEncodeMeasurementService` 4 tests + live `SELECT * FROM v_audio_consistency_summary` |
 | S9 | PostEncodeAudioHandler -> Probe | `PostEncodeAudioHandler.HandlePostEncode(AttemptId, MediaFileId)` resolves canonical path -> invokes `PostEncodeMeasurementService.Probe` | `TranscodeAttempts.AudioTracksEmittedJson` row updated | `TestPostEncodeAudioHandler` with mocked probe |
 | S11 | Track builders -> alimiter argv | `_BuildTrack0Chain` + `_BuildDialogBoostBlock` compute `EffectiveTargetTp` (dBTP) -> `_DbToLinear` -> pass to `_AlimiterArg(LimitLinear)` | Helper raises `ValueError` if `LimitLinear` outside [0.0625, 1.0]; else emits `alimiter=level_in=1:level_out=1:limit=<x>:attack=1:release=50:level=false`. Both callers place the alimiter AFTER `loudnorm` in the chain. | `TestAlimiterRangeInvariant` matrix of source TP / integrated LUFS values -- asserts parsed `limit` always in range and always follows loudnorm |
+| S12 | SourceAudioTrackSelector -> pre-encode + emit | `SourceAudioTrackSelector.SelectTrueSourceStreams(Streams)` filters ffprobe streams by `tags.handler_name.startswith('Dialog Boost')` OR `tags.title == 'Dialog Boost'`; raises `PriorBoostSourceError` when input non-empty AND every stream is prior MediaVortex boost | Two consumer sites, deterministic filter -- results identical at both callsites: (a) `PreEncodeAudioPipeline._SelectPreferredAudioIndex` filters before picking the Demucs input stream (fail-loud propagates to `AudioPreEncodeFacade.Prepare` -> `JobProcessor.Process` -> attempt fails); (b) `AudioSlot._EmitReencode` filters `SourceStreams` before invoking `EmitTracks` (fail-loud propagates to `CommandComposer.Build` -> attempt fails). Neither Demucs input choice nor Original emission ever sees a prior boost track. | `Tests/Contract/TestSourceAudioTrackSelector.py` (handler_name / title / mixed / all-boost / fresh cases); I9 smoke of a `-mv.mp4` re-transcode expects `PriorBoostSourceError` at pre-encode |
 
 ## Status
 
@@ -340,7 +354,8 @@ C1-C38 shipped. Live-verified end-to-end across all six ProcessingModes
 | File | Role |
 |------|------|
 | Features/AudioNormalization/AudioPolicyResolver.py | 4-scope walk |
-| Features/AudioNormalization/AudioFilterEmitter.py | The seam: EmitTracks -> List[TrackBlock]; two-track (Original + Dialog Boost) per Source of Truth |
+| Features/AudioNormalization/AudioFilterEmitter.py | The seam: EmitTracks -> List[TrackBlock]; per-file Dialog Boost hoisted above per-stream Original loop |
+| Features/AudioNormalization/SourceAudioTrackSelector.py | Input classification: SelectTrueSourceStreams filters prior MediaVortex Dialog Boost tracks from ffprobe output; PriorBoostSourceError on all-boost input |
 | Features/AudioNormalization/Services/AudioPreEncodeFacade.py | Single facade for Demucs pre-encode + G5 persistence + scratch cleanup; called by JobProcessor + `_ProcessSingleVariant` |
 | Features/AudioNormalization/AudioPolicyAdmissionGate.py | Pre-queue gate + PolicyJson snapshot + BackfillAllPending (no time window) |
 | Features/AudioNormalization/Services/AudioStateService.py | Audio-state machine on MediaFile (S2; renamed from AudioCompletionService) |
