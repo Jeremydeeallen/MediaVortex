@@ -50,6 +50,11 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0002 | active | file-replacement | Silent-output Remux MediaFiles purge | 2026-05-16
 - BUG-0007 | active | activity-page | Worker capability toggle no UI refresh | 2026-05-22
 - BUG-0020 | active | worker-lifecycle | Workers must own processes end-to-end; -mv only when compliant (C3 FR-internal TFP leak absorbed by filereplacement-decompose 2026-06-02; C5 operator zero-candidate fleet pass remains) | 2026-05-26
+- BUG-0100 | active | compliance-gate | ComplianceGateFailed `invalid_loudness_measurement` on Doctor Who S08E10 (3x) despite plausible source + achieved measurements; validator reject-reason enumeration + fresh-read fix | 2026-09-15
+- BUG-0101 | active | observability | ComplianceGateFailed cluster is plurality of recent transcode failures; blocked on BUG-0095 (FailureClass taxonomy) to decompose sub-causes into countable buckets | 2026-09-15
+- BUG-0102 | active | subtitle-emit | mov_text `Result too large` (ffmpeg exit 4294967262) on oversized subtitle samples in mp4 output; add MAX_SUB_SAMPLE_BYTES filter alongside BUG-0090 whitelist | 2026-09-15
+- BUG-0103 | active | audio-pre-encode | Source unreadable (missing moov atom on Weeds S02E12 `-mv.mp4`); no source-readability preflight in PreEncodeAudioPipeline; downmix ffmpeg is first substep to crash. Fix: preflight ffprobe + SourceUnreadableError + operator-review routing; separate bug for FileReplacement pre-swap validation | 2026-09-15
+- BUG-0104 | active | video-encode | ffmpeg exit 218 / 4294967274 on source with yuv422p16le / yuv444p16le; VideoSlot lacks pix_fmt normalization to encoder-supported format | 2026-09-15
 
 ## Recently Resolved (last 10)
 

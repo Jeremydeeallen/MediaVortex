@@ -1801,6 +1801,124 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 
 ---
 
+### transcode-failure-scope-2026-09-15
+
+Scope commitment 2026-09-15: BUG-0100 through BUG-0104 are the CURRENT visible transcode failures. Work is bounded to this list. No adjacent scope creep.
+
+### [BUG-0100] Compliance gate rejects transcode with `invalid_loudness_measurement` despite plausible source + achieved measurements -- Doctor Who S08E10 3x
+**Date:** 2026-09-15 | **Area:** compliance-gate / audio-loudness
+
+**What breaks (symptom):** `ComplianceGateFailed: invalid_loudness_measurement` on TranscodeAttempts 91470 / 93257 / 93350 (MediaFileId 709363, Doctor Who 2005 S08E10 "In the Forest of the Night"), all Success=FALSE. Attempts land at ffmpeg-exit=0 but the post-encode compliance gate refuses to promote the `.inprogress` output. Cluster candidate -- same reason string appears on multiple recent failures.
+
+**Root class hypothesis:** `LoudnessMeasurementValidator.IsValid(MediaFile)` reads `MediaFiles.SourceIntegratedLufs / SourceLoudnessRangeLU / SourceTruePeakDbtp / SourceIntegratedThresholdLufs` and returns invalid. On this file the columns look plausible (`I=-22.44 LRA=14.5 TP=-1.97 Threshold=-33.23`). Three suspects, ranked:
+1. Gate reads a stale/pre-remeasure snapshot. `LoudnessMeasuredAt=2026-09-14 19:57` is AFTER attempt 93350 at 19:25 -- back-date via `AudioRemeasurementService.MarkForRemeasurement` may be masking the actual pre-attempt state.
+2. Validator has a rule beyond null-check (silence-floor predicate, `SourceIntegratedThresholdLufs > SourceIntegratedLufs` sanity, etc) that this file trips despite plausible numeric values.
+3. Achieved (post-encode) measurement fails a hidden check -- weakest suspect. `AudioTracksEmittedJson` on attempt 93350 shows both tracks measured (Boost I=-15.9 LRA=7.7 TP=-2.7; Original I=-23.2 LRA=3.1 TP=-4.3), tolerable numbers.
+
+**Principled fix (KISS):**
+1. Read `LoudnessMeasurementValidator.IsValid` source + `ComplianceGate.Evaluate` audio-loudness branch. Enumerate every reject reason the code can produce that surfaces as `invalid_loudness_measurement`; identify which fires on this file.
+2. If stale-snapshot bug -> gate reads fresh per `db-is-authority.md`, no `_cached_*`.
+3. If rule beyond null-check legitimately rejects Original LRA=3.1 as too-low-post-linear-loudnorm -> real quality gate; requeue policy needs a bump-CRF-or-give-up branch and `/AudioNormalization` review-queue routing per C6.
+4. NO bandaid: do not lower the threshold to make Doctor Who pass. Understand which rule fires + why.
+
+**Blockers / gates:** code read of validator + gate to enumerate reject reasons is a hard prerequisite. No hardware / operator gates.
+
+**Evidence:**
+- `SELECT SUBSTR(ErrorMessage,1,120) FROM TranscodeAttempts WHERE MediaFileId=709363 ORDER BY AttemptDate DESC LIMIT 5` returns 3 x `ComplianceGateFailed: invalid_loudness_measurement`.
+- `SELECT SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, SourceIntegratedThresholdLufs, LoudnessMeasuredAt FROM MediaFiles WHERE Id=709363` -> `-22.44 / 14.5 / -1.97 / -33.23 / 2026-09-14 19:57`.
+- `SELECT AudioTracksEmittedJson FROM TranscodeAttempts WHERE Id=93350` -> both tracks have plausible achieved measurements.
+
+---
+
+### [BUG-0101] ComplianceGateFailed cluster is the plurality of recent failures -- reason string is one bucket with N sub-causes hidden inside
+**Date:** 2026-09-15 | **Area:** compliance-gate / observability
+
+**What breaks (symptom):** Query `SELECT ErrorMessage FROM TranscodeAttempts WHERE Success=FALSE AND AttemptDate > NOW() - INTERVAL '3 days' AND ErrorMessage ILIKE 'Post-encode pipeline failed:%ComplianceGateFailed:%'` returns the plurality of recent failures. Reasons visible in samples: `invalid_loudness_measurement`, `n...`, `i...` (truncated). One error class, many sub-causes. Operator cannot see the breakdown without ad-hoc SQL.
+
+**Root class hypothesis:** `ComplianceGate.Evaluate` produces heterogeneous reject reasons packed into one text field. Failure surface (FailedJobs page, /Activity) treats them as one bucket. Root fix cannot target the top cause because the top cause is N distinct causes hidden behind one message.
+
+**Principled fix (KISS):**
+1. Decompose FIRST: `SELECT SPLIT_PART(SUBSTR(ErrorMessage, POSITION('ComplianceGateFailed: ' IN ErrorMessage) + 22, 60), CHR(10), 1) AS reason, COUNT(*) FROM ... GROUP BY reason ORDER BY 2 DESC` -- count each sub-cause across last 30 days.
+2. Rank reasons by frequency. Fix top-1 as its own directive; file others behind it.
+3. **File BUG-0095 (FailureClass column + FailedJobs page + regex classifier) as blocking dependency.** That work auto-decomposes ComplianceGate into named buckets and eliminates re-running manual SQL. BUG-0095 already tracked as active; prioritize it before iterating on cluster sub-causes.
+
+**Blockers / gates:** BUG-0095 (failure-class taxonomy) is the enabling infrastructure. Without it, every iteration on this cluster costs a manual SQL breakdown.
+
+**Evidence:** `SELECT REGEXP_REPLACE(SUBSTR(ErrorMessage,1,80),'[0-9]+','N','g') AS err_shape, COUNT(*) FROM TranscodeAttempts WHERE Success=FALSE AND AttemptDate > NOW() - INTERVAL '7 days' GROUP BY err_shape` -- ComplianceGateFailed variants as majority.
+
+---
+
+### [BUG-0102] Subtitle emit fails with mov_text `Result too large` (ffmpeg exit 4294967262 = ERANGE) -- caps every mp4 remux with any oversized subtitle sample
+**Date:** 2026-09-15 | **Area:** subtitle-emit
+
+**What breaks (symptom):** ffmpeg exits 4294967262 (= -34 = ERANGE) with tail `[sost#0:4/mov_text @ ...] Error encoding a frame: Result too large`. Any mkv-to-mp4 remux where a subtitle sample exceeds mov_text's per-sample byte limit fails. Confirmed 2026-09-15 on smoke (a) attempt 94412 (MediaFileId 41072, Attack on Titan S03E18 1080p Bluray). Related failures 93308 / 93318 / 93260 (return codes 218 / 4294967274 / 4294967262) show the same pattern-shape.
+
+**Root class hypothesis:** mp4's mov_text codec has a hard per-sample byte cap (~2048 bytes). Long subtitle lines (song-lyrics karaoke, ASS style-heavy captions, PGS-to-text conversion overflow, single-sample "sing-along" text blocks) exceed the cap and ffmpeg refuses to emit. Current subtitle emission (`Features/TranscodeJob/Emit/Slots/SubtitleSlot`) whitelists text codecs (BUG-0090 RESOLVED 2026-09-08) but does not preflight for oversized samples.
+
+**Principled fix (KISS):** three options, ranked cheapest-first:
+1. **Drop the offending subtitle stream** at emit time -- add a preflight ffprobe pass measuring max sample size per subtitle stream; skip streams whose max > 2000 bytes. Log the drop with source stream index + max size + total streams dropped. One file to change (SubtitleSlot), one preflight, one log line. Extends BUG-0090's TEXT_SUB_CODECS whitelist with a MAX_SUB_SAMPLE_BYTES clause.
+2. **Split long samples** via a wrapping ffmpeg-filter chain. More work; preserves content. Second-order concern: split-samples may lose lyric-line timing.
+3. **Route affected files through a subtitle-transcode variant** muxing into mkv rather than mp4 (constraint doesn't apply). Deep -- ProcessingMode change + downstream container decision. Not KISS.
+
+Recommend (1). Dropping subtitles loses operator content, but oversized mov_text is impossible in mp4 by container spec -- the loss is intrinsic. Log + route affected sources to `/AudioNormalization`-style operator review if drop rate exceeds threshold.
+
+**Blockers / gates:** none technical. Operator judgment on drop-vs-split policy. BUG-0089 (argfile for 32k-char cmdline) is adjacent -- same class ("streams overflow tool limits") different fix path.
+
+**Evidence:** Smoke (a) 2026-09-15 ErrorMessage: `Remux failed: Transcoding failed with return code 4294967262 / FFmpeg output tail: ... [sost#0:4/mov_text ...] Error encoding a frame: Result too large / Task finished with error code: -34 (Result too large)`.
+
+---
+
+### [BUG-0103] Pre-encode enters expensive substeps on unreadable source -- Weeds S02E12 `-mv.mp4` has no moov atom, downmix ffmpeg crashes first with "Invalid data found when processing input"
+**Date:** 2026-09-15 | **Area:** audio-pre-encode / source-integrity
+
+**What breaks (symptom):** TranscodeAttempts.Id 93390 (MediaFileId 617826, `Weeds - S02E12 - Pittsburgh Bluray-480p-mv.mp4`) ErrorMessage full body: `AudioFix failed after pre-encode Demucs failure + AudioSlot=Copy ffmpeg failure: pre_encode=RuntimeError: stereo downmix failed (exit 183): ... [in#0 @ ...] moov atom not found / [in#0 @ ...] Error opening input: Invalid data found when processing input / Error opening input file /mnt/media_tv/Weeds/Season 2/...-mv.mp4`. Source file itself is corrupt -- missing `moov` atom = malformed mp4 = ffmpeg cannot open. Downmix is where the crash first surfaces; the real fault is entering pre-encode at all.
+
+**Root class hypothesis:** two-tier failure.
+
+Tier 1 (proximate, in this vertical): `PreEncodeAudioPipeline.Run` has no source-readability preflight. Substeps (a) SourceMeasure, (b) Downmix, (c) Demucs each spawn separate ffmpeg subprocesses; whichever runs first on an unreadable source crashes. Downmix happens to be substep (b), so its ffmpeg exit surfaces first as `RuntimeError: stereo downmix failed`. If Downmix were reordered, the same file would crash at a different substep with a different-shaped error.
+
+Tier 2 (upstream, cross-vertical): a previous transcode wrote a corrupt `-mv.mp4` (crash before moov flush, or interrupted mid-fault), and `Features/FileReplacement/TranscodedOutputPlacement` replaced source `.mkv` with that corrupt output WITHOUT validating it was readable. The `MediaFile.FilePath` now points at unopenable bytes. Compliance re-flags on next scan, re-queues, pre-encode chokes forever.
+
+**Principled fix (KISS + fail-loud + writer-owns-cascade):**
+
+1. **PreEncodeAudioPipeline preflight (this bug's owned change):** add `_ProbeSourceReadable(SourceFilePath)` as the first substep of `_RunDemucsChain`. Runs `ffprobe -show_format` (cheap, no stream decode). If exit != 0, raise `SourceUnreadableError(f"source unreadable: {SourceFilePath}: {ffprobe_stderr_tail}")`. `AudioPreEncodeFacade.Prepare` catches, JobProcessor routes to operator review with `AdmissionDeferReason='source_unreadable'`. NOT via D13 Copy fallback -- Copy fallback would ALSO fail on the same unreadable file; routing there just adds a second ffmpeg exec that produces the same crash. `source_unreadable` is a distinct terminal state, not a partial-completion.
+
+2. **FileReplacement guard (cross-vertical -- FILE SEPARATELY as its own bug):** `TranscodedOutputPlacement.Execute` MUST ffprobe the transcoded output BEFORE replacing source. Reject any output missing moov or failing to open. This is the cross-vertical root fix; not in this bug's scope, but named here so it doesn't get lost.
+
+3. **Backfill / audit (further deferred):** one-shot script probes every `-mv.mp4` in `MediaFiles`, flags unreadable ones with `AdmissionDeferReason='source_unreadable'`. Handles the population that BUG-0103 fix alone won't reach.
+
+**Blockers / gates:** none for the preflight step. Cross-vertical FileReplacement guard is a separate directive (file a new BUG when picking up).
+
+**Anti-bandaid discipline:** the ORIGINAL entry for this bug suggested "enrich the RuntimeError message with channel_layout + ffmpeg stderr" as the first step. That was misdiagnosis -- the current code already includes `Result.stderr[-500:]` in the exception (`PreEncodeAudioPipeline._ExtractStereoDownmix` line 205-207). Enrichment isn't needed; a preflight is. Re-diagnosed 2026-09-15 after operator pushback "just says don't worry about the problem, it's close enough" -- correct call. Message-polishing without fixing the entrance condition is exactly the bandaid pattern `feedback_no_bandaids_ever` refuses.
+
+**Evidence:**
+- `SELECT SUBSTR(ErrorMessage,1,600) FROM TranscodeAttempts WHERE Id=93390` -> full body shows `moov atom not found` + `Invalid data found when processing input` + `Error opening input file /mnt/media_tv/Weeds/Season 2/Weeds - S02E12 - Pittsburgh Bluray-480p-mv.mp4`.
+- `Features/AudioNormalization/Services/PreEncodeAudioPipeline.py` lines 189-210 (`_ExtractStereoDownmix`) -- current impl already includes ffmpeg stderr in the raise.
+- Predicted class: any `-mv.mp4` MediaFile whose bytes are truncated/corrupt hits this on next admission.
+
+---
+
+### [BUG-0104] Video encode fails with ffmpeg exit 218 / 4294967274 on source pix_fmt yuv422p16le / yuv444p16le -- VideoSlot lacks pix_fmt normalization to encoder-supported format
+**Date:** 2026-09-15 | **Area:** video-encode
+
+**What breaks (symptom):** ffmpeg exits 218 (= -38 = ENOSYS on Linux) or 4294967274 (Windows equivalent) with tail listing `yuv422p16le yuv422p16be yuv444p16le yuv444p16be ...` -- ffmpeg's supported-input pixel-format list, meaning the ENCODER rejected the source's pix_fmt. Confirmed on attempts 93324 (MediaFileId 703875) and 93318 (MediaFileId 701679). 10-bit / 4:2:2 chroma sources are the pattern.
+
+**Root class hypothesis:** `CommandComposer.Build` `VideoSlot` emits `-c:v <codec>` without an upstream `-vf format=<pix>` (or `-pix_fmt <pix>` on output side). Source is 10-bit 4:2:2. Encoder (av1_nvenc / hevc_nvenc / hevc_qsv / av1_qsv) needs 4:2:0 at 8-bit (`nv12`, `yuv420p`) or 10-bit (`p010le`, `yuv420p10le`). No pix_fmt normalization = ffmpeg passes source pix_fmt through = encoder refuses.
+
+**Principled fix (KISS):**
+1. Add `-vf format=<encoder-supported>` (or `-pix_fmt <encoder-supported>` on output) to VideoSlot emit-reencode path. Key on `Profile.VideoCodec`:
+   - `av1_nvenc` / `hevc_nvenc` -> `p010le` for 10-bit sources, `nv12` for 8-bit
+   - `av1_qsv` / `hevc_qsv` -> similar table
+   - CPU codecs (`libaom-av1`, `libx265`) -> `yuv420p10le` / `yuv420p`
+2. One switch statement keyed on codec + source-bit-depth. Small, additive, no seam changes.
+3. Do NOT bandaid by dropping 10-bit -> 8-bit unconditionally -- source-bit-depth preservation is a real quality gate for HDR sources. Match encoder to source bit depth.
+
+**Blockers / gates:** requires accurate per-encoder supported-pix_fmt list. `ffmpeg -h encoder=<codec>` prints it -- one-time table lookup + baked into VideoSlot as a constant map. No hardware gates.
+
+**Evidence:** `SELECT SUBSTR(ErrorMessage,1,400) FROM TranscodeAttempts WHERE Id=93324` shows the pix_fmt list in the error tail.
+
+---
+
 ## Resolved
 
 ### [BUG-0042] Active Jobs list view omits VMAF runs while header badge counts them -- operator misreads as "stuck", kills workers, orphans claimed rows
