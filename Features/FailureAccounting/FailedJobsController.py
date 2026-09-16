@@ -134,3 +134,75 @@ def Count():
     except Exception as Ex:
         LoggingService.LogException("Count failed", Ex, "FailedJobsController", "Count")
         return _Envelope(False, Message=str(Ex), Status=500)
+
+
+# directive: bug-0095-failure-classification | # see failure-accounting.C10 -- FailureClasses CRUD for /settings operator tuner
+@FailedJobsBlueprint.route('/api/FailureClasses', methods=['GET'])
+def ListFailureClasses():
+    """List all classifier rules ordered by Priority ASC (first-match-wins)."""
+    try:
+        from Features.FailureAccounting.Repositories.FailureClassesRepository import FailureClassesRepository
+        Rows = FailureClassesRepository().ListOrderedByPriority()
+        return _Envelope(True, Data={
+            'FailureClasses': [
+                {
+                    'ClassName': R.ClassName,
+                    'Priority': R.Priority,
+                    'ErrorPattern': R.ErrorPattern,
+                    'Terminal': R.Terminal,
+                    'Remediation': R.Remediation,
+                }
+                for R in Rows
+            ],
+        })
+    except Exception as Ex:
+        LoggingService.LogException("ListFailureClasses failed", Ex, "FailedJobsController", "ListFailureClasses")
+        return _Envelope(False, Message=str(Ex), Status=500)
+
+
+# directive: bug-0095-failure-classification | # see failure-accounting.C10 -- POSIX-regex validated upsert; refuses invalid pattern
+@FailedJobsBlueprint.route('/api/FailureClasses', methods=['POST'])
+def UpsertFailureClass():
+    """Upsert a classifier rule. Body: {ClassName, Priority, ErrorPattern, Terminal, Remediation}. Refuses uncompilable regex."""
+    try:
+        import re
+        Body = request.get_json(silent=True) or {}
+        ClassName = str(Body.get('ClassName') or '').strip()
+        if not ClassName:
+            return _Envelope(False, Message='ClassName required', Status=400)
+        try:
+            Priority = int(Body.get('Priority', 9999))
+        except (TypeError, ValueError):
+            return _Envelope(False, Message='Priority must be integer', Status=400)
+        ErrorPattern = str(Body.get('ErrorPattern') or '').strip()
+        if not ErrorPattern:
+            return _Envelope(False, Message='ErrorPattern required', Status=400)
+        try:
+            re.compile(ErrorPattern)
+        except re.error as RegexEx:
+            return _Envelope(False, Message=f'ErrorPattern is not a valid regex: {RegexEx}', Status=400)
+        Terminal = bool(Body.get('Terminal', False))
+        Remediation = str(Body.get('Remediation') or '').strip()
+        if not Remediation:
+            return _Envelope(False, Message='Remediation required', Status=400)
+        from Features.FailureAccounting.Repositories.FailureClassesRepository import FailureClassesRepository
+        FailureClassesRepository().Upsert(ClassName, Priority, ErrorPattern, Terminal, Remediation)
+        return _Envelope(True, Message='Saved', Data={'ClassName': ClassName})
+    except Exception as Ex:
+        LoggingService.LogException("UpsertFailureClass failed", Ex, "FailedJobsController", "UpsertFailureClass")
+        return _Envelope(False, Message=str(Ex), Status=500)
+
+
+# directive: bug-0095-failure-classification | # see failure-accounting.C10 -- refuses delete of unclassified catch-all
+@FailedJobsBlueprint.route('/api/FailureClasses/<string:ClassName>', methods=['DELETE'])
+def DeleteFailureClass(ClassName: str):
+    """Delete a classifier rule. Refuses 'unclassified' catch-all."""
+    try:
+        from Features.FailureAccounting.Repositories.FailureClassesRepository import FailureClassesRepository
+        FailureClassesRepository().Delete(ClassName)
+        return _Envelope(True, Message='Deleted', Data={'ClassName': ClassName})
+    except ValueError as VE:
+        return _Envelope(False, Message=str(VE), Status=400)
+    except Exception as Ex:
+        LoggingService.LogException("DeleteFailureClass failed", Ex, "FailedJobsController", "DeleteFailureClass")
+        return _Envelope(False, Message=str(Ex), Status=500)
