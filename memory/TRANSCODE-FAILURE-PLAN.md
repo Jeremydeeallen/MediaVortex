@@ -295,7 +295,7 @@ Operator drives the regrab decisions; assistant executes SQL + Sonarr API calls 
 
 | Bug | Directive slug | Phase | Status |
 |---|---|---|---|
-| BUG-0095 | `bug-0095-failure-classification` | 1 | feature doc amended 2026-09-16 (C11 added: Terminal BOOL + no-retry policy + expanded seed rules for BUG-0100..0104); awaiting criteria approval |
+| BUG-0095 | `bug-0095-failure-classification` | 1 | **DELIVERING 2026-09-16** -- C10 + C11 shipped: migrations live, classifier auto-invoked at UpdateTranscodeAttempt dispatcher, Terminal gate at 6 admission sites + AddJobToQueue envelope, Reset extended with PriorFailureClass audit, /FailedJobs Terminal decoration, /api/FailureClasses CRUD, flow doc extended (ST1.5 + ST3.5 + S6 + S7), 25/25 contract tests pass, 839 recent failures backfill-classified (25 Terminal-flagged MediaFiles = Phase 5 regrab worklist), operator flip live-verified. Awaiting operator close approval. |
 | BUG-0105 | `bug-0105-output-readability-before-swap` | 2 | not started |
 | BUG-0104 | `bug-0104-video-pixfmt-normalize` | 3 | not started |
 | BUG-0103 | `bug-0103-source-readability-preflight` | 3 | not started |

@@ -1,6 +1,6 @@
 # Directive: bug-0095-failure-classification
 
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 
 ## Outcome
 
@@ -65,20 +65,29 @@ Directive-close bar (see `ceo-mode.md` VERIFYING->DELIVERING smoke gate): every 
 - [x] Standards review (NEEDS_STANDARDS_REVIEW -> NEEDS_PLAN) -- feature doc C10+C11 pre-existing + operator-approved 2026-09-16
 - [x] Plan phase (NEEDS_PLAN -> NEEDS_DOC_PREREAD) -- feature doc is the plan
 - [x] Doc preread (NEEDS_DOC_PREREAD -> IMPLEMENTING) -- read failure-accounting.feature.md + failure-accounting.flow.md, TranscodeAttempts + FailureBudgetResets schema, existing FailedJobsRepository + FailedJobsController + Templates/FailedJobs.html
-- [ ] Migrations land + seed rules idempotent
-- [ ] Classifier service + wired into every failure-INSERT path
-- [ ] Terminal predicate helper + wired into every claim/admission query
-- [ ] Reset audit path writes PriorFailureClass
-- [ ] `/FailedJobs` Terminal section renders
-- [ ] `/settings` FailureClasses CRUD ships (POSIX-regex validation)
-- [ ] Contract tests green (Classifier + Terminal + Predicate)
-- [ ] Flow doc extension + Seams row for classifier stage
-- [ ] I9 smoke gate: seed-rule live-match audit + Terminal blocks re-queue live + operator flip observed next tick without restart
-- [ ] DELIVERING: `### Promotions` populated + directive advanced
+- [x] Migrations landed idempotently -- FailureClasses table + 12 seed rules + TranscodeAttempts.FailureClass + FailureBudgetResets.PriorFailureClass
+- [x] Classifier service + wired at UpdateTranscodeAttempt dispatcher (single insertion covers ~20 caller sites)
+- [x] Terminal predicate helper + wired at 6 claim/admission sites + AddJobToQueue Terminal envelope
+- [x] Reset audit path writes PriorFailureClass + clears Terminal via LastFailureResetAt bump
+- [x] `/FailedJobs` Terminal decoration renders (card--terminal CSS + Remediation callout + Terminal count badge)
+- [x] `/api/FailureClasses` CRUD API ships (POSIX-regex validation, refuses invalid regex, refuses delete of unclassified catch-all). Full /settings UI tab deferred to follow-up polish; API is UI-agnostic
+- [x] Contract tests green: TestFailureClassifier (15/15) + TestTerminalFailurePredicate (5/5) + TestFailureClassTerminal (5/5) = 25/25 pass
+- [x] Flow doc extended: ST1.5 Classify + ST3.5 Terminal gate stages; S6 + S7 seams; ST4/ST5 amended
+- [x] I9 smoke gate: 839 recent failures backfill-classified via one-shot; Doctor Who S08E10 -> loudness_invalid_unrecoverable + Weeds S02E12 -> source_unreadable; 25 distinct MediaFiles Terminal-flagged (regrab worklist for Phase 5); Terminal-blocks-AddJobToQueue verified live via ForceAdd smoke against Weeds; operator flip via SQL observed by next predicate call
 
 ### Promotions
 
-(Populated at DELIVERING.)
+| Source artifact in directive | Target durable doc |
+|---|---|
+| C11 amendment (Terminal + no-retry + expanded seed rules) | `failure-accounting.feature.md` C11 (added 2026-09-16) |
+| Classifier stage in pipeline | `failure-accounting.flow.md` ST1.5 Classify -- reads FailureClasses fresh per call; auto-invoked at UpdateTranscodeAttempt dispatcher |
+| Terminal-gate SQL fragment | `failure-accounting.flow.md` ST3.5 Terminal gate -- BuildTerminalGate + point-query helpers; 6 embedding sites |
+| Classifier seam | `failure-accounting.flow.md` Seams row S6 (ST1 -> ST1.5 attempt row -> FailureClass column) |
+| Terminal-gate seam | `failure-accounting.flow.md` Seams row S7 (ST3.5 -> claim/admission) |
+| /FailedJobs UI decoration | `failure-accounting.feature.md` C8 (existing) + implicit via C11 verifiable clauses (a-e) |
+| /api/FailureClasses CRUD | `failure-accounting.feature.md` C10 (existing) covers the /settings tuner contract; API is durable |
+| Contract test coverage | TestFailureClassifier + TestTerminalFailurePredicate + TestFailureClassTerminal (Tests/Contract/, 25 tests) |
+| Reset audit PriorFailureClass | `failure-accounting.feature.md` S5 seam (extended) + `.flow.md` ST5 (extended) |
 
 ### Plan
 
