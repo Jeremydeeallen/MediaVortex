@@ -275,9 +275,12 @@ class TranscodeQueueRepository(BaseRepository):
             from Core.Database.WorkerCapabilityPredicate import BuildNvencPredicate, BuildQsvPredicate, BuildInflightCapPredicate
             # directive: failure-accounting | # see failure-accounting.C6
             from Core.Database.FailureBudgetPredicate import BuildCapPredicate
+            # directive: bug-0095-failure-classification | # see failure-accounting.C11
+            from Core.Database.TerminalFailurePredicate import BuildTerminalGate
             NvencFragment, NvencParams = BuildNvencPredicate(WorkerName)
             QsvFragment, QsvParams = BuildQsvPredicate(WorkerName)
             CapPredicateFragment, _CapParams = BuildCapPredicate("tq.MediaFileId")
+            TerminalGateFragment, _TgParams = BuildTerminalGate("tq.MediaFileId")
             # directive: transcode-flow-canonical | # see claim-authority.md
             InflightFragment, InflightParams = BuildInflightCapPredicate(WorkerName, "Transcode")
             ReturningCols = (
@@ -322,6 +325,7 @@ class TranscodeQueueRepository(BaseRepository):
                     f"      AND (NOT pm.RequiresProfileGates OR ({NvencFragment})) "
                     f"      AND (NOT pm.RequiresProfileGates OR ({QsvFragment})) "
                     f"      AND {CapPredicateFragment} "
+                    f"      AND {TerminalGateFragment} "
                     f"      AND {InflightFragment} "
                     "    ORDER BY (CASE WHEN tq.Priority >= 195 THEN tq.Priority ELSE 0 END) DESC, tq.SizeMB DESC NULLS LAST, tq.DateAdded ASC "
                     "    LIMIT 1 "

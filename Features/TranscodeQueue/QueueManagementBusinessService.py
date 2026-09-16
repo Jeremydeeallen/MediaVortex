@@ -258,14 +258,18 @@ class QueueManagementBusinessService:
 
             # directive: failure-accounting | # see failure-accounting.C6
             from Core.Database.FailureBudgetPredicate import BuildCapPredicate
+            # directive: bug-0095-failure-classification | # see failure-accounting.C11
+            from Core.Database.TerminalFailurePredicate import BuildTerminalGate
             CapPredicateFragment, _CapParams = BuildCapPredicate("m.Id")
+            TerminalGateFragment, _TgParams = BuildTerminalGate("m.Id")
             Params = []
             WhereSql = (
                 " WHERE m.TranscodedByMediaVortex IS NOT TRUE "
                 "AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL) "
                 "AND m.SizeMB > 0 "
                 "AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true) "
-                "AND " + CapPredicateFragment
+                "AND " + CapPredicateFragment + " "
+                "AND " + TerminalGateFragment
             )
 
             # directive: transcode-flow-canonical | # see transcode.ST2
@@ -412,13 +416,17 @@ class QueueManagementBusinessService:
             Params: List[Any] = []
             # directive: failure-accounting | # see failure-accounting.C6
             from Core.Database.FailureBudgetPredicate import BuildCapPredicate
+            # directive: bug-0095-failure-classification | # see failure-accounting.C11
+            from Core.Database.TerminalFailurePredicate import BuildTerminalGate
             CapPredicateFragment, _CapParams = BuildCapPredicate("m.Id")
+            TerminalGateFragment, _TgParams = BuildTerminalGate("m.Id")
             WhereSql = (
                 " WHERE m.WorkBucket = 'Transcode' "
                 "AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL) "
                 "AND m.SizeMB > 0 "
                 "AND m.HasExplicitEnglishAudio IS NOT FALSE "
-                "AND " + CapPredicateFragment
+                "AND " + CapPredicateFragment + " "
+                "AND " + TerminalGateFragment
             )
 
             if Drive:
@@ -560,7 +568,10 @@ class QueueManagementBusinessService:
 
             # directive: failure-accounting | # see failure-accounting.C6
             from Core.Database.FailureBudgetPredicate import BuildCapPredicate
+            # directive: bug-0095-failure-classification | # see failure-accounting.C11
+            from Core.Database.TerminalFailurePredicate import BuildTerminalGate
             CapPredicateFragment, _CapParams = BuildCapPredicate("m.Id")
+            TerminalGateFragment, _TgParams = BuildTerminalGate("m.Id")
             InsertSql = (
                 "INSERT INTO TranscodeQueue "
                 "(StorageRootId, RelativePath, FileName, Directory, "
@@ -581,6 +592,7 @@ class QueueManagementBusinessService:
                 "WHERE m.Id = ANY(%s) "
                 "AND m.SizeMB > 0 "
                 "AND " + CapPredicateFragment + " "
+                "AND " + TerminalGateFragment + " "
                 "ON CONFLICT (MediaFileId) WHERE Status = 'Pending' AND TestVariantSetId IS NULL DO NOTHING"
             )
 
@@ -623,13 +635,17 @@ class QueueManagementBusinessService:
             BucketSql = "AND " + _QamMeta['WorkBucketFilterSql'] + " "
             # directive: failure-accounting | # see failure-accounting.C6
             from Core.Database.FailureBudgetPredicate import BuildCapPredicate
+            # directive: bug-0095-failure-classification | # see failure-accounting.C11
+            from Core.Database.TerminalFailurePredicate import BuildTerminalGate
             CapPredicateFragment, _CapParams = BuildCapPredicate("m.Id")
+            TerminalGateFragment, _TgParams = BuildTerminalGate("m.Id")
             WhereSql = (
                 " WHERE m.TranscodedByMediaVortex IS NOT TRUE "
                 "AND m.SizeMB > 0 "
                 "AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true) "
                 + BucketSql +
                 "AND " + CapPredicateFragment + " "
+                "AND " + TerminalGateFragment + " "
                 "AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.StorageRootId = m.StorageRootId AND tq.RelativePath = m.RelativePath)"
             )
 
@@ -1926,6 +1942,22 @@ class QueueManagementBusinessService:
                 errorMsg = f"File {mediaFile.FileName} has no profile assigned. Please select a profile first."
                 LoggingService.LogWarning(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
+
+            # directive: bug-0095-failure-classification | # see failure-accounting.C11 -- Terminal class blocks even ForceAdd; applies to ALL modes (Transcode/Remux/AudioFix/SubtitleFix) because source-unrecoverable is mode-agnostic; operator must Reset via /FailedJobs after remediating (regrab source, fix pipeline etc)
+            from Core.Database.TerminalFailurePredicate import IsMediaFileTerminalBlocked, GetTerminalRemediation
+            if IsMediaFileTerminalBlocked(mediaFile.Id):
+                _TR = GetTerminalRemediation(mediaFile.Id)
+                _TClass, _TRemediation = _TR if _TR else (None, None)
+                errorMsg = f"Cannot add {mediaFile.FileName} to queue: Terminal failure class '{_TClass}' -- {_TRemediation}. Reset via /FailedJobs after remediation."
+                LoggingService.LogInfo(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
+                return {
+                    "Success": False,
+                    "ErrorMessage": errorMsg,
+                    "CanOverride": False,
+                    "FailureClassTerminal": True,
+                    "FailureClass": _TClass,
+                    "Remediation": _TRemediation,
+                }
 
             if IsTranscodeMode:
                 # directive: video-compliance-multiplier
