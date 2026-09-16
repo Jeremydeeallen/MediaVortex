@@ -325,8 +325,22 @@ class TranscodeJobRepository(BaseRepository):
                 'VideoBitrateKbps', 'ProfileName', 'VMAF', 'FileReplaced', 'FileReplacedDate',
                 'ReplacementType', 'StartTime', 'PreferredAttempt', 'WorkerName',
                 'CompletedDate', 'QualityTestRequired', 'QualityTestCompleted',
-                'TestVariantSetId', 'TestVariantName', 'VideoSlotStrategy'
+                'TestVariantSetId', 'TestVariantName', 'VideoSlotStrategy', 'FailureClass'
             ]
+
+            # directive: bug-0095-failure-classification | # see failure-accounting.C10 -- auto-classify Success=FALSE writes at the single canonical dispatcher; caller need not know classifier exists
+            if Updates.get('Success') is False and Updates.get('FailureClass') is None:
+                _Err = Updates.get('ErrorMessage') or Updates.get('FFmpegError')
+                if _Err:
+                    try:
+                        from Features.FailureAccounting.Services.FailureClassifier import FailureClassifier
+                        Updates = dict(Updates)
+                        Updates['FailureClass'] = FailureClassifier().Classify(_Err)
+                    except Exception as _CEx:
+                        LoggingService.LogException(
+                            "FailureClassifier raised during UpdateTranscodeAttempt; failure row will land with FailureClass NULL",
+                            _CEx, "TranscodeJobRepository", "UpdateTranscodeAttempt",
+                        )
 
             set_clauses = []
             parameters = []
