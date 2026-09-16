@@ -50,9 +50,22 @@ C10. **[BUG-0095] Failure-class taxonomy surfaces operator-actionable remediatio
 
 C11. **[BUG-0095 amendment 2026-09-16] Terminal-vs-Transient discrimination + no-retry policy + expanded seed rules covering visible transcode-failure scope (BUG-0100..0104).** Extends C10 with the missing third failure bucket: `SourceTerminal`.
 
-  Schema addition: `FailureClasses.Terminal BOOL NOT NULL DEFAULT FALSE`. Classifier writes both `TranscodeAttempts.FailureClass` and `TranscodeAttempts.FailureClassTerminal BOOL NOT NULL DEFAULT FALSE` (denormalized on the attempt row so downstream queries can gate on it without join-per-row). Migration `Scripts/SQLScripts/AddFailureClassTerminal_2026_09_16.py` idempotent.
+  Schema addition (single source of truth): `FailureClasses.Terminal BOOL NOT NULL DEFAULT FALSE`. Idempotent migration `Scripts/SQLScripts/AddFailureClassesTerminal_2026_09_16.py`. NO denormalized copy on `TranscodeAttempts` -- `db-is-authority.md` forbids two-writer sync tax on config-derived state; operator toggles Terminal in `/settings` CRUD, next claim tick observes fresh; no backfill mechanic ever.
 
-  No-retry policy: any auto-requeue path (`TranscodeQueue` re-admission, `RetryBudgetService`, VMAF-decider follow-ups) MUST read the latest attempt's `FailureClassTerminal`. Terminal=TRUE => refuse re-queue AND refuse manual ForceAdd without an explicit operator-override toggle. `AddJobToQueue` returns `{Success: False, FailureClassTerminal: True, Remediation: <text>, CanOverride: False}` on Terminal cap-hit. Reset button on `/FailedJobs` (W3) DOES clear Terminal state (operator authority to say "I regrabbed the source, try again"); reset writes `FailureBudgetResets.PriorFailureClass` for audit.
+  No-retry policy: any auto-requeue path (`TranscodeQueue` re-admission, `RetryBudgetService`, VMAF-decider follow-ups) MUST resolve the latest attempt's Terminal via JOIN to `FailureClasses` at gate time. Shape:
+
+  ```sql
+  LEFT JOIN LATERAL (
+    SELECT ta.FailureClass
+    FROM TranscodeAttempts ta
+    WHERE ta.MediaFileId = mf.Id AND ta.Success = FALSE
+    ORDER BY ta.AttemptDate DESC LIMIT 1
+  ) latest_fail ON TRUE
+  LEFT JOIN FailureClasses fc ON fc.ClassName = latest_fail.FailureClass
+  WHERE (fc.Terminal IS NULL OR fc.Terminal = FALSE)
+  ```
+
+  Single SQL helper `Core/Database/TerminalFailurePredicate.BuildTerminalGate(MediaFileIdColumn)` emits the JOIN + WHERE fragment (mirrors `FailureBudgetPredicate.BuildCapPredicate` shape from C6). Consumers: every existing claim/admission query already gated via `BuildCapPredicate`. Terminal=TRUE => refuse re-queue AND refuse manual ForceAdd without an explicit operator-override toggle. `AddJobToQueue` returns `{Success: False, FailureClassTerminal: True, Remediation: <text>, CanOverride: False}` on Terminal gate-hit (resolves Terminal via one point-query JOIN in the single-file admission path). Reset button on `/FailedJobs` (W3) DOES clear the block (operator authority to say "I regrabbed the source, try again"); reset writes `FailureBudgetResets.PriorFailureClass` for audit (bumps `LastFailureResetAt` per C7 which the existing cap predicate already respects; no new column on MediaFiles required).
 
   Expanded seed rules (Priority order preserves C10 rules; adds four new + amends one):
 
@@ -71,9 +84,9 @@ C11. **[BUG-0095 amendment 2026-09-16] Terminal-vs-Transient discrimination + no
   | `orphan_output` | 100 | `Refusing to overwrite existing` | FALSE | Delete `.inprogress` at path; then retry |
   | `unclassified` | 9999 | `.*` (catch-all) | FALSE | Investigate manually via /FailedJobs modal attempt history |
 
-  `/FailedJobs` renders Terminal-tinted class cards with a "REGRAB / MANUAL" badge that opens `mediavortex-sonarr-refresh` skill guidance for Sonarr-managed series. Terminal rows list in their own section separate from transient failures so operator visual scan distinguishes "waiting for regrab" from "waiting for retry."
+  `/FailedJobs` renders Terminal class cards with a single CSS class `card--terminal` + static Remediation text from the JOINed `FailureClasses.Remediation` column. No dynamic badge component, no per-row JS, no new API. Terminal rows list in their own section separate from transient failures so operator visual scan distinguishes "waiting for regrab" from "waiting for retry."
 
-  Verifiable: `Tests/Contract/TestFailureClassTerminal.py` -- (a) classifier sets both FailureClass + FailureClassTerminal on INSERT; (b) synthetic Terminal attempt row + re-queue call inserts no new TranscodeQueue row; (c) `AddJobToQueue` returns Terminal error envelope; (d) Reset via W3 clears the Terminal state + writes audit row.
+  Verifiable: `Tests/Contract/TestFailureClassTerminal.py` -- (a) classifier populates `TranscodeAttempts.FailureClass` on INSERT (no denorm-column write); (b) synthetic Terminal-class attempt row + auto-requeue call refuses insert (asserts no new `TranscodeQueue` row); (c) `AddJobToQueue` returns `{Success: False, FailureClassTerminal: True, CanOverride: False, Remediation: <text>}` on gate-hit; (d) Reset via W3 clears the block on next claim (asserts `TerminalFailurePredicate` returns admissible after `LastFailureResetAt` bump) + writes audit row with `PriorFailureClass` populated; (e) operator flip of `FailureClasses.Terminal` in `/settings` observed by next claim (no restart, no backfill).
 
 ## Seams
 

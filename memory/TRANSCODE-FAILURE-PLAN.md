@@ -64,25 +64,29 @@ Phase 5 (recovery ops, operator-driven)
 
 **Directive slug:** `bug-0095-failure-classification`
 
-**Root fix:**
-- `TranscodeAttempts.FailureClass TEXT` column
-- `FailureClasses` table: `ClassName TEXT PK`, `Priority INT` (first-match-wins), `ErrorPattern TEXT` (regex), `Terminal BOOL`, `Remediation TEXT`, `CreatedAt`, `UpdatedAt`
-- One-fn regex classifier fires at `TranscodeAttempts` INSERT when `Success=FALSE`
-- `/FailedJobs` HTMX page grouping by FailureClass with counts + samples + Terminal-tinted rendering + Remediation label
-- `/settings/FailureClasses` GUI tuner (per `gui-editable-knobs.md`)
-- Auto-retry / requeue policies READ `Terminal=TRUE` and refuse to re-queue
+**Root fix (KISS-audited 2026-09-16 -- removed denormalization violation):**
+- `TranscodeAttempts.FailureClass TEXT NULL` column (populated by classifier at failure INSERT). NO denormalized Terminal column on `TranscodeAttempts` -- would create two-writer sync tax on config-derived state; violates `db-is-authority.md`.
+- `FailureClasses` table: `ClassName TEXT PK`, `Priority INT` (first-match-wins), `ErrorPattern TEXT` (regex), `Terminal BOOL NOT NULL DEFAULT FALSE`, `Remediation TEXT NOT NULL`, `CreatedAt`, `UpdatedAt`. Single source of truth for Terminal.
+- One-fn regex classifier fires at `TranscodeAttempts` INSERT when `Success=FALSE`; writes `FailureClass` column only.
+- `Core/Database/TerminalFailurePredicate.BuildTerminalGate(MediaFileIdColumn)` -- single SQL-fragment helper mirroring `FailureBudgetPredicate.BuildCapPredicate` shape; every claim/admission query gates via this fragment, JOINing `FailureClasses.Terminal` at query time.
+- `/FailedJobs` HTMX page groups by FailureClass with counts + samples + Terminal cards use single `card--terminal` CSS class + static Remediation text from JOIN (no dynamic badge component, no per-row JS).
+- `/settings/FailureClasses` GUI tuner (per `gui-editable-knobs.md`).
+- Auto-retry / requeue paths JOIN `FailureClasses.Terminal` at gate time and refuse re-queue on Terminal=TRUE.
 
-**Files:**
-- `Scripts/SQLScripts/AddFailureClassColumn_2026_09_15.py`
-- `Scripts/SQLScripts/AddFailureClassesTable_2026_09_15.py`
-- `Features/FailureAccounting/FailureClassifier.py` (new)
-- `Features/FailureAccounting/FailedJobsController.py` (new)
-- `Features/FailureAccounting/failure-accounting.feature.md` (new)
-- `Features/FailureAccounting/failure-classification.flow.md` (new -- pipeline: INSERT -> classifier -> row-with-class -> operator surface)
-- `Templates/FailedJobs.html` (new)
-- `Templates/settings.html` (extend with FailureClasses tab)
-- `Tests/Contract/TestFailureClassifier.py`
-- `Tests/Contract/TestTerminalNoRetry.py` (asserts Terminal rows never re-queued)
+**Files (existing feature doc + controller + template EXTEND, do not create-new):**
+- `Scripts/SQLScripts/AddFailureClassColumn_2026_09_16.py` (new; adds `TranscodeAttempts.FailureClass TEXT NULL`)
+- `Scripts/SQLScripts/AddFailureClassesTable_2026_09_16.py` (new; creates `FailureClasses` table incl `Terminal BOOL NOT NULL DEFAULT FALSE` from the start)
+- `Scripts/SQLScripts/AddPriorFailureClassAudit_2026_09_16.py` (new; adds `FailureBudgetResets.PriorFailureClass TEXT NULL`)
+- `Features/FailureAccounting/Services/FailureClassifier.py` (new)
+- `Core/Database/TerminalFailurePredicate.py` (new; single SQL-fragment helper)
+- `Features/FailureAccounting/FailedJobsController.py` (EXTEND -- already exists per C7/C8)
+- `Features/FailureAccounting/Repositories/FailedJobsRepository.py` (EXTEND -- add Terminal JOIN + FailureClass grouping)
+- `Features/FailureAccounting/failure-accounting.feature.md` (EXTEND -- C11 already added; Progress checklist below)
+- `Features/FailureAccounting/failure-accounting.flow.md` (EXTEND -- add classifier stage + Terminal-gate seam)
+- `Templates/FailedJobs.html` (EXTEND -- add Terminal card section + `card--terminal` CSS)
+- `Features/Settings/SettingsController.py` + `Templates/settings.html` (EXTEND -- add Failure Classes CRUD tab)
+- `Tests/Contract/TestFailureClassifier.py` (new)
+- `Tests/Contract/TestFailureClassTerminal.py` (new -- 5 test cases per C11 Verifiable list)
 
 **Seed rules (Priority ascending):**
 
