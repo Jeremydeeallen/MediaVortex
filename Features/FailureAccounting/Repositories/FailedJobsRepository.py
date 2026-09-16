@@ -134,16 +134,25 @@ class FailedJobsRepository(BaseRepository):
         )
         PriorCount = int(Prior[0]['n']) if Prior else 0
 
+        # directive: bug-0095-failure-classification | # see failure-accounting.C11 -- capture latest failing attempt's FailureClass for audit trail
+        PriorClassRows = self.ExecuteQuery(
+            "SELECT FailureClass FROM TranscodeAttempts "
+            "WHERE MediaFileId = %s AND Success = FALSE "
+            "ORDER BY AttemptDate DESC LIMIT 1",
+            (int(MediaFileId),),
+        )
+        PriorFailureClass = (PriorClassRows[0].get('FailureClass') if PriorClassRows else None)
+
         self.ExecuteNonQuery(
-            "INSERT INTO FailureBudgetResets (MediaFileId, OperatorName, PriorFailureCount) VALUES (%s, %s, %s)",
-            (int(MediaFileId), OperatorName or 'unknown', PriorCount),
+            "INSERT INTO FailureBudgetResets (MediaFileId, OperatorName, PriorFailureCount, PriorFailureClass) VALUES (%s, %s, %s, %s)",
+            (int(MediaFileId), OperatorName or 'unknown', PriorCount, PriorFailureClass),
         )
         self.ExecuteNonQuery(
             "UPDATE MediaFiles SET LastFailureResetAt = NOW() WHERE Id = %s",
             (int(MediaFileId),),
         )
         LoggingService.LogInfo(
-            "FailureBudget reset for MediaFileId=" + str(MediaFileId) + " by " + str(OperatorName) + " (prior failures=" + str(PriorCount) + ")",
+            "FailureBudget reset for MediaFileId=" + str(MediaFileId) + " by " + str(OperatorName) + " (prior failures=" + str(PriorCount) + ", prior class=" + str(PriorFailureClass) + ")",
             "FailedJobsRepository", "ResetFailureBudget"
         )
 
@@ -155,9 +164,13 @@ class FailedJobsRepository(BaseRepository):
         Ids = [int(I) for I in MediaFileIds]
         Op = OperatorName or 'operator'
         Placeholders = ','.join(['%s'] * len(Ids))
+        # directive: bug-0095-failure-classification | # see failure-accounting.C11 -- capture latest failing FailureClass per MediaFile via correlated subquery
         self.ExecuteNonQuery(
-            "INSERT INTO FailureBudgetResets (MediaFileId, OperatorName, PriorFailureCount) "
-            "SELECT ta.MediaFileId, %s, COUNT(*) "
+            "INSERT INTO FailureBudgetResets (MediaFileId, OperatorName, PriorFailureCount, PriorFailureClass) "
+            "SELECT ta.MediaFileId, %s, COUNT(*), "
+            "  (SELECT FailureClass FROM TranscodeAttempts tf "
+            "   WHERE tf.MediaFileId = ta.MediaFileId AND tf.Success = FALSE "
+            "   ORDER BY tf.AttemptDate DESC LIMIT 1) "
             "FROM TranscodeAttempts ta JOIN MediaFiles mf ON mf.Id = ta.MediaFileId "
             f"WHERE ta.MediaFileId IN ({Placeholders}) AND ta.Success = FALSE "
             "AND ta.AttemptDate > GREATEST("
