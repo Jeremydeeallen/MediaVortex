@@ -2,6 +2,17 @@
 
 {% block title %}Failed Jobs - MediaVortex{% endblock %}
 
+{% block head_extra %}
+<style>
+  /* directive: bug-0095-failure-classification | see failure-accounting.C11 -- Terminal-tinted row + Remediation callout */
+  tr.card--terminal { background-color: rgba(220, 53, 69, 0.08) !important; border-left: 3px solid #dc3545; }
+  tr.card--terminal td:first-child { position: relative; }
+  tr.card--terminal td:first-child::before { content: "REGRAB"; position: absolute; top: 2px; left: -2px; font-size: 9px; font-weight: bold; color: #dc3545; letter-spacing: 0.5px; }
+  .terminal-remediation { display: block; margin-top: 2px; color: #dc3545; font-size: 11px; font-style: italic; }
+  #FailedJobsTerminalCount { background-color: #dc3545; }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid px-4">
     <div class="d-flex justify-content-between align-items-center my-3">
@@ -36,7 +47,7 @@
 
     <div id="FailedJobsListPane">
         <div class="d-flex justify-content-between align-items-center mb-2">
-            <div>Total capped: <span class="badge bg-danger" id="FailedJobsTotal">0</span></div>
+            <div>Total capped: <span class="badge bg-danger" id="FailedJobsTotal">0</span> <span class="badge" id="FailedJobsTerminalCount" title="Terminal failures (SourceUnrecoverable class -- REGRAB required)">Terminal: 0</span></div>
             <div class="text-muted small">Click a filename to see full attempt history.</div>
         </div>
         <div id="FailedJobsTableMount"></div>
@@ -143,6 +154,9 @@ class _FailedJobsDataSource extends IDataSource {
         const Json = await Resp.json();
         if (!Json.Success) throw new Error(Json.Message || 'Load failed');
         const Payload = { Items: Json.Data?.Items || Json.Rows || [], TotalCount: Json.Data?.TotalCount ?? Json.TotalCount ?? 0 };
+        // directive: bug-0095-failure-classification | # see failure-accounting.C11 -- cache Terminal mfids for post-render row decoration
+        window._FailedJobsTerminalMfids = new Set((Payload.Items || []).filter(I => I.Terminal).map(I => String(I.MediaFileId)));
+        window._FailedJobsRemediationByMfid = new Map((Payload.Items || []).filter(I => I.Terminal).map(I => [String(I.MediaFileId), I.Remediation || 'Regrab / remediate']));
         this._Cache.clear();
         this._Cache.set(Key, Payload);
         return Payload;
@@ -290,6 +304,29 @@ const InitFailedJobsTable = () => {
         PrevBtn.disabled = P <= 0;
         NextBtn.disabled = (P + 1) * S >= Tot;
         TotalEl.textContent = Tot.toLocaleString();
+        // directive: bug-0095-failure-classification | # see failure-accounting.C11 -- decorate Terminal rows + update Terminal count badge
+        try {
+            const TerminalSet = window._FailedJobsTerminalMfids || new Set();
+            const RemMap = window._FailedJobsRemediationByMfid || new Map();
+            const TermBadge = document.getElementById('FailedJobsTerminalCount');
+            if (TermBadge) TermBadge.textContent = 'Terminal: ' + TerminalSet.size;
+            const Rows = Mount.querySelectorAll('tr[data-mfid], tr[data-row-key]');
+            Rows.forEach(TR => {
+                const Mfid = TR.getAttribute('data-mfid') || TR.getAttribute('data-row-key') || '';
+                if (Mfid && TerminalSet.has(String(Mfid))) {
+                    TR.classList.add('card--terminal');
+                    if (!TR.querySelector('.terminal-remediation')) {
+                        const ErrCell = TR.querySelector('td'); // decorate first cell (filename)
+                        if (ErrCell) {
+                            const Rem = document.createElement('span');
+                            Rem.className = 'terminal-remediation';
+                            Rem.textContent = 'Remediation: ' + (RemMap.get(String(Mfid)) || 'Regrab source');
+                            ErrCell.appendChild(Rem);
+                        }
+                    }
+                }
+            });
+        } catch (E) { /* decoration is best-effort */ }
     };
     PrevBtn.addEventListener('click', () => Pag.PrevPage());
     NextBtn.addEventListener('click', () => Pag.NextPage());

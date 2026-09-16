@@ -37,23 +37,28 @@ def ListCappedJobs():
         Repo = FailedJobsRepository()
         Rows = Repo.GetCappedJobs(Limit=Limit, Offset=Offset, Search=Search, SortBy=SortBy, SortDir=SortDir)
         Total = Repo.CountCapped()
+        # directive: bug-0095-failure-classification | # see failure-accounting.C11 -- split rows into Terminal + Transient sections for /FailedJobs
+        _Serialize = lambda R: {
+            'MediaFileId': R.MediaFileId,
+            'FileName': R.FileName,
+            'FilePath': R.FilePath,
+            'FailureCount': R.FailureCount,
+            'LastErrorMessage': R.LastErrorMessage,
+            'LastAttemptDate': R.LastAttemptDate.isoformat() if R.LastAttemptDate else None,
+            'AssignedProfile': R.AssignedProfile,
+            'LastWorkerName': R.LastWorkerName,
+            'SizeMB': R.SizeMB,
+            'LastFailureResetAt': R.LastFailureResetAt.isoformat() if R.LastFailureResetAt else None,
+            'Duration': R.Duration,
+            'FailureClass': R.FailureClass,
+            'Terminal': R.Terminal,
+            'Remediation': R.Remediation,
+        }
+        Items = [_Serialize(R) for R in Rows]
         return _Envelope(True, Data={
-            'Items': [
-                {
-                    'MediaFileId': R.MediaFileId,
-                    'FileName': R.FileName,
-                    'FilePath': R.FilePath,
-                    'FailureCount': R.FailureCount,
-                    'LastErrorMessage': R.LastErrorMessage,
-                    'LastAttemptDate': R.LastAttemptDate.isoformat() if R.LastAttemptDate else None,
-                    'AssignedProfile': R.AssignedProfile,
-                    'LastWorkerName': R.LastWorkerName,
-                    'SizeMB': R.SizeMB,
-                    'LastFailureResetAt': R.LastFailureResetAt.isoformat() if R.LastFailureResetAt else None,
-                    'Duration': R.Duration,
-                }
-                for R in Rows
-            ],
+            'Items': Items,
+            'TerminalRows': [I for I in Items if I['Terminal']],
+            'TransientRows': [I for I in Items if not I['Terminal']],
             'TotalCount': Total,
             'Limit': Limit,
             'Offset': Offset,

@@ -55,7 +55,8 @@ class FailedJobsRepository(BaseRepository):
             "         MIN(ta.AttemptDate) AS first_attempt, "
             "         MAX(ta.CompletedDate) AS last_completed, "
             "         (ARRAY_AGG(ta.ErrorMessage ORDER BY ta.AttemptDate DESC))[1] AS last_error, "
-            "         (ARRAY_AGG(ta.WorkerName ORDER BY ta.AttemptDate DESC))[1] AS last_worker "
+            "         (ARRAY_AGG(ta.WorkerName ORDER BY ta.AttemptDate DESC))[1] AS last_worker, "
+            "         (ARRAY_AGG(ta.FailureClass ORDER BY ta.AttemptDate DESC))[1] AS last_failure_class "
             "    FROM TranscodeAttempts ta "
             "    JOIN MediaFiles mf ON mf.Id = ta.MediaFileId "
             "   WHERE ta.Success = FALSE "
@@ -68,9 +69,11 @@ class FailedJobsRepository(BaseRepository):
             "SELECT mf.Id AS MediaFileId, mf.FileName, COALESCE(mf.RelativePath, '') AS FilePath, "
             "       r.fail_count, r.last_error, r.last_attempt, r.first_attempt, r.last_completed, "
             "       mf.AssignedProfile, r.last_worker, "
-            "       mf.SizeMB, mf.LastFailureResetAt "
+            "       mf.SizeMB, mf.LastFailureResetAt, "
+            "       r.last_failure_class, fc.Terminal, fc.Remediation "
             "  FROM ranked r "
             "  JOIN MediaFiles mf ON mf.Id = r.MediaFileId "
+            "  LEFT JOIN FailureClasses fc ON fc.ClassName = r.last_failure_class "
             " WHERE r.fail_count >= COALESCE((SELECT MaxEncodeFailures FROM FailureBudgetConfig WHERE Id = 1), 3) "
             + SearchClause +
             " ORDER BY " + SortCol + " " + SortOrder + ", mf.Id DESC "
@@ -97,6 +100,9 @@ class FailedJobsRepository(BaseRepository):
                 SizeMB=float(R['SizeMB']) if R.get('SizeMB') is not None else None,
                 LastFailureResetAt=R.get('LastFailureResetAt'),
                 Duration=_DurationStr(R.get('first_attempt'), R.get('last_attempt'), R.get('last_completed')),
+                FailureClass=R.get('last_failure_class'),
+                Terminal=bool(R.get('Terminal')) if R.get('Terminal') is not None else False,
+                Remediation=R.get('Remediation'),
             )
             for R in Rows
         ]
