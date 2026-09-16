@@ -1,6 +1,6 @@
 # Directive: dialog-boost-emission-integrity
 
-**Status:** Active -- phase: DELIVERING
+**Status:** Closed 2026-09-16
 
 ## Interrupts: preencode-loudness-cache-hit
 

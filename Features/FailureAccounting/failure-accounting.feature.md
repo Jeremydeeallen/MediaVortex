@@ -48,6 +48,33 @@ C9. **Single-file admission consults the failure-budget cap.** `QueueManagementB
 
 C10. **[BUG-0095] Failure-class taxonomy surfaces operator-actionable remediation.** New column `TranscodeAttempts.FailureClass TEXT NULL` populated at every failure INSERT by `ClassifyFailure(ErrorMessage)` -> `SELECT ClassName FROM FailureClasses WHERE %s ~* ErrorPattern ORDER BY Priority LIMIT 1` (default `'unclassified'` on no match; first-match-wins). New table `FailureClasses(ClassName TEXT PK, Priority INT NOT NULL, ErrorPattern TEXT NOT NULL, Remediation TEXT NOT NULL)` seeded with `orphan_output` / `source_audio_corrupt_dts` / `source_video_corrupt_h264` / `demucs_daemon_down` / `codec_map_mismatch` / `ffmpeg_crash_midencode` / `unclassified` rules. `/FailedJobs` page groups capped files by `FailureClass` (one card per class with count + Remediation text + expandable file list). `/settings` gains a Failure Classes CRUD table (POSIX-regex validation). Ships strictly AFTER C1-C9 (BUG-0061 cap + surface must exist first). Verifiable: `\d TranscodeAttempts` shows `FailureClass TEXT`; `SELECT DISTINCT FailureClass FROM TranscodeAttempts WHERE Success=FALSE AND FailureClass IS NOT NULL` returns at least 3 distinct classes on production data; `Tests/Contract/TestFailureClassClassifier.py` asserts every seed-row pattern matches its intended sample stderr fixture.
 
+C11. **[BUG-0095 amendment 2026-09-16] Terminal-vs-Transient discrimination + no-retry policy + expanded seed rules covering visible transcode-failure scope (BUG-0100..0104).** Extends C10 with the missing third failure bucket: `SourceTerminal`.
+
+  Schema addition: `FailureClasses.Terminal BOOL NOT NULL DEFAULT FALSE`. Classifier writes both `TranscodeAttempts.FailureClass` and `TranscodeAttempts.FailureClassTerminal BOOL NOT NULL DEFAULT FALSE` (denormalized on the attempt row so downstream queries can gate on it without join-per-row). Migration `Scripts/SQLScripts/AddFailureClassTerminal_2026_09_16.py` idempotent.
+
+  No-retry policy: any auto-requeue path (`TranscodeQueue` re-admission, `RetryBudgetService`, VMAF-decider follow-ups) MUST read the latest attempt's `FailureClassTerminal`. Terminal=TRUE => refuse re-queue AND refuse manual ForceAdd without an explicit operator-override toggle. `AddJobToQueue` returns `{Success: False, FailureClassTerminal: True, Remediation: <text>, CanOverride: False}` on Terminal cap-hit. Reset button on `/FailedJobs` (W3) DOES clear Terminal state (operator authority to say "I regrabbed the source, try again"); reset writes `FailureBudgetResets.PriorFailureClass` for audit.
+
+  Expanded seed rules (Priority order preserves C10 rules; adds four new + amends one):
+
+  | ClassName | Priority | ErrorPattern (regex) | Terminal | Remediation |
+  |---|---|---|---|---|
+  | `source_unreadable` | 10 | `moov atom not found\|Invalid data found when processing input\|Error opening input file` | TRUE | Regrab source (Sonarr/Radarr); source file is corrupt or truncated |
+  | `source_audio_corrupt_dts` | 20 | `Error while decoding stream.*dca` | TRUE | Regrab source; audio stream corrupt |
+  | `source_video_corrupt_h264` | 30 | `Error while decoding stream.*h264` | TRUE | Regrab source; video stream corrupt |
+  | `subtitle_sample_too_large` | 40 | `mov_text.*Result too large` | FALSE (pipeline fix pending BUG-0102) | Auto-drop subtitle stream (BUG-0102 fix); or choose mkv container variant |
+  | `pix_fmt_unsupported` | 50 | `Impossible to convert between the formats.*yuv4[24]2p16` | FALSE (pipeline fix pending BUG-0104) | Pipeline fix pending; VideoSlot pix_fmt normalization filter (BUG-0104) |
+  | `stereo_downmix_source_unreadable` | 55 | `stereo downmix failed.*moov atom not found` | TRUE | Regrab source; pre-encode source-readability preflight (BUG-0103) will catch upstream once shipped |
+  | `demucs_daemon_down` | 60 | `DemucsDaemonUnavailableError` | FALSE | Restart worker; retry auto-triggered via D13 partial-completion |
+  | `loudness_invalid_unrecoverable` | 70 | `ComplianceGateFailed:\s*invalid_loudness_measurement` | FALSE (pending BUG-0100 diagnosis) | Under investigation per BUG-0100; may become Terminal or pipeline fix once validator rule identified |
+  | `ffmpeg_crash_midencode` | 80 | `Segmentation fault\|core dumped` | FALSE | Retry once; escalate if repeats within 24h |
+  | `codec_map_mismatch` | 90 | `Requested output format.*does not accept` | FALSE | Pipeline fix pending; codec assignment audit |
+  | `orphan_output` | 100 | `Refusing to overwrite existing` | FALSE | Delete `.inprogress` at path; then retry |
+  | `unclassified` | 9999 | `.*` (catch-all) | FALSE | Investigate manually via /FailedJobs modal attempt history |
+
+  `/FailedJobs` renders Terminal-tinted class cards with a "REGRAB / MANUAL" badge that opens `mediavortex-sonarr-refresh` skill guidance for Sonarr-managed series. Terminal rows list in their own section separate from transient failures so operator visual scan distinguishes "waiting for regrab" from "waiting for retry."
+
+  Verifiable: `Tests/Contract/TestFailureClassTerminal.py` -- (a) classifier sets both FailureClass + FailureClassTerminal on INSERT; (b) synthetic Terminal attempt row + re-queue call inserts no new TranscodeQueue row; (c) `AddJobToQueue` returns Terminal error envelope; (d) Reset via W3 clears the Terminal state + writes audit row.
+
 ## Seams
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |

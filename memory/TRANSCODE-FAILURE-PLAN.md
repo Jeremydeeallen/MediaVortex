@@ -291,7 +291,7 @@ Operator drives the regrab decisions; assistant executes SQL + Sonarr API calls 
 
 | Bug | Directive slug | Phase | Status |
 |---|---|---|---|
-| BUG-0095 | `bug-0095-failure-classification` | 1 | not started |
+| BUG-0095 | `bug-0095-failure-classification` | 1 | feature doc amended 2026-09-16 (C11 added: Terminal BOOL + no-retry policy + expanded seed rules for BUG-0100..0104); awaiting criteria approval |
 | BUG-0105 | `bug-0105-output-readability-before-swap` | 2 | not started |
 | BUG-0104 | `bug-0104-video-pixfmt-normalize` | 3 | not started |
 | BUG-0103 | `bug-0103-source-readability-preflight` | 3 | not started |
