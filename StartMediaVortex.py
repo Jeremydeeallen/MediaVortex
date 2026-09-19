@@ -23,7 +23,6 @@ RootDirectory = os.path.dirname(os.path.abspath(__file__))
 NetworkDrives = [
     {"Letter": "T", "UncPath": r"\\10.0.0.43\srv\nfs-media-_tv", "Required": True},
     {"Letter": "M", "UncPath": r"\\10.0.0.61\volume1\_video\Adults\Movies", "Required": True},
-    {"Letter": "Z", "UncPath": r"\\10.0.0.61\volume2\XXX", "Required": False},
 ]
 
 Services = [

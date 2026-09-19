@@ -18,7 +18,7 @@ class FileManagerService:
     
     # Common media file extensions
     MediaExtensions = {
-        '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp', '.mpg', '.mpeg',
+        '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp', '.mpg', '.mpeg', '.ts',
         '.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma', '.m4a', '.opus'
     }
     
