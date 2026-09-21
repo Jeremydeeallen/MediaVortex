@@ -25,6 +25,10 @@ TorchIndexByVariant = {
 # see .claude/rules/worker-deploy.md
 KeepVersions = 5
 
+# see worker-deploy-baremetal.ST4 per-host MemoryMax table
+_MemoryMaxByHost = {"dot": "24G", "wakko": "14G", "mediavortex-workers": "18G", "larry": "18G"}
+_MemoryMaxDefault = "18G"
+
 
 def _Status(Step: int, Total: int, Title: str, Result: str = "...", Detail: str = "") -> None:
     Tag = {"OK": "[OK]   ", "SKIPPED": "[SKIP] ", "FAILED": "[FAIL] ", "...": "[..]   "}.get(Result, f"[{Result}] ")
@@ -212,6 +216,7 @@ def StepInstallRequirements(Target: str, VenvPath: str, SrcPath: str, DepsFinger
 
 def StepRenderSystemdUnit(Target: str, Friendly: str, Count: int, SrcPath: str, VenvPath: str) -> bool:
     # see .claude/rules/worker-deploy.md
+    MemoryMax = _MemoryMaxByHost.get(Friendly, _MemoryMaxDefault)
     UnitBody = (
         "[Unit]\n"
         "Description=MediaVortex WorkerService instance %i\n"
@@ -232,7 +237,7 @@ def StepRenderSystemdUnit(Target: str, Friendly: str, Count: int, SrcPath: str, 
         "TimeoutStopSec=1800\n"
         "KillSignal=SIGTERM\n"
         # see worker-deploy-baremetal.ST4
-        "MemoryMax=18G\n"
+        f"MemoryMax={MemoryMax}\n"
         "LimitNOFILE=65536\n"
         "\n"
         "[Install]\n"

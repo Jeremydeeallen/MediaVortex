@@ -119,7 +119,7 @@ Restart=always
 RestartSec=10
 TimeoutStopSec=1800
 KillSignal=SIGTERM
-MemoryMax=18G
+MemoryMax=<per-host cap>
 LimitNOFILE=65536
 
 [Install]
@@ -127,6 +127,17 @@ WantedBy=multi-user.target
 ```
 
 Per-instance identity: `deploy-baremetal-worker.py::StepInstallSystemdUnit` writes one `/etc/mediavortex/instance-<N>.env` per slot with `MEDIAVORTEX_WORKER_NAME=<friendly>-worker-<N>`. Systemd's `%i` substitution selects the right env file per instance. `WorkerService.Main._ResolveWorkerName` reads `MEDIAVORTEX_WORKER_NAME` and fail-louds when unset. See `.claude/rules/claim-authority.md#worker-identity-is-deterministic-deploy-assigned`.
+
+Per-host MemoryMax cap (`_MemoryMaxByHost` in `deploy-baremetal-worker.py`) is sized to host RAM minus kernel + OS + service headroom. Cgroup cap must sit under host RAM so the cgroup gets the OOM kill instead of the kernel choosing an arbitrary victim.
+
+| Friendly | Host RAM | Cap | Rationale |
+|---|---|---|---|
+| dot | 31 GB | 24G | Single Remux-capable worker (dot-worker-1); 24G leaves 7G for OS + host services. Demucs peak ~14G + AV1 libaom encode + 10-bit HEVC decode need >18G for 2h files (2026-09-19 OOM loop on Dancing with the Stars). |
+| wakko | 15 GB | 14G | Host RAM ceiling forces low cap. Occasional OOM until RAM upgrade (`memory/KNOWN-ISSUES.md`). |
+| mediavortex-workers (larry LXC 218) | 96 GB | 18G | 4 workers × 18G = 72G, leaves 24G for LXC host + Proxmox overhead. |
+| larry (host) | 96 GB | 18G | Same as LXC. |
+
+Default cap (`_MemoryMaxDefault`) is 18G — matches prior fleet-wide setting from `memorymax-and-single-remux-per-host` (2026-09-08). New hosts start at 18G until per-host tuning is added to `_MemoryMaxByHost`.
 
 Apply per slot:
 ```bash

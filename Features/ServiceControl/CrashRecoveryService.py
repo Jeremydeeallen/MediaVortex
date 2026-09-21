@@ -14,6 +14,7 @@ from Core.DateTimeHelpers import ToUtcIsoZ
 from Core.Path.LocalPath import LocalExists
 from Services.ProcessManagementService import ProcessManagementService
 from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
+from Features.TranscodeJob.TranscodeJobRepository import TranscodeJobRepository
 
 
 # directive: path-schema-migration | # see path.S9
@@ -243,16 +244,8 @@ class CrashRecoveryService:
         """Clean up progress records for a specific job."""
         try:
             if JobType == "Transcode":
-                # Mark incomplete attempts as failed with the unified crash/kill
-                # reason (worker-lifecycle.feature.md criterion 13).
-                fail_query = """
-                    UPDATE TranscodeAttempts
-                    SET Success = FALSE, CompletedDate = NOW(),
-                        ErrorMessage = COALESCE(ErrorMessage, 'worker crashed/restarted')
-                    WHERE Success IS NULL
-                      AND MediaFileId = (SELECT MediaFileId FROM TranscodeQueue WHERE Id = %s)
-                """
-                failed_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(fail_query, (QueueId,))
+                # see failure-accounting.ST1.5 -- repo method inlines classifier; keeps FailureClass populated for crash-recovery writes
+                failed_rows = TranscodeJobRepository().MarkInflightAttemptsCrashedForQueue(QueueId)
                 if failed_rows > 0:
                     LoggingService.LogInfo(f"Marked {failed_rows} incomplete transcode attempts as failed for queue {QueueId}", "CrashRecoveryService", "CleanupProgressRecords")
 
@@ -290,20 +283,8 @@ class CrashRecoveryService:
         Covers both explicit failures (Success = FALSE) and incomplete attempts
         (Success IS NULL) left by hard kills (SIGKILL, OOM) where no signal handler ran."""
         try:
-            # First, mark incomplete attempts as failed so they don't masquerade as in-progress.
-            # Exclude attempts with recently-updated progress (active transcodes).
-            # worker-lifecycle.feature.md criterion 13: unified crash/kill reason.
-            mark_query = """
-                UPDATE TranscodeAttempts
-                SET Success = FALSE, CompletedDate = NOW(),
-                    ErrorMessage = COALESCE(ErrorMessage, 'worker crashed/restarted')
-                WHERE Success IS NULL
-                  AND Id NOT IN (
-                      SELECT TranscodeAttemptId FROM TranscodeProgress
-                      WHERE LastProgressUpdate > NOW() - INTERVAL '5 minutes'
-                  )
-            """
-            marked_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(mark_query, ())
+            # see failure-accounting.ST1.5 -- repo method inlines classifier for orphan crash-recovery writes
+            marked_rows = TranscodeJobRepository().MarkOrphanedInflightAttemptsCrashed()
             if marked_rows > 0:
                 LoggingService.LogInfo(f"Marked {marked_rows} incomplete transcode attempts as failed", "CrashRecoveryService", "CleanupOrphanedProgressRecords")
 
