@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any
 from Core.Database.BaseRepository import BaseRepository
 from Core.Database.DatabaseService import EscapeLikePattern
+from Core.Resolution.ResolutionTierRegistry import ResolutionTierRegistry
 from Features.Profiles.Models.TranscodeProfileModel import TranscodeProfileModel
 from Features.Profiles.Models.ProfileThresholdModel import ProfileThresholdModel
 from Core.Logging.LoggingService import LoggingService
@@ -390,7 +391,7 @@ class ProfileRepository(BaseRepository):
         try:
             LoggingService.LogFunctionEntry("GetProfileQualityForTargetResolution", "ProfileRepository", ProfileName, SourceResolution)
 
-            resolutionCategory = self._ConvertPixelDimensionsToResolutionCategory(SourceResolution)
+            resolutionCategory = ResolutionTierRegistry().CategoryStringFromResolution(SourceResolution)
             LoggingService.LogInfo(f"Converted {SourceResolution} to {resolutionCategory}", "ProfileRepository", "GetProfileQualityForTargetResolution")
 
             # allow: R12 -- SQL string literal
@@ -462,7 +463,7 @@ class ProfileRepository(BaseRepository):
             foundResolution = SourceResolution
 
             if not rows:
-                resolutionCategory = self._ConvertPixelDimensionsToResolutionCategory(SourceResolution)
+                resolutionCategory = ResolutionTierRegistry().CategoryStringFromResolution(SourceResolution)
                 LoggingService.LogInfo(f"Resolution {SourceResolution} not found in database, using standardized resolution {resolutionCategory}", "ProfileRepository", "GetProfileSettingsForTargetResolution")
                 rows = self.ExecuteQuery(query, (ProfileName, resolutionCategory))
                 foundResolution = resolutionCategory
@@ -538,7 +539,7 @@ class ProfileRepository(BaseRepository):
                 Raw = (Row.get('TranscodeDownTo') or '').strip()
                 if not Raw or Raw.lower() == 'no downscaling':
                     continue
-                Label = self._ConvertPixelDimensionsToResolutionCategory(Raw) if 'x' in Raw else Raw
+                Label = ResolutionTierRegistry().CategoryStringFromResolution(Raw) if 'x' in Raw else Raw
                 Rank = Ranks.get(Label)
                 if Rank is None:
                     continue
