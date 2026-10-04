@@ -2,7 +2,7 @@
 
 **Slug:** transcode-vs-remux-routing
 
-**Canonical compliance + bucket contract:** see `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md`. This doc retains only the routing-specific concerns (cascade resolution, queue-entry sites, post-flight gate, admin endpoint, visibility widget, Remux audio integrity) that are not duplicated in the spec.
+**Canonical compliance + bucket contract:** see `transcode.flow.md` `## Domain Decisions` (D1-D13). This doc retains only the routing-specific concerns (cascade resolution, queue-entry sites, post-flight gate, admin endpoint, visibility widget, Remux audio integrity) that are not duplicated there.
 
 ## What It Does
 
@@ -84,7 +84,7 @@ User-facing -- two GUI surfaces, two columns visible in any operator query, one 
 
 ### D. IsCompliant materialization
 
-Criteria 10-13 are consolidated into `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md` (sections "Architectural Model" and "Compliance Evaluation"). The spec is the canonical contract for the three-vertical evaluator, `MediaFiles.IsCompliant` / `WorkBucket` generated-column semantics, and the `AudioComplete` interaction with the audio loudness cascade.
+Criteria 10-13 are consolidated into `transcode.flow.md` D1 (per-dimension evaluators) + D4 (`WorkBucket` generated-column semantics). `MediaFiles.IsCompliant` / `AudioComplete` interaction with the audio loudness cascade: see `audio-normalization.feature.md`.
 
 ### E. Pre-flight gate at queue creation
 
@@ -147,7 +147,7 @@ Implementation of criteria 26-28 is owned by `Features/AudioCompletion/audio-com
 
 ### L. Bucket-scoped operations contract
 
-Criteria 29-31 are consolidated into `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md` (sections "Bucket-Scoped Operations Contract" and "Idempotency Invariant"). The spec replaces the savings-calc + BPP-override + MV-trusted scheme with a single per-profile bitrate comparison, and locks profile compliance fields against post-reference edits so the verdict cannot move under a file.
+Criteria 29-31 are consolidated into `transcode.flow.md` D2 (minimum-scope slot strategy) + D4 (bucket precedence). Idempotency regression check: `Tests/Contract/TestComplianceIdempotency.py`.
 
 ## Status
 

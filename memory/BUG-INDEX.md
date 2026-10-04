@@ -5,6 +5,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 
 ## Active
 
+- BUG-0106 | active | compliance | READ FIRST -- suspected wrong WorkBucket classifications; ComplianceGate.Evaluate has 2 swallowed excepts + ffmpeg-command regex scraping (fail-loud violations, likely root cause) + WorkBucket terminal short-circuit may mask retiered files needing re-transcode (unconfirmed, query in KNOWN-ISSUES.md) | 2026-09-28
 - BUG-0024 | active | file-scanning | Scan pipeline perf + observability (FindFuzzyFileMatch O(NxM), missing counters, single-threaded stats, silent progress writer) | 2026-05-15
 - BUG-0025 | active | worker-lifecycle | Worker status / capability model cleanup (Draining broken, non-data-driven concurrency, UI-uneditable flags) | 2026-05-14
 - BUG-0026 | active | quality-testing | VMAF measurement quality (held-frame bimodal -- PARTIAL FIX) + MonitorVMAFProgress emit gap | 2026-05-10

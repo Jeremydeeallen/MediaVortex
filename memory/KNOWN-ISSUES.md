@@ -2,6 +2,42 @@
 
 ## Active
 
+### [BUG-0106 -- IN PROGRESS 2026-09-28] Suspected wrong WorkBucket classifications -- investigation in progress, READ FIRST before continuing
+
+**Date:** 2026-09-28 | **Area:** compliance / workbucket / compliance-gate | **Status:** ACTIVE INVESTIGATION, not yet root-caused. Resume here after any restart.
+
+**Original trigger:** operator saw "Dancing with the Stars - S31E09" (and ~46 sibling files under the AV1 Tier 1 Efficient profile) listed in `/Work/Audio` (`WorkBucket=AudioFix`) and asked why, expecting `/Work/Transcode`.
+
+**Confirmed facts (verified this session):**
+1. That specific case is CORRECT, not a bug. `VideoCompliant=TRUE` via `source_codec_matches_target:av1` short-circuit (`VideoVertical.py:41`, `video-vertical-codec-match-skip` directive 2026-08-14 -- codec already matches target profile codec, skip re-encode regardless of bitrate). `AudioCompliant=FALSE` via `no_dialog_boost` (`AudioVertical.py:54` -- no Dialog Boost track). Per `transcode.flow.md` D4 (3-check tree, consolidated this session), Video+Container compliant + Audio non-compliant correctly routes to `AudioFix` (`PlanVideoOp=Copy` + `PlanAudioOp=Reencode`, `ProcessingModeMetadata.py:9`) -- it WILL add Dialog Boost, video untouched. Verified live DB `generation_expression` matches.
+2. Doc-side SSoT was a real mess (fixed this session): WorkBucket bucket-derivation logic was independently restated in 5 places (`transcode.flow.md` D4/D7, `work-bucket.feature.md` C7, `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md` x3 sections, `transcode-vs-remux-routing.feature.md` x3 pointers) with real drift (stale spec used bucket name `AudioFixOnly` vs live `AudioFix`, wrong NULL-handling). Consolidated to single SSoT at `transcode.flow.md` D4+D7; others reduced to pointers. Verified against live `information_schema.columns.generation_expression`.
+3. `VideoVertical.Evaluate` criteria (`video-encoding.feature.md` C1-C7) reviewed line-by-line against code -- matches. One doc gap found+fixed: C7 `non_video_scope` guard for audio-only containers (same guard exists uniformly in `ContainerVertical.py:38` + `AudioVertical.py:39`); `work-bucket.feature.md` Unclassified reason list updated to include it.
+4. `EvaluateCandidateCompliance` (`QueueManagementBusinessService.py:1414`) -- the core 3-vertical aggregator -- is clean, matches D4 exactly. NOT a suspect.
+
+**Live suspects for actual wrong-classification bugs (NOT YET INVESTIGATED FURTHER -- start here on resume):**
+
+A. **`ComplianceGate.Evaluate`** (`Features/FileReplacement/ComplianceGate.py`, full file, 146 lines) -- the PRE-PERSIST gate run before a transcoded file replaces its source. Confirmed problems:
+   - Two silent `except Exception: pass` blocks (lines 97-102, 120-127) -- violates `.claude/rules/fail-loud.md` anti-pattern #1, no whitelist marker. If either swallows a real failure, `CandidateRow` silently carries wrong/stale values into the compliance decision -- most likely root cause of "wrong classification after transcode."
+   - Lines 120-127 regex-scrape the ffmpeg command STRING (`-metadata:s:a:\d+\s+"?language=([a-z]{2,3})"?`) to recover `AudioLanguages`/`HasExplicitEnglishAudio`, instead of reading structured data. If the command format drifts, extraction fails, the exception above swallows it, and `CandidateRow` silently falls back to STALE pre-transcode `AudioLanguages` (from the DB read at line 48-59) -- can produce a false compliance verdict.
+   - Manually reconstructs ~20 fields into `CandidateRow` via raw SQL (48-59) + dict literal (72-95) instead of a repository method -- same drift class as the documented Heroes-S2 bug (`video-encoding.feature.md` C5): a new compliance-input column ships, this hand-rolled dict misses it, gate silently mis-evaluates.
+   - Own refusal-reason taxonomy (`non_compliant_<bucket>` / `undecidable_<bucket>`, lines 134-138) discards the vertical's actual specific reason string (`no_dialog_boost`, `source_above_ceiling:...`) for a generic bucket-named reason -- loses the diagnostic detail an operator needs to see WHY a gate refusal happened.
+
+B. **WorkBucket terminal short-circuit ordering** (`transcode.flow.md` D4/D7; live SQL first CASE branch): `TranscodedByMediaVortex=TRUE AND HasDialogBoostTrack=TRUE -> Compliant` fires BEFORE the 3 real compliance checks. If a file was MV-transcoded with Dialog Boost, then later retiered to a different profile such that `VideoCompliant` would now read FALSE under the new profile, this branch still forces `WorkBucket='Compliant'`, masking the need to re-transcode. NOT YET CONFIRMED against real data. Next step -- run: `SELECT Id, AssignedProfile, VideoCompliant, VideoCompliantReason, WorkBucket FROM MediaFiles WHERE TranscodedByMediaVortex=TRUE AND HasDialogBoostTrack=TRUE AND VideoCompliant=FALSE LIMIT 20`. Any rows returned = confirmed live bug.
+
+**Ruled out:**
+- The 3 verticals themselves (`VideoVertical`/`AudioVertical`/`ContainerVertical` `.Evaluate`) -- read and compared to docs, no bugs beyond the C7 doc gap (fixed).
+- The WorkBucket generated-column CASE expression itself -- matches its (now-fixed) documentation exactly; it was badly-DOCUMENTED, not wrong.
+
+**Resume here, in order:**
+1. Run suspect-B query against live DB to confirm/deny the terminal-short-circuit masking theory.
+2. Read `ComplianceGate.py` end-to-end with the two swallowed-exception sites in mind; check Logs table / worker logs for exceptions ever thrown from `AudioStateService.DetectNormalizationInCommand` or the language-regex block (they'd be invisible today since both are swallowed -- may need temporary logging to catch one live).
+3. Decide fix scope -- likely its own directive (e.g. `compliance-gate-fail-loud`), not doc-only. Confirm root cause before fixing (`superpowers:systematic-debugging`).
+4. Unrelated loose end: `bug-0095-failure-classification` directive is DELIVERING, all criteria checked, Promotions populated -- ready to close, operator has not yet confirmed closure.
+
+**Evidence:**
+- Live DB query 2026-09-28 confirmed `WorkBucket.generation_expression` matches `transcode.flow.md` D4 exactly.
+- `ComplianceGate.py` full-file read 2026-09-28, line numbers cited above.
+
 ### activity-page
 
 ### [BUG-0094 -- RESOLVED 2026-08-26] /Activity JS mutation handlers hard-couple to render-impl names -- rename left dead reference; symptom of a design bug, not a typo

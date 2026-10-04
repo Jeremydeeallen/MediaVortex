@@ -50,21 +50,7 @@ Two parallel cascade systems resolve the bars these verticals evaluate against:
 | **Profile cascade** (existing) | Video, container, audio-codec bar | `ShowSettings.AssignedProfile > SystemSettings.DefaultProfileName` |
 | **Audio policy cascade** (existing in `AudioNormalization`) | Loudness bar, dual-track contract, language keep policy | `item > folder > library > global` (4-tier) |
 
-One generated column derives the bucket. NULL booleans short-circuit to NULL (undecidable hold; not queueable):
-
-```
-MediaFiles.WorkBucket  (GENERATED, redefined to handle NULL explicitly)
-  = NULL            when ANY OF (VideoCompliant, ContainerCompliant, AudioCompliant) IS NULL
-                                   -- undecidable: hold out of queue
-  = 'Transcode'     when VideoCompliant      = FALSE
-  = 'Remux'         when VideoCompliant      = TRUE  AND ContainerCompliant = FALSE
-  = 'AudioFixOnly'  when VideoCompliant      = TRUE  AND ContainerCompliant = TRUE  AND AudioCompliant = FALSE
-  = NULL            when all three are TRUE     -- already compliant; no work needed
-```
-
-Bucket precedence (`!Video -> Transcode`, `!Container -> Remux`, `!Audio -> AudioFixOnly`) names which bucket OWNS the file. Within that bucket, only the dimensions that are actually False produce work.
-
-**Queue-population invariant:** every queue-entry path's WHERE clause includes `WorkBucket IS NOT NULL`. A NULL WorkBucket means "system cannot decide this file's fate" -- the cure is admin-recompute after resolving the missing input (probe, profile, audio policy), not enqueueing on a guess.
+Bucket derivation (the generated `WorkBucket` column, its evaluation order, and the minimum-scope operations each bucket performs) is canonical at `transcode.flow.md` D2 + D4 + D7 -- not restated here.
 
 ## Per-Profile Compliance Bar (immutable once written)
 
@@ -252,38 +238,9 @@ return (True, None)
 
 The cross-vertical leak (`AcceptableAudioCodecsCsv` in `ContainerComplianceRules`) is removed -- audio codec belongs in `AudioVertical`.
 
-## Bucket-Scoped Operations Contract
+## Bucket-Scoped Operations Contract + Idempotency Invariant
 
-Each bucket's worker emits the **minimum-scope** ffmpeg command per the table below. The three compliance booleans are read fresh at command-build time; each False adds the corresponding op, each True suppresses it.
-
-| Bucket | Always (the bucket-defining op) | Conditionally |
-|---|---|---|
-| `Transcode` | video re-encode via `profile.Codec` (encoder) targeting `profile.StreamCodecName` (stream) + encoder section | container rewrite if `!ContainerCompliant`; audio re-encode + loudnorm + downmix-if-policy-requires if `!AudioCompliant` |
-| `Remux` | container rewrite to `profile.Container` | audio re-encode + loudnorm + downmix-if-policy-requires if `!AudioCompliant` |
-| `AudioFixOnly` | audio re-encode + loudnorm + downmix-if-policy-requires per `AudioNormalizationConfig` (incl. `MaxAudioChannels`) | -- |
-
-Symmetric reads in `CommandBuilder`:
-
-- `!AudioCompliant` -> emit dual-track loudnorm filter chain per `linear-loudnorm.feature.md` + `audio-normalization.feature.md`; emit `-ac N` + `pan` filter if effective `AudioNormalizationConfig.MaxAudioChannels` < source channels
-- `AudioCompliant=True` -> `-c:a copy` (do not touch audio stream)
-- `!ContainerCompliant` -> output container = `profile.Container`, source basename + `-mv` suffix
-- `ContainerCompliant=True` -> output container matches source container; no rewrite
-
-## Idempotency Invariant
-
-Running any bucket's worker on a file flips ONLY the booleans the bucket touched, and only from False to True. No worker may cause any compliance boolean to flip from True to False post-replacement.
-
-**Surface query (steady-state regression check):**
-
-```sql
-SELECT COUNT(*) FROM MediaFilesArchive a
-JOIN MediaFiles m ON m.Id = a.MediaFileId
-WHERE a.WorkBucket = 'AudioFixOnly'
-  AND m.WorkBucket  = 'Transcode';
--- Must be 0. Any non-zero row indicates an AudioFix poisoned a video verdict.
-```
-
-Symmetric queries cover Remux -> Transcode and AudioFixOnly -> Remux.
+Canonical at `transcode.flow.md` D2 (minimum-scope slot strategy) + D4 (bucket precedence) -- not restated here. Idempotency regression check: `Tests/Contract/TestComplianceIdempotency.py`.
 
 ## Re-evaluation Triggers
 
@@ -469,23 +426,7 @@ ALTER TABLE AudioNormalizationConfig
 
 ### MediaFiles table
 
-No new columns required. The three booleans (`VideoCompliant`, `ContainerCompliant`, `AudioCompliant`) and `WorkBucket` (generated) already exist from the compliance-rip directive.
-
-**`WorkBucket` generated column redefined** to handle NULLs explicitly:
-
-```sql
-ALTER TABLE MediaFiles DROP COLUMN WorkBucket;  -- existing GENERATED expression
-ALTER TABLE MediaFiles ADD COLUMN WorkBucket TEXT GENERATED ALWAYS AS (
-  CASE
-    WHEN VideoCompliant IS NULL OR ContainerCompliant IS NULL OR AudioCompliant IS NULL
-      THEN NULL
-    WHEN VideoCompliant = FALSE THEN 'Transcode'
-    WHEN ContainerCompliant = FALSE THEN 'Remux'
-    WHEN AudioCompliant = FALSE THEN 'AudioFixOnly'
-    ELSE NULL
-  END
-) STORED;
-```
+No new columns required. The three booleans (`VideoCompliant`, `ContainerCompliant`, `AudioCompliant`) and `WorkBucket` (generated) already exist from the compliance-rip directive. `WorkBucket` generated-column definition: canonical at `transcode.flow.md` D4; live migration is `Scripts/SQLScripts/RewriteWorkBucketGeneratedColumn_2026_08_13.py`.
 
 ### Dying tables (RENAME, not DROP, per 30-day recoverability)
 

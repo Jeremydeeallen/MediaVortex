@@ -2,8 +2,6 @@
 
 **Slug:** transcode
 
-**Canonical compliance + bucket + admission contract:** see `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md`. This flow doc retains the pipeline shape and stage IDs; per-stage compliance and bucket-derivation prose has been consolidated into the spec.
-
 Entry point: `StartMediaVortex.py` (all services) or individual service scripts.
 
 ## Domain Decisions
@@ -16,13 +14,37 @@ Single source of truth for Transcode / Remux / Audio pipeline shape. Sibling doc
 
 **D3. `ProcessingMode` is a reporting/priority tag only.** Names which vertical drove the admission. Does not decide slot behavior.
 
-**D4. `WorkBucket` = generated column from the three compliance flags.** Priority: `Unclassified > Compliant > Transcode > Remux > AudioFix`. Definition lives in `work-bucket.feature.md` C7 (subject to Phase 3 amendment for D7 alignment).
+**D4. `WorkBucket` = generated column from the three compliance flags. This section is the single canonical definition -- every other doc points here; none restate it.**
+
+```
+Incoming File
+     |
+     v
+[Check 1: Video Compliant?] --NO--> Pipeline 1: Transcode --+
+     | YES                                                  |
+     v                                                       |
+[Check 2: Container Compliant?] --NO--> Pipeline 2: Remux ---+
+     | YES                                                    |
+     v                                                        |
+[Check 3: Audio Compliant?] --NO--> Pipeline 3: Audio Dialog Boost
+     | YES                                                     |
+     v                                                         v
+              Fully Compliant File <----------------------------
+```
+
+Evaluation order (first failing check owns the bucket): `Transcode` (Video=FALSE) > `Remux` (Container=FALSE, Video=TRUE) > `AudioFix` (Audio=FALSE, Video+Container=TRUE) > `Compliant` (all three TRUE) > `Unclassified` (any input NULL -- undecidable, held out of queue).
+
+Minimum-scope, single-pass (see D2): landing in a bucket does not mean ONLY that dimension gets fixed -- it means that dimension is the one that DECIDED the bucket. Every dimension still False gets fixed in the same job, same ffmpeg invocation. A video-noncompliant file with also-noncompliant audio gets Dialog Boost in the SAME `Transcode` pass, not a follow-up `AudioFix` job. `AudioFix` as a bucket only exists for files where Video and Container are ALREADY compliant and Audio is the sole remaining gap.
+
+Terminal-state exception: see D7 -- MediaVortex's own Dialog-Boost-carrying outputs short-circuit straight to `Compliant` ahead of the three checks above (we never re-encode our own output).
+
+Executable SSoT (must match this section exactly): `Scripts/SQLScripts/RewriteWorkBucketGeneratedColumn_2026_08_13.py`. Verify: `SELECT generation_expression FROM information_schema.columns WHERE table_name='mediafiles' AND column_name='workbucket'`.
 
 **D5. Container target = `.mp4` always.** MP4 mux writes `handler_name` (not `title`) for track identity -- MP4 spec drops `title` on audio streams.
 
 **D6. Audio emission on any Reencode-slot pass = 2 tracks per kept source language.** Track 0 (default) = Dialog Boost from Demucs vocals-isolation on the source (once per encode). Track 1+ = Original per source stream, LRA-preserved. Details in `Features/AudioNormalization/audio-normalization.feature.md`.
 
-**D7. `TranscodedByMediaVortex = TRUE` is a terminal state.** We do not re-encode our own outputs. To change encoding, re-acquire source via Sonarr/Radarr -> fresh scan -> new MediaFile row without the flag. WorkBucket generated column MUST short-circuit `TranscodedByMediaVortex=TRUE -> 'Compliant'` (Phase 3 landing).
+**D7. `TranscodedByMediaVortex = TRUE` is a terminal state.** We do not re-encode our own outputs. To change encoding, re-acquire source via Sonarr/Radarr -> fresh scan -> new MediaFile row without the flag. Generated-column implementation of this short-circuit: see D4.
 
 **D8. Source file deleted after successful `ProcessFileReplacement`** (`Features/FileReplacement/TranscodedOutputPlacement.py:220`). Once transcode succeeds + MediaFiles row updated, the original .mkv/.mp4 is removed from disk. Sonarr/Radarr re-fetch is the only way to restore.
 
