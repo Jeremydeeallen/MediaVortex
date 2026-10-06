@@ -12,7 +12,7 @@ A TV file's bucket is decided by one readable rule: source video bitrate against
 ## Acceptance Criteria
 
 1. Each library carries an operator-set default quality tier. TV = 1; Movies and XXX unset. Verify: `SELECT Name, DefaultQualityTier FROM StorageRoots`.
-2. In a library with a default tier, a file's video is compliant iff its source video kbps <= (that tier's target kbps for the file's resolution) x (that resolution's multiplier). Verify: SQL recomputing the verdict from `ProfileThresholds` + `VideoComplianceThresholds` disagrees with stored `VideoCompliant` on 0 TV rows.
+2. In a library with a default tier, a file's video is compliant iff its source video kbps <= (the kbps that tier encodes a file of that resolution at) x (that resolution's multiplier). Verify: SQL recomputing the verdict from `ProfileThresholds` + `VideoComplianceThresholds` disagrees with stored `VideoCompliant` on 0 TV rows.
 3. In such a library the verdict ignores assigned profile and source codec. Verify: 0 TV rows with `VideoCompliantReason LIKE 'source_codec_matches_target%'` or `= 'missing_input:AssignedProfile'`; setting a TV series to another profile leaves `VideoCompliant` + `WorkBucket` unchanged for its files.
 4. The stored reason for a tier-ruled file names source kbps, ceiling, tier, target and multiplier. Verify: `SELECT VideoCompliantReason FROM MediaFiles WHERE StorageRootId=1 LIMIT 5`.
 5. Libraries with no default tier are untouched. Verify: snapshot of `(Id, VideoCompliant, VideoCompliantReason, WorkBucket)` for Movies + XXX before vs after differs on 0 rows.
@@ -51,7 +51,7 @@ A TV file's bucket is decided by one readable rule: source video bitrate against
 ## Engineering Calls Already Made
 
 - Operator 2026-10-06: ceiling = Tier 1 target x multiplier; codec-match dropped, AV1 included; TV tier is a default, per-series override changes encode tier only, never the bucket; TV only.
-- Ceilings come from live data, not doc numbers. Live today: 480p 400x4.0=1600, 720p 1000x2.0=2000, 1080p 900x2.0=1800, 2160p 900x3.0=2700 kbps.
+- Ceilings come from live data, not doc numbers. Target = the bitrate the tier actually encodes that source at, i.e. the cell of the resolution the tier outputs (`TranscodeDownTo`), not the source-resolution cell. Operator raised Tier 1 720p 900 -> 1000 between 2026-09-06 and 2026-09-08 (ffmpeg commands flip `900k` -> `1000k` then, downscaled 1080p included); the 1080p/2160p Tier 1 cells still say 900 and are not what encodes run at. Operator 2026-10-06: "we want the better bitrate". Live ceilings: 480p 400x4.0=1600, 720p 1000x2.0=2000, 1080p 1000x2.0=2000, 2160p 1000x3.0=3000 kbps.
 - TV identity = nullable `StorageRoots.DefaultQualityTier`, read fresh per evaluation.
 - Tier target read filters `ProfileThresholds.ContentClass` (existing `GetTier1Target` filters `Profiles.ContentClass` and can return either content-class row).
 
