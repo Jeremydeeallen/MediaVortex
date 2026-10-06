@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-06
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: VERIFYING
 **Slug:** tv-video-rule-tier1
 **Replaces:** `directives/closed/2026-10-06-bug-0095-failure-classification.md` (closed Success)
 
@@ -114,6 +114,7 @@ Seams added or changed (existing `transcode.S*` untouched):
 - **1:** migration applied twice 2026-10-06; `media_tv=1, movies=NULL, xxx=NULL`.
 - **2, 3, 9 (data half):** pending fleet deploy -> `RetireTvPinRule` -> TV recompute. Live tests `TestTvVideoRuleTier1Live` (2) + `TestTvPinTier1Classification` (2) fail until then, by design.
 - **Logic:** 60 contract tests pass (`TestTvVideoRuleTier1`, `TestComplianceGatePassFailOnly`, `TestVerticalsAreProfileIndependent`, `TestVideoVerticalCodecMatch`, `TestVideoComplianceMultiplier`, `TestClaimAuthority`, `TestWriterOwnsCascadeEnforcement`, `TestClassifierCascade`, 2 of 4 `TestTvPinTier1Classification`).
+- **6 (partial):** I9 WebService restarted on `32f24fb9`; `GET /api/SystemSettings/LibraryTiers` returns the three libraries; PUT rejects tier 9 (400) and unknown library (404); `/settings` renders the section. Successful PUT + cascade not yet exercised -- it is the TV recompute, held for after fleet deploy.
 - **Read-only evaluation on live rows:** TV AV1 1080p 2086 kbps (Id 616542) -> `source_above_ceiling:2086>2000(tier=1:1000*2.0)` (stored: codec-match compliant). TV unprofiled (Id 700831) -> decided (stored: Unclassified). Movie + XXX samples -> old path, reasons carry `profile=`.
 
 ### Decisions Made
