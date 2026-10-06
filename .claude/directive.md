@@ -115,4 +115,16 @@ Seams changed (others referenced by existing `transcode.S*`):
 
 ### Verification
 
+- **Units 1-4 committed** (`729f7f7c`, `7fb7e325`, `4bec73aa`). Unit 5 (three labels) not started.
+- **Contract suite, before vs after** (throwaway worktree at `d04de772` vs HEAD, same command): before 65 failed / 20 collection errors; after 62 failed / 20 errors. New failures: 0. The 3 fewer are `TestFileReplacementRollbackOnUpdateFailure`, fixed here.
+- **New:** `TestLabelDecidesCommand` 13/13, `TestCommandComposer` 28/28.
+- **Live:** nothing yet. Fleet not deployed; criteria 1-4, 9 unverified on a real job.
+
 ### Decisions Made
+
+- Units 1 and 2 landed as one commit: the fallback only existed to override a flag-derived plan, so removing one without the other left dead references.
+- `TranscodeJobStrategy` left as is. Forwarding `OutputPath` would change the transcode output filename (it currently goes through `OutputFilenameBuilder.GenerateOutputFileName`); naming is out of scope.
+- `HasDialogBoostTrack` at placement = existing flag OR the placing attempt's `DialogBoostEmitted`, not the attempt value alone: Transcode and Remux copy audio, so a boost track already in the file survives them.
+- Boost requirement in stage verification is keyed on the label's audio op (Reencode), not on the literal label name.
+- `UpdateTranscodeAttempt` re-raises `ValueError` past its catch-all; this also makes the existing immutable-`AttemptDate` refusal actually propagate.
+- Unit 5 is wider than planned: `SubtitleFix` has an operator surface (`/Optimization` "queue subtitle fix" button + `QueueSubtitleFix` endpoint + `PopulateQueueForSubtitleFix`) and `Quick` is in three queue-page mode whitelists. Retiring the labels means removing those too. Units 1-4 are deployable without it: both labels still resolve to a valid plan.
