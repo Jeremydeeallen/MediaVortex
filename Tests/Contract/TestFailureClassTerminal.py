@@ -95,7 +95,7 @@ class TestFailureClassTerminal(unittest.TestCase):
         from Repositories.DatabaseManager import DatabaseManager
         DbMgr = DatabaseManager()
         Svc = QueueManagementBusinessService(DbMgr)
-        Result = Svc.AddJobToQueue(self.TestMediaFileId, ForceAdd=True)
+        Result = Svc.AddJobToQueue(self.TestMediaFileId, ForceAdd=True, ProcessingMode='Transcode')
         self.assertFalse(Result.get('Success'))
         self.assertTrue(Result.get('FailureClassTerminal'))
         self.assertFalse(Result.get('CanOverride'))

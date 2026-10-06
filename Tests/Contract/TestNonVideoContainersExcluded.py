@@ -143,7 +143,7 @@ class TestTranscodeQueueRefusesAudioOnlyLive(unittest.TestCase):
     def test_add_job_refuses_forceadd(self):
         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
         Svc = QueueManagementBusinessService()
-        Result = Svc.AddJobToQueue(int(self.Row.get('id')), Priority=200, ForceAdd=True)
+        Result = Svc.AddJobToQueue(int(self.Row.get('id')), Priority=200, ForceAdd=True, ProcessingMode='Transcode')
         self.assertFalse(Result.get('Success'))
         self.assertIn('audio-only', (Result.get('ErrorMessage') or '').lower())
 

@@ -67,10 +67,14 @@ class StuckJobDetectionPhaseAwareTest(unittest.TestCase):
         Svc.IsJobStuck(_MakeJob())
         Registry.GetDetector.assert_called_once_with(JobPhase.Verifying)
 
+    # directive: auto-handoff | # see stuck-job-detection.ST2
     def test_missing_activejob_returns_stuck(self):
         Svc, _, _ = _MakeService(JobPhase.Setup, datetime.now(timezone.utc))
         Svc.ActiveJobRepository.GetActiveJobsByService.return_value = []
-        Stuck, Reason = Svc.IsJobStuck(_MakeJob())
+        Svc._ReadSetupPhaseTimeoutMin = lambda: 30
+        Job = _MakeJob()
+        Job.DateStarted = datetime.now(timezone.utc) - timedelta(minutes=45)
+        Stuck, Reason = Svc.IsJobStuck(Job)
         self.assertTrue(Stuck)
         self.assertIn('No ActiveJob', Reason)
 

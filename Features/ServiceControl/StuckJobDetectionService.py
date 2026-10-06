@@ -156,7 +156,16 @@ class StuckJobDetectionService:
         except Exception:
             return self.STUCK_SCAN_THRESHOLD_MINUTES
 
-    # directive: transcode-flow-canonical
+    # directive: auto-handoff | # see stuck-job-detection.ST2
+    def _ReadSetupPhaseTimeoutMin(self) -> int:
+        """Operator setting, read per call; a missing row raises."""
+        from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+        Value = SystemSettingsRepository().GetSystemSetting('SetupPhaseTimeoutMin')
+        if Value is None:
+            raise RuntimeError("SystemSettings.SetupPhaseTimeoutMin is not set")
+        return int(Value)
+
+    # directive: auto-handoff | # see stuck-job-detection.ST2
     def IsJobStuck(self, Job) -> tuple[bool, str]:
         """Phase-aware detection: Tier 1 (heartbeat) then phase-detector dispatch via PhaseDetectorRegistry."""
         try:
@@ -170,7 +179,13 @@ class StuckJobDetectionService:
                     break
 
             if not relevantActiveJob:
-                return True, "No ActiveJob record found for running transcode job"
+                GraceMin = self._ReadSetupPhaseTimeoutMin()
+                if Job.DateStarted is None:
+                    raise RuntimeError(f"Running queue row {Job.Id} has no claim time")
+                MinutesSinceClaim = (datetime.now(timezone.utc) - AsAwareUtc(Job.DateStarted)).total_seconds() / 60.0
+                if MinutesSinceClaim < GraceMin:
+                    return False, f"Claimed {MinutesSinceClaim:.1f} min ago; ActiveJob record not written yet (grace {GraceMin}min)"
+                return True, f"No ActiveJob record {MinutesSinceClaim:.1f} min after claim (grace {GraceMin}min)"
 
             JobWorkerName = relevantActiveJob.get('WorkerName')
             if JobWorkerName:

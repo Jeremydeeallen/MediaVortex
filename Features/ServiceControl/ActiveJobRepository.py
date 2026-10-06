@@ -266,7 +266,7 @@ class ActiveJobRepository:
         Sort = QuerySort("StartedAt", "ASC", ActiveJobRepository.ActiveJobsSortWhitelist, NullsLast=False)
         return PagedQuery(Page=Page, PageSize=PageSize, Sort=Sort, Filters=Filters)
 
-    # directive: paged-query-core | # see paged-query.C11
+    # directive: auto-handoff | # see stuck-job-detection.ST2
     def GetActiveJobsByService(self, Query: "PagedQuery") -> "PagedQueryResult":
         """Paged active jobs via PagedQuery; window-count strategy; ActiveJobs columns preserved verbatim (Id, ServiceName, JobType, QueueId, ProcessId, FFmpegPid, ThreadId, StartedAt, Status, CreatedAt, UpdatedAt, WorkerName)."""
         from Core.Querying import PagedQueryBuilder, PagedQueryResult, PagedQueryConfig, CountStrategy
@@ -285,7 +285,7 @@ class ActiveJobRepository:
             )
         except Exception as e:
             LoggingService.LogException("Exception getting active jobs by service", e, "ActiveJobRepository", "GetActiveJobsByService")
-            return PagedQueryResult(Rows=[], TotalCount=0, Page=Query.Page, PageSize=Query.PageSize)
+            raise
 
     def GetAllActiveJobProcessIds(self) -> List[int]:
         """Get all ProcessIds from active jobs for orphaned process detection."""

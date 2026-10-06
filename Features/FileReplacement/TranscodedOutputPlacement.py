@@ -43,7 +43,39 @@ class TranscodedOutputPlacement:
         from Core.Path.PathStorageRoots import GetStorageRoots
         return GetStorageRoots()
 
-    # directive: transcode-flow-canonical | # see transcode.ST9 | see transcoded-output-placement.C4 | see transcoded-output-placement.C13
+    # directive: auto-handoff | # see transcode.ST9
+    def _QueueNextStage(self, MediaFileId: int, LabelThatRan: str) -> Optional[Dict[str, Any]]:
+        """Queue the stage the file's bucket names; never the label that just ran."""
+        from Features.TranscodeJob import ProcessingModeMetadata
+        from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+        Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+            "SELECT WorkBucket FROM MediaFiles WHERE Id = %s", (int(MediaFileId),)
+        )
+        if not Rows:
+            raise RuntimeError(f"Hand-off: MediaFiles row {MediaFileId} not found after placement")
+        Bucket = Rows[0]['WorkBucket']
+        if not ProcessingModeMetadata.IsKnown(Bucket):
+            return None
+        if Bucket == LabelThatRan:
+            LoggingService.LogError(
+                f"Hand-off: MediaFileId={MediaFileId} is still in bucket {Bucket} after a {LabelThatRan} job placed its output; not queued again",
+                "TranscodedOutputPlacement", "_QueueNextStage"
+            )
+            return None
+        Result = QueueManagementBusinessService().AddJobToQueue(MediaFileId=MediaFileId, ProcessingMode=Bucket)
+        if Result.get('Success'):
+            LoggingService.LogInfo(
+                f"Hand-off: MediaFileId={MediaFileId} {LabelThatRan} -> {Bucket} queued (row {Result.get('ItemId')})",
+                "TranscodedOutputPlacement", "_QueueNextStage"
+            )
+        else:
+            LoggingService.LogError(
+                f"Hand-off: MediaFileId={MediaFileId} {LabelThatRan} -> {Bucket} not queued: {Result.get('ErrorMessage')}",
+                "TranscodedOutputPlacement", "_QueueNextStage"
+            )
+        return Result
+
+    # directive: auto-handoff | # see transcode.ST9 | see transcoded-output-placement.C4 | see transcoded-output-placement.C13
     def Execute(self, OriginalFilePath: str, TranscodedFilePath: str, NetworkOriginalPath: str = None,
                 FFmpegCommand: Optional[str] = None, SourceMediaFileId: Optional[int] = None,
                 Mode: str = 'Transcode') -> Dict[str, Any]:
@@ -133,6 +165,7 @@ class TranscodedOutputPlacement:
             UpdateResult = self._UpdateMediaFilesAfterReplacement(CanonicalOriginal, CanonicalNewPath,
                                                                    FFmpegCommand=FFmpegCommand,
                                                                    Mode=Mode)
+            HandoffMediaFileId = None
             if UpdateResult.get('Success', False):
                 StepsCompleted.append("Updated MediaFiles table")
                 Renamer.Commit()  # see transcoded-output-placement.C13
@@ -166,6 +199,7 @@ class TranscodedOutputPlacement:
                         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
                         Updated = QueueManagementBusinessService().RecomputeForFiles([RecomputeMediaFileId])
                         StepsCompleted.append(f"Recomputed compliance (updated {Updated} row)")
+                        HandoffMediaFileId = RecomputeMediaFileId
                     except Exception as RecomputeEx:
                         LoggingService.LogException(
                             f"RecomputeForFiles failed for MediaFileId={RecomputeMediaFileId} after replacement",
@@ -213,6 +247,18 @@ class TranscodedOutputPlacement:
                     )
             else:
                 StepsCompleted.append("Original source was already absent")
+
+            if HandoffMediaFileId:
+                try:
+                    Handoff = self._QueueNextStage(HandoffMediaFileId, Mode)
+                    if Handoff and Handoff.get('Success'):
+                        StepsCompleted.append("Queued next stage")
+                # fail-loud-ok: output is placed and the original is gone; a hand-off error is logged and the file stays in its bucket
+                except Exception as HandoffEx:
+                    LoggingService.LogException(
+                        f"Hand-off failed for MediaFileId={HandoffMediaFileId} after {Mode} placement",
+                        HandoffEx, "TranscodedOutputPlacement", "Execute"
+                    )
 
             return {
                 'Success': True,

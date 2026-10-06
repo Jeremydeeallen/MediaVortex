@@ -46,7 +46,7 @@ class TestAddJobToQueueForceAddAutoReset(unittest.TestCase):
             self._InsertFailure()
         self.assertFalse(self.Service.HasBudgetRemaining(self.MediaFileId), "precondition: cap hit")
 
-        Result = self.Qmbs.AddJobToQueue(self.MediaFileId, ForceAdd=True)
+        Result = self.Qmbs.AddJobToQueue(self.MediaFileId, ForceAdd=True, ProcessingMode='Transcode')
 
         self.assertTrue(Result.get('Success'), "expected admission success, got: " + repr(Result))
 
@@ -67,7 +67,7 @@ class TestAddJobToQueueForceAddAutoReset(unittest.TestCase):
     def test_forceadd_when_budget_available_does_not_write_audit(self):
         self.assertTrue(self.Service.HasBudgetRemaining(self.MediaFileId), "precondition: budget available")
 
-        self.Qmbs.AddJobToQueue(self.MediaFileId, ForceAdd=True)
+        self.Qmbs.AddJobToQueue(self.MediaFileId, ForceAdd=True, ProcessingMode='Transcode')
 
         Audit = self.Db.ExecuteQuery(
             "SELECT COUNT(*) AS n FROM FailureBudgetResets WHERE MediaFileId = %s",
@@ -80,7 +80,7 @@ class TestAddJobToQueueForceAddAutoReset(unittest.TestCase):
             self._InsertFailure()
         self.assertFalse(self.Service.HasBudgetRemaining(self.MediaFileId), "precondition: cap hit")
 
-        Result = self.Qmbs.AddJobToQueue(self.MediaFileId, ForceAdd=False)
+        Result = self.Qmbs.AddJobToQueue(self.MediaFileId, ForceAdd=False, ProcessingMode='Transcode')
 
         self.assertFalse(Result.get('Success'), "expected refusal without ForceAdd")
 
