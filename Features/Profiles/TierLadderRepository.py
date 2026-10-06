@@ -43,6 +43,36 @@ class TierLadderRepository:
         Value = Row[0].get('targetkbps')
         return int(Value) if Value is not None else None
 
+    # directive: tv-video-rule-tier1 | # see video-encoding.C1
+    def GetTierEncodeKbps(self, Tier: int, ContentClass: str, Resolution: str) -> Optional[int]:
+        Row = self.Db.ExecuteQuery(
+            "SELECT tgt.TargetKbps FROM Profiles p "
+            "JOIN ProfileThresholds src ON src.ProfileId = p.Id "
+            "JOIN ProfileThresholds tgt ON tgt.ProfileId = p.Id AND tgt.ContentClass = src.ContentClass "
+            "  AND tgt.Resolution = CASE WHEN src.TranscodeDownTo IN ('', 'No downscaling') "
+            "                            THEN src.Resolution ELSE src.TranscodeDownTo END "
+            "WHERE p.Family = 'ANY' AND p.QualityTier = %s AND p.QualityLabel IS NOT NULL "
+            "  AND src.ContentClass = %s AND src.Resolution = %s AND tgt.TargetKbps IS NOT NULL "
+            "ORDER BY p.Id LIMIT 1",
+            (int(Tier), ContentClass, Resolution),
+        )
+        if not Row:
+            return None
+        Value = Row[0].get('targetkbps')
+        return int(Value) if Value is not None else None
+
+    # directive: tv-video-rule-tier1 | # see classifier.C9
+    def GetTierProfileName(self, Tier: int) -> Optional[str]:
+        Row = self.Db.ExecuteQuery(
+            "SELECT ProfileName FROM Profiles "
+            "WHERE Family = 'ANY' AND QualityTier = %s AND QualityLabel IS NOT NULL "
+            "ORDER BY Id LIMIT 1",
+            (int(Tier),),
+        )
+        if not Row:
+            return None
+        return Row[0].get('profilename')
+
     # directive: video-vertical-codec-match-skip
     def GetProfileCodec(self, ProfileName: str) -> Optional[str]:
         Row = self.Db.ExecuteQuery(

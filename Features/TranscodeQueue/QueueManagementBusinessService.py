@@ -1410,28 +1410,18 @@ class QueueManagementBusinessService:
                     lookup[(pn, src_res)] = (vk, ak, src_res)
         return lookup
 
-    # directive: compliance-rip
+    # directive: tv-video-rule-tier1 | # see compliance-gated-rename.C5
     def EvaluateCandidateCompliance(self, CandidateRow: Dict[str, Any], EffectiveProfile: Optional[str] = None) -> Dict[str, Any]:
-        """Pre-rename compliance check via three pure vertical Evaluate calls. Returns {IsCompliant, WorkBucket, RefusalReason} for ComplianceGate.Evaluate."""
+        """Pass/fail for a finished encode before rename. Video is not judged: our own output is terminal (transcode.flow.md D7)."""
         from Features.AudioNormalization.AudioVertical import AudioVertical
-        from Features.VideoEncoding.VideoVertical import VideoVertical
         from Features.ContainerFormat.ContainerVertical import ContainerVertical
         Mf = self._RowToMediaFileForCompliance(CandidateRow)
-        AudioOk, AudioReason = AudioVertical().Evaluate(Mf)
-        VideoOk, VideoReason = VideoVertical().Evaluate(Mf)
-        ContainerOk, ContainerReason = ContainerVertical().Evaluate(Mf)
-        if AudioOk is None or VideoOk is None or ContainerOk is None:
-            WorkBucket, IsCompliant, RefusalReason = None, None, (AudioReason or VideoReason or ContainerReason)
-        elif not VideoOk:
-            WorkBucket, IsCompliant, RefusalReason = 'Transcode', False, VideoReason
-        elif not ContainerOk:
-            WorkBucket, IsCompliant, RefusalReason = 'Remux', False, ContainerReason
-        elif not AudioOk:
-            WorkBucket, IsCompliant, RefusalReason = 'AudioFix', False, AudioReason
-        else:
-            WorkBucket, IsCompliant, RefusalReason = None, True, None
-        CandidateRow['_RefusalReason'] = RefusalReason
-        return {'IsCompliant': IsCompliant, 'WorkBucket': WorkBucket, 'RefusalReason': RefusalReason}
+        Verdicts = (ContainerVertical().Evaluate(Mf), AudioVertical().Evaluate(Mf))
+        Failing = [(Ok, Reason) for Ok, Reason in Verdicts if Ok is not True]
+        if not Failing:
+            return {'IsCompliant': True, 'RefusalReason': None}
+        IsCompliant = None if any(Ok is None for Ok, _ in Failing) else False
+        return {'IsCompliant': IsCompliant, 'RefusalReason': Failing[0][1]}
 
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
     def _RowToMediaFileForCompliance(self, Row: Dict[str, Any]):

@@ -8,11 +8,14 @@ from Features.ContentClassifier.Models.ContentClassificationRuleModel import (
     ContentClassificationRuleModel,
 )
 from Features.MediaFiles.ProfileAssignmentService import ProfileAssignmentService
+from Features.Profiles.LibraryDefaultTierRepository import LibraryDefaultTierRepository
+from Features.Profiles.TierLadderRepository import TierLadderRepository
 
 
 _SKIP_SENTINEL = "__skip__"
 _SKIP_SOURCE = "classifier_skip_av1"
 _CLASSIFIER_SOURCE = "classifier"
+_LIBRARY_TIER_SOURCE = "library_default_tier"
 
 
 def _MatchesNumericRange(Value, MinV, MaxV) -> bool:
@@ -78,7 +81,20 @@ class ContentClassifierService:
         self.Repository = ContentClassifierRepository()
         self.Db = DatabaseService()
         self.ProfileWriter = ProfileWriter or ProfileAssignmentService(Db=self.Db)
+        self.LibraryTiers = LibraryDefaultTierRepository(self.Db)
+        self.Tiers = TierLadderRepository(self.Db)
 
+    # directive: tv-video-rule-tier1 | # see classifier.C9
+    def _LibraryDefaultProfile(self, Media: dict) -> Optional[str]:
+        Tier = self.LibraryTiers.GetDefaultQualityTier(Media.get('StorageRootId') or Media.get('storagerootid'))
+        if Tier is None:
+            return None
+        ProfileName = self.Tiers.GetTierProfileName(Tier)
+        if not ProfileName:
+            raise RuntimeError(f"No Family='ANY' profile exists for library default tier {Tier}")
+        return ProfileName
+
+    # directive: tv-video-rule-tier1 | # see classifier.C2
     def _Walk(self, Rules: List[ContentClassificationRuleModel], Media: dict) -> Optional[ContentClassificationRuleModel]:
         for Rule in Rules:
             if _RuleMatches(Rule, Media, self.Db):
@@ -98,6 +114,15 @@ class ContentClassifierService:
 
             if Media.get("AssignedProfile"):
                 return Media.get("AssignedProfile")
+
+            LibraryProfile = self._LibraryDefaultProfile(Media)
+            if LibraryProfile:
+                self.ProfileWriter.Assign([MediaFileId], LibraryProfile, _LIBRARY_TIER_SOURCE, IfUnsetOnly=True)
+                LoggingService.LogInfo(
+                    f"ContentClassifier: library default tier -> profile '{LibraryProfile}' for MediaFileId {MediaFileId}",
+                    "ContentClassifierService", "ClassifyAndAssign",
+                )
+                return LibraryProfile
 
             Rules = self.Repository.GetActiveRules()
             Matched = self._Walk(Rules, Media)
@@ -138,12 +163,18 @@ class ContentClassifierService:
         Skipped = 0
         Unmatched = 0
         ProfileToIds = {}
+        LibraryProfileToIds = {}
         SkipIds = []
         for MfId in MediaFileIds:
             try:
                 Media = self.Repository.GetMediaFileForClassification(MfId)
                 if not Media or Media.get("AssignedProfile"):
                     Skipped += 1
+                    continue
+                LibraryProfile = self._LibraryDefaultProfile(Media)
+                if LibraryProfile:
+                    LibraryProfileToIds.setdefault(LibraryProfile, []).append(MfId)
+                    HitCounts['LibraryDefaultTier'] = HitCounts.get('LibraryDefaultTier', 0) + 1
                     continue
                 Matched = self._Walk(Rules, Media)
                 if not Matched:
@@ -161,6 +192,8 @@ class ContentClassifierService:
                 )
         if SkipIds:
             self.ProfileWriter.Assign(SkipIds, None, _SKIP_SOURCE, IfUnsetOnly=True)
+        for ProfileName, Ids in LibraryProfileToIds.items():
+            self.ProfileWriter.Assign(Ids, ProfileName, _LIBRARY_TIER_SOURCE, IfUnsetOnly=True)
         for ProfileName, Ids in ProfileToIds.items():
             self.ProfileWriter.Assign(Ids, ProfileName, _CLASSIFIER_SOURCE, IfUnsetOnly=True)
         return {"HitCounts": HitCounts, "Skipped": Skipped, "Unmatched": Unmatched}

@@ -67,6 +67,28 @@ def _CellsToGrid(Cells, ValueKey: str, PerResolution: bool):
     return list(Grouped.values())
 
 
+# directive: tv-video-rule-tier1 | # see video-encoding.C4
+def _SpawnLibraryRecompute(StorageRootId: int):
+    import threading
+
+    # directive: tv-video-rule-tier1 | # see video-encoding.C4
+    def _Run():
+        try:
+            from Core.Database.DatabaseService import DatabaseService
+            from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+            Rows = DatabaseService().ExecuteQuery("SELECT Id FROM MediaFiles WHERE StorageRootId = %s ORDER BY Id", (StorageRootId,))
+            Ids = [int(R.get('Id')) for R in Rows]
+            Service = QueueManagementBusinessService()
+            for I in range(0, len(Ids), 500):
+                Service.RecomputeForFiles(Ids[I:I + 500])
+            LoggingService.LogInfo(f"Library tier recompute complete: StorageRootId={StorageRootId}, {len(Ids)} files", 'SystemSettingsController', '_SpawnLibraryRecompute')
+        except Exception as Ex:
+            LoggingService.LogException(f"Library tier recompute failed for StorageRootId={StorageRootId}", Ex, 'SystemSettingsController', '_SpawnLibraryRecompute')
+            raise
+
+    threading.Thread(target=_Run, daemon=True, name=f'LibraryTierRecompute-{StorageRootId}').start()
+
+
 # directive: path-schema-migration | # see path.S9
 class SystemSettingsController:
     """Controller for system settings management."""
@@ -569,6 +591,42 @@ class SystemSettingsController:
             except Exception as e:
                 LoggingService.LogException("Error updating Transcoding settings", e, 'UpdateTranscodingSettings', 'SystemSettingsController')
                 return jsonify({'Success': False, 'Error': str(e)}), 500
+
+        @self.Blueprint.route('/LibraryTiers', methods=['GET'])
+        # directive: tv-video-rule-tier1 | # see video-encoding.C4
+        def GetLibraryTiers():
+            try:
+                from Features.Profiles.LibraryDefaultTierRepository import LibraryDefaultTierRepository
+                Libraries = LibraryDefaultTierRepository().ListLibraries()
+                return jsonify({'Success': True, 'Data': {'Libraries': [
+                    {'StorageRootId': L.StorageRootId, 'Name': L.Name, 'DefaultQualityTier': L.DefaultQualityTier}
+                    for L in Libraries
+                ]}}), 200
+            # fail-loud-ok: HTTP boundary; logged and surfaced as Success=False
+            except Exception as e:
+                LoggingService.LogException("Error getting library tiers", e, 'GetLibraryTiers', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Message': 'Could not load library tiers'}), 500
+
+        @self.Blueprint.route('/LibraryTiers', methods=['PUT'])
+        # directive: tv-video-rule-tier1 | # see video-encoding.C4
+        def UpdateLibraryTier():
+            try:
+                Data = request.get_json() or {}
+                StorageRootId = Data.get('StorageRootId')
+                Tier = Data.get('DefaultQualityTier')
+                if not isinstance(StorageRootId, int):
+                    return jsonify({'Success': False, 'Message': 'StorageRootId (integer) is required'}), 400
+                if Tier is not None and (not isinstance(Tier, int) or not 1 <= Tier <= 5):
+                    return jsonify({'Success': False, 'Message': 'DefaultQualityTier must be 1-5 or null'}), 400
+                from Features.Profiles.LibraryDefaultTierRepository import LibraryDefaultTierRepository
+                if LibraryDefaultTierRepository().SetDefaultQualityTier(StorageRootId, Tier) == 0:
+                    return jsonify({'Success': False, 'Message': f'No library with StorageRootId {StorageRootId}'}), 404
+                _SpawnLibraryRecompute(StorageRootId)
+                return jsonify({'Success': True, 'Message': 'Library tier saved; re-evaluating that library in the background', 'Data': {'StorageRootId': StorageRootId, 'DefaultQualityTier': Tier}}), 200
+            # fail-loud-ok: HTTP boundary; logged and surfaced as Success=False
+            except Exception as e:
+                LoggingService.LogException("Error updating library tier", e, 'UpdateLibraryTier', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Message': 'Could not save library tier'}), 500
 
         @self.Blueprint.route('/TestFFmpegPaths', methods=['POST'])
         def TestFFmpegPaths():

@@ -592,6 +592,10 @@
                     <p class="text-muted small mb-2">SourceKbps &gt; Tier1TargetKbps &times; Multiplier &rarr; file classified <code>WorkBucket='Transcode'</code>. Otherwise the file falls through to Remux/AudioFix/Compliant depending on other columns. Higher multiplier = stricter (more sources treated compliant).</p>
                     <div id="VideoComplianceContainer" class="mb-3"><em class="text-muted small">Loading&hellip;</em></div>
 
+                    <h6 class="mb-2">Library default tier</h6>
+                    <p class="text-muted small mb-2">A library with a default tier judges every file against that tier's bitrate &times; the multiplier above, whatever profile or codec the file has. New files in it get that tier's profile. Changing a tier re-evaluates the whole library in the background.</p>
+                    <div id="LibraryTiersContainer" class="mb-3"><em class="text-muted small">Loading&hellip;</em></div>
+
                     <h6 class="mb-2">VMAF confidence-skip</h6>
                     <table class="table settings-table mb-3">
                         <tbody>
@@ -2435,6 +2439,46 @@ function LoadTranscodingSettings() {
         RenderVideoCompliance();
         RenderConfidenceStats(R.ConfidenceStats || []);
     }).fail(function(X) { alert('Load failed: ' + X.responseText); });
+    LoadLibraryTiers();
+}
+
+function LoadLibraryTiers() {
+    var Container = $('#LibraryTiersContainer').html('<em class="text-muted small">Loading&hellip;</em>');
+    $.get('/api/SystemSettings/LibraryTiers').done(function(R) {
+        if (!R.Success) { Container.html('<span class="text-danger small">' + (R.Message || 'Load failed') + '</span>'); return; }
+        var H = '<table class="table table-sm table-bordered mb-0" style="max-width: 640px;">';
+        H += '<thead><tr><th>Library</th><th>Default tier</th><th></th></tr></thead><tbody>';
+        (R.Data.Libraries || []).forEach(function(L) {
+            H += '<tr data-storage-root-id="' + L.StorageRootId + '"><td class="fw-bold">' + $('<span>').text(L.Name).html() + '</td>';
+            H += '<td><select class="form-select form-select-sm library-tier" style="max-width: 200px;">';
+            H += '<option value=""' + (L.DefaultQualityTier == null ? ' selected' : '') + '>None (judge by file profile)</option>';
+            for (var T = 1; T <= 5; T++) {
+                var Label = (_TranscodingSettings.TierLabels || {})[T];
+                H += '<option value="' + T + '"' + (L.DefaultQualityTier === T ? ' selected' : '') + '>Tier ' + T + (Label ? ' (' + Label + ')' : '') + '</option>';
+            }
+            H += '</select></td><td><button type="button" class="btn btn-sm btn-primary" onclick="SaveLibraryTier(this)">Save</button> <span class="text-muted small library-tier-status"></span></td></tr>';
+        });
+        H += '</tbody></table>';
+        Container.html(H);
+    }).fail(function() { Container.html('<span class="text-danger small">Could not load library tiers</span>'); });
+}
+
+function SaveLibraryTier(Button) {
+    var Tr = $(Button).closest('tr');
+    var Raw = Tr.find('.library-tier').val();
+    var Status = Tr.find('.library-tier-status').text('Saving…');
+    $(Button).prop('disabled', true);
+    $.ajax({
+        url: '/api/SystemSettings/LibraryTiers',
+        method: 'PUT',
+        contentType: 'application/json',
+        timeout: 15000,
+        data: JSON.stringify({ StorageRootId: parseInt(Tr.data('storage-root-id'), 10), DefaultQualityTier: Raw === '' ? null : parseInt(Raw, 10) })
+    }).done(function(R) {
+        Status.text(R.Success ? 'Saved. Re-evaluating library in background.' : (R.Message || 'Save failed'));
+    }).fail(function(X) {
+        Status.text((X.responseJSON && X.responseJSON.Message) || 'Save failed');
+    }).always(function() { $(Button).prop('disabled', false); });
 }
 
 function RenderVideoCompliance() {
