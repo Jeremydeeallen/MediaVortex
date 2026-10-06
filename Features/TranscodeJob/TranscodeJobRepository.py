@@ -408,8 +408,7 @@ class TranscodeJobRepository(BaseRepository):
                     set_clauses.append("ErrorMessage = %s")
                     parameters.append(value)
                 else:
-                    LoggingService.LogWarning(f"Unknown field '{field}' ignored in UpdateTranscodeAttempt",
-                                            "TranscodeJobRepository", "UpdateTranscodeAttempt")
+                    raise ValueError(f"UpdateTranscodeAttempt: unknown field {field!r}; refusing to drop it silently")
 
             if not set_clauses:
                 LoggingService.LogWarning("No valid fields to update", "TranscodeJobRepository", "UpdateTranscodeAttempt")
@@ -453,6 +452,8 @@ class TranscodeJobRepository(BaseRepository):
             finally:
                 self.DatabaseService.CloseConnection(connection)
 
+        except ValueError:
+            raise
         except Exception as e:
             LoggingService.LogException("Exception in UpdateTranscodeAttempt", e, "TranscodeJobRepository", "UpdateTranscodeAttempt")
             return False

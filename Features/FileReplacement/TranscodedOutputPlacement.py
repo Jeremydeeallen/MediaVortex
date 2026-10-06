@@ -154,14 +154,14 @@ class TranscodedOutputPlacement:
                     # directive: dialog-boost-marker-unify | # see dialog-boost-marker-unify.C4
                     from Core.Database.DatabaseService import DatabaseService as _DbSvc
                     _DbSvc().ExecuteNonQuery(
-                        "UPDATE MediaFiles SET HasDialogBoostTrack = COALESCE(("
+                        "UPDATE MediaFiles SET HasDialogBoostTrack = HasDialogBoostTrack IS TRUE OR COALESCE(("
                         "  SELECT DialogBoostEmitted FROM TranscodeAttempts "
-                        "  WHERE MediaFileId = %s AND Success = TRUE "
+                        "  WHERE MediaFileId = %s AND Success IS NOT FALSE "
                         "  ORDER BY Id DESC LIMIT 1"
                         "), FALSE) WHERE Id = %s",
                         (RecomputeMediaFileId, RecomputeMediaFileId),
                     )
-                    StepsCompleted.append("Updated HasDialogBoostTrack from latest attempt")
+                    StepsCompleted.append("Updated HasDialogBoostTrack from the placing attempt")
                     try:
                         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
                         Updated = QueueManagementBusinessService().RecomputeForFiles([RecomputeMediaFileId])

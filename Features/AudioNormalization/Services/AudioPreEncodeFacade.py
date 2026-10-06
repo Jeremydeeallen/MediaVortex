@@ -7,7 +7,7 @@ from Core.Logging.LoggingService import LoggingService
 _PREMIX_KEYS = ('DemucsPremixPath', 'VocalsRmsDbfs', 'PremixMeasuredI', 'PremixMeasuredLra', 'PremixMeasuredTp', 'PremixMeasuredThresh')
 
 
-# directive: bug-0093-preencode-fail-loud-via-d13 -- pre-encode failure raises; caller (JobProcessor) routes via transcode.D13. Silent swallower removed.
+# directive: label-decides-command | # see audio-normalization.C8
 def Prepare(FfmpegPath, InputPath, JobId, ProgressReporter=None, MediaFileId=None):
     if not InputPath:
         return None
@@ -26,7 +26,7 @@ def EnrichContext(Context, PreAudio):
         Context[Key] = (PreAudio or {}).get(Key)
 
 
-# directive: bug-0093-preencode-fail-loud-via-d13 -- pre-encode failure never reaches PersistMeta (JobProcessor routes to D13 before this call); DemucsFailed sentinel key removed.
+# directive: label-decides-command | # see audio-normalization.C8
 def PersistMeta(TranscodeAttemptId, PreAudio):
     if not PreAudio:
         return
@@ -44,6 +44,16 @@ def PersistMeta(TranscodeAttemptId, PreAudio):
         "UPDATE TranscodeAttempts SET DialogBoostEmitted = %s WHERE Id = %s",
         (bool(DialogBoostEmitted), int(TranscodeAttemptId)),
     )
+
+
+# directive: label-decides-command | # see audio-normalization.C8
+def WasDialogBoostEmitted(TranscodeAttemptId) -> bool:
+    from Core.Database.DatabaseService import DatabaseService
+    Rows = DatabaseService().ExecuteQuery(
+        "SELECT DialogBoostEmitted FROM TranscodeAttempts WHERE Id = %s",
+        (int(TranscodeAttemptId),),
+    )
+    return bool(Rows) and Rows[0].get('DialogBoostEmitted') is True
 
 
 # directive: transcode-flow-canonical

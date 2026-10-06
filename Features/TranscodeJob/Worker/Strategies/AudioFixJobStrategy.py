@@ -12,13 +12,13 @@ class AudioFixJobStrategy(ITranscodeJobStrategy):
         # see worker-loop.C3
         self.QueueService = QueueService
 
-    # directive: transcode-flow-canonical | # see transcode.ST5
+    # directive: label-decides-command | # see transcode.ST6
     def BuildCommand(self, Job, MediaFile, Context: Dict[str, Any]) -> Optional[CommandSpec]:
         QueueService = Context.get('QueueService') or self.QueueService
         _Spec = QueueService.CommandComposer.Build(MediaFile, Job, Context=Context)
         if not _Spec:
             return None
-        return CommandSpec(Command=_Spec.Command, OutputPath=_Spec.OutputPath)
+        return CommandSpec(Command=_Spec.Command, OutputPath=_Spec.OutputPath, VideoSlotStrategy=getattr(_Spec, 'VideoSlotStrategy', ''))
 
     # directive: transcode-worker-unification | # see worker-loop.C3
     def HandleResult(self, Job, Result: Dict[str, Any], TranscodeAttemptId: int, ActiveJobId: int, OutputPath: str, QueueService=None) -> None:

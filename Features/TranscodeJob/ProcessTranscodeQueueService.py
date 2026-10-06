@@ -582,9 +582,21 @@ class ProcessTranscodeQueueService:
             except Exception:
                 pass
 
-    # directive: transcode-flow-canonical | # see transcode.ST8 -- StreamCopy checksum verify
+    # directive: label-decides-command | # see transcode.ST8
+    def _VerifyVideoCopyStage(self, Job: TranscodeQueueModel, StagedOutputPath: str, TranscodeAttemptId: int) -> Optional[str]:
+        """Return None when the stage produced what its label promises, else the failure reason."""
+        ChecksumOutcome = self._VerifyStreamCopyChecksum(Job, StagedOutputPath, TranscodeAttemptId)
+        if not ChecksumOutcome['Success']:
+            return ChecksumOutcome['ErrorMessage']
+        if PlanFactory().FromProcessingMode(Job.ProcessingMode).AudioOp == 'Reencode':
+            from Features.AudioNormalization.Services import AudioPreEncodeFacade
+            if not AudioPreEncodeFacade.WasDialogBoostEmitted(TranscodeAttemptId):
+                return f"{Job.ProcessingMode} produced no Dialog Boost track"
+        return None
+
+    # directive: label-decides-command | # see transcode.ST8
     def HandleRemuxResult(self, Job: TranscodeQueueModel, TranscodeResult: Dict[str, Any], TranscodeAttemptId: int, ActiveJobId: int, OutputPath: str):
-        """StreamCopy path: checksum-verify then dispatch disposition. Vmaf=100.0 sentinel on match; Success=False on mismatch."""
+        """Video-copy stages: verify the stage's own product, then dispatch. A failed verify fails the job; nothing is replaced."""
         try:
             NewSizeBytes = TranscodeResult.get("NewSizeBytes", 0)
             RawOutputFilePath = TranscodeResult.get("OutputFilePath", OutputPath)
@@ -594,20 +606,20 @@ class ProcessTranscodeQueueService:
             SizeReductionBytes = OldSizeBytes - NewSizeBytes if NewSizeBytes > 0 and OldSizeBytes > 0 else 0
             SizeReductionPercent = (SizeReductionBytes / OldSizeBytes) * 100 if OldSizeBytes > 0 else 0.0
 
-            ChecksumOutcome = self._VerifyStreamCopyChecksum(Job, RawOutputFilePath, TranscodeAttemptId)
-            AttemptUpdate = {
+            VerifyError = self._VerifyVideoCopyStage(Job, RawOutputFilePath, TranscodeAttemptId)
+            if VerifyError:
+                self._DeleteInProgressFile(RawOutputFilePath)
+                self.HandleJobFailure(Job, VerifyError, TranscodeAttemptId, ActiveJobId)
+                return
+            self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                 'CompletedDate': datetime.now(timezone.utc),
                 'TranscodeDurationSeconds': TranscodeResult.get('Duration', 0.0),
                 'NewSizeBytes': NewSizeBytes,
                 'SizeReductionBytes': SizeReductionBytes,
                 'SizeReductionPercent': SizeReductionPercent,
                 'QualityTestRequired': False,
-                'Success': ChecksumOutcome['Success'],
-                'VMAF': ChecksumOutcome['Vmaf'],
-            }
-            if not ChecksumOutcome['Success']:
-                AttemptUpdate['ErrorMessage'] = ChecksumOutcome['ErrorMessage']
-            self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, AttemptUpdate)
+                'Success': True,
+            })
 
             # Update TranscodeFiles record
             self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes, MediaFileId=Job.MediaFileId)
@@ -626,6 +638,7 @@ class ProcessTranscodeQueueService:
 
         except Exception as e:
             LoggingService.LogException("Exception handling job result", e, "ProcessTranscodeQueueService", "HandleRemuxResult")
+            self.HandleJobFailure(Job, f"Post-encode pipeline failed: {str(e)[:400]}", TranscodeAttemptId, ActiveJobId)
 
     # directive: transcode-flow-canonical | # see transcode.ST8 -- StreamCopy verify emits checksum
     def _VerifyStreamCopyChecksum(self, Job: TranscodeQueueModel, StagedOutputPath: str, TranscodeAttemptId: int) -> Dict[str, Any]:
