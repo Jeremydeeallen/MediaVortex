@@ -118,7 +118,12 @@ Seams changed (others referenced by existing `transcode.S*`):
 - **Units 1-4 committed** (`729f7f7c`, `7fb7e325`, `4bec73aa`). Unit 5 (three labels) not started.
 - **Contract suite, before vs after** (throwaway worktree at `d04de772` vs HEAD, same command): before 65 failed / 20 collection errors; after 62 failed / 20 errors. New failures: 0. The 3 fewer are `TestFileReplacementRollbackOnUpdateFailure`, fixed here.
 - **New:** `TestLabelDecidesCommand` 13/13, `TestCommandComposer` 28/28.
-- **Live:** nothing yet. Fleet not deployed; criteria 1-4, 9 unverified on a real job.
+- **Deploy:** fleet on `47e2f77c` (units 1-4) 2026-10-06, 9 workers OK, exit 0.
+- **1, 2 live:** MediaFile 750871 (Slow Horses S01E05), attempt 99259, wakko-worker-1, label Transcode: command `-c:v av1_qsv ... -c:a copy ... -f mp4`; `Success=TRUE`, `FileReplaced=TRUE`, `DialogBoostEmitted=FALSE`; file 690 -> 161 MB, `TranscodedByMediaVortex=TRUE`, `WorkBucket='AudioFix'`.
+- **1, 4, 5, 9 live:** same file, attempt 99266, label AudioFix: `-c:v copy`, `VideoSlotStrategy='Copy'`, checksum passed, tracks emitted `Dialog Boost` + `Original`, `DialogBoostEmitted=TRUE`, `Success=TRUE`, replaced; `HasDialogBoostTrack=TRUE`, `WorkBucket='Compliant'`, queue row gone, ActiveJobs 0.
+- **Failure leaves file untouched, live:** attempts 99257 (output filename too long) and 99258 (mov_text subtitle encode, file's 23rd failure) both `Success=FALSE`, `FileReplaced=FALSE`, source intact, correct command shape.
+- **3:** no failed attempt has replaced a file since deploy (2 failures, 0 replaced). 24h SQL check still to run.
+- **Remux path, 6, 7, 8 live:** not exercised. Unit 5 (`9824964e`) not deployed; `RetireQuickSubtitleFixModes` not run.
 
 ### Decisions Made
 
