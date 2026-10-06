@@ -1,6 +1,6 @@
 # Directive: bug-0095-failure-classification
 
-**Status:** Active -- phase: DELIVERING
+**Status:** Closed 2026-10-06
 
 ## Outcome
 
