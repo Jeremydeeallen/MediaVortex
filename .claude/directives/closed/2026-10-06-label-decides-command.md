@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-06
-**Status:** Active -- phase: DELIVERING
+**Status:** Closed 2026-10-06
 **Slug:** label-decides-command
 **Replaces:** `directives/closed/2026-10-06-tv-video-rule-tier1.md` (closed Success)
 
