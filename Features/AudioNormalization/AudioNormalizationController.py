@@ -307,7 +307,7 @@ class AudioNormalizationController:
             for TrackCodecField in ('Track0Codec', 'Track1Codec'):
                 CodecValue = Payload[TrackCodecField]
                 if CodecValue and CodecValue not in AcceptableSet:
-                    return jsonify({'Success': False, 'Message': f"{TrackCodecField}='{CodecValue}' must appear in AcceptableAudioCodecsCsv ('{Payload['AcceptableAudioCodecsCsv']}'). Mismatch causes ComplianceGate to refuse every output with '{CodecValue}' -- silent starvation vector."}), 400
+                    return jsonify({'Success': False, 'Message': f"{TrackCodecField}='{CodecValue}' must appear in AcceptableAudioCodecsCsv ('{Payload['AcceptableAudioCodecsCsv']}'). Mismatch would make every output with '{CodecValue}' fail the audio rule again."}), 400
             AudioComplianceRulesRepository().UpdateRules(Payload)
             LoggingService.LogInfo(
                 f"AudioComplianceRules updated: {Payload}",

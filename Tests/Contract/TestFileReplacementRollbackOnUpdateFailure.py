@@ -35,7 +35,7 @@ class TestFileReplacementRollbackOnUpdateFailure(unittest.TestCase):
         Inst = TranscodedOutputPlacement.__new__(TranscodedOutputPlacement)
         Inst.DatabaseManager = MagicMock()
         Inst.FileManager = MagicMock()
-        Inst.WorkerName = 'test-worker'
+        Inst._WorkerName = 'test-worker'
         Inst._Worker = MagicMock()
         return Inst
 

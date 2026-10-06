@@ -1410,52 +1410,6 @@ class QueueManagementBusinessService:
                     lookup[(pn, src_res)] = (vk, ak, src_res)
         return lookup
 
-    # directive: tv-video-rule-tier1 | # see compliance-gated-rename.C5
-    def EvaluateCandidateCompliance(self, CandidateRow: Dict[str, Any], EffectiveProfile: Optional[str] = None) -> Dict[str, Any]:
-        """Pass/fail for a finished encode before rename. Video is not judged: our own output is terminal (transcode.flow.md D7)."""
-        from Features.AudioNormalization.AudioVertical import AudioVertical
-        from Features.ContainerFormat.ContainerVertical import ContainerVertical
-        Mf = self._RowToMediaFileForCompliance(CandidateRow)
-        Verdicts = (ContainerVertical().Evaluate(Mf), AudioVertical().Evaluate(Mf))
-        Failing = [(Ok, Reason) for Ok, Reason in Verdicts if Ok is not True]
-        if not Failing:
-            return {'IsCompliant': True, 'RefusalReason': None}
-        IsCompliant = None if any(Ok is None for Ok, _ in Failing) else False
-        return {'IsCompliant': IsCompliant, 'RefusalReason': Failing[0][1]}
-
-    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C9
-    def _RowToMediaFileForCompliance(self, Row: Dict[str, Any]):
-        """Helper for legacy-shim callers (RecomputeForFiles row, EvaluateCandidateCompliance CandidateRow) -- build a MediaFileModel from the dict for the new engine."""
-        from Models.MediaFileModel import MediaFileModel
-        return MediaFileModel(
-            Id=Row.get('Id') or Row.get('id'),
-            FileName=Row.get('FileName') or '',
-            SizeMB=float(Row.get('SizeMB') or 0),
-            DurationMinutes=Row.get('DurationMinutes'),
-            Resolution=Row.get('Resolution'),
-            ResolutionCategory=Row.get('ResolutionCategory') or ResolutionTierRegistry().CategoryStringFromResolution(Row.get('Resolution')),
-            Codec=Row.get('Codec'),
-            VideoBitrateKbps=Row.get('VideoBitrateKbps'),
-            AudioCodec=Row.get('AudioCodec'),
-            AudioChannels=Row.get('AudioChannels'),
-            AudioBitrateKbps=Row.get('AudioBitrateKbps'),
-            AudioComplete=Row.get('AudioComplete'),
-            AudioCorruptSuspect=Row.get('AudioCorruptSuspect') if Row.get('AudioCorruptSuspect') is not None else False,
-            ContainerFormat=Row.get('ContainerFormat'),
-            SubtitleFormats=Row.get('SubtitleFormats'),
-            AssignedProfile=Row.get('AssignedProfile'),
-            HasExplicitEnglishAudio=Row.get('HasExplicitEnglishAudio'),
-            HasForcedSubtitles=Row.get('HasForcedSubtitles'),
-            SourceIntegratedLufs=Row.get('SourceIntegratedLufs'),
-            SourceLoudnessRangeLU=Row.get('SourceLoudnessRangeLU'),
-            SourceTruePeakDbtp=Row.get('SourceTruePeakDbtp'),
-            SourceIntegratedThresholdLufs=Row.get('SourceIntegratedThresholdLufs'),
-            # directive: mv-trust-savings-and-clamp -- AC3 wiring.
-            TranscodedByMediaVortex=bool(Row.get('TranscodedByMediaVortex')) if Row.get('TranscodedByMediaVortex') is not None else None,
-            # directive: compliance-gate-dialog-boost-signal
-            HasDialogBoostTrack=Row.get('HasDialogBoostTrack') if Row.get('HasDialogBoostTrack') is not None else None,
-        )
-
     # directive: compliance-solid-refactor | # see compliance-solid-refactor.C12
     def _BuildEffectiveProfileObj(self, ProfileName: Optional[str], ResolutionCategory: Optional[str], Lookup: Dict[tuple, tuple], VideoBitrateKbps: Optional[int] = None):
         """Delegate to EffectiveProfileResolver -- profile name + source resolution + optional source video kbps fold into a synthesized MediaFileModel-shaped input; resolver handles fixed/VBR/CRF strategy dispatch."""

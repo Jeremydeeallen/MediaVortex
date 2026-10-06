@@ -46,7 +46,7 @@ class TranscodedOutputPlacement:
     # directive: transcode-flow-canonical | # see transcode.ST9 | see transcoded-output-placement.C4 | see transcoded-output-placement.C13
     def Execute(self, OriginalFilePath: str, TranscodedFilePath: str, NetworkOriginalPath: str = None,
                 FFmpegCommand: Optional[str] = None, SourceMediaFileId: Optional[int] = None,
-                Mode: str = 'Transcode', RunComplianceGate: bool = True) -> Dict[str, Any]:
+                Mode: str = 'Transcode') -> Dict[str, Any]:
         """Rename .inprogress -> final, refresh MediaFiles, delete original; see transcoded-output-placement.C4."""
         try:
             LocalOriginalPath = Path.FromLegacyString(OriginalFilePath, self._GetStorageRoots()).Resolve(self._GetWorker())
@@ -81,32 +81,6 @@ class TranscodedOutputPlacement:
                 )
                 LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
                 return {'Success': False, 'ErrorMessage': ErrorMsg}
-
-            if SourceMediaFileId is not None and RunComplianceGate:
-                from Features.FileReplacement.ComplianceGate import ComplianceGate
-                GateResult = ComplianceGate(self.DatabaseManager, self.FileManager).Evaluate(LocalStagedPath, SourceMediaFileId, FFmpegCommand)
-                if not GateResult.get('Compliant', False):
-                    CascadeReason = GateResult.get('RefusalReason') or 'unknown'
-                    ErrorMsg = f'ComplianceGateFailed: {CascadeReason}'
-                    LoggingService.LogWarning(
-                        f"Compliance gate refused rename for {LocalStagedPath}: {CascadeReason}. "
-                        f"Deleting `.inprogress`; source `{LocalOriginalPath}` untouched.",
-                        "TranscodedOutputPlacement", "Execute",
-                    )
-                    try:
-                        if LocalExists(LocalStagedPath):  # allow: local-path; host-resolved
-                            os.remove(LocalStagedPath)
-                    except Exception as DelEx:
-                        LoggingService.LogException(
-                            f"Compliance gate refused but failed to delete `.inprogress` {LocalStagedPath}",
-                            DelEx, "TranscodedOutputPlacement", "Execute"
-                        )
-                    return {
-                        'Success': False,
-                        'ErrorMessage': ErrorMsg,
-                        'ComplianceGateRefused': True,
-                        'CascadeReason': CascadeReason,
-                    }
 
             BackupPath = LocalOriginalPath + '.replacing.bak' if SameSlotReplacement else None
             if SameSlotReplacement and LocalExists(BackupPath):
