@@ -10,9 +10,21 @@ Single source of truth for Transcode / Remux / Audio pipeline shape. Sibling doc
 
 **D1. Compliance is per-dimension.** Video, Audio, Container each evaluated independently by their own vertical (`VideoVertical`, `AudioVertical`, `ContainerVertical`). No dimension short-circuits another.
 
-**D2. Slot strategy is driven by per-dimension compliance flags, NOT by ProcessingMode enum.** `VideoSlot`: Reencode if `!videocompliant` else Copy. `AudioSlot`: Reencode if `!audiocompliant` else Copy. `ContainerSlot`: Mp4 if `!containercompliant` else Preserve. `SubtitleSlot`: Preserve always (unless explicit SubtitleFix intent).
+**D2. The job label decides the command. Each stage does one thing and keeps its result.** Three labels; a file's bucket (D4) names the label it is queued under. Compliance flags decide the bucket, never the command.
 
-**D3. `ProcessingMode` is a reporting/priority tag only.** Names which vertical drove the admission. Does not decide slot behavior.
+| Label | Video | Audio | Container | Stage is verified by |
+|---|---|---|---|---|
+| `Transcode` | Re-encode at the file's tier | Copy untouched | mp4 | output probes; smaller than source |
+| `Remux` | Copy | Copy untouched | mp4 | video stream checksum equals source |
+| `AudioFix` | Copy | Re-encode: Dialog Boost + Original (D6) | mp4 | video stream checksum equals source; Dialog Boost emitted |
+
+| File needs | Path |
+|---|---|
+| Video work | Transcode -> Audio |
+| Video fine, container wrong | Remux -> Audio |
+| Video and container fine | Audio |
+
+A stage whose verification fails does not replace the file; the previous stage's file stays and only the failed stage is retried. A finished transcode is kept even though it carries no Dialog Boost yet. "Copy untouched" means stream copy when the audio codec is in `AudioComplianceRules.AcceptableAudioCodecsCsv`; otherwise a plain aac conversion at `Track0BitratePerChannelKbps` x channels, no loudness work. Subtitles are converted to mov_text by every stage.
 
 **D4. `WorkBucket` = generated column from the three compliance flags. This section is the single canonical definition -- every other doc points here; none restate it.**
 
@@ -38,7 +50,7 @@ The three dimensions:
 
 "Kbps that tier encodes at" follows the tier's downscale: Tier 1 outputs 720p for 720p, 1080p and 2160p sources, so all three use the Tier 1 720p cell. A library's default tier also gives its unprofiled files that tier's profile; a per-series profile changes what a series is encoded at, never its bucket.
 
-Minimum-scope, single-pass (see D2): landing in a bucket does not mean ONLY that dimension gets fixed -- it means that dimension is the one that DECIDED the bucket. Every dimension still False gets fixed in the same job, same ffmpeg invocation. A video-noncompliant file with also-noncompliant audio gets Dialog Boost in the SAME `Transcode` pass, not a follow-up `AudioFix` job. `AudioFix` as a bucket only exists for files where Video and Container are ALREADY compliant and Audio is the sole remaining gap.
+The bucket names the next stage (D2). A stage fixes its own dimension only (Transcode and Remux both write mp4, so container is fixed by either); the file then re-buckets and moves to the next stage until all three pass.
 
 Terminal-state exception: see D7 -- MediaVortex's own Dialog-Boost-carrying outputs short-circuit straight to `Compliant` ahead of the three checks above (we never re-encode our own output).
 
@@ -46,9 +58,9 @@ Executable SSoT (must match this section exactly): `Scripts/SQLScripts/RewriteWo
 
 **D5. Container target = `.mp4` always.** MP4 mux writes `handler_name` (not `title`) for track identity -- MP4 spec drops `title` on audio streams.
 
-**D6. Audio emission on any Reencode-slot pass = 2 tracks per kept source language.** Track 0 (default) = Dialog Boost from Demucs vocals-isolation on the source (once per encode). Track 1+ = Original per source stream, LRA-preserved. Details in `Features/AudioNormalization/audio-normalization.feature.md`.
+**D6. The Audio stage emits 2 tracks per kept source language.** Track 0 (default) = Dialog Boost from Demucs vocals-isolation on the source (once per encode). Track 1+ = Original per source stream, LRA-preserved. Details in `Features/AudioNormalization/audio-normalization.feature.md`.
 
-**D7. `TranscodedByMediaVortex = TRUE` with a Dialog Boost track is a terminal state.** We do not re-encode our own outputs, and the pre-replace check does not judge video on a finished encode (it passes or refuses on Container + Audio only). To change encoding, re-acquire source via Sonarr/Radarr -> fresh scan -> new MediaFile row without the flag. Generated-column implementation of this short-circuit: see D4.
+**D7. `TranscodedByMediaVortex = TRUE` with a Dialog Boost track is a terminal state.** We do not re-encode our own outputs. To change encoding, re-acquire source via Sonarr/Radarr -> fresh scan -> new MediaFile row without the flag. Generated-column implementation of this short-circuit: see D4.
 
 **D8. Source file deleted after successful `ProcessFileReplacement`** (`Features/FileReplacement/TranscodedOutputPlacement.py:220`). Once transcode succeeds + MediaFiles row updated, the original .mkv/.mp4 is removed from disk. Sonarr/Radarr re-fetch is the only way to restore.
 
@@ -56,11 +68,9 @@ Executable SSoT (must match this section exactly): `Scripts/SQLScripts/RewriteWo
 
 **D10. Every Reencode audio pass runs the Demucs pre-encode pipeline** (SourceMeasure -> Downmix -> Demucs -> Premix -> LoudnormMeasure). Progress ticks `TranscodeProgress.LastProgressUpdate` per substep. Stuck-detect reads this signal (not wall-clock).
 
-**D11. Emitter operates on source streams as-received.** No idempotence heuristic (no "detect existing Boost track"). Idempotence is guaranteed structurally by D2 (audio only re-encoded when `!audiocompliant`) + D7 (our outputs are terminal, so they will not be re-encoded).
+**D11. Emitter operates on source streams as-received.** No idempotence heuristic (no "detect existing Boost track"). Idempotence is guaranteed structurally by D2 (audio is re-encoded only by the Audio stage, queued only while the audio rule fails) + D7 (our outputs are terminal, so they will not be re-encoded).
 
 **D12. Fail-loud everywhere.** Probe failure = LastFFprobeError + one-shot NeedsReprobe. No silent retry caps. Stuck-detect = progress-tick staleness, not wall-clock. Delete failures = raise, not LogWarning.
-
-**D13. Slot-independence fallback.** On ffmpeg failure inside a Reencode-Reencode attempt OR on pre-encode Demucs failure (`DemucsDaemonUnavailableError` / `RuntimeError` from `AudioPreEncodeFacade.Prepare`), up to two fallback ffmpeg invocations run with one Reencode slot replaced by Copy each pass. ffmpeg-failure ordering picked by `PartialCompletion.SniffFirstFallback` scanning stderr for `libopus | demucs | loudnorm | audio` → audio-side first, else video-side first. Pre-encode Demucs failure skips the sniff (side is known a priori: `AudioSlot`), runs exactly one fallback with `AudioSlot=Copy`, and on ffmpeg failure of that fallback lands `Success=FALSE` (no second fallback -- both-slots-Copy defeats transcode purpose). Successful fallback lands `Success=TRUE, Disposition='Replace', DispositionReason='PartialSuccess_{Audio,Video}SlotCopied'` and enqueues one follow-up `TranscodeQueue` row (`ProcessingMode='AudioFix'` when audio was the copied slot, or `'Transcode' + AudioSlotOverride='Copy'` when video was the copied slot) via `QueueManagementBusinessService.EnqueuePartialCompletionFollowup`. **ComplianceGate bypass invariant:** `FileReplacementBusinessService.ProcessFileReplacement` passes `RunComplianceGate=False` when `DispositionReason` startswith `PartialSuccess_` -- the gate would re-refuse an intentionally-partial output (e.g. `PartialSuccess_AudioSlotCopied` lacks a Dialog Boost track) and defeat the "preserve the good half; enqueue a follow-up for the bad half" contract. D13 IS the compliance decision for partial-success outputs. Follow-up children carry `ParentTranscodeAttemptId` and cannot themselves partial-complete; child ffmpeg failure lands `Success=FALSE, DispositionReason='PartialRetryExhausted'`. Cap: 3 ffmpeg per parent + 3 per child = 6 worst-case invocations per file per chain. Every event logged (sniff INFO, fallback attempt INFO, success WARNING, both-fail ERROR, PartialRetryExhausted ERROR, pre-encode-fallback WARNING) so design flaws in the sniff or unknown failure signatures surface in the logs table.
 
 ## Stage Overview
 
@@ -174,7 +184,7 @@ See `Features/TranscodeQueue/priority-materialization.feature.md` and `Features/
 |------|----------|----------------------|
 | Full populate | `POST /api/TranscodeQueue/PopulateQueue` | All guards (audio, resolution, VMAF, CRF floor) |
 | Work bucket: queue by folder | `POST /api/WorkBucket/QueueByFolder` | Audio language, probed (Resolution NOT NULL), dedup, already-transcoded |
-| Work bucket: batch (NextTranscodeBatch -- TV/Movies cards; SmartPopulate -- Quick Fix/Remux/AudioFix cards) | `POST /api/WorkBucket/AddToQueue` | Dedup only (user explicitly chose files) |
+| Work bucket: batch (NextTranscodeBatch -- TV/Movies cards; SmartPopulate -- Remux/AudioFix cards) | `POST /api/WorkBucket/AddToQueue` | Dedup only (user explicitly chose files) |
 | Single file add | `POST /api/TranscodeQueue/AddJob` | All guards (audio, resolution, VMAF, CRF floor) |
 
 **Full populate code path** (most guards):
@@ -300,19 +310,17 @@ Queue admission (whether a file enters the queue at all) is owned by `Features/T
 
 ST6 has one orchestration body (`Features/TranscodeJob/Worker/JobProcessor.Process`) and per-mode Strategy classes (`Features/TranscodeJob/Worker/Strategies/<Mode>JobStrategy.py`). Each Strategy implements:
 
-| Mode | Strategy class | BuildCommand emits | HandleResult marks |
+| Mode | Strategy class | BuildCommand emits | HandleResult |
 |---|---|---|---|
-| Transcode | `TranscodeJobStrategy` | Full re-encode argv via `CommandComposer.Build` with `Plan(Reencode, Reencode, Preserve, Mp4)` | `QualityTestRequired=<config>` |
-| Remux | `RemuxJobStrategy` | `CommandComposer.Build` with `Plan(Copy, Reencode, Preserve, Mp4)` | `QualityTestRequired=False` (no VMAF; remux quality is byte-defined) |
-| AudioFix | `AudioFixJobStrategy` | Same Plan as Remux; audio-policy attestation forced | `QualityTestRequired=False` |
-| SubtitleFix | `SubtitleFixJobStrategy` | Same Plan as Remux; SubtitleSlot handles per-container subtitle codec + stream selection per `Services.FFmpegAnalysisService.SelectPreferredSubtitleStream` | `QualityTestRequired=False` |
-| Quick | `QuickJobStrategy` | Same Plan as Remux | `QualityTestRequired=False` |
+| Transcode | `TranscodeJobStrategy` | `CommandComposer.Build`; plan per D2 from `PlanFactory.FromProcessingMode` | `HandleTranscodingResult`: `QualityTestRequired=<config>`, dispatch |
+| Remux | `RemuxJobStrategy` | same composer, plan per D2 | `HandleRemuxResult`: verify per D2, then dispatch |
+| AudioFix | `AudioFixJobStrategy` | same composer, plan per D2 | `HandleRemuxResult`: verify per D2, then dispatch |
 
 The orchestration shape (ActiveJob create -> Mark Running -> Load MediaFile -> Setup file prep -> BuildCommand -> ExecuteFFmpeg -> Verify output -> `PostEncodeMeasurementService.Probe` -> HandleResult -> Cleanup) is identical for every mode. PostEncode measurement runs universally; per-mode strategies cannot opt out.
 
 Adding a new ProcessingMode is one `INSERT INTO ProcessingModes` row + one `<NewMode>JobStrategy` class + one `Registry.Register('NewMode', NewModeJobStrategy)` line in `ProcessTranscodeQueueService.ProcessJob` registry initialization. No other file changes.
 
-Audio-policy attestation contract: `Strategy.HandleResult` is called AFTER `PostEncodeMeasurementService.Probe` has populated `TranscodeAttempts.AudioPolicyResolved` and `AudioTracksEmittedJson`. Mode-specific HandleResult bodies MUST NOT consume these columns directly -- they belong to the downstream ComplianceGate evaluation.
+Audio-policy attestation contract: `Strategy.HandleResult` is called AFTER `PostEncodeMeasurementService.Probe` has populated `TranscodeAttempts.AudioPolicyResolved` and `AudioTracksEmittedJson`. Mode-specific HandleResult bodies do not consume these columns; the Audio stage's own check reads `TranscodeAttempts.DialogBoostEmitted`.
 
 Same-slot rename safety: all post-flight modes use `Features/FileReplacement/FilesystemRenameWithBackup` with `Apply` -> `Commit` (on success) or `Rollback` (on update failure). Source file is never at the path FFmpeg writes to (PrepareReplacement moves it). Both layers must independently fail before any data loss; the 2026-05-09 bug pattern cannot recur.
 
@@ -363,7 +371,7 @@ Post `transcode-flow-canonical` C14 + C16 (Reset 10):
 | Disposition | What happens |
 |---|---|
 | `Replace` | FileReplacement proceeds: archive original, rename `.inprogress` -> `-mv.<ext>`, re-probe, update MediaFiles, delete source. On post-rename update failure the rename is rolled back (no orphan, source intact) and `Success=False` is returned with the real error. See `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4. |
-| `Reject` | Verify-failure / operator-fail terminal. Reasons: `VmafAboveMax`, `NoSavings`, `TranscodeFailed`, `RetryBudgetExhausted`, `ComplianceGateFailed`, `OperatorDiscarded`, `TestMode`. `RetainInprogressPolicy.ShouldRetain(Reason)` decides `.inprogress` disposal: `TestMode` retains for A/B comparison; every other reason deletes. TFP row always cleared. |
+| `Reject` | Verify-failure / operator-fail terminal. Reasons: `VmafAboveMax`, `NoSavings`, `TranscodeFailed`, `RetryBudgetExhausted`, `OperatorDiscarded`, `TestMode`. `RetainInprogressPolicy.ShouldRetain(Reason)` decides `.inprogress` disposal: `TestMode` retains for A/B comparison; every other reason deletes. TFP row always cleared. |
 | `Requeue` | Staged file deleted; TFP row cleared; `NextTierAdjuster.Get(currentProfile)` returns next-tier sibling Profile via `(Family, QualityTier+1, ContentClass, TargetResolutionCategory)` tuple lookup. If non-None, new `TranscodeQueue` row inserted for the same `MediaFileId` with the escalated ProfileId via canonical `AddJobToQueue(ForceAdd=True)`. Chain terminates at Tier 5 -> Reject/QualityCeilingReached. `RetryBudgetService.HasBudgetRemaining=False` overrides to `Reject/RetryBudgetExhausted` regardless of tier. BUG-0079 + `profile-tier-ladder.feature.md`. |
 | `Pending` | Awaiting VMAF. The row lands in `QualityTestingQueue`; disposition re-evaluated when the score lands. |
 
@@ -425,7 +433,7 @@ ST8 has one orchestration body (`QualityTestingBusinessService.ProcessQualityTes
 | Strategy | Verify method | Score domain | Written to |
 |---|---|---|---|
 | Reencode (`TranscodeJobStrategy`) | `libvmaf` on transcoded vs source | `0.0-100.0` float (perceptual score) | `TranscodeAttempts.Vmaf` |
-| StreamCopy (`RemuxJobStrategy`, `AudioFixJobStrategy`, `SubtitleFixJobStrategy`, `Quick` alias) | Video-stream MD5 checksum comparison (`-c:v copy` is bit-identical by construction) | `Success=TRUE` on match / `Success=FALSE` on mismatch | `TranscodeAttempts.Vmaf IS NULL` (not a VMAF measurement -- see DOMAIN.md 2026-07-26) |
+| StreamCopy (`RemuxJobStrategy`, `AudioFixJobStrategy`) | Video-stream MD5 checksum comparison (`-c:v copy` is bit-identical by construction); AudioFix also requires Dialog Boost emitted | `Success=TRUE` and dispatch on pass / job fails, `.inprogress` deleted, nothing dispatched on fail | `TranscodeAttempts.Vmaf IS NULL` (not a VMAF measurement -- see DOMAIN.md 2026-07-26) |
 
 Per DOMAIN.md 2026-07-26, `TranscodeAttempts.Vmaf` holds a real VMAF score or NULL. Stream-copy checksum-verified attempts write `Vmaf=NULL`. Outcome signal lives in `(Success, Disposition)` -- downstream decision logic reads those columns, never `Vmaf` as a proxy for pass/fail.
 
@@ -442,13 +450,12 @@ Adding a new Strategy verify path is one `Strategy.Verify()` implementation + on
   1. Validate TranscodeAttempt exists and FileReplaced=false.
   2. Validate both source and staged files exist; resolve canonical paths to worker-local via `Path.Resolve(Worker)`.
   3. Archive original metadata to MediaFilesArchive.
-  4. Compliance gate (`ComplianceGate.Evaluate`): re-runs the cascade compliance predicate against the staged file. On refusal, delete the `.inprogress`, mark the attempt `Disposition='Reject'` / `DispositionReason='ComplianceGateFailed'`, source untouched. See `Features/FileReplacement/compliance-gated-rename.feature.md`.
   5. **Rename `.inprogress` -> `<basename>-mv.<ext>`** (`TranscodedOutputPlacement.Execute`). Two paths depending on whether source path equals target path:
      - **Non-SameSlot** (typical): single `os.rename(staged, target)`. Source is untouched at this step; source delete happens at step 8 only after MediaFiles update succeeds.
      - **SameSlot** (source already ends in `-mv.<ext>`, e.g. re-encoded MV output): rename `source -> <source>.replacing.bak`, then `os.rename(staged, target)`. If the second rename fails, restore from `.replacing.bak`. Backup is NOT deleted yet -- it is the rollback target for step 7.
      The `-mv` suffix is the canonical MediaVortex on-disk marker -- structurally distinct from the source filename, defending against same-name collision regressions and giving operators a glance-readable "this was transcoded" signal. See `Features/FileReplacement/transcoded-output-placement.feature.md` C4.
   6. Re-probe new file via FFprobe (worker's local FFprobe path on the worker-resolved path).
-  7. Update MediaFiles with new metadata; set ONE of `TranscodedByMediaVortex=True` (Mode='Transcode') or `RemuxedByMediaVortex=True` + `RemuxedByMediaVortexDate=NOW()` (Mode in 'Remux','SubtitleFix','AudioFix','Quick'). `MediaFiles.FilePath` (typed pair) now points at `-mv.<ext>`. **On failure** (unique-key collision on `(StorageRootId, RelativePath)`, re-probe error, or any update error): rollback fires -- non-SameSlot deletes the renamed `-mv.<ext>` orphan; SameSlot renames `target -> staged` then `.replacing.bak -> source` then deletes the staging artifact. Returns `Success=False` with the real update error in `ErrorMessage`; source is bit-identical to its pre-call state. See BUG-0067 + `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4. SameSlot only: on update SUCCESS, `.replacing.bak` is removed.
+  7. Update MediaFiles with new metadata; set ONE of `TranscodedByMediaVortex=True` (Mode='Transcode') or `RemuxedByMediaVortex=True` + `RemuxedByMediaVortexDate=NOW()` (Mode in 'Remux','AudioFix'). `MediaFiles.FilePath` (typed pair) now points at `-mv.<ext>`. **On failure** (unique-key collision on `(StorageRootId, RelativePath)`, re-probe error, or any update error): rollback fires -- non-SameSlot deletes the renamed `-mv.<ext>` orphan; SameSlot renames `target -> staged` then `.replacing.bak -> source` then deletes the staging artifact. Returns `Success=False` with the real update error in `ErrorMessage`; source is bit-identical to its pre-call state. See BUG-0067 + `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4. SameSlot only: on update SUCCESS, `.replacing.bak` is removed.
   8. **Recompute compliance**: `RecomputeForFiles([MediaFileId])` re-evaluates the three compliance dimensions, `PriorityScore` and `AssignedProfile`; `WorkBucket` follows (D4), so a finished file leaves its work bucket and is not re-queued. Failure of this recompute does NOT roll back -- the file is on disk correctly and the next scheduled recompute will reconcile.
   9. Delete source file from disk (non-SameSlot only; SameSlot has no separate source to delete). `MarkAudioComplete` runs if the FFmpeg command contained loudnorm.
 
@@ -458,7 +465,7 @@ Adding a new Strategy verify path is one `Strategy.Verify()` implementation + on
 - Next claim picks up the requeued row; adjustment-registry knob overrides apply at admission for CRF/bitrate refinement.
 
 **Reject path:**
-- Terminal outcome. Committed disposition. `RetainInprogressPolicy.ShouldRetain(Reason)` decides `.inprogress` disposal: `TestMode` retains for A/B comparison, every other reason deletes. TFP row always cleared. Reasons: `TranscodeFailed`, `NoSavings`, `VmafAboveMax`, `RetryBudgetExhausted`, `ComplianceGateFailed`, `OperatorDiscarded`, `TestMode`. When reason is `NoSavings`: `MediaFiles.LastTranscodeOutcome='NoSavings'`.
+- Terminal outcome. Committed disposition. `RetainInprogressPolicy.ShouldRetain(Reason)` decides `.inprogress` disposal: `TestMode` retains for A/B comparison, every other reason deletes. TFP row always cleared. Reasons: `TranscodeFailed`, `NoSavings`, `VmafAboveMax`, `RetryBudgetExhausted`, `OperatorDiscarded`, `TestMode`. When reason is `NoSavings`: `MediaFiles.LastTranscodeOutcome='NoSavings'`.
 
 **Tables written:** MediaFiles (new metadata on Replace), MediaFilesArchive (snapshot before replace), TranscodeAttempts (FileReplaced, FileReplacedDate), TranscodeQueue (new row on Requeue), ProblemFiles (CRF floor breach), QualityTestQueue (cleared on disposition commit).
 
@@ -717,10 +724,9 @@ Per-step detail of Stage 8 ACTION above (Replace path). Step IDs match the Stage
 |------|--------|----------|---------|---------------|
 | 7.1 | Orchestrate | `FileReplacementBusinessService.ProcessFileReplacement(TranscodeAttemptId)` | `SELECT * FROM TranscodeAttempts WHERE Id = %s AND FileReplaced=FALSE` | Caller resolves source + staged paths via TemporaryFilePaths typed pair `(StorageRootId, RelativePath)`. |
 | 7.2 | Archive | `_ArchiveOriginalFileDetails()` | `INSERT INTO MediaFilesArchive (...)` | Snapshot before destructive ops. |
-| 7.3 | Compliance gate | `ComplianceGate.Evaluate(stagedPath, sourceMediaFileId, ffmpegCommand)` | (synthesizes candidate row, calls `QueueManagementBusinessService._EvaluateCompliance`) | On refusal: delete `.inprogress`, record `Disposition='Reject'` / `DispositionReason='ComplianceGateFailed'`, return early. Source untouched. |
 | 7.4 | Rename `.inprogress` -> `-mv.<ext>` | `TranscodedOutputPlacement.Execute` | -- | Non-SameSlot: `os.rename(staged, target)`. SameSlot: `os.rename(source, source + '.replacing.bak')` then `os.rename(staged, target)` with restore-from-`.replacing.bak` if inner rename fails. |
 | 7.5 | Verify target | `LocalGetSize(target)` | -- | Logs WARN if zero bytes. |
-| 7.6 | Re-probe + update MediaFiles | `_UpdateMediaFilesAfterReplacement(Mode=...)` -- FFprobe the new file, write all metadata columns. Sets ONE flag: `TranscodedByMediaVortex=True` (Mode='Transcode') or `RemuxedByMediaVortex=True` + `RemuxedByMediaVortexDate=NOW()` (Mode in 'Remux','SubtitleFix','AudioFix','Quick'). Mode comes from `TranscodeAttempts.ProfileName`. See `Features/FileReplacement/remuxed-flag.feature.md`. | `UPDATE MediaFiles SET StorageRootId=..., RelativePath=..., FileName=..., Resolution=..., Codec=..., SizeMB=..., <one of Transcoded/RemuxedByMediaVortex>=TRUE, LastScannedDate=NOW(), NeedsReprobe=FALSE WHERE Id = %s` | MediaFiles reflects the new file with the right flag for the mode. **On failure**: rollback fires (BUG-0067 -- non-SameSlot deletes the renamed `-mv.<ext>` orphan; SameSlot renames target back to staged, then `.replacing.bak` back to source, then deletes staging artifact). Returns `Success=False` with the real error in `ErrorMessage`. See `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4. |
+| 7.6 | Re-probe + update MediaFiles | `_UpdateMediaFilesAfterReplacement(Mode=...)` -- FFprobe the new file, write all metadata columns. Sets ONE flag: `TranscodedByMediaVortex=True` (Mode='Transcode') or `RemuxedByMediaVortex=True` + `RemuxedByMediaVortexDate=NOW()` (Mode in 'Remux','AudioFix'). Mode comes from `TranscodeAttempts.ProfileName`. See `Features/FileReplacement/remuxed-flag.feature.md`. | `UPDATE MediaFiles SET StorageRootId=..., RelativePath=..., FileName=..., Resolution=..., Codec=..., SizeMB=..., <one of Transcoded/RemuxedByMediaVortex>=TRUE, LastScannedDate=NOW(), NeedsReprobe=FALSE WHERE Id = %s` | MediaFiles reflects the new file with the right flag for the mode. **On failure**: rollback fires (BUG-0067 -- non-SameSlot deletes the renamed `-mv.<ext>` orphan; SameSlot renames target back to staged, then `.replacing.bak` back to source, then deletes staging artifact). Returns `Success=False` with the real error in `ErrorMessage`. See `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4. |
 | 7.7 | Remove SameSlot backup | (only when SameSlot AND step 7.6 succeeded) | -- | `os.remove(source + '.replacing.bak')`. Deferred from step 7.4 so rollback in 7.6 has a valid backup. |
 | 7.8 | Recompute compliance | `QueueManagementBusinessService().RecomputeForFiles([MediaFileId])` | per-vertical `UPDATE MediaFiles SET <Dimension>Compliant=..., <Dimension>CompliantReason=...` then `SET AssignedProfile=..., PriorityScore=...` | `WorkBucket` regenerates (D4). Failure here does NOT roll back -- file is on disk correctly. |
 | 7.9 | Delete source (non-SameSlot only) | `os.remove(LocalOriginalPath)` | -- | SameSlot: no separate source to delete (source path equals target path). |

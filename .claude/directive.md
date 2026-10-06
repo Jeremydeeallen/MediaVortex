@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-06
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** label-decides-command
 **Replaces:** `directives/closed/2026-10-06-tv-video-rule-tier1.md` (closed Success)
 
@@ -113,6 +113,15 @@ Seams changed (others referenced by existing `transcode.S*`):
 
 ### Promotions
 
+| Source artifact | Target file |
+|---|---|
+| Label table, three paths, stage verification, uncopyable-audio rule | `transcode.flow.md` D2 (rewritten; ID kept for existing `# see transcode.D2` anchors) |
+| "ProcessingMode is a reporting tag" and the keep-the-good-half fallback | `transcode.flow.md` D3 and D13 deleted |
+| Audio stage owns the two-track emit; idempotence wording; terminal wording | `transcode.flow.md` D4 note, D6, D7, D11 |
+| Three strategies; stream-copy verify fails the job; no pre-replace check; three labels | `transcode.flow.md` ST6 strategy table, ST8 verify table, ST9 steps + reject reasons, Phase 7 table |
+
+Every other doc that still describes the removed behaviour (53 files inventoried) is owned by `pipeline-doc-single-source`.
+
 ### Verification
 
 - **Units 1-4 committed** (`729f7f7c`, `7fb7e325`, `4bec73aa`). Unit 5 (three labels) not started.
@@ -123,7 +132,11 @@ Seams changed (others referenced by existing `transcode.S*`):
 - **1, 4, 5, 9 live:** same file, attempt 99266, label AudioFix: `-c:v copy`, `VideoSlotStrategy='Copy'`, checksum passed, tracks emitted `Dialog Boost` + `Original`, `DialogBoostEmitted=TRUE`, `Success=TRUE`, replaced; `HasDialogBoostTrack=TRUE`, `WorkBucket='Compliant'`, queue row gone, ActiveJobs 0.
 - **Failure leaves file untouched, live:** attempts 99257 (output filename too long) and 99258 (mov_text subtitle encode, file's 23rd failure) both `Success=FALSE`, `FileReplaced=FALSE`, source intact, correct command shape.
 - **3:** no failed attempt has replaced a file since deploy (2 failures, 0 replaced). 24h SQL check still to run.
-- **Remux path, 6, 7, 8 live:** not exercised. Unit 5 (`9824964e`) not deployed; `RetireQuickSubtitleFixModes` not run.
+- **Deploy 2:** fleet on `ca712cdb` (unit 5), 9 workers OK. `RetireQuickSubtitleFixModes` run twice (deleted 2, then 0).
+- **7:** `SELECT Name FROM ProcessingModes` -> AudioFix, Remux, Transcode.
+- **Remux live:** MediaFile 750418 (American Horror Story S13E03), attempt 99267, dot-worker-1: `-c:v copy -tag:v hvc1 ... -c:a copy ... -c:s mov_text -f mp4`, `VideoSlotStrategy='Copy'`, checksum passed, replaced, 86 -> 86 MB, bucket Remux -> AudioFix.
+- **6, 8:** contract tests (`TestLabelDecidesCommand`). Not exercised on a real file. The conversion-bitrate fix `41d48f24` is pushed, not yet deployed.
+- **Since first deploy:** 6 attempts, 0 failed-but-replaced, 0 `ComplianceGateFailed`.
 
 ### Decisions Made
 
