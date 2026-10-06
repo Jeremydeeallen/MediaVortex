@@ -520,6 +520,15 @@ class FileScanningBusinessService:
         except Exception as e:
             LoggingService.LogException("Error cleaning up scan jobs", e)
 
+    @staticmethod
+    # directive: auto-handoff | # see ingest.ST3
+    def _ConfirmDiffAgainstDisk(NewKeys: set, DeletedKeys: set, DiskMap: dict, DbMap: dict, ResolveLocal) -> tuple:
+        """Keep a new path only if it exists now and a deleted row only if its file is absent now; the walk and the library read are not simultaneous."""
+        StillNew = {K for K in NewKeys if LocalExists(ResolveLocal(DiskMap[K]['RelativePath']))}
+        StillDeleted = {K for K in DeletedKeys if not LocalExists(ResolveLocal(DbMap[K]['RelativePath']))}
+        return StillNew, StillDeleted
+
+    # directive: auto-handoff | # see ingest.ST3
     def PerformScan(self, RootFolderPath: str, Recursive: bool, SkipDuplicateCleanup: bool = False) -> Dict[str, Any]:
         """Perform the actual scanning process.
 
@@ -587,6 +596,12 @@ class FileScanningBusinessService:
             NewKeys = DiskKeys - DbKeys
             DeletedKeys = DbKeys - DiskKeys
             CommonKeys = DiskKeys & DbKeys
+
+            ScanWorker = Worker.Current(Db=self.Repository.DatabaseService)
+            NewKeys, DeletedKeys = self._ConfirmDiffAgainstDisk(
+                NewKeys, DeletedKeys, DiskMap, DbMap,
+                lambda Rel: Path(RootFolder.StorageRootId, Rel).Resolve(ScanWorker),
+            )
 
             RenamePairs = []
             if NewKeys and DeletedKeys:

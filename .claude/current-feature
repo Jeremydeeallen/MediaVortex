@@ -5,3 +5,4 @@ probe-loudness-remove
 worker-memorymax-cgroup
 preencode-loudness-cache-hit
 bug-0095-failure-classification
+auto-handoff
