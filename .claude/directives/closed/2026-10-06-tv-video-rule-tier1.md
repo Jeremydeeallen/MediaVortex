@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-06
-**Status:** Active -- phase: DELIVERING
+**Status:** Closed 2026-10-06
 **Slug:** tv-video-rule-tier1
 **Replaces:** `directives/closed/2026-10-06-bug-0095-failure-classification.md` (closed Success)
 
