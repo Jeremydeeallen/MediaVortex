@@ -1,14 +1,14 @@
 # Pipeline Test Fixtures -- Permanent Bucket Samples
 
-**Purpose:** preserve one representative media file in each WorkBucket so the E2E pipeline tests have something to chew on even after the live library is fully fixed.
+**Purpose:** preserve one representative media file in each WorkBucket so the E2E pipeline tests have something to chew on even after the live library is fully fixed. Bucket rules: `transcode.flow.md` D4.
 
 ## Layout
 
 ```
 Tests/Fixtures/PipelineFiles/
-├── Transcode/        <- a file whose VideoCompliant=FALSE (codec / resolution / savings rule fires)
+├── Transcode/        <- a file whose VideoCompliant=FALSE
 ├── Remux/            <- a file whose ContainerCompliant=FALSE (matroska, avi, etc.)
-├── AudioFixOnly/     <- a file whose AudioCompliant=FALSE (loudness off-target)
+├── AudioFixOnly/     <- directory name only; holds a file for the `AudioFix` bucket (AudioCompliant=FALSE)
 ├── Compliant/        <- a file with all three booleans TRUE (no work needed)
 ├── manifest.json     <- per-fixture expected properties + source provenance
 └── README.md         <- this file

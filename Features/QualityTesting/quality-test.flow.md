@@ -138,7 +138,7 @@ On ffmpeg `returncode != 0` or exception: `UpdateQualityTestResultFailure(result
 - `PostTranscodeDispositionDecider.Decide` now has `VmafScore IS NOT NULL`:
   - `VMAF >= VmafAutoReplaceMinThreshold AND VMAF <= VmafAutoReplaceMaxThreshold` -> `Replace`.
   - `VMAF < VmafAutoReplaceMinThreshold` -> `Requeue`.
-  - Out-of-band cases (e.g. compliance fail, size regression) -> `Reject` per the gate table.
+  - Out-of-band cases (e.g. size regression) -> `Reject` per the gate table.
 - `_CommitDisposition` writes `TranscodeAttempts.(Disposition, DispositionReason, DispositionDecidedAt)`.
 - `BuildVMAFCommand` branches on the returned `DispositionResult.Disposition`:
   - `Replace` -> `FileReplacementBusinessService(...).ProcessFileReplacement(ta_id)` synchronously (`AutoReplaceTriggered=True`).

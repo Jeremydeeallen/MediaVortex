@@ -4,25 +4,20 @@
 
 ### [BUG-0106 -- IN PROGRESS 2026-09-28] Suspected wrong WorkBucket classifications -- investigation in progress, READ FIRST before continuing
 
-**Date:** 2026-09-28 | **Area:** compliance / workbucket / compliance-gate | **Status:** ACTIVE INVESTIGATION, not yet root-caused. Resume here after any restart.
+**Date:** 2026-09-28 | **Area:** compliance / workbucket | **Status:** ACTIVE INVESTIGATION, not yet root-caused. Resume here after any restart.
 
 **Original trigger:** operator saw "Dancing with the Stars - S31E09" (and ~46 sibling files under the AV1 Tier 1 Efficient profile) listed in `/Work/Audio` (`WorkBucket=AudioFix`) and asked why, expecting `/Work/Transcode`.
 
-**Update 2026-10-06 (`tv-video-rule-tier1`):** fact 1 below no longer describes TV. Operator decided bitrate alone decides TV video; the same-codec pass is gone for TV, so an AV1 TV file above the Tier 1 ceiling now lands in Transcode. Fact 4's `EvaluateCandidateCompliance` no longer derives a bucket (pass/fail from Container + Audio only). Suspect A's silent excepts and suspect B are untouched -- see `.claude/directives/backlog/_bucket-rules-phase-2.md` rows 4-5.
+**Update 2026-10-06 (`tv-video-rule-tier1`):** fact 1 below no longer describes TV. Operator decided bitrate alone decides TV video; the same-codec pass is gone for TV, so an AV1 TV file above the Tier 1 ceiling now lands in Transcode.
+
+**Update 2026-10-06 (`label-decides-command`):** the pre-replace check that was suspect A has been deleted along with its file, so suspect A is closed without a fix. A stage's output is now accepted or refused by that stage's own verification (`transcode.flow.md` D2). Only suspect B remains open -- see `.claude/directives/backlog/_bucket-rules-phase-2.md` row 5.
 
 **Confirmed facts (verified this session):**
 1. That specific case is CORRECT, not a bug. `VideoCompliant=TRUE` via `source_codec_matches_target:av1` short-circuit (`VideoVertical.py:41`, `video-vertical-codec-match-skip` directive 2026-08-14 -- codec already matches target profile codec, skip re-encode regardless of bitrate). `AudioCompliant=FALSE` via `no_dialog_boost` (`AudioVertical.py:54` -- no Dialog Boost track). Per `transcode.flow.md` D4 (3-check tree, consolidated this session), Video+Container compliant + Audio non-compliant correctly routes to `AudioFix` (`PlanVideoOp=Copy` + `PlanAudioOp=Reencode`, `ProcessingModeMetadata.py:9`) -- it WILL add Dialog Boost, video untouched. Verified live DB `generation_expression` matches.
-2. Doc-side SSoT was a real mess (fixed this session): WorkBucket bucket-derivation logic was independently restated in 5 places (`transcode.flow.md` D4/D7, `work-bucket.feature.md` C7, `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md` x3 sections, `transcode-vs-remux-routing.feature.md` x3 pointers) with real drift (stale spec used bucket name `AudioFixOnly` vs live `AudioFix`, wrong NULL-handling). Consolidated to single SSoT at `transcode.flow.md` D4+D7; others reduced to pointers. Verified against live `information_schema.columns.generation_expression`.
+2. Doc-side SSoT was a real mess (fixed this session): WorkBucket bucket-derivation logic was independently restated in 5 places with real drift (a stale bucket name, wrong NULL-handling). Consolidated to single SSoT at `transcode.flow.md` D4+D7; the other copies were reduced to pointers or have since been deleted. Verified against live `information_schema.columns.generation_expression`.
 3. `VideoVertical.Evaluate` criteria (`video-encoding.feature.md` C1-C7) reviewed line-by-line against code -- matches. One doc gap found+fixed: C7 `non_video_scope` guard for audio-only containers (same guard exists uniformly in `ContainerVertical.py:38` + `AudioVertical.py:39`); `work-bucket.feature.md` Unclassified reason list updated to include it.
-4. `EvaluateCandidateCompliance` (`QueueManagementBusinessService.py:1414`) -- the core 3-vertical aggregator -- is clean, matches D4 exactly. NOT a suspect.
 
-**Live suspects for actual wrong-classification bugs (NOT YET INVESTIGATED FURTHER -- start here on resume):**
-
-A. **`ComplianceGate.Evaluate`** (`Features/FileReplacement/ComplianceGate.py`, full file, 146 lines) -- the PRE-PERSIST gate run before a transcoded file replaces its source. Confirmed problems:
-   - Two silent `except Exception: pass` blocks (lines 97-102, 120-127) -- violates `.claude/rules/fail-loud.md` anti-pattern #1, no whitelist marker. If either swallows a real failure, `CandidateRow` silently carries wrong/stale values into the compliance decision -- most likely root cause of "wrong classification after transcode."
-   - Lines 120-127 regex-scrape the ffmpeg command STRING (`-metadata:s:a:\d+\s+"?language=([a-z]{2,3})"?`) to recover `AudioLanguages`/`HasExplicitEnglishAudio`, instead of reading structured data. If the command format drifts, extraction fails, the exception above swallows it, and `CandidateRow` silently falls back to STALE pre-transcode `AudioLanguages` (from the DB read at line 48-59) -- can produce a false compliance verdict.
-   - Manually reconstructs ~20 fields into `CandidateRow` via raw SQL (48-59) + dict literal (72-95) instead of a repository method -- same drift class as the documented Heroes-S2 bug (`video-encoding.feature.md` C5): a new compliance-input column ships, this hand-rolled dict misses it, gate silently mis-evaluates.
-   - Own refusal-reason taxonomy (`non_compliant_<bucket>` / `undecidable_<bucket>`, lines 134-138) discards the vertical's actual specific reason string (`no_dialog_boost`, `source_above_ceiling:...`) for a generic bucket-named reason -- loses the diagnostic detail an operator needs to see WHY a gate refusal happened.
+**Open suspect for actual wrong-classification bugs (NOT YET INVESTIGATED FURTHER -- start here on resume):**
 
 B. **WorkBucket terminal short-circuit ordering** (`transcode.flow.md` D4/D7; live SQL first CASE branch): `TranscodedByMediaVortex=TRUE AND HasDialogBoostTrack=TRUE -> Compliant` fires BEFORE the 3 real compliance checks. If a file was MV-transcoded with Dialog Boost, then later retiered to a different profile such that `VideoCompliant` would now read FALSE under the new profile, this branch still forces `WorkBucket='Compliant'`, masking the need to re-transcode. NOT YET CONFIRMED against real data. Next step -- run: `SELECT Id, AssignedProfile, VideoCompliant, VideoCompliantReason, WorkBucket FROM MediaFiles WHERE TranscodedByMediaVortex=TRUE AND HasDialogBoostTrack=TRUE AND VideoCompliant=FALSE LIMIT 20`. Any rows returned = confirmed live bug.
 
@@ -32,13 +27,10 @@ B. **WorkBucket terminal short-circuit ordering** (`transcode.flow.md` D4/D7; li
 
 **Resume here, in order:**
 1. Run suspect-B query against live DB to confirm/deny the terminal-short-circuit masking theory.
-2. Read `ComplianceGate.py` end-to-end with the two swallowed-exception sites in mind; check Logs table / worker logs for exceptions ever thrown from `AudioStateService.DetectNormalizationInCommand` or the language-regex block (they'd be invisible today since both are swallowed -- may need temporary logging to catch one live).
-3. Decide fix scope -- likely its own directive (e.g. `compliance-gate-fail-loud`), not doc-only. Confirm root cause before fixing (`superpowers:systematic-debugging`).
-4. Unrelated loose end: `bug-0095-failure-classification` directive is DELIVERING, all criteria checked, Promotions populated -- ready to close, operator has not yet confirmed closure.
+2. If rows come back, decide fix scope -- its own directive (`iscompliant-terminal-parity`, backlog row 5), not doc-only. Confirm root cause before fixing (`superpowers:systematic-debugging`).
 
 **Evidence:**
 - Live DB query 2026-09-28 confirmed `WorkBucket.generation_expression` matches `transcode.flow.md` D4 exactly.
-- `ComplianceGate.py` full-file read 2026-09-28, line numbers cited above.
 
 ### activity-page
 
@@ -166,7 +158,7 @@ Amplification: `tv-tier1-classifier-pin` directive (2026-08-25) retiered 188 TV 
 ### [BUG-0095] Failure-class taxonomy so `/FailedJobs` shows operator-actionable remediation instead of raw ffmpeg stderr
 **Date:** 2026-08-27 | **Area:** failure-accounting | **Follows:** BUG-0061 (cap + FailedJobs surface must ship first)
 
-**What breaks (operator experience):** BUG-0061 (in-flight) surfaces the LAST raw `ErrorMessage` per capped MediaFile. Operator has to eyeball ffmpeg stderr to know what to DO about each stuck file. Today's snapshot (2026-08-27, 15 files with 3+ fails in 30d) revealed 4 distinct root classes needing 4 different remediations: 4 need new sources (source corruption -- DTS bit-alloc / H.264 decode / mid-encode crash), 9 need mechanical cleanup (orphan `-mv.mp4` files on disk from partial replacement, `Refusing to overwrite existing file at target`), 1 waits for BUG-0093 (Demucs daemon crash -> ComplianceGate `no_dialog_boost`), 1 needs remux-config investigation (`Tag hvc1 incompatible with output codec id '27' (avc1)`). Raw-stderr surface makes the operator do this decoding for every file, forever. Does not scale.
+**What breaks (operator experience):** BUG-0061 (in-flight) surfaces the LAST raw `ErrorMessage` per capped MediaFile. Operator has to eyeball ffmpeg stderr to know what to DO about each stuck file. Today's snapshot (2026-08-27, 15 files with 3+ fails in 30d) revealed 4 distinct root classes needing 4 different remediations: 4 need new sources (source corruption -- DTS bit-alloc / H.264 decode / mid-encode crash), 9 need mechanical cleanup (orphan `-mv.mp4` files on disk from partial replacement, `Refusing to overwrite existing file at target`), 1 waits for BUG-0093 (Demucs daemon crash -> no Dialog Boost track), 1 needs remux-config investigation (`Tag hvc1 incompatible with output codec id '27' (avc1)`). Raw-stderr surface makes the operator do this decoding for every file, forever. Does not scale.
 
 **Design (KISS, data-driven, per gui-editable-knobs.md):**
 
@@ -1152,21 +1144,20 @@ returns the AttributeError. Observed timestamps this session: `2026-06-06 22:01:
 
 2. **Premature `-mv` naming.** A file is renamed to `<basename>-mv.mp4` once FFmpeg returns 0 and the FFprobe sanity check passes (`worker-lifecycle.feature.md` criterion 8). But "FFmpeg produced a valid MP4" is not the same as "the output is compliant" -- the rename can land on a file that still has wrong audio, missed loudnorm, oversized output (no-savings refusal), or any other downstream-detectable defect. The next scan / cascade recompute then sees a `-mv.mp4` path and assumes work is done, when in fact the file would still get picked up by a remux / audio / transcode job if it were re-evaluated.
 
-   Stronger rule: `-mv` should only be appended when the output passes the same compliance gate that the cascade uses to decide whether a file needs work. If the output would still get re-queued, the rename is misleading at best, an infinite-loop risk at worst (re-encode produces same non-compliant output, `-mv-mv.mp4` grows another generation each cycle -- see Doctor Who / Love Death Robots ghost-row pattern this session).
+   Status 2026-10-06: this gap is now covered by per-stage verification (`transcode.flow.md` D2) -- a stage whose output fails its own check replaces nothing and the `.inprogress` is deleted. The earlier remedy for this gap (a pre-replace compliance check) was removed by `label-decides-command`. Gap 1 remains open.
 
 **Success criteria for the real fix:**
 1. A worker process that produces a `.inprogress` file is responsible for that file's terminal state. On any non-success exit (encode failure, FFprobe failure, FileReplacement failure, kill/crash mid-flow), the same worker deletes the `.inprogress` before releasing the active-job slot. No other service is permitted to delete `.inprogress` files belonging to a live worker.
 2. A worker that completes an encode AND succeeds at FileReplacement is responsible for the post-replacement state (TFP cleanup, MediaFile row update). No other service may touch TFP rows for an attempt whose owning worker is alive.
-3. The `-mv.mp4` rename happens only after compliance is verified against the same predicate the cascade uses (`NeedsQuick`, `NeedsTranscode`, audio criteria, savings gate). If the candidate output would still be re-queued by the cascade, the worker must not rename and must instead emit a non-Replace disposition with the audit trail naming which compliance check failed.
+3. The `-mv.mp4` rename happens only after the stage's own verification passes (`transcode.flow.md` D2). A failed verification fails the job, deletes the `.inprogress` and replaces nothing.
 4. Crash recovery on worker startup (`worker-lifecycle.feature.md` C11-C13) remains the safety net for the case where the worker died before reaching its own cleanup. Crash recovery operates only on rows OWNED by the restarting worker.
 5. After the fix, the operator-run scripts (`CleanupSourceFileOrphans.py`, `CleanupStaleInProgressFiles.py`, `CleanupGenerationalGhostRows.py`, `CleanupOrphanMvPairs.py`) should report zero candidates on a fresh fleet pass -- if they find candidates, that is a worker bug, not an expected sweep target.
 
 **Violates:**
 - `WorkerService/worker-lifecycle.feature.md` criteria 8-13 (rename / cleanup ownership)
 - `Features/FileReplacement/FileReplacement.feature.md` (transition contract)
-- The compliance contract enforced by the cascade in `Features/TranscodeQueue/QueueManagementBusinessService._EvaluateCompliance`
 
-**Related:** BUG-0015 (disk orphans), BUG-0016 (DB ghost-row pairs), BUG-0018 (TFP sweep race). All three are downstream symptoms of the ownership gap this bug names. Fix them together as a single "worker process ownership + compliance-gated rename" feature pass.
+**Related:** BUG-0015 (disk orphans), BUG-0016 (DB ghost-row pairs), BUG-0018 (TFP sweep race). All three are downstream symptoms of the ownership gap this bug names. Fix them together as a single "worker process ownership" feature pass.
 
 ---
 
@@ -1381,7 +1372,7 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 **Violates:** SmartPopulate should exclude files that are known to have zero audio streams (possibly corrupt). No feature doc exists yet for this card's population logic end-to-end.
 
-**Look first:** `Features/TranscodeQueue/QueueManagementBusinessService.py` `SmartPopulateQueue()` WHERE clause; `Features/ShowSettings/remux-populate-card.feature.md`; the `RecommendedMode` materialization in `_EvaluateCompliance()`.
+**Look first:** `Features/TranscodeQueue/QueueManagementBusinessService.py` `SmartPopulateQueue()` WHERE clause; `Features/ShowSettings/remux-populate-card.feature.md`; the bucket rules in `transcode.flow.md` D4.
 
 **Fix with:** `/t`.
 
@@ -1542,7 +1533,7 @@ Minnie's metrics with the fix:
 
 ### [BUG-0036 - CRITICAL] Profile-less savings estimate uses misleading `SizeMB * 0.5` proxy
 **Date:** 2026-05-10
-**Affects:** `Features/TranscodeQueue/QueueManagementBusinessService.py:CalculatePriority` (size*0.5 fallback at line 1032), `_EvaluateCompliance` (returns undecidable when profile missing), `EstimateTargetSizeMB` (returns None when profile missing).
+**Affects:** `Features/TranscodeQueue/QueueManagementBusinessService.py:CalculatePriority` (size*0.5 fallback at line 1032), `EstimateTargetSizeMB` (returns None when profile missing).
 
 When a `MediaFile` has no `AssignedProfile` (and the profile cascade doesn't resolve), every estimate-of-savings path either falls back to `SizeMB * 0.5` (priority calc) or returns "undecidable" (compliance / admission). Result: profile-less files all rank by file size, regardless of compression headroom -- a 5 GB already-AV1 source ranks the same as a 5 GB h264 source. The operator looking at the library to decide which titles to assign profiles to next is sorted by the wrong signal.
 
@@ -1815,7 +1806,6 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 **Suspect sites (surface):**
 - `Core/Database/BaseRepository.py:53` `AddProblemFile(FilePath, ...)` -- 3 callers in `Features/TranscodeQueue/QueueManagementBusinessService.py`, `Features/MediaProbe/MediaProbeBusinessService.py`, `Features/QualityTesting/QualityTestingBusinessService.py`. If any caller passes `MediaFile.FilePath` (canonical), that is drift.
 - `Features/FileReplacement/TranscodedOutputPlacement.py` -- `LocalExists` calls near source/output path handling; confirm each is post-`Path.Resolve(worker)`.
-- `Features/FileReplacement/ComplianceGate.py` -- same.
 - `Features/TranscodeJob/Worker/JobProcessor.py` -- same.
 - `Features/TranscodeQueue/QueueManagementBusinessService.py` -- same.
 
@@ -1843,50 +1833,7 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 
 ### transcode-failure-scope-2026-09-15
 
-Scope commitment 2026-09-15: BUG-0100 through BUG-0104 are the CURRENT visible transcode failures. Work is bounded to this list. No adjacent scope creep.
-
-### [BUG-0100] Compliance gate rejects transcode with `invalid_loudness_measurement` despite plausible source + achieved measurements -- Doctor Who S08E10 3x
-**Date:** 2026-09-15 | **Area:** compliance-gate / audio-loudness
-
-**What breaks (symptom):** `ComplianceGateFailed: invalid_loudness_measurement` on TranscodeAttempts 91470 / 93257 / 93350 (MediaFileId 709363, Doctor Who 2005 S08E10 "In the Forest of the Night"), all Success=FALSE. Attempts land at ffmpeg-exit=0 but the post-encode compliance gate refuses to promote the `.inprogress` output. Cluster candidate -- same reason string appears on multiple recent failures.
-
-**Root class hypothesis:** `LoudnessMeasurementValidator.IsValid(MediaFile)` reads `MediaFiles.SourceIntegratedLufs / SourceLoudnessRangeLU / SourceTruePeakDbtp / SourceIntegratedThresholdLufs` and returns invalid. On this file the columns look plausible (`I=-22.44 LRA=14.5 TP=-1.97 Threshold=-33.23`). Three suspects, ranked:
-1. Gate reads a stale/pre-remeasure snapshot. `LoudnessMeasuredAt=2026-09-14 19:57` is AFTER attempt 93350 at 19:25 -- back-date via `AudioRemeasurementService.MarkForRemeasurement` may be masking the actual pre-attempt state.
-2. Validator has a rule beyond null-check (silence-floor predicate, `SourceIntegratedThresholdLufs > SourceIntegratedLufs` sanity, etc) that this file trips despite plausible numeric values.
-3. Achieved (post-encode) measurement fails a hidden check -- weakest suspect. `AudioTracksEmittedJson` on attempt 93350 shows both tracks measured (Boost I=-15.9 LRA=7.7 TP=-2.7; Original I=-23.2 LRA=3.1 TP=-4.3), tolerable numbers.
-
-**Principled fix (KISS):**
-1. Read `LoudnessMeasurementValidator.IsValid` source + `ComplianceGate.Evaluate` audio-loudness branch. Enumerate every reject reason the code can produce that surfaces as `invalid_loudness_measurement`; identify which fires on this file.
-2. If stale-snapshot bug -> gate reads fresh per `db-is-authority.md`, no `_cached_*`.
-3. If rule beyond null-check legitimately rejects Original LRA=3.1 as too-low-post-linear-loudnorm -> real quality gate; requeue policy needs a bump-CRF-or-give-up branch and `/AudioNormalization` review-queue routing per C6.
-4. NO bandaid: do not lower the threshold to make Doctor Who pass. Understand which rule fires + why.
-
-**Blockers / gates:** code read of validator + gate to enumerate reject reasons is a hard prerequisite. No hardware / operator gates.
-
-**Evidence:**
-- `SELECT SUBSTR(ErrorMessage,1,120) FROM TranscodeAttempts WHERE MediaFileId=709363 ORDER BY AttemptDate DESC LIMIT 5` returns 3 x `ComplianceGateFailed: invalid_loudness_measurement`.
-- `SELECT SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, SourceIntegratedThresholdLufs, LoudnessMeasuredAt FROM MediaFiles WHERE Id=709363` -> `-22.44 / 14.5 / -1.97 / -33.23 / 2026-09-14 19:57`.
-- `SELECT AudioTracksEmittedJson FROM TranscodeAttempts WHERE Id=93350` -> both tracks have plausible achieved measurements.
-
----
-
-### [BUG-0101] ComplianceGateFailed cluster is the plurality of recent failures -- reason string is one bucket with N sub-causes hidden inside
-**Date:** 2026-09-15 | **Area:** compliance-gate / observability
-
-**What breaks (symptom):** Query `SELECT ErrorMessage FROM TranscodeAttempts WHERE Success=FALSE AND AttemptDate > NOW() - INTERVAL '3 days' AND ErrorMessage ILIKE 'Post-encode pipeline failed:%ComplianceGateFailed:%'` returns the plurality of recent failures. Reasons visible in samples: `invalid_loudness_measurement`, `n...`, `i...` (truncated). One error class, many sub-causes. Operator cannot see the breakdown without ad-hoc SQL.
-
-**Root class hypothesis:** `ComplianceGate.Evaluate` produces heterogeneous reject reasons packed into one text field. Failure surface (FailedJobs page, /Activity) treats them as one bucket. Root fix cannot target the top cause because the top cause is N distinct causes hidden behind one message.
-
-**Principled fix (KISS):**
-1. Decompose FIRST: `SELECT SPLIT_PART(SUBSTR(ErrorMessage, POSITION('ComplianceGateFailed: ' IN ErrorMessage) + 22, 60), CHR(10), 1) AS reason, COUNT(*) FROM ... GROUP BY reason ORDER BY 2 DESC` -- count each sub-cause across last 30 days.
-2. Rank reasons by frequency. Fix top-1 as its own directive; file others behind it.
-3. **File BUG-0095 (FailureClass column + FailedJobs page + regex classifier) as blocking dependency.** That work auto-decomposes ComplianceGate into named buckets and eliminates re-running manual SQL. BUG-0095 already tracked as active; prioritize it before iterating on cluster sub-causes.
-
-**Blockers / gates:** BUG-0095 (failure-class taxonomy) is the enabling infrastructure. Without it, every iteration on this cluster costs a manual SQL breakdown.
-
-**Evidence:** `SELECT REGEXP_REPLACE(SUBSTR(ErrorMessage,1,80),'[0-9]+','N','g') AS err_shape, COUNT(*) FROM TranscodeAttempts WHERE Success=FALSE AND AttemptDate > NOW() - INTERVAL '7 days' GROUP BY err_shape` -- ComplianceGateFailed variants as majority.
-
----
+Scope commitment 2026-09-15: BUG-0100 through BUG-0104 are the CURRENT visible transcode failures. Work is bounded to this list. No adjacent scope creep. BUG-0100 and BUG-0101 were resolved 2026-10-06 (see Resolved); BUG-0102 through BUG-0104 remain.
 
 ### [BUG-0102] Subtitle emit fails with mov_text `Result too large` (ffmpeg exit 4294967262 = ERANGE) -- caps every mp4 remux with any oversized subtitle sample
 **Date:** 2026-09-15 | **Area:** subtitle-emit
@@ -1921,7 +1868,7 @@ Tier 2 (upstream, cross-vertical): a previous transcode wrote a corrupt `-mv.mp4
 
 **Principled fix (KISS + fail-loud + writer-owns-cascade):**
 
-1. **PreEncodeAudioPipeline preflight (this bug's owned change):** add `_ProbeSourceReadable(SourceFilePath)` as the first substep of `_RunDemucsChain`. Runs `ffprobe -show_format` (cheap, no stream decode). If exit != 0, raise `SourceUnreadableError(f"source unreadable: {SourceFilePath}: {ffprobe_stderr_tail}")`. `AudioPreEncodeFacade.Prepare` catches, JobProcessor routes to operator review with `AdmissionDeferReason='source_unreadable'`. NOT via D13 Copy fallback -- Copy fallback would ALSO fail on the same unreadable file; routing there just adds a second ffmpeg exec that produces the same crash. `source_unreadable` is a distinct terminal state, not a partial-completion.
+1. **PreEncodeAudioPipeline preflight (this bug's owned change):** add `_ProbeSourceReadable(SourceFilePath)` as the first substep of `_RunDemucsChain`. Runs `ffprobe -show_format` (cheap, no stream decode). If exit != 0, raise `SourceUnreadableError(f"source unreadable: {SourceFilePath}: {ffprobe_stderr_tail}")`. `AudioPreEncodeFacade.Prepare` catches, JobProcessor routes to operator review with `AdmissionDeferReason='source_unreadable'`. `source_unreadable` is a distinct terminal state.
 
 2. **FileReplacement guard (cross-vertical -- FILE SEPARATELY as its own bug):** `TranscodedOutputPlacement.Execute` MUST ffprobe the transcoded output BEFORE replacing source. Reject any output missing moov or failing to open. This is the cross-vertical root fix; not in this bug's scope, but named here so it doesn't get lost.
 
@@ -1960,6 +1907,24 @@ Tier 2 (upstream, cross-vertical): a previous transcode wrote a corrupt `-mv.mp4
 ---
 
 ## Resolved
+
+### [BUG-0100] Compliance gate rejects transcode with `invalid_loudness_measurement` despite plausible source + achieved measurements -- Doctor Who S08E10 3x
+**Date:** 2026-09-15 -> 2026-10-06 | **Area:** compliance-gate / audio-loudness
+
+**Symptom (as filed):** `ComplianceGateFailed: invalid_loudness_measurement` on TranscodeAttempts 91470 / 93257 / 93350 (MediaFileId 709363); ffmpeg exited 0 but the pre-replace compliance gate refused to promote the `.inprogress` output.
+
+**Resolution:** resolved by directive `label-decides-command` (2026-10-06). The pre-replace compliance gate was deleted; a stage's output is now accepted or refused by that stage's own verification (`transcode.flow.md` D2), so a `ComplianceGateFailed` refusal can no longer occur. The question of which validator rule fired on this file was never answered and no longer blocks replacement.
+
+---
+
+### [BUG-0101] ComplianceGateFailed cluster is the plurality of recent failures -- reason string is one bucket with N sub-causes hidden inside
+**Date:** 2026-09-15 -> 2026-10-06 | **Area:** compliance-gate / observability
+
+**Symptom (as filed):** `Post-encode pipeline failed: ... ComplianceGateFailed: <reason>` was the plurality of recent transcode failures, with many distinct sub-causes hidden behind one message.
+
+**Resolution:** resolved by directive `label-decides-command` (2026-10-06). The gate that produced the `ComplianceGateFailed` message was deleted, so the cluster can no longer grow; since the first deploy of that directive there have been 0 new `ComplianceGateFailed` attempts. The sub-causes were not decomposed.
+
+---
 
 ### [BUG-0042] Active Jobs list view omits VMAF runs while header badge counts them -- operator misreads as "stuck", kills workers, orphans claimed rows
 **Date:** 2026-06-03 -> 2026-06-03 | **Area:** activity-page

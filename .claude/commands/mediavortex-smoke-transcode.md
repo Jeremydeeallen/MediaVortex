@@ -27,7 +27,7 @@ Enqueue one or more smoke-test transcodes so each lands on the exact worker the 
    ```
    UPDATE MediaFiles SET AssignedProfile=(SELECT ProfileName FROM Profiles WHERE Id=<ProfileId>) WHERE Id=<MediaFileId>;
    ```
-3. Verify a `ProfileThresholds` row exists for the profile at the source's resolution. If missing, transcode fails with "Failed to build Transcode command". Insert with quality field set to the CQ/ICQ/CRF value.
+3. Verify a `ProfileThresholds` row exists for the profile at the source's resolution. If missing, transcode fails with "Failed to build Transcode command". Insert with quality field set to the CQ/CRF value.
 4. Verify each target worker is Online + has the required hardware flag (`nvenccapable`, `qsvcapable`).
 
 ## The pinning dance (per triple `<MediaFileId>:<ProfileId>:<WorkerName>`)
@@ -59,7 +59,7 @@ Repeat for the next triple. Each triple's target worker stays free while the oth
 ## Never do this
 
 - **NEVER `systemctl restart` a worker while its ffmpeg child is encoding.** The restart sends SIGTERM to the child, wasting all encode work done so far (exit code -15 or 234). Restart workers only when they are idle.
-- **NEVER enqueue multiple heavy transcodes at the same priority to the same host without pinning.** The claim query ignores MaxConcurrentJobs and you will get two Demucs jobs on the same 8GB GPU -> VRAM OOM -> SIGKILL -> Track 1 silently dropped.
+- **NEVER enqueue multiple heavy transcodes at the same priority to the same host without pinning.** The claim query ignores MaxConcurrentJobs and you will get two heavy jobs on the same 8GB GPU -> VRAM OOM -> SIGKILL.
 - **NEVER pause every worker at once and forget to unpause.** Leaves the queue frozen until manual recovery.
 
 ## Post-completion
@@ -70,7 +70,7 @@ After the batch finishes, for each attempt report:
 - `TranscodeDurationSeconds` (report both minutes and seconds)
 - `OldSizeBytes` -> `NewSizeBytes` + `SizeReductionPercent`
 - `VMAF` (if QualityTestRequired on the profile)
-- Post-encode audio loudness on Track 0 + Track 1 via `ffmpeg -i <output> -map 0:a:N -af ebur128=peak=true -f null -`
+- For an AudioFix job only (the one label that re-encodes audio -- `transcode.flow.md` D2): post-encode audio loudness on Track 0 + Track 1 via `ffmpeg -i <output> -map 0:a:N -af ebur128=peak=true -f null -`
 - Post-encode audio stream shape (codec, channels, bitrate) via `ffprobe -show_streams -select_streams a`
 
 Present as a side-by-side table -- each column a worker/host, each row a metric.

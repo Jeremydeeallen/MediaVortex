@@ -23,13 +23,11 @@ C3. **`WidthAnchoredScalePolicy` is the SOLE producer of scale-filter strings.**
 
 C4. **`ResolutionCalculator.CalculateScaleFilter` and `EncoderKnobRepository._NormalizeResolution` delegate to the typed shape.** The former composes `Resolution.FromAny` + `Registry.FromCategory` + `WidthAnchoredScalePolicy.Decide`; the latter buckets `WIDTHxHEIGHT` via `Registry.FromDims`. No raw-string `==` / `!=` comparisons on resolution values remain in the encode + compliance call chain (`grep` in `Features/TranscodeJob/Emit/`, `Features/Compliance/`, `Core/Resolution/`, `Features/Profiles/`; one filename-equality match in `OutputFilenameBuilder.py` is naming-only, not scale-decision). Verifiable: `Tests/Contract/TestResolutionCalculator.py` 12/12 + `Tests/Contract/TestEncoderKnobNormalizeResolution.py` 8/8.
 
-C5. **`Features/Compliance/Operations/TranscodeOperation` compares via `ResolutionTier.Rank`.** The legacy inline `_RES_HEIGHTS = {...}` dict + `_HeightOf` static method are removed. The `PreventUpscale` + `ResolutionExceedsProfileTarget` rules use `SrcTier.Rank` vs `TgtTier.Rank`. `EffectiveProfile.TargetResolutionCategory` is typed `Optional[ResolutionTier]` (not `str`). Verifiable: `Tests/Contract/TestComplianceEngine.py::TestOperations` (8 cases) green; `Tests/Contract/TestTranscodeOperationMvTrust.py` (7 cases) green.
-
-C6. **`EffectiveProfileResolver` returns a typed `TargetTier`.** `EffectiveProfileResolver.Resolve()` maps the `TargetResolution` string from `ProfileThresholds` to `ResolutionTier` via the injected `ResolutionTierRegistry` at this single boundary; `EffectiveProfile.TargetResolutionCategory: Optional[ResolutionTier]`. Legacy `'No downscaling'` is collapsed at the resolver, not inside operation code. Verifiable: field annotation + `Tests/Contract/TestComplianceEngine.py::TestCrfProfileRegression` 3/3.
+C6. **`EffectiveProfileResolver` returns a typed `TargetTier`.** `Features/Profiles/EffectiveProfileResolver.Resolve()` maps the target-resolution string to `ResolutionTier` via the injected `ResolutionTierRegistry` at this single boundary; `EffectiveProfile.TargetResolutionCategory: Optional[ResolutionTier]` (not `str`). The resolver serves profile and priority resolution; the bucket rules do not go through it (`transcode.flow.md` D4). Verifiable: field annotation.
 
 C7. **Live MIB-II shape produces the right scale filter end-to-end.** `Resolution.FromAny('1916x1040')` -> `Tier=T1080p, AspectRatio=1.842`. `WidthAnchoredScalePolicy.Decide(that, T720p)` -> `ScaleFilter(1280, '-2')` -> `'scale=w=1280:h=-2'`. Verifiable: dedicated test `test_mib_ii_regression_1916x1040_to_720p` + live re-encode of MF 621554 (TranscodeAttempt 37754) -- FFmpeg argv contains `-vf "scale=w=1280:h=-2"`, output landed at `1280x694` (cinematic aspect preserved), `FileReplaced=TRUE`, size reduction 82.94%.
 
-C8. **OCP: adding a tier is one place.** Adding a new tier (e.g. `T1440p`) requires exactly one DB row insert into `ResolutionTiers`. No edits to `ResolutionCalculator`, `ScalePolicy`, `TranscodeOperation`, `EffectiveProfileResolver`, or `EncoderKnobRepository`. Verifiable: `TestRegistryDataDriven::test_new_tier_added_via_db_only` proves a synthetic T1440p row makes `Registry.FromDims(2560, 1440).Name == 'T1440p'` with no code change.
+C8. **OCP: adding a tier is one place.** Adding a new tier (e.g. `T1440p`) requires exactly one DB row insert into `ResolutionTiers`. No edits to `ResolutionCalculator`, `ScalePolicy`, `EffectiveProfileResolver`, or `EncoderKnobRepository`. Verifiable: `TestRegistryDataDriven::test_new_tier_added_via_db_only` proves a synthetic T1440p row makes `Registry.FromDims(2560, 1440).Name == 'T1440p'` with no code change.
 
 C9. **`max(Width, Height)` is the SOLE classification discriminant.** `Registry.FromDims(W, H)` walks `_ByRankDesc` and returns the highest-rank tier whose `MinLongEdge <= max(W, H)`. Works orientation-agnostically for landscape, portrait, square, ultra-wide, and letterbox content. Verifiable: `TestRegistryFromDimsMaxEdge` (10 cases incl. portrait FullHD 1080x1920 -> T1080p, broadcast 1280x718 -> T720p, ultra-wide 1920x800 -> T1080p, MIB-II 1916x1040 -> T1080p, canonical round-trip for all four tiers).
 
@@ -47,7 +45,7 @@ C10. **Tier thresholds are operator-tunable via SQL.** `UPDATE ResolutionTiers S
 
 ## Status
 
-COMPLETE -- shipped via the `resolution-types` directive (2026-06-15). Adoption gap closed 2026-08-10 by `pre-encode-savings-gate`: the 4 inline classifier copies scattered across `MediaProbeBusinessService`, `QueueManagementBusinessService`, `Repositories/DatabaseManager` (orphan), `Features/Profiles/ProfileRepository`, and the inline block in `Features/FileReplacement/ComplianceGate.Evaluate` all deleted in favor of `ResolutionTierRegistry.CategoryStringFromDims` / `.CategoryStringFromResolution`. Two of the four were height-only; one directly caused the Ace Ventura Jr false-reject class (cinemascope 1280x534 misclassified as 480p under a 600 kbps ceiling instead of 720p under 1800 kbps).
+COMPLETE -- shipped via the `resolution-types` directive (2026-06-15). Adoption gap closed 2026-08-10 by `pre-encode-savings-gate`: the 4 inline classifier copies scattered across `MediaProbeBusinessService`, `QueueManagementBusinessService`, `Repositories/DatabaseManager` (orphan), and `Features/Profiles/ProfileRepository` all deleted in favor of `ResolutionTierRegistry.CategoryStringFromDims` / `.CategoryStringFromResolution`. Two of the four were height-only; one directly caused the Ace Ventura Jr false-reject class (cinemascope 1280x534 misclassified as 480p under a 600 kbps ceiling instead of 720p under 1800 kbps).
 
 ## Scope
 
@@ -55,9 +53,8 @@ COMPLETE -- shipped via the `resolution-types` directive (2026-06-15). Adoption 
 Core/Resolution/**
 Scripts/SQLScripts/AddResolutionTiersTable.py
 Features/TranscodeJob/Emit/ResolutionCalculator.py (CalculateScaleFilter only)
-Features/Compliance/Models/EffectiveProfile.py
-Features/Compliance/Services/EffectiveProfileResolver.py
-Features/Compliance/Operations/TranscodeOperation.py
+Features/Profiles/EffectiveProfile.py
+Features/Profiles/EffectiveProfileResolver.py
 Features/Profiles/EncoderKnobRepository.py (_NormalizeResolution only)
 ```
 
@@ -73,9 +70,8 @@ Features/Profiles/EncoderKnobRepository.py (_NormalizeResolution only)
 | `Scripts/SQLScripts/AddResolutionTiersTable.py` | Idempotent migration; seeds T480p / T720p / T1080p / T2160p |
 | `Features/TranscodeJob/Emit/ResolutionCalculator.py` | `CalculateScaleFilter` thin facade over the policy |
 | `Features/Profiles/EncoderKnobRepository.py` | `_NormalizeResolution` delegates to `Registry.FromDims` |
-| `Features/Compliance/Models/EffectiveProfile.py` | `TargetResolutionCategory: Optional[ResolutionTier]` |
-| `Features/Compliance/Services/EffectiveProfileResolver.py` | Maps `TargetResolutionStr -> ResolutionTier` at the resolver boundary |
-| `Features/Compliance/Operations/TranscodeOperation.py` | Rank-based comparisons via `ResolutionTier` |
+| `Features/Profiles/EffectiveProfile.py` | `TargetResolutionCategory: Optional[ResolutionTier]` |
+| `Features/Profiles/EffectiveProfileResolver.py` | Maps `TargetResolutionStr -> ResolutionTier` at the resolver boundary |
 | `Tests/Contract/TestResolution.py` | 12 contract tests |
 | `Tests/Contract/TestResolutionTier.py` | 19 contract tests (incl. data-driven OCP probe) |
 | `Tests/Contract/TestScalePolicy.py` | 8 contract tests + tier-pair subtest matrix |

@@ -6,7 +6,7 @@
 
 Adds a new `MediaFiles.RemuxedByMediaVortex BOOLEAN` column and a paired `RemuxedByMediaVortexDate TIMESTAMP` column, parallel to the existing `TranscodedByMediaVortex` / (implicit) date pair. The post-replacement writer now sets exactly ONE of the two flags based on the originating job's mode, instead of unconditionally setting `TranscodedByMediaVortex=TRUE` for every replacement.
 
-A remux or subtitle-fix or audio-fix that leaves the video stream untouched does NOT lie about having transcoded the file. SmartPopulate (and any other consumer that filters on "already transcoded") can then trust `TranscodedByMediaVortex` to mean exactly what it says: the video stream was re-encoded by MediaVortex.
+A remux or audio-fix that leaves the video stream untouched does NOT lie about having transcoded the file. SmartPopulate (and any other consumer that filters on "already transcoded") can then trust `TranscodedByMediaVortex` to mean exactly what it says: the video stream was re-encoded by MediaVortex.
 
 ## Concern
 
@@ -28,10 +28,10 @@ The mop-up script `Scripts/FixFalseTranscodeFlags.py` existed but only cleared t
 
 4. After file replacement, `TranscodedOutputPlacement._UpdateMediaFilesAfterReplacement` sets (extracted from `FileReplacementBusinessService` 2026-06-02 via `filereplacement-decompose`):
    - `TranscodedByMediaVortex=TRUE` (and leaves `RemuxedByMediaVortex` untouched) when the originating job's `Mode='Transcode'`.
-   - `RemuxedByMediaVortex=TRUE`, `RemuxedByMediaVortexDate=NOW()` (and leaves `TranscodedByMediaVortex` untouched) when the originating job's `Mode in ('Remux', 'SubtitleFix', 'AudioFix', 'Quick')`.
+   - `RemuxedByMediaVortex=TRUE`, `RemuxedByMediaVortexDate=NOW()` (and leaves `TranscodedByMediaVortex` untouched) when the originating job's `Mode in ('Remux', 'AudioFix')`.
    - Never sets both TRUE for the same row in the same replacement. Verifiable: induce one of each mode against test files, observe each row has exactly one flag flipped.
 
-5. Mode is derived from the `TranscodeAttempts.ProfileName` of the just-finished replacement and threaded through `TranscodedOutputPlacement.Execute(..., Mode=...)`. ProfileName values `'Remux'` and `'SubtitleFix'` route to the remux branch; any other ProfileName routes to the transcode branch. Verifiable: grep `TranscodedOutputPlacement._UpdateMediaFilesAfterReplacement` for the `Mode in ('Remux', 'SubtitleFix', 'AudioFix', 'Quick')` routing condition.
+5. Mode is the job label (`transcode.flow.md` D2) of the just-finished replacement, threaded through `TranscodedOutputPlacement.Execute(..., Mode=...)`. `PostFlightRegistry.Get(Mode)` picks the per-label post-flight: `TranscodePostFlight`, `RemuxPostFlight`, `AudioFixPostFlight`. Verifiable: `Features/FileReplacement/PostFlightProcessors/PostFlightRegistry.py` registers exactly those three labels.
 
 ### Retro-fix
 
@@ -62,7 +62,7 @@ COMPLETE 2026-05-30. Writer fix deployed to larry (c4f8890b). Live verify deferr
 
 - [x] 1. Migration script `Scripts/SQLScripts/AddRemuxedByMediaVortexColumn.py` (criteria 1, 2, 3). Applied 2026-05-30; both columns present.
 - [x] 2. Writer fix in `FileReplacementBusinessService._UpdateMediaFilesAfterReplacement` -- accepts `Mode` param, routes flag write (criterion 4, 5).
-- [x] 3. Plumb `Mode` from `_ProcessCompleteFileReplacement` call site (derived from `transcode_attempt.ProfileName in ('Remux','SubtitleFix')`). `FinalizePartialReplacement` continues to use the default `Mode='Transcode'`.
+- [x] 3. Plumb `Mode` from `_ProcessCompleteFileReplacement` call site. `FinalizePartialReplacement` continues to use the default `Mode='Transcode'`.
 - [x] 4. Retroflip script `Scripts/SQLScripts/RetroflipRemuxedFlags.py` (criteria 6, 7, 8). Applied 2026-05-30: 13,498 MediaFiles flipped, 13,476 TranscodeFiles cleared.
 - [x] 5. Updated `transcode.flow.md` Stage 7.6 and `Features/TranscodeQueue/TranscodeQueue.feature.md` criterion 3.
 - [x] 6. Migration + retroflip applied; SmartPopulate now surfaces the 13,498 previously-hidden remuxed files (verified: Westworld S02E10 at PriorityScore=147 returned by the diagnostic query).

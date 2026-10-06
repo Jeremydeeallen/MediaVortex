@@ -53,7 +53,7 @@ py Scripts/SQLScripts/QueryDatabase.py sql "SELECT count(*) FILTER (WHERE <col> 
 
 **Signal 3 fires** when `populated > 0` but `modes_populating < total_modes`. That means some modes write the column and some don't — the modes that don't are missing a step.
 
-Historical example from work-transcode-unified close: `SELECT count(*) FROM TranscodeAttempts WHERE AudioPolicyResolved IS NOT NULL` returned 0 across ALL attempts. Every mode was missing the attestation step. The ComplianceGate was then failing-closed on remux because there was no attestation to validate. Caught only via 9-media smoke; should have been caught at audit time.
+Historical example from work-transcode-unified close: `SELECT count(*) FROM TranscodeAttempts WHERE AudioPolicyResolved IS NOT NULL` returned 0 across ALL attempts. Every mode was missing the attestation step. A downstream check was then failing-closed on remux because there was no attestation to validate. Caught only via 9-media smoke; should have been caught at audit time.
 
 ### Signal 5 — Config-driven call-graph shape
 
@@ -133,7 +133,7 @@ Historical example: work-transcode-unified spec wrote "EffectiveProfileResolver 
 ### Out of Scope items
 
 - `EffectiveProfileResolver` behavior preserved AND internal duplication collapsed in this directive (category (a)).
-- Worker-processor unification (TranscodeJobProcessor + RemuxJobProcessor + SubtitleFixJobProcessor) — category (b), explicit. Tracked in sibling directive `transcode-worker-unification`, sequenced AFTER this one. **This directive's UI ships on top of the current divergent pipeline; the audio-policy attestation gap (Signal 3) is therefore expected.**
+- Worker-processor unification (the per-mode JobProcessor classes) — category (b), explicit. Tracked in sibling directive `transcode-worker-unification`, sequenced AFTER this one. **This directive's UI ships on top of the current divergent pipeline; the audio-policy attestation gap (Signal 3) is therefore expected.**
 ```
 
 The audit takes 15-30 minutes if no signals fire, 1-2 hours if multiple do (because you have to scope or carve-out each one). Cheaper than discovering the divergence via operator probe after declaring DELIVERING.

@@ -4,7 +4,7 @@
 
 ## What It Does
 
-Provides the SOLID-clean structural seam for the worker tier: a `WorkerLoopService` that polls both Transcode and Remux queues based on worker capability flags, dispatching each claimed job to a `JobProcessor` strategy looked up by `Job.ProcessingMode`. Replaces the dual poller pair (`ProcessTranscodeQueueService` + `ProcessRemuxQueueService`) with a unified service. The four `JobProcessor` strategies (Transcode / Remux / SubtitleFix / Variant) are constructor-injected and execute the full orchestration body directly -- they invoke shared helpers (`GetMediaFileData`, `SetupFilePreparation`, `ExecuteTranscoding`, `HandleJobFailure`, `DispatchDisposition`, `CommandComposer`, etc.) via injected `QueueService` reference. Auxiliary services (`EncodeExecutor`, `AttemptRecordService`, `TemporaryFilePathsService`, `LocalStagingAdapter`, `StuckJobMonitor`, `ProcessSupervisor`) are extracted and contract-tested but not yet composed into the JobProcessors -- they sit ready for the future helper-extraction directive to consume.
+Provides the SOLID-clean structural seam for the worker tier: a `WorkerLoopService` that polls both Transcode and Remux queues based on worker capability flags, dispatching each claimed job to a `JobProcessor` strategy looked up by `Job.ProcessingMode`. Replaces the dual poller pair (`ProcessTranscodeQueueService` + `ProcessRemuxQueueService`) with a unified service. The per-label strategies (Transcode / Remux / AudioFix -- `transcode.flow.md` D2 + ST6 Strategy variants) and the TestVariant processor are constructor-injected and execute the full orchestration body directly -- they invoke shared helpers (`GetMediaFileData`, `SetupFilePreparation`, `ExecuteTranscoding`, `HandleJobFailure`, `DispatchDisposition`, `CommandComposer`, etc.) via injected `QueueService` reference. Auxiliary services (`EncodeExecutor`, `AttemptRecordService`, `TemporaryFilePathsService`, `LocalStagingAdapter`, `StuckJobMonitor`, `ProcessSupervisor`) are extracted and contract-tested but not yet composed into the JobProcessors -- they sit ready for the future helper-extraction directive to consume.
 
 ## Workflows
 
@@ -22,7 +22,7 @@ C1. **JobResult is a typed frozen value object.** `Features/TranscodeJob/Worker/
 
 C2. **JobProcessor is an ABC with one abstract `Process` method.** `Features/TranscodeJob/Worker/JobProcessor.py` cannot be instantiated directly; concrete subclasses implement `Process(Job, MediaFile) -> JobResult`. Verifiable: `Tests/Contract/TestJobProcessor.py`.
 
-C3. **JobProcessorRegistry maps ProcessingMode to strategy via constructor injection.** `.Get('Transcode')` returns TranscodeJobProcessor; `.Get('Remux')` / `.Get('Quick')` / `.Get('AudioFix')` returns RemuxJobProcessor; `.Get('SubtitleFix')` returns SubtitleFixJobProcessor; `.Get('TestVariant')` returns VariantJobProcessor; unknown raises KeyError. Verifiable: `Tests/Contract/TestJobProcessorRegistry.py`.
+C3. **JobProcessorRegistry maps ProcessingMode to strategy via constructor injection.** `.Get('Transcode')` returns `TranscodeJobStrategy`; `.Get('Remux')` returns `RemuxJobStrategy`; `.Get('AudioFix')` returns `AudioFixJobStrategy`; a label with no `ProcessingModes` row or no registered strategy raises KeyError. Verifiable: `Tests/Contract/TestJobProcessorRegistry.py`.
 
 C4. **One `WorkerLoopService` instance per container drives every claim.** Ctor accepts `(DatabaseManager, JobProcessorRegistry, WorkerName, TranscodeEnabled, RemuxEnabled, AcceptsInterlaced, MaxConcurrentJobs)`. Slot cap is a `threading.BoundedSemaphore(MaxConcurrentJobs)` seeded at construction from `Workers.MaxConcurrentJobs`. `ProcessQueueLoop` acquires non-blocking before every claim; `_DispatchJobWithSlotRelease` releases in a finally block so exceptions cannot leak capacity. `ClaimNextPendingJob(WorkerName)` returns any-mode job the worker is capable of; dispatch routes via `JobProcessorRegistry.Get(Job.ProcessingMode).Process`. `StopRequested=True` exits the loop within one tick. Mid-flight resize of `MaxConcurrentJobs` requires worker restart -- semaphore capacity is boot-fixed. Verifiable: `Tests/Contract/TestWorkerLoopSlotCap.py`.
 
@@ -57,7 +57,7 @@ C13. **ProcessRemuxQueueService deleted (closes BUG-0051 structurally).** `grep 
 
 ## Status
 
-ACTIVE -- `worker-loop-method-extraction` shipped 2026-06-11 at commit `945021c`. The four `JobProcessor.Process` methods now execute the orchestration body directly (verbatim port of the former `ProcessTranscodeQueueService.Process*Job` methods, with `self.X` rewritten to `self.QueueService.X`). The four `Process*Job` methods are deleted from `ProcessTranscodeQueueService` (-566 LOC). `WorkerService/Main._StartTranscodeCapability` composes `WorkerLoopService(TranscodeEnabled=True)` + `JobProcessorRegistry({'Transcode', 'SubtitleFix', 'TestVariant'})`; the legacy `ProcessTranscodeQueueService.Run()` poll loop is no longer invoked from any production path. ProcessTranscodeQueueService (1871 LOC) retains shared helpers + legacy Run/Stop/GetStatus/ProcessQueueLoop methods (intentionally retained as dead code -- see `directives/closed/2026-06-11-worker-loop-method-extraction.md` Decisions Made). Live smoke 2026-06-11 14:38-14:48: 1 Remux on larry-worker-1 + 1 Transcode on I9-2024 = 2 successful completions, 0 failures.
+ACTIVE -- `worker-loop-method-extraction` shipped 2026-06-11 at commit `945021c`. The four `JobProcessor.Process` methods now execute the orchestration body directly (verbatim port of the former `ProcessTranscodeQueueService.Process*Job` methods, with `self.X` rewritten to `self.QueueService.X`). The four `Process*Job` methods are deleted from `ProcessTranscodeQueueService` (-566 LOC). `WorkerService/Main._StartTranscodeCapability` composes `WorkerLoopService(TranscodeEnabled=True)` + `JobProcessorRegistry` registering `Transcode`, `Remux` and `AudioFix`; the legacy `ProcessTranscodeQueueService.Run()` poll loop is no longer invoked from any production path. ProcessTranscodeQueueService (1871 LOC) retains shared helpers + legacy Run/Stop/GetStatus/ProcessQueueLoop methods (intentionally retained as dead code -- see `directives/closed/2026-06-11-worker-loop-method-extraction.md` Decisions Made). Live smoke 2026-06-11 14:38-14:48: 1 Remux on larry-worker-1 + 1 Transcode on I9-2024 = 2 successful completions, 0 failures.
 
 ## Files
 
@@ -66,9 +66,9 @@ ACTIVE -- `worker-loop-method-extraction` shipped 2026-06-11 at commit `945021c`
 | `Features/TranscodeJob/Worker/JobResult.py` | C1 value object |
 | `Features/TranscodeJob/Worker/JobProcessor.py` | C2 interface |
 | `Features/TranscodeJob/Worker/JobProcessorRegistry.py` | C3 registry |
-| `Features/TranscodeJob/Worker/TranscodeJobProcessor.py` | C5 (Transcode strategy) |
-| `Features/TranscodeJob/Worker/RemuxJobProcessor.py` | C5 (Remux strategy; replaces ProcessRemuxQueueService) |
-| `Features/TranscodeJob/Worker/SubtitleFixJobProcessor.py` | C5 (SubtitleFix strategy) |
+| `Features/TranscodeJob/Worker/Strategies/TranscodeJobStrategy.py` | C5 (Transcode label) |
+| `Features/TranscodeJob/Worker/Strategies/RemuxJobStrategy.py` | C5 (Remux label) |
+| `Features/TranscodeJob/Worker/Strategies/AudioFixJobStrategy.py` | C5 (AudioFix label) |
 | `Features/TranscodeJob/Worker/VariantJobProcessor.py` | C5 (TestVariant strategy; filename avoids R8 Test-prefix) |
 | `Features/TranscodeJob/Worker/WorkerLoopService.py` | C4 orchestrator |
 | `Features/TranscodeJob/Worker/EncodeExecutor.py` | C7 |

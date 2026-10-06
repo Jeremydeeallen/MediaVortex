@@ -67,7 +67,7 @@ Operator dogfood (2026-05-10). Operator wanted to use `AV1 P4 FG6 >720p` to comp
 ### Progress
 
 - [x] 1. Read existing flow + feature docs (`transcode.flow.md` Stage 4, `TranscodeQueue.feature.md`)
-- [x] 2. Identify the gap: `ShouldSkipDueToResolution` is too strict; `_EvaluateCompliance` savings logic is not wired into queue admission; `MIN_SAVINGS_MB` is hardcoded; CRF-only profiles bypass the savings estimate
+- [x] 2. Identify the gap: `ShouldSkipDueToResolution` is too strict; the savings logic is not wired into queue admission; `MIN_SAVINGS_MB` is hardcoded; CRF-only profiles bypass the savings estimate
 - [x] 3. Draft this feature doc
 - [x] 4. Update `transcode.flow.md` Stage 4 to describe the new gate
 - [x] 5. Operator approval of criteria 1-16
@@ -75,7 +75,7 @@ Operator dogfood (2026-05-10). Operator wanted to use `AV1 P4 FG6 >720p` to comp
 - [x] 7. Repository helpers: `CrfBitrateEstimateRepository.GetEstimatedKbps`, `QueueAdmissionConfigRepository.Get`, `CodecCompatibilityRepository.GetAcceptableSet`. Read-fresh per call, no cache.
 - [x] 8. Helper `EstimateTargetSizeMB(MediaFile, ProfileSettings)` -- bitrate-mode formula when VideoBitrateKbps>0; CrfBitrateEstimates lookup otherwise; (None, True) when key missing.
 - [x] 9. `EvaluateQueueAdmission(MediaFile, ProfileSettings, AdmissionConfig=None) -> (bool, str)` plus `EvaluateQueueAdmissionForProfile(MediaFile, ProfileName)` convenience wrapper. Block reasons: `Upscale`, `MarginalSavings`, `MissingProfile`, `MissingEstimate`. `ShouldSkipDueToResolution` removed.
-- [x] 10. Class constants `COMPATIBLE_CONTAINERS`, `ACCEPTABLE_VIDEO_CODECS`, `MP4_COMPATIBLE_AUDIO_CODECS`, `MIN_SAVINGS_MB` deleted. `_EvaluateCompliance` accepts pre-loaded sets/threshold; `RecomputeForFiles` loads them once at top of the bulk loop and passes through.
+- [x] 10. Class constants `COMPATIBLE_CONTAINERS`, `ACCEPTABLE_VIDEO_CODECS`, `MP4_COMPATIBLE_AUDIO_CODECS`, `MIN_SAVINGS_MB` deleted.
 - [x] 11. No DatabaseManager calls inside the new gate code (gate only uses the three new repositories + ResolutionService). The wider DatabaseManager-cleanup is deferred per the memory/KNOWN-ISSUES.md backlog entry.
 - [x] 12. Wired into the four queue-admission paths: `PopulateQueueFromMediaFiles` (full populate), `GetMediaFilesByFolderWithResolutionFilterUsingAssignedProfiles` (folder), `EvaluateThresholdCriteria` (legacy single-file), `AddJobToQueue` (manual; `ForceAdd=True` still bypasses).
 - [x] 13. Rolled-up `INFO` summary log line at end of each populate run: `"Marginal-savings gate: <admit> admitted, <block> blocked (Marginal: N, Upscale: N, MissingEstimate: N, MissingProfile: N)"`.
@@ -113,7 +113,7 @@ Features/TranscodeQueue/marginal-savings-gate.feature.md         -- this file
 | `Features/TranscodeQueue/CrfBitrateEstimateRepository.py` | `GetEstimatedKbps(Codec, Resolution, Crf) -> Optional[int]`, `GetAll() -> List`, `Upsert(model)`. No caching. |
 | `Features/TranscodeQueue/QueueAdmissionConfigRepository.py` | `Get() -> QueueAdmissionConfigModel`, `Update(MinTranscodeSavingsMB, MissingEstimatePolicy)`. No caching. |
 | `Features/TranscodeQueue/CodecCompatibilityRepository.py` | `GetAcceptableSet(Kind) -> set[str]`, `GetAll() -> List`, `Upsert(model)`. No caching. |
-| `Features/TranscodeQueue/QueueManagementBusinessService.py` | New `EstimateTargetSizeMB`, `EvaluateQueueAdmission`. Class constants `COMPATIBLE_CONTAINERS` / `ACCEPTABLE_VIDEO_CODECS` / `MP4_COMPATIBLE_AUDIO_CODECS` deleted. `_EvaluateCompliance` reads from `CodecCompatibilityRepository`. `self.DatabaseManager.<...>` calls inside the touched paths replaced with `self.Repository.<...>`. The four queue-admission entry paths consult the new evaluator. |
+| `Features/TranscodeQueue/QueueManagementBusinessService.py` | New `EstimateTargetSizeMB`, `EvaluateQueueAdmission`. Class constants `COMPATIBLE_CONTAINERS` / `ACCEPTABLE_VIDEO_CODECS` / `MP4_COMPATIBLE_AUDIO_CODECS` deleted. `self.DatabaseManager.<...>` calls inside the touched paths replaced with `self.Repository.<...>`. The four queue-admission entry paths consult the new evaluator. |
 | `Features/SystemSettings/SystemSettingsController.py` | New endpoints: `GET/PUT /api/QueueAdmissionConfig`, `GET /api/CrfBitrateEstimates`, `PUT /api/CrfBitrateEstimates/<id>`, `GET /api/CodecCompatibility`, `PUT /api/CodecCompatibility/<id>`. |
 | `Features/SystemSettings/SystemSettingsViewModel.py` | Editor view-model methods, stamps `Source='OperatorOverride'` on edits. |
 | `Templates/Settings.html` | New "Queue Tuning" card: scalar controls for `MinTranscodeSavingsMB` + `MissingEstimatePolicy`; inline table editor for `CrfBitrateEstimates`; toggleable lists for `CodecCompatibility`. |

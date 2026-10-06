@@ -25,7 +25,7 @@ Three FFmpeg-driven job types map to three worker capability flags. One flow doc
 
 | Job type | Work | Capability | Flow doc |
 |---|---|---|---|
-| Transcode | Run FFmpeg to produce new file (re-encode or stream-copy). Verify. Replace source. "Remux" is `Plan.VideoOp=StreamCopy`. | `TranscodeEnabled` | `transcode.flow.md` |
+| Transcode | Run FFmpeg to produce new file (re-encode or stream-copy). Verify. Replace source. Three job labels (`Transcode` / `Remux` / `AudioFix`); the label decides the command (`transcode.flow.md` D2). | `TranscodeEnabled` | `transcode.flow.md` |
 | QualityTest | Re-run VMAF or checksum against existing attempt. No new encode. | `QualityTestEnabled` | `Features/QualityTesting/quality-test.flow.md` |
 | Scan | Walk storage roots. `ffprobe` only. | `ScanEnabled` | `Features/FileScanning/FileScanning.flow.md` |
 

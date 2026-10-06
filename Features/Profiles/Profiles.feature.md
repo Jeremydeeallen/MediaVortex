@@ -2,7 +2,7 @@
 
 **Slug:** profiles
 
-**Profile lifecycle, immutability, retirement:** see `docs/superpowers/specs/2026-06-22-compliance-symmetry-design.md` ("Profile Lifecycle: Immutability + Retirement" + "Per-Profile Compliance Bar"). The spec is canonical for which profile fields are locked after first reference, the `Active=FALSE` retirement semantics, and the compliance-bar columns added to this table.
+**Profile lifecycle:** a profile is a Draft (`Profiles.Draft=TRUE`) until the operator finalizes it. Only a finalized, active profile (`Draft=FALSE AND Active=TRUE`) is resolved for a file by `EffectiveProfileResolver`. After finalize, the profile API rejects edits to its locked fields; "Copy as new draft" forks an editable copy. Retiring a profile sets `Active=FALSE`.
 
 ## What It Does
 

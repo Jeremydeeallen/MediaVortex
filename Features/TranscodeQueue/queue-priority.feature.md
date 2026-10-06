@@ -27,7 +27,7 @@ Operator dogfood. The prior contract computed a log-scaled "impact score" (`log1
 
 1. **Log compression flattened the size signal.** A 10× difference in source size moved priority by only ~40 points (700 MB → ~89, 7000 MB → ~127). Combined with the `DateAdded ASC` tiebreaker, claim order did not track size in practice.
 
-2. **Already-efficient large files sank to Priority 1.** Files where `SizeMB - target_size_mb ≈ 0` (e.g. a 6 GB AV1 source against an AV1 profile) computed savings ≈ 0 → Priority 1. The same file sat at the top of Next Batch (still `NeedsTranscode = TRUE`, still huge), creating a disagreement between what the UI surfaced and what the worker actually picked.
+2. **Already-efficient large files sank to Priority 1.** Files where `SizeMB - target_size_mb ≈ 0` (e.g. a 6 GB AV1 source against an AV1 profile) computed savings ≈ 0 → Priority 1. The same file sat at the top of Next Batch (still in the Transcode bucket, still huge), creating a disagreement between what the UI surfaced and what the worker actually picked.
 
 The fix is to make claim order match the operator-facing card: largest non-compliant first. The estimated-savings math moves out of the claim path entirely — admission decisions (whether a file should be queued at all) live in `marginal-savings-gate.feature.md`.
 

@@ -24,10 +24,10 @@
 
 ## Media / encoding
 
-- **AudioFix** -- deprecated ProcessingMode label; now Plan variant with `VideoOp=StreamCopy + AudioOp=Reencode`. Source: `transcode.flow.md`.
+- **AudioFix** -- job label (the Audio stage): copy video, re-encode audio adding the Dialog Boost track. Also the name of the bucket that feeds it. Source: `transcode.flow.md` D2, D4.
 - **BypassReplace** -- **deprecated** Disposition value. Retired by `transcode-flow-canonical` C6. Replacement: real verify + `Replace` / `Reject` / `Requeue`. Source: `transcode-flow-canonical` C6.
 - **Checksum verify** -- StreamCopy strategy's verification method: video stream bit-identical between source and output. Emits `Vmaf=100.0` with `Method=Checksum`. Source: `transcode.flow.md` ST8 Strategy Verify.
-- **Container-only fix** -- Plan variant `VideoOp=StreamCopy + AudioOp=StreamCopy + ContainerOp=Change`. Rewraps into target container without re-encoding. Source: `transcode.flow.md`.
+- **Container-only fix** -- the `Remux` job label. Rewraps into mp4 without re-encoding video. Source: `transcode.flow.md` D2.
 - **Demucs pre-pass** -- ML source separation to isolate dialog before Dialog Boost track emit. Source: `Features/AudioNormalization/audio-normalization.flow.md`.
 - **Dialog Boost** -- forced-stereo Track 1 with dialog isolated + emphasized. `Track 1.disposition.default=1`; Track 0 (original) `default=0`. Source: `Features/AudioNormalization/`; audio-dialog-boost-real closed directive.
 - **Disposition** -- verify outcome per `TranscodeAttempts` row. Valid post-cutover: `Replace` / `Reject` / `Requeue`. See BypassReplace (deprecated). Source: `transcode.flow.md` ST9 ACTION.
@@ -36,15 +36,15 @@
 - **Linear loudnorm** -- audio loudness normalization mode preserved by `linear-loudnorm.feature.md`. Enforcement: `Tests/Contract/TestLinearLoudnormEnforcement.py`. Source: `Features/AudioNormalization/linear-loudnorm.feature.md`.
 - **LUFS** -- Loudness Units relative to Full Scale. Track 0 integrated LUFS target read from `TargetIntegratedLufs`. Source: `Features/AudioNormalization/`.
 - **NVENC** -- NVIDIA hardware encoder. Gated by `Workers.nvenccapable` flag. Post-deploy capability probe, not startup-time. Source: memory `feedback_deploy_time_capability_probe`.
-- **Plan** -- per-job encode plan: `{VideoOp, AudioOp, SubtitleOp, ContainerOp}` where each Op is `Reencode` / `StreamCopy` / `Copy` / `Change` / `Drop`. Variance lives in Plan; orchestration is Plan-blind. Source: `transcode.flow.md`.
+- **Plan** -- per-job encode plan `{VideoOp, AudioOp, SubtitleOp, ContainerOp}`, read from the job label alone (`PlanFactory.FromProcessingMode`). Orchestration is Plan-blind. Source: `transcode.flow.md` D2.
 - **Probe** -- FFprobe pass at ST3 that fills `MediaFiles.Resolution` + audio/subtitle stream metadata. Source: `transcode.flow.md` ST3.
 - **Profile** -- named encode configuration (bitrate, codec, container, thresholds). Rows in `Profiles`; thresholds in `ProfileThresholds`. Read-only at CommandBuilder + decision layers. Source: `Features/Profiles/`.
-- **Quick** -- deprecated ProcessingMode label; smoke-path fast encode. Now Plan variant. Source: `transcode.flow.md`.
+- **Quick** -- **deprecated** job label. No replacement; the three labels are `Transcode` / `Remux` / `AudioFix`. Source: `transcode.flow.md` D2.
 - **Reencode** -- Strategy that produces a new encoded video stream. Verify method: VMAF. Source: `transcode.flow.md` ST5 Strategy variants; `Features/TranscodeJob/Worker/Strategies/`.
-- **Remux** -- **deprecated** as a top-level job type / ProcessingMode. Now Plan variant `VideoOp=StreamCopy`. `remux.flow.md` deleted; see `transcode.flow.md`. Source: `transcode-worker-unification` closed directive; `transcode-flow-canonical` C1.
+- **Remux** -- job label: copy video, copy audio, write mp4 (container change only). Runs through the same pipeline as the other labels (`transcode.flow.md`); not a separate job type. Source: `transcode.flow.md` D2.
 - **StreamCopy** -- Strategy that copies streams without re-encoding. Verify method: checksum. Source: `transcode.flow.md` ST5; `Features/TranscodeJob/Worker/Strategies/`.
-- **SubtitleFix** -- deprecated ProcessingMode label; now Plan variant with `SubtitleOp=Change`. Source: `transcode.flow.md`.
-- **Transcode** -- **ambiguous** term: (a) umbrella name for the whole FFmpeg-driven job type (see `TranscodeQueue`, `TranscodeJob`, `TranscodeAttempts`); (b) old ProcessingMode label meaning "re-encode". Meaning (b) is deprecated; use Reencode Strategy. Umbrella rename to `MediaJob*` filed at `IDEAS.md`. Source: `transcode-flow-canonical` Engineering Calls; `IDEAS.md`.
+- **SubtitleFix** -- **deprecated** job label. Replacement: `Remux` (every stage converts subtitles to mov_text; the `/Optimization` subtitle-fix action queues a `Remux` job). Source: `transcode.flow.md` D2.
+- **Transcode** -- **ambiguous** term: (a) umbrella name for the whole FFmpeg-driven job type (see `TranscodeQueue`, `TranscodeJob`, `TranscodeAttempts`); (b) the job label that re-encodes video and copies audio untouched. Umbrella rename to `MediaJob*` filed at `IDEAS.md`. Source: `transcode.flow.md` D2; `IDEAS.md`.
 - **VMAF** -- Netflix perceptual quality score (0-100). Reencode strategy's verify method. Threshold `>= 80` gates Replace disposition. Source: `Features/QualityTesting/`.
 - **Verify** -- Strategy hook at ST8. Reencode -> VMAF; StreamCopy -> checksum. Both write `Vmaf` column semantically (checksum path writes 100.0 on match). Source: `transcode.flow.md` ST8; `transcode-flow-canonical` Engineering Calls.
 
@@ -56,12 +56,12 @@
 - **Force add** -- `TranscodeQueue.AddJobToQueue(ForceAdd=True)` bypasses "already exists" skip. Contract: returns `Success=True, Skipped=False` on insert. BUG-0078 fix. Source: `transcode-flow-canonical` C2.
 - **Job type** -- three FFmpeg-driven types (`Transcode` / `QualityTest` / `Scan`); each maps to one `Workers.<Capability>Enabled` flag + one `*.flow.md`. New job type requires distinct capability flag. Source: `ARCHITECTURE.md#job-types`.
 - **JobProcessor** -- Template Method base class for worker execution. Owns orchestration; hooks (`Encode` / `Verify`) delegated to Strategy. Source: `Features/TranscodeJob/Worker/JobProcessor.py`; `Features/TranscodeJob/Worker/Strategies/`.
-- **Post-transcode gate** -- compliance gate after ST8 Verify. Configured in `PostTranscodeGateConfig`. Not bypassable per C6. Source: `Features/QualityTesting/`.
-- **ProcessingMode** -- **deprecated** column-level discriminator (`Transcode` / `Remux` / `AudioFix` / `SubtitleFix` / `Quick`). Replacement: Plan `{VideoOp, AudioOp, SubtitleOp, ContainerOp}`. Existing rows remain until schema migration. Source: `transcode-flow-canonical` C4.
+- **Post-transcode gate** -- VMAF / savings disposition gate after ST8 Verify. Configured in `PostTranscodeGateConfig`. Not bypassable per C6. Source: `Features/QualityTesting/`.
+- **ProcessingMode** -- the job label column on `TranscodeQueue` (`Transcode` / `Remux` / `AudioFix`). The label alone decides the ffmpeg command. Source: `transcode.flow.md` D2; `Features/TranscodeJob/ProcessingModeMetadata.py`.
 - **QualityTest** -- non-encode job type: re-runs verify against existing attempt. Capability `QualityTestEnabled`. Source: `ARCHITECTURE.md#job-types`.
 - **Requeue** -- Disposition value that inserts a new `TranscodeQueue` row via `AddJobToQueue`. BUG-0079 fix. Source: `transcode-flow-canonical` C6.
 - **Scan** -- job type: walk storage roots + FFprobe. Capability `ScanEnabled`. Source: `ARCHITECTURE.md#job-types`.
-- **Strategy** -- per-Plan variant hook implementation. Registered in `JobProcessorRegistry`. Owns `Encode()` + `Verify()`; nothing else. Source: `Features/TranscodeJob/Worker/Strategies/`.
+- **Strategy** -- per-job-label hook implementation. Registered in `JobProcessorRegistry`. Owns `Encode()` + `Verify()`; nothing else. Source: `Features/TranscodeJob/Worker/Strategies/`.
 - **TranscodeAttempts** -- one row per completed attempt. Shared output shape. Every strategy populates `AudioPolicyResolved` / `AudioPolicyJson` / `AudioTracksEmittedJson` / `Vmaf` / `Disposition`. Column `ffpmpegcommand` (double `p`) is a known typo. Source: `CLAUDE.md#database`; `transcode-flow-canonical` C5.
 - **TranscodeJob** -- vertical that runs claimed jobs. Owns JobProcessor + Strategies. Source: `Features/TranscodeJob/`.
 - **TranscodeQueue** -- one row per pending job. Populated by all admission producers. Consumed by JobProcessor via `ClaimNextPendingJob`. Source: `Features/TranscodeQueue/`.

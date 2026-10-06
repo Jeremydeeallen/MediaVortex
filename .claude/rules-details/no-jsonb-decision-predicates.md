@@ -21,7 +21,7 @@ JSONB `@>` containment probes are legitimate for FILTERING (operator SQL, ad-hoc
 
 ## Failure pattern this rule closes
 
-`dialog-boost-marker-unify` (2026-08-22): two writers stamped keys into `TranscodeAttempts.AudioTracksEmittedJson`. `_PersistAttestation` (per-track ebur128) overwrote `PersistPreEncodeMeta` (Dialog Boost + Demucs breadcrumbs) when it ran last. Three reader sites (`ComplianceGate.py`, `TranscodedOutputPlacement.py`, `AddHasDialogBoostTrack_2026_08_13.py`) queried `AudioTracksEmittedJson::jsonb @> '[{"dialog_boost_emitted": true}]'::jsonb`. Key stomped -> probe returned FALSE -> compliance gate refused -> `HasDialogBoostTrack` written FALSE -> infinite re-queue loop. 62 failures / 24 h, 6,505 files stuck. Fix: `TranscodeAttempts.DialogBoostEmitted BOOL` column, one writer, one reader.
+`dialog-boost-marker-unify` (2026-08-22): two writers stamped keys into `TranscodeAttempts.AudioTracksEmittedJson`. `_PersistAttestation` (per-track ebur128) overwrote `PersistPreEncodeMeta` (Dialog Boost + Demucs breadcrumbs) when it ran last. Three reader sites (a pre-replace check since deleted, `TranscodedOutputPlacement.py`, `AddHasDialogBoostTrack_2026_08_13.py`) queried `AudioTracksEmittedJson::jsonb @> '[{"dialog_boost_emitted": true}]'::jsonb`. Key stomped -> probe returned FALSE -> replacement refused -> `HasDialogBoostTrack` written FALSE -> infinite re-queue loop. 62 failures / 24 h, 6,505 files stuck. Fix: `TranscodeAttempts.DialogBoostEmitted BOOL` column, one writer, one reader.
 
 ## When this rule applies (PR triggers)
 

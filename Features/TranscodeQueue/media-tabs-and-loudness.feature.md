@@ -8,7 +8,7 @@ Three changes shipped together because they reinforce each other:
 
 1. **Loudness Analysis** (data layer): captures `SourceIntegratedLufs`, `SourceLoudnessRangeLU`, and `SourceTruePeakDbtp` per MediaFile via FFmpeg's `ebur128` filter. Measurements drive smarter `AudioComplete` decisions -- files already at -23 LUFS are marked complete without ever running through the normalize chain.
 2. **Reprobe lifecycle**: a one-time full-library reprobe (re-runs `ffprobe` *and* `ebur128` on every MediaFile) plus an on-demand per-folder / per-file rescan API. Today, probe metadata is captured once on scan and never refreshed unless a file replacement triggers it; this feature makes refresh first-class.
-3. **Media tabs UX**: `/TranscodeQueue` splits into three sub-tabs -- **Transcode**, **Remux**, **Audio Fix** -- each filtered to its `ProcessingMode`. The Audio Fix tab adds folder-level priority hints so the operator can say "do all of `Westworld` next." The cascade now distinguishes audio-only-fix from container-only-fix so the tabs route correctly.
+3. **Media tabs UX**: `/TranscodeQueue` splits into three sub-tabs -- **Transcode**, **Remux**, **Audio Fix** -- each filtered to its `ProcessingMode`. The Audio Fix tab adds folder-level priority hints so the operator can say "do all of `Westworld` next." Which bucket and job label a file gets is defined in `transcode.flow.md` D2 + D4.
 
 Together they answer two operator questions:
 - *"Which files in the library will play at noticeably different volume than the rest?"* -- via `SourceIntegratedLufs` distance from -23 LUFS.
@@ -17,7 +17,7 @@ Together they answer two operator questions:
 
 ## Concern
 
-Six operator concerns this feature resolves:
+Operator concerns this feature resolves:
 
 1. **No loudness measurement today.** The cascade decides "needs normalize / doesn't need normalize" using bitrate proxies (channel-aware floor) and history (loudnorm-in-past-command). Neither tells us what the audio actually *sounds* like. Bitrate and codec do not predict perceived loudness.
 
@@ -26,8 +26,6 @@ Six operator concerns this feature resolves:
 3. **No way to identify wide-dynamic-range files at risk of audio damage.** Files with LRA > 18 LU (typical theatrical mixes) need to be flagged for the operator so the right loudnorm behavior gets applied (see `Features/AudioNormalization/audio-normalization.feature.md` C36 for the linear-mode two-pass loudnorm invariant driven by these measurements). We can't surface these for review without measurement.
 
 4. **Probe data goes stale.** A file scanned in 2024 with FFprobe results that haven't been refreshed -- if the file was replaced out-of-band, edited, or if FFprobe was upgraded -- still carries the old metadata. There's no mechanism to refresh.
-
-5. **Workers open files inefficiently.** When the cascade routes a file to Remux for container fix, and that same file also needs audio normalization, BuildRemuxCommand already does both. But the operator can't *see* this -- the queue shows a single "Remux" row with no indication that audio work is part of it. Conversely, when a file needs only audio work but the queue presents it as "Remux," the operator may wonder why a fine-looking MP4 is being remuxed.
 
 6. **Queue is presented as one undifferentiated list.** Transcode jobs (90 minutes) and Remux jobs (15 seconds) currently mix in the same view. The operator cannot easily say "let me kick off a batch of Remuxes while the Transcodes run overnight" without manually filtering. A tabbed view by job type makes the queue actionable.
 
@@ -40,8 +38,8 @@ User-facing -- three GUI changes + one new admin endpoint:
 3. SmartPopulate (Card 1 on `/Scanning` or wherever it lives) gets a "Mode" column showing the cascade's decision per row, so the operator sees which tab each suggestion will land on.
 4. `POST /api/MediaProbe/Reprobe` admin endpoint accepts scoped filters (`MediaFileIds[]`, `ShowFolder`, `Drive`) and runs a probe + loudness measurement pass over matching rows. No-body call returns 400 (no unbounded reprobes).
 
-See `Features/TranscodeQueue/media-tabs.flow.md` for the tab UX flow and
-the cascade -> tab mapping. See `Features/AudioCompletion/audio-completion.flow.md`
+See `transcode.flow.md` D2 + D4 for which bucket and job label a file
+gets. See `Features/AudioCompletion/audio-completion.flow.md`
 for how `AudioComplete` is decided.
 
 ## Success Criteria
@@ -86,50 +84,25 @@ for how `AudioComplete` is decided.
 
 14. After successful reprobe of a file, the MediaProbe worker calls `LoudnessAnalysisService.MeasureLoudness` in the same pass (criterion 7) and then `RecomputeForFiles([MediaFileId])` so the cascade picks up fresh state. Verifiable: queue a reprobe for a file with stale loudness, observe LoudnessMeasuredAt updated post-run.
 
-### F. Quick + Transcode duo (replaces trichotomy 2026-05-17)
+### F. Job labels
 
-**Design pivot:** Remux and AudioFix were identical operations with different labels -- both use `BuildRemuxCommand` which handles container fix AND/OR audio normalize in one FFmpeg pass. Collapsing them into a single `'Quick'` mode (a) eliminates the artificial mode-exclusivity that hid eligible files from tabs and (b) lets the operator drain the cheap "fix audio + container" backlog independently of the expensive Transcode backlog. Same file can be eligible for both Quick and Transcode -- Quick runs first, file falls out of Quick tab, Transcode later does pure video work because container + audio are already done.
-
-15. The cascade in `_EvaluateCompliance` evaluates two independent eligibility predicates per file:
-    - **`NeedsQuick`**: true when container is not MP4-family (`ContainerWrong`), OR audio codec is not MP4-compat (`AudioCodecWrong`), OR audio is **CONFIRMED off-target** -- i.e. `AudioComplete = false` AND `SourceIntegratedLufs IS NOT NULL` AND LUFS outside the on-target window [-24, -22]. **Files with NULL `SourceIntegratedLufs` are NOT claimed to need audio work** (data-driven semantics, set 2026-05-17 after operator feedback): without measurement we don't know whether the file needs normalization, and queueing it would burn worker time on potentially-no-op passes. A file can still be `NeedsQuick=true` via the container/codec branches independently of audio state.
-    - **`NeedsTranscode`**: true when video codec is not in the acceptable set, OR resolution exceeds the profile's TranscodeDownTo, OR estimated savings >= MinSavingsMB threshold (subject to bitrate-floor short-circuit).
-    A file can be eligible for both. `RecommendedMode` retains a single value for display/badging purposes -- set to `'Transcode'` when `NeedsTranscode` is true, else `'Quick'` when `NeedsQuick` is true, else NULL when compliant. Verifiable: an MP4 H264 AAC stereo file at 192 kbps with `AudioComplete = false` and `SourceIntegratedLufs IS NULL` → `NeedsQuick=false` (no confirmed signal). Same file with `SourceIntegratedLufs = -18.0` (off-target) → `NeedsQuick=true, RecommendedMode='Quick'`. MKV file with any audio state → `NeedsQuick=true` (container wrong is sufficient).
-
-16. Tab eligibility queries read the flags directly, NOT `RecommendedMode`:
-    - **Quick Fix tab** lists every file where `NeedsQuick = true`. Includes files that ALSO need Transcode (so the operator can do the cheap audio/container fix first regardless of whether heavy video work is also pending).
-    - **Transcode tab** lists every file where `NeedsTranscode = true`. Includes files that ALSO need Quick.
-    Verifiable: a file with both flags appears in both tabs. After a successful Quick pass, `NeedsQuick` is recomputed false; file drops from Quick tab; Transcode tab still has it.
-
-17. `BuildRemuxCommand` handles every Quick pass:
-    - `AudioComplete = false` and container not MP4 → audio normalize + container fix in one pass.
-    - `AudioComplete = false` and container MP4 → audio normalize, container unchanged.
-    - `AudioComplete = true` and container not MP4 → `-c:a copy` + container fix.
-    - `AudioComplete = true` and container MP4 → wouldn't be eligible (not in Quick).
-    `TranscodeQueueModel.IsRemux` returns true for `ProcessingMode IN ('Quick', 'Remux', 'AudioFix')` -- new rows use 'Quick'; legacy 'Remux'/'AudioFix' rows continue to dispatch correctly. Verifiable: insert a TranscodeQueue row with `ProcessingMode='Quick'`, observe worker dispatch routes to `BuildRemuxCommand`.
+Which job label a file is queued under, and what that label's command does to the file, is defined once in `transcode.flow.md` D2 (labels) + D4 (buckets). Not restated here.
 
 17b. **[BUG-0005]** Every command builder writing to a `.inprogress` output filename MUST include the FFmpeg `-f mp4` flag (or the appropriate muxer name when not MP4). FFmpeg's auto-detection reads only the LAST filename extension, sees `.inprogress`, fails to find a muxer, and exits with `AVERROR(EINVAL) = -22`. Verifiable: build a Remux command for any MediaFile, observe `-f mp4` appears between the codec args and the output path; running the command end-to-end completes without the "Unable to choose an output format" error.
 
-17c. **[BUG-0006]** Quick-class queue rows (`ProcessingMode IN ('Quick','Remux','AudioFix')`) are claimed by the Remux capability poller (gated on `Workers.RemuxEnabled`), NOT the Transcode poller (gated on `TranscodeEnabled`). Verifiable: with `Workers.RemuxEnabled=true, TranscodeEnabled=false` on a worker, queue a row with `ProcessingMode='Quick'`; observe the worker claims it within the capability-poll interval. Symmetric: with `RemuxEnabled=false, TranscodeEnabled=true`, that same row is NOT claimed by that worker -- only the Remux side claims Quick-class.
-
-17a. **Quick Fix tab Focus control:** the Quick Fix card has a "Focus" dropdown (Audio first / Container first / Mixed). It changes the ORDER of SmartPopulate results so the operator can prioritize audio-needed vs container-needed files at the top of the suggestion list. Focus does NOT affect eligibility or what the worker does -- a row queued with Focus=Audio still gets container fix if its container is wrong, because BuildRemuxCommand handles both. Verifiable: switch Focus, observe row order changes; queue any row, observe worker performs all applicable fixes.
+17c. **[BUG-0006]** `Remux` and `AudioFix` queue rows are claimed under `Workers.RemuxEnabled`, NOT under `TranscodeEnabled` (see `Features/ServiceControl/capability-control-plane.feature.md` criterion 6). Verifiable: with `Workers.RemuxEnabled=true, TranscodeEnabled=false` on a worker, queue a row with `ProcessingMode='Remux'`; observe the worker claims it within the capability-poll interval. Symmetric: with `RemuxEnabled=false, TranscodeEnabled=true`, that same row is NOT claimed by that worker.
 
 ### G. Media tabs UI
 
-18. **Top-of-page nav on `/Work/<bucket>`** has three pills (in `_media_subnav.html`): **Transcode | Quick Fix | Clip Builder**. Each pill activates the matching in-page section pane (Transcode card, Quick Fix card, or navigates to `/ClipBuilder`). Hash routing (`#transcode`, `#quickfix`) persists the active section across reloads. Verifiable: click each pill, observe URL hash changes, observe the matching pane visible while the other is hidden.
-
-19. Quick Fix card (replaces the prior Remux and AudioFix cards) shows files where `NeedsQuick=true`. Transcode card shows files where `NeedsTranscode=true`. A file with both flags appears in both cards. Existing actions (Add Batch / Queue All / Re-Analyze) work identically. Verifiable: a file with `NeedsQuick=true AND NeedsTranscode=true` appears in both cards' SmartPopulate.
-
-20. SmartPopulate (current Card 1 on `/Scanning`) gains a `Mode` column per row showing the cascade's `RecommendedMode`. The "Add to queue" button uses that value -- the operator sees which tab a row will land on. Verifiable: SmartPopulate response shape includes `RecommendedMode`; UI renders a badge with the value.
-
 21. The Audio Fix tab gains a "Prioritize folder" control: input box accepting a folder name (autocomplete from `ShowFolders`), plus a list of currently-pinned folders with remove buttons. Pinning persists to `AudioFixPriorityHints` table. Verifiable: pin `Westworld`, observe `AudioFixPriorityHints` row inserted; Audio Fix tab list re-orders so Westworld files surface at the top.
 
-22. When the cascade routes a file to 'AudioFix' (criterion 15) and a folder pin matches its show folder, the `TranscodeQueue.Priority` is set higher (or a "BoostedPriority" column reflects the pin). Verifiable: pin a folder, run RecomputeForFiles, observe pinned-folder rows have higher Priority than unpinned ones of the same mode.
+22. When a file is queued as `AudioFix` and a folder pin matches its show folder, the `TranscodeQueue.Priority` is set higher (or a "BoostedPriority" column reflects the pin). Verifiable: pin a folder, run RecomputeForFiles, observe pinned-folder rows have higher Priority than unpinned ones of the same mode.
 
 ### H. Operator visibility
 
-23. The Activity page's Library Compliance panel (deferred from `transcode-vs-remux-routing.feature.md` criterion 21) is added in this feature. It shows counts by:
+23. The Activity page's Library Compliance panel is added in this feature. It shows counts by:
     - Compliance: total / IsCompliant=true / IsCompliant=false / IsCompliant=NULL
-    - Recommended mode breakdown (Transcode / Remux / AudioFix / None)
+    - Work bucket breakdown (Transcode / Remux / AudioFix / none)
     - Audio sub-section: AudioComplete=true / false / NULL / AudioCorruptSuspect=true (by reason)
     - **NEW** Loudness sub-section: distribution by integrated LUFS band (on target ±1, close ±3, off 3-6 LU, way off 6+ LU), unmeasured count, LRA > 18 count
    Verifiable: visual inspection plus SQL reconciliation against MediaFiles GROUP BY.
@@ -163,14 +136,13 @@ The full feature is large. To parallelize, Phase 1 ships only the schema + a sta
 - MediaProbe loudness integration (criterion 7)
 - Reprobe endpoint + queue (E11-E14)
 - Cascade `AudioComplete` bump on target-loudness files (D9-D10)
-- ProcessingMode trichotomy + `AudioFix` mode (F15-F17)
-- Media tabs UI (G18-G22)
+- `AudioFix` job label (F)
+- Media tabs UI (G21-G22)
 - Activity panel + visibility queries (H23-H24)
 - Cross-feature doc updates
 
 ### Progress
 
-- [x] Flow doc `media-tabs.flow.md` drafted
 - [x] Feature doc (this file) drafted
 - [x] Decision: ONE feature (kept) -- shipped as a single composite with clean criteria boundaries
 - [x] Decision: AudioFixPriorityHints standalone table (kept) -- transient operator state, not durable per-show config
@@ -203,13 +175,6 @@ Backfill monitoring (any time):
 ssh root@larry "pct exec 218 -- sh /tmp/_status_shards.sh"
 ```
 
-Bulk recompute already ran 2026-05-17 producing real Mode distribution:
-- Compliant: 9,626
-- RecommendedMode='Transcode': 17,168
-- RecommendedMode='Remux': 8,128
-- RecommendedMode='AudioFix': 2,504
-- Undecided (no English audio / suspect / etc): 19,272
-
 ## Open design questions
 
 The criteria above bake in specific designs. Items below are intentionally
@@ -226,14 +191,13 @@ different route:
 
 ```
 Features/TranscodeQueue/media-tabs-and-loudness.feature.md  -- (THIS FILE)
-Features/TranscodeQueue/media-tabs.flow.md                  -- (NEW)
 Features/LoudnessAnalysis/LoudnessAnalysisService.py        -- (NEW) ebur128 invoker + parser + persister
 Features/LoudnessAnalysis/__init__.py                       -- (NEW)
 Features/MediaProbe/MediaProbeBusinessService.py            -- chain loudness measurement after probe
 Features/MediaProbe/MediaProbeController.py                 -- POST /api/MediaProbe/Reprobe endpoint
 Features/MediaProbe/MediaProbeWorker.py (or equivalent)     -- claim ReprobeQueue rows + measure + recompute
 Features/AudioCompletion/AudioCompletionService.py          -- extend EvaluateInitialAudioState with loudness clause
-Features/TranscodeQueue/QueueManagementBusinessService.py   -- cascade emits 'AudioFix' as discrete RecommendedMode
+Features/TranscodeQueue/QueueManagementBusinessService.py   -- queue admission for the AudioFix label; folder-pin boost
 Features/TranscodeQueue/TranscodeQueueController.py         -- tab filtering, mode counts, folder-pin endpoint
 Features/TranscodeQueue/TranscodeQueueViewModel.py          -- mode counts, audio-fix-pin queries
 Features/Activity/...                                        -- Library Compliance panel + loudness sub-section
@@ -245,7 +209,6 @@ Scripts/SQLScripts/AddAudioFixPriorityHints.py              -- (NEW) standalone 
 Scripts/SQLScripts/BackfillSourceLoudness.py                -- (NEW) one-time measurement pass
 Scripts/SQLScripts/QueueFullLibraryReprobe.py               -- (NEW) one-time reprobe seed
 Scripts/SQLScripts/BackfillAudioComplete.py                 -- extend with Pass 5 (target-loudness)
-Features/TranscodeQueue/transcode-vs-remux-routing.feature.md -- amend criterion 11 (cascade emits AudioFix); add cross-link
 Features/AudioCompletion/audio-completion.feature.md          -- amend C9 (cascade reads SourceIntegratedLufs)
 transcode.flow.md                                              -- Stage 4 (queue) tab structure noted
 ```
@@ -255,7 +218,6 @@ transcode.flow.md                                              -- Stage 4 (queue
 | File | Role |
 |------|------|
 | Feature doc (this file) | Contract |
-| `media-tabs.flow.md` | User-facing flow for the new tab UI |
 | `Scripts/SQLScripts/AddSourceLoudnessColumns.py` | Idempotent ADD COLUMN SourceIntegratedLufs / SourceLoudnessRangeLU / SourceTruePeakDbtp / LoudnessMeasuredAt |
 | `Scripts/SQLScripts/AddReprobeQueue.py` | NEW table or FileScanQueue extension (TBD) |
 | `Scripts/SQLScripts/AddAudioFixPriorityHints.py` | NEW standalone `AudioFixPriorityHints` table |
@@ -265,7 +227,7 @@ transcode.flow.md                                              -- Stage 4 (queue
 | `Features/MediaProbe/MediaProbeBusinessService.py` | Chain LoudnessAnalysisService after FFprobe; expose reprobe |
 | `Features/MediaProbe/MediaProbeController.py` | POST /api/MediaProbe/Reprobe + GET /api/MediaProbe/ReprobeQueueStatus |
 | `Features/AudioCompletion/AudioCompletionService.py` | EvaluateInitialAudioState gets a target-loudness clause |
-| `Features/TranscodeQueue/QueueManagementBusinessService.py` | Cascade emits 'AudioFix' as a discrete RecommendedMode |
+| `Features/TranscodeQueue/QueueManagementBusinessService.py` | Queue admission for the `AudioFix` label; folder-pin boost |
 | `Features/TranscodeQueue/TranscodeQueueController.py` | Tab counts endpoint; folder-pin POST endpoint |
 | `Features/TranscodeQueue/TranscodeQueueViewModel.py` | Per-mode count queries; AudioFixPriorityHints query |
 | `Templates/TranscodeQueue.html` | Tab bar + per-tab body + folder-pin controls |
@@ -274,12 +236,9 @@ transcode.flow.md                                              -- Stage 4 (queue
 
 ## Deviation from conventions
 
-**Multi-concern feature.** This feature spans loudness analysis (data), reprobe lifecycle (probe pipeline), and queue UX (UI). Each is large enough to be its own feature, and traditional convention is one-concern-per-feature. Bundling is intentional: the three concerns reinforce each other -- loudness data is what makes the cascade able to route to `AudioFix`, which is what justifies the third tab. Shipping them piecemeal would leave each in a half-useful state.
+**Multi-concern feature.** This feature spans loudness analysis (data), reprobe lifecycle (probe pipeline), and queue UX (UI). Each is large enough to be its own feature, and traditional convention is one-concern-per-feature. Bundling is intentional: the three concerns reinforce each other. Shipping them piecemeal would leave each in a half-useful state.
 
 Implementation may still split into sibling features for clean code review (e.g. `loudness-analysis.feature.md` covering criteria A-D, `reprobe-lifecycle.feature.md` covering E, `media-tabs.feature.md` covering F-G-H). The decision is deferred to the operator at review time. The runbook order above keeps them in dependency order regardless of doc split.
-
-**`AudioFix` reuses `BuildRemuxCommand`.** A new `ProcessingMode` enum value usually implies a new worker code path. Here, `'Remux'` and `'AudioFix'` rows execute the identical FFmpeg command -- the only difference is operator-facing classification. The split exists to give the operator three queue surfaces, not three implementations. This intentionally couples two ProcessingMode values to one command builder for efficiency.
-
 ## Interrupts
 
 This feature was filed as a `/n` PIVOT while the parent `audio-completion` work was awaiting operator smoke test. `audio-completion` is **code complete and committed** (commit `48555ba`, 2026-05-17) -- it is not paused, just awaiting the FFmpeg byte-identical hash verification once workers come up. This feature builds on top of it: the loudness data added here will refine the `AudioComplete` decisions audio-completion already makes.

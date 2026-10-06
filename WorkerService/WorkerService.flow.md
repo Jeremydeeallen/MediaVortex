@@ -96,7 +96,7 @@ Three services own the container's active work:
 
 | Capability | Start | Stop | Service Class |
 |------------|-------|------|---------------|
-| Transcode + Remux + AudioFix + SubtitleFix + Quick | `_StartTranscodeCapability()` | `_StopTranscodeCapability()` | single `WorkerLoopService` |
+| Transcode + Remux + AudioFix | `_StartTranscodeCapability()` | `_StopTranscodeCapability()` | single `WorkerLoopService` |
 | QualityTest | `_StartQualityTestCapability()` | `_StopQualityTestCapability()` | `ProcessQualityTestQueueService` |
 | Scan | `_StartScanCapability()` | `_StopScanCapability()` | `ContinuousScanService` |
 
@@ -108,7 +108,7 @@ Three services own the container's active work:
 
 ### Unified claim
 
-The single `WorkerLoopService` calls `ClaimNextPendingJob(WorkerName)`. That query returns any `ProcessingMode` the worker is capable of (Transcode, Remux, AudioFix, SubtitleFix, Quick). Slot cap is authoritative -- the container never exceeds `MaxConcurrentJobs` concurrent claims regardless of mode mix.
+The single `WorkerLoopService` calls `ClaimNextPendingJob(WorkerName)`. That query returns any `ProcessingMode` the worker is capable of (Transcode, Remux, AudioFix). Slot cap is authoritative -- the container never exceeds `MaxConcurrentJobs` concurrent claims regardless of mode mix.
 
 Capabilities are created lazily -- only initialized when enabled for the first time. Stop methods wait for the current job to finish (transcode: up to 2 hour timeout).
 

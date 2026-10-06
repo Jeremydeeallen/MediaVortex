@@ -2,7 +2,7 @@
 
 **Slug:** work-bucket
 
-**Pipeline shape SSoT:** `transcode.flow.md` `## Domain Decisions` (D1-D12) is the canonical list of Transcode/Remux/Audio shape decisions (per-dimension compliance, slot-strategy source, WorkBucket priority order, TranscodedByMediaVortex terminal state). Do not restate here.
+**Pipeline shape SSoT:** `transcode.flow.md` `## Domain Decisions` (D1-D12) is the canonical list of Transcode/Remux/Audio shape decisions (per-dimension compliance, job label decides the command, WorkBucket priority order, TranscodedByMediaVortex terminal state). Do not restate here.
 
 ## What It Does
 

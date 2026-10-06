@@ -90,27 +90,9 @@ Silent trade-offs are refused. `.claude/rules/call-graph-audit.md` five-signal c
 
 Question: What operations does MediaVortex perform on a media file?
 
-Answer: Four operators. Nothing else.
+Answer: *Superseded by 2026-10-06 "The job label decides the command; stages chain" (below) -- that entry and `transcode.flow.md` D2 + D4 define the operators and which one a file gets.*
 
-- **Skip** -- leave the file alone.
-- **Remux** -- copy video stream, re-encode audio, change container.
-- **AudioFix** -- copy video stream, re-encode audio, preserve container.
-- **Transcode** -- re-encode video + audio + container.
-
-Every file passes through a classifier that returns exactly one operator. The classifier is a decision function with five branches:
-
-```
-IF audio-only container            -> out of scope
-IF source is efficiently transcoded -> Skip / Remux / AudioFix depending on other compliance
-IF video codec not in allowlist    -> Transcode
-IF container not in allowlist      -> Remux
-IF audio needs normalization       -> AudioFix
-ELSE                                -> Skip
-```
-
-Consequence: any proposed feature that doesn't map to one of the four operators or the five-branch decision = refuse. Non-destructive archive of source (`MediaFilesArchive`) always. Jellyfin notify on any change to a served file.
-
-*Note: the "video codec not in allowlist" branch is superseded by the 2026-07-26 compliance entry (Compliance section). See [Video compliance is bitrate-driven](#2026-07-26----video-compliance-is-bitrate-driven-codec-allowlist-retired).*
+Still standing from this entry: non-destructive archive of source (`MediaFilesArchive`) always. Jellyfin notify on any change to a served file.
 
 ### 2026-07-23 -- Definition of "efficiently transcoded"
 
@@ -161,7 +143,7 @@ Question: What does `TranscodeAttempts.Vmaf` hold, and where does the "did this 
 
 Answer: **`Vmaf` holds a real VMAF score or NULL. Nothing else. No sentinels. Outcome signal lives in `(Success, Disposition)` -- never in an overloaded quality-score column.**
 
-- Stream-copy modes (`Remux`, `AudioFix`, `SubtitleFix`, `Quick`) are verified by MD5 checksum, not VMAF. Their attempts land with `Vmaf IS NULL`.
+- Stream-copy modes (`Remux`, `AudioFix`) are verified by MD5 checksum, not VMAF. Their attempts land with `Vmaf IS NULL`.
 - Only real VMAF measurements populate `Vmaf`. A checksum-passed stream-copy is NOT a VMAF measurement.
 - Downstream code that wants to know "did this attempt pass?" reads `Success` (ffmpeg exit) and `Disposition` (`Replace` / `Reject` / `Requeue` / `Pending`). It does NOT read `Vmaf` as a proxy for outcome.
 - Analytics queries (`AVG(Vmaf)`, `WHERE Vmaf >= 80`) get real signal because `Vmaf` is dense-with-truth for the modes that measure it and NULL for the modes that don't.
@@ -173,6 +155,20 @@ Consequences:
 - The historical `Vmaf=100.0` sentinel rows for stream-copy modes are legacy against this rule. Backfilling them to NULL is a data-honesty fix.
 
 Historical note: sentinel introduced because `RetranscodeDecider.Decide` was reading `Vmaf >= 80` as the pass signal, and stream-copy paths needed to route around it. Both the sentinel and the RetranscodeDecider VMAF gate are legacy against this domain rule; RetranscodeDecider is bypassed by `ForceAdd=True` on every prod admission path (`QueueAdmissionAppService`, `DispositionDispatcher._MaybeScheduleRequeue`) as of BUG-0078 fix and is retired by directive `verify-signal-cleanup` (2026-07-26).
+
+---
+
+### 2026-10-06 -- The job label decides the command; stages chain
+
+Question: What does each job do to a file, and what decides it?
+
+Answer: **Three job labels -- Transcode, Remux, AudioFix. The label alone decides the command. Each stage does one thing and keeps its own good result.** The rule tables are `transcode.flow.md` D2 (labels, paths, verification) and D4 (which bucket a file lands in); this entry records the decision, it does not restate them.
+
+- Transcode re-encodes video and leaves audio alone. Remux only changes the container. AudioFix leaves video alone and adds the Dialog Boost track. Compliance decides the bucket a file waits in, never the command.
+- A file that needs several things goes through stages in order (video or container first, then audio). A finished transcode is kept even though it has no Dialog Boost yet; it then waits in the Audio bucket.
+- A stage that fails its own verification replaces nothing. There is no partial-success outcome and no pre-replace compliance check.
+- Hand-off from one stage to the next is manual today; automatic hand-off is planned, not built.
+- Supersedes: the operator definitions in 2026-07-23 "Pipeline operators", and the "Operator-visible effect" wording in the 2026-07-26 compliance entry where it says Transcode re-encodes audio or Remux re-encodes audio.
 
 ---
 
@@ -415,7 +411,7 @@ Answer: **The TV library's default tier, nothing about the individual file's pro
 - Video is non-compliant when source kbps exceeds the bitrate that tier actually encodes the file at, times the per-resolution multiplier. Tier 1 outputs 720p, so 720p / 1080p / 2160p sources are all judged against the Tier 1 720p bitrate.
 - Source codec is not a signal. An AV1 source above the ceiling is re-encoded.
 - A per-series profile changes what that series is encoded at. It never changes the bucket.
-- Our own finished output is never judged on video again, including by the pre-replace check.
+- Our own finished output is never judged on video again.
 - Supersedes for TV: the 2026-07-26 multiplier table's "Tier 1 target" numbers (ceilings now come from live ladder cells) and the 2026-08-14 same-codec pass.
 - Movies and XXX are undecided: Movies tiers vary by taste (romantic comedy Tier 1, action Tier 2-3). Until decided they keep the assigned-profile rule with the same-codec pass.
 

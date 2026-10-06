@@ -78,7 +78,6 @@ Features/TranscodeQueue/**
 | Class.method | External caller(s) |
 |---|---|
 | QueueManagementBusinessService.RecomputeForFiles(ids) -> int | MediaProbe post-flight; FileReplacement post-rename re-probe |
-| QueueManagementBusinessService.EvaluateCandidateCompliance(row) -> dict | FileReplacement.ComplianceGate.Evaluate |
 | QueueManagementBusinessService.PopulateQueue / NextTranscodeBatch / SmartPopulateQueue | Operator UI buttons |
 
 ### HTTP API surface

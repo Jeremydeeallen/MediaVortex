@@ -1,4 +1,4 @@
-﻿# Pipeline Test Harness -- end-to-end verification of Quick Fix + Transcode
+﻿# Pipeline Test Harness -- end-to-end verification of the pipeline stages
 
 **Slug:** pipeline-test-harness
 
@@ -7,33 +7,17 @@
 ## What It Does
 
 Provides a `pytest`-runnable harness that drives real MediaFile rows
-through the actual Quick Fix (Remux) and Transcode pipelines on the I9
-worker, asserting state at every stage. The two initial test cases
-cover the contracts of `audio-completion`, `audio-normalization` (see
-C36 linear-mode + C37 single-emit-path), and `transcode-vs-remux-routing`
-all at once:
-
-1. **Quick Fix then Transcode preserves audio.** A file flagged for
-   Quick Fix runs through Remux first -- audio is one-shot normalized,
-   `AudioComplete` flips to true, DB columns settle, Jellyfin gets
-   notified. Then the same file runs through Transcode -- audio is
-   byte-identical to the post-Remux file (`-c:a copy`), the DB still
-   says `AudioComplete=true`, Jellyfin gets notified again.
-2. **Transcode with both audio fix and video transcode.** A file
-   flagged for Transcode (needs both video re-encode and audio normalize)
-   runs through the Transcode pipeline once -- video codec changes,
-   audio lands at target loudness, `AudioComplete=true`, the file is
-   removed from every queue surface (no `RecommendedMode`,
-   `IsCompliant=true`, `NeedsQuick=false`, `NeedsTranscode=false`),
-   Jellyfin gets notified.
+through the actual pipeline on the I9 worker, asserting state at every
+stage. What each job label does to a file and how stages chain is
+defined by `transcode.flow.md` D2 (buckets: D4); the harness asserts
+against that and does not restate it.
 
 The harness backs up the source file and DB state before each test,
 runs the pipeline, asserts every observable, then restores everything
 on success or failure. Tests are idempotent and self-cleaning.
 
 This is a **regression-grade** harness, not a one-shot script: the
-primitives are reusable for any future end-to-end test (subtitle fix
-path, corrupt-file negative test, multi-language audio file, etc.)
+primitives are reusable for any future end-to-end test (corrupt-file negative test, multi-language audio file, etc.)
 without harness rewrites.
 
 ## Concern
@@ -45,9 +29,8 @@ Five concerns this feature resolves:
    `Scripts/Smoke` exists for one-off checks. Nothing drives a real
    MediaFile through the actual pipeline and asserts the full
    contract from `audio-completion.feature.md` criterion 25,
-   `Features/AudioNormalization/audio-normalization.feature.md`
-   C36 + C37 (linear-mode two-pass + single audio emit path), and
-   the routing feature criteria 26-28. We have been shipping these
+   and `Features/AudioNormalization/audio-normalization.feature.md`
+   C36 + C37 (linear-mode two-pass + single audio emit path). We have been shipping these
    features without a regression-grade test.
 2. **Manual verification doesn't scale.** Each release re-derives the
    same probe sequence (run a file, check the DB, check ffprobe output,
@@ -113,32 +96,24 @@ No production surface. Not exposed via WebService or any UI.
 
 ### B. Harness primitives -- pipeline invocation
 
-4. `Harness/Invocation.py` exposes `InvokeQuickFix(MediaFileId) -> TranscodeAttemptId`
-   that runs the Remux pipeline synchronously against the file. Returns
-   the resulting `TranscodeAttempts.Id`. Blocks until completion or
-   raises with the failure reason. Verifiable: call against an
-   `AudioComplete=false` MP4 file, observe the function returns a
-   non-NULL TranscodeAttemptId and the file's audio loudness has
-   shifted toward target.
-
 5. `Harness/Invocation.InvokeTranscode(MediaFileId) -> TranscodeAttemptId`
-   runs the Transcode pipeline synchronously. Same return/blocking
-   contract. Verifiable: call against a file that
-   `_EvaluateCompliance` returns `(False, 'Transcode')` for; observe
-   a TranscodeAttemptId returned and the file's video codec matches
-   the assigned profile post-call.
+   runs a `Transcode` job synchronously. Returns the resulting
+   `TranscodeAttempts.Id`. Blocks until completion or raises with the
+   failure reason. Verifiable: call against a file whose
+   `WorkBucket='Transcode'`; observe a TranscodeAttemptId returned and
+   the file's video codec matches the assigned profile post-call.
 
-6. Both invocation helpers initialize `WorkerContext` for `I9-2024`
+6. Invocation helpers initialize `WorkerContext` for `I9-2024`
    from `Workers` + `WorkerShareMappings` if not already initialized.
    They do not assume WebService or WorkerService daemons are up.
    Verifiable: with WebService stopped (`Get-NetTCPConnection -LocalPort 5000`
-   returns empty), `InvokeQuickFix` still completes a real Remux.
+   returns empty), `InvokeTranscode` still completes a real job.
 
-7. Both invocation helpers refuse to run when the file has an existing
+7. Invocation helpers refuse to run when the file has an existing
    `TranscodeQueue` row or `ActiveJobs` row referencing it -- they
    raise `PipelineBusyError` with the conflicting row id. Verifiable:
    insert a TranscodeQueue row for the test file; call
-   `InvokeQuickFix`; observe the named exception.
+   `InvokeTranscode`; observe the named exception.
 
 ### C. Harness primitives -- assertions
 
@@ -164,9 +139,9 @@ No production surface. Not exposed via WebService or any UI.
     actual=True`.
 
 11. `Harness/Assertions.AssertNoQueueRows(MediaFileId) -> None` asserts
-    `TranscodeQueue` has zero rows for the MediaFileId AND
-    `MediaFiles.NeedsQuick = false` AND `MediaFiles.NeedsTranscode = false`
-    AND `MediaFiles.RecommendedMode IS NULL`. Verifiable: insert one
+    `TranscodeQueue` has zero rows for the MediaFileId AND the file is
+    no longer in a work bucket (`MediaFiles.WorkBucket`; rules in
+    `transcode.flow.md` D4). Verifiable: insert one
     TranscodeQueue row; call; observe failure naming the table.
     Remove it; call; passes.
 
@@ -200,12 +175,10 @@ No production surface. Not exposed via WebService or any UI.
 
 15. `Harness/Fixtures.py` exposes a registry of stable test file
     candidates by intent:
-    - `QuickFixCandidate(MaxSizeMB=500)` -- returns a MediaFile.Id
-      whose current `RecommendedMode='Quick'` (or 'Remux') and is
-      under the size limit
     - `TranscodeCandidate(MaxSizeMB=500)` -- returns a MediaFile.Id
-      where `RecommendedMode='Transcode'` AND audio also needs work
-      (so Test 2 exercises both pipelines)
+      whose `WorkBucket='Transcode'` and is under the size limit
+    - `RemuxCandidate(MaxSizeMB=500)` -- returns a MediaFile.Id whose
+      `WorkBucket='Remux'` and is under the size limit
     - `AlreadyCompliant()` -- returns a MediaFile.Id with
       `IsCompliant=true, AudioComplete=true` for negative-test purposes
     Selection is data-driven (queries the live DB); the registry
@@ -220,62 +193,6 @@ No production surface. Not exposed via WebService or any UI.
     failure). Verifiable: run the same test twice in one session;
     the same MediaFileId is used. Run again in a new session; a
     different (or same, if still eligible) MediaFileId is selected.
-
-### F. Test case 1 -- Quick Fix then Transcode preserves audio
-
-17. `Tests/Pipeline/test_quickfix_then_transcode.py` exercises a
-    `QuickFixCandidate(MaxSizeMB=500)` file in this sequence:
-
-    Step 1 (setup): Backup the file via `BackupMediaFile`. Start a
-    `CaptureNotifyEvents` capture.
-
-    Step 2 (Quick Fix): `InvokeQuickFix(MediaFileId)`. After return:
-    - `AssertIntegratedLoudnessNear(LocalPath, -23, tolerance=1.0)` -- audio normalized
-    - `AssertDbState(MediaFileId, AudioComplete=True, IsCompliant=True)` -- DB cleared
-    - `AssertNoQueueRows(MediaFileId)` -- file dropped out of queue surfaces
-    - `AssertNotifyFired(capture, CanonicalNewPath, 'Modified', since_ts=t0)` -- Jellyfin called
-
-    Step 3 (Transcode): Mark the file as needing Transcode (set a
-    profile that requires re-encode), capture pre-transcode audio
-    hash via `ffmpeg -map 0:a -c copy -f data - | sha256sum`, then
-    `InvokeTranscode(MediaFileId)`. After return:
-    - `AssertAudioBytesIdentical(pre-transcode-audio, post-transcode-audio)` -- byte identical
-    - `AssertDbState(MediaFileId, AudioComplete=True)` -- still true, no flip
-    - `AssertVideoCodecMatchesProfile(MediaFileId)` -- video codec changed per profile
-    - `AssertNotifyFired(capture, CanonicalNewPath, 'Modified', since_ts=t1)` -- second notify
-
-    Step 4 (cleanup, always runs): `RestoreMediaFile(handle)`.
-    `capture.Stop()`. The test verifies the file and DB rows are
-    restored to their pre-test state via a final `AssertDbState`
-    against the pre-test snapshot.
-
-    Verifiable: the test passes against a real candidate, fails
-    cleanly with descriptive messages when any assertion does not
-    hold, and always restores state.
-
-### G. Test case 2 -- Transcode with both audio fix and video transcode
-
-18. `Tests/Pipeline/test_transcode_dual_pipeline.py` exercises a
-    `TranscodeCandidate(MaxSizeMB=500)` file in this sequence:
-
-    Step 1 (setup): Backup. Start capture.
-
-    Step 2 (Transcode): `InvokeTranscode(MediaFileId)`. After return:
-    - `AssertVideoCodecMatchesProfile(MediaFileId)` -- video re-encoded to profile codec
-    - `AssertIntegratedLoudnessNear(LocalPath, -23, tolerance=1.0)` -- audio normalized
-    - `AssertDbState(MediaFileId, AudioComplete=True, IsCompliant=True, RecommendedMode=None)`
-    - `AssertNoQueueRows(MediaFileId)` -- compliant, not queued
-    - `AssertNotifyFired(capture, CanonicalNewPath, 'Modified', since_ts=t0)`
-
-    Step 3 (recompute regression check): call
-    `QueueManagementBusinessService.RecomputeForFiles([MediaFileId])`.
-    After return:
-    - `AssertDbState(MediaFileId, IsCompliant=True, RecommendedMode=None)` -- recompute does not re-flag
-    - `AssertNoQueueRows(MediaFileId)` -- recompute does not re-queue
-
-    Step 4 (cleanup, always runs): `RestoreMediaFile(handle)`.
-
-    Verifiable: passes on a real candidate, all assertions checked.
 
 ### H. Pytest integration and discipline
 
@@ -306,7 +223,7 @@ No production surface. Not exposed via WebService or any UI.
 
 ## Status
 
-IMPLEMENTED 2026-05-25 -- both test cases green, idempotency verified.
+Harness primitives IMPLEMENTED 2026-05-25. The two test modules under `Tests/Pipeline/` and the `InvokeQuickFix` / `QuickFixCandidate` / `AudioFixOnlyCandidate` helpers were written before `transcode.flow.md` D2 and have not yet been re-pointed at the three job labels; they carry no criteria here until they are.
 
 ### Progress
 
@@ -351,12 +268,12 @@ Tests/Pipeline/_jellyfin_capture/.gitkeep               -- (NEW) Capture-file di
 | Feature doc (this file) | Contract |
 | `Tests/Pipeline/conftest.py` | Pytest fixtures: DB connection, WorkerContext, capture wrapper, precondition gate |
 | `Tests/Pipeline/Harness/Backup.py` | File + DB row backup/restore; `BackupHandle` dataclass |
-| `Tests/Pipeline/Harness/Invocation.py` | Synchronous Quick Fix and Transcode invocations |
+| `Tests/Pipeline/Harness/Invocation.py` | Synchronous pipeline invocations |
 | `Tests/Pipeline/Harness/Assertions.py` | Reusable assertion helpers for DB, file, and audio state |
 | `Tests/Pipeline/Harness/JellyfinVerify.py` | Notify-capture: monkey-patches `JellyfinNotifyService.NotifyJellyfin` so tests record payloads without POSTing |
 | `Tests/Pipeline/Harness/Fixtures.py` | Test file registry |
-| `Tests/Pipeline/test_quickfix_then_transcode.py` | Test case 1 (criterion 17) |
-| `Tests/Pipeline/test_transcode_dual_pipeline.py` | Test case 2 (criterion 18) |
+| `Tests/Pipeline/test_quickfix_then_transcode.py` | Test module 1 |
+| `Tests/Pipeline/test_transcode_dual_pipeline.py` | Test module 2 |
 
 ## Deviation from conventions
 

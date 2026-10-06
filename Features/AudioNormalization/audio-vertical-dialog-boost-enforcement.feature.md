@@ -13,7 +13,7 @@ Simplification-first: `AudioVertical.Evaluate` collapses; four legacy MarkAudioC
 ## Domain policy (locked 2026-07-17)
 
 - **Every playback file must have a Dialog Boost track.** No exceptions for at-target-loudness sources.
-- **Untranscoded sources** (`TranscodedByMediaVortex=FALSE`) are NOT compliant on the audio axis regardless of their measured LUFS.
+- **A file with no Dialog Boost track** is NOT compliant on the audio axis, regardless of its measured LUFS and regardless of whether its video has been transcoded. The Audio stage (`AudioFix` job, `transcode.flow.md` D2) is what adds the track.
 - **Ground truth** = latest successful `TranscodeAttempts.AudioTracksEmittedJson` for the MediaFileId contains a Dialog Boost track. No cutover-date constant; the data self-verifies.
 
 ## Population impact (locked estimate)
@@ -29,7 +29,7 @@ Query at directive open (2026-07-17):
 
 C1. `AudioVertical.Evaluate(Mf)` returns `Compliant=True` **iff** `Mf.HasDialogBoostTrack=TRUE` (single-aggregate MediaFile read; DDD-clean). The `HasDialogBoostTrack BOOL` column is derived from `TranscodeAttempts.DialogBoostEmitted BOOL` (the canonical per-attempt marker, written by `AudioPreEncodeFacade.PersistMeta`) for the latest successful attempt, written via writer-owns-cascade at `TranscodedOutputPlacement` alongside `MarkAudioComplete` + `RecomputeForFiles`. See `dialog-boost-marker-unify` for the column + rationale.
 
-C2. Untranscoded sources (`Mf.TranscodedByMediaVortex IS NOT TRUE`) return `Compliant=False, Reason='no_dialog_boost'` from the audio vertical. LUFS-at-target is no longer an escape hatch.
+C2. A file whose `HasDialogBoostTrack` is not TRUE returns `Compliant=False, Reason='no_dialog_boost'` from the audio vertical, whether or not its video has been transcoded. LUFS-at-target is no longer an escape hatch.
 
 C3. `AudioComplete` column is preserved for metadata (LUFS-at-target signal) but is **no longer read by `AudioVertical.Evaluate`**. Grep of `AudioVertical.py` for `AudioComplete` returns 0 after the change.
 

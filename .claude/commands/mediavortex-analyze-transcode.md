@@ -37,7 +37,7 @@ Analyze the transcode history of a media file. The goal is a clear before/after 
 
 ## Interpretation notes
 
-- `disposition = Replace`, `dispositionreason = QualityTestNotRequired` -- typical for StreamCopy profiles (Remux / AudioFix / SubtitleFix / Quick) where `-c:v copy` is used. Verify was checksum, not VMAF. Size savings come from audio re-encode and/or container change.
+- `disposition = Replace`, `dispositionreason = QualityTestNotRequired` -- typical for the video-copy job labels (Remux / AudioFix -- see `transcode.flow.md` D2) where `-c:v copy` is used. Verify was checksum, not VMAF. Remux leaves audio alone; AudioFix re-encodes audio and adds the Dialog Boost track.
 - `qualitytestrequired = false` AND `qualitytestcompleted = false` AND no `qualitytestresults` row -- VMAF was deliberately skipped, not failed.
 - `loudnorm` in the audio filter chain often upsamples the audio internally (e.g. source 48 kHz can come out 96 kHz). That is expected, not a bug.
 - If the current `videobitratekbps` differs from source but `-c:v copy` is set, the difference is the container remeasuring -- the video stream itself is byte-identical.

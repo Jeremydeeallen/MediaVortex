@@ -22,8 +22,6 @@ C11. [BUG-0009] **FileReplacement does not silently fail in steady-state.** When
 C12. [BUG-0010 MET 2026-06-02] **TFP cleanup is owned by `PostTranscodeDispositionService.CleanupTemporaryFilePaths`** (the chokepoint named in `post-transcode-pipeline.C15`). FR's `ProcessFileReplacement` success branch delegates to it; non-Pending dispositions (`Discard`/`NoReplace`/`Requeue`) reach the same chokepoint via `_CommitDisposition`. The old FR-local `_CleanupTemporaryFilePaths` is gone. Verifiable: `grep -rn "_CleanupTemporaryFilePaths" --include="*.py" Features/FileReplacement/` returns zero; `SELECT COUNT(*) FROM TemporaryFilePaths tfp JOIN TranscodeAttempts ta ON ta.Id = tfp.TranscodeAttemptId WHERE ta.Success IS NOT NULL` returns 0 in steady state.
 C14. [BUG-0021] **`_UpdateMediaFilesAfterReplacement` must persist every column it assigns, including `Codec`, `AudioCodec`, and `AudioComplete`.** Today these three columns are assigned on the model after the post-replacement re-probe but silently dropped by `Repositories/DatabaseManager.SaveMediaFile` because they are not in the UPDATE column list. BUG-0017 (resolved 2026-05-25) added 6 sibling columns (FileSize, LastModifiedDate, ResolutionCategory, IsInterlaced, AudioLanguages, HasExplicitEnglishAudio) but Codec/AudioCodec/AudioComplete remain uncovered. Observable failure: after a successful re-encode (HEVC -> AV1 verified on disk), `SELECT Codec, AudioCodec, AudioComplete FROM MediaFiles WHERE Id=<id>` returns the pre-replacement values. Operator-visible compliance tallies (Library Compliance counts, AudioFix routing) misreport this file class until the next manual probe. Verifiable: after any post-replacement re-probe writes a new value for these three columns, `SELECT Codec, AudioCodec, AudioComplete FROM MediaFiles WHERE Id=<id>` round-trips that value. Immediate patch: add the three columns to the UPDATE list (matching the BUG-0017 pattern). Architectural fix: `mediafile-persistence-no-drift` feature.
 
-C13. [BUG-0020] **`_ProcessCompleteFileReplacement` must consult the cascade compliance predicate before the `.inprogress` -> final-name rename.** Today the rename fires when (a) the staged file exists and (b) its name ends in `.inprogress` (`FileReplacementBusinessService.py:441-465`). FFprobe sanity is verified upstream by the worker. Neither check answers "would this output still be picked up by the cascade?" -- so the rename can land `-mv.mp4` on a file whose audio is still wrong, savings still marginal, container still non-acceptable, etc. After the fix, the function probes the staged file, synthesizes a candidate `MediaFile`-shaped row (carrying forward source-row fields the probe cannot derive: `HasExplicitEnglishAudio`, `SourceIntegratedLufs`/`SourceLoudnessRangeLU`/`SourceTruePeakDbtp`/`SourceIntegratedThresholdLufs`, `AudioComplete`), calls `QueueManagementBusinessService._EvaluateCompliance`, and only renames when `(IsCompliant, RecommendedMode) == (True, None)`. Non-compliant outputs return Success=False with `ErrorMessage='ComplianceGateFailed: <specific cascade reason>'`, and the owning worker (per worker-lifecycle criterion 22) deletes the `.inprogress`. Verifiable: queue any file whose source has unnormalized audio AND a profile that does not include loudnorm in the emitted command -- the encode completes, the rename refuses, no `-mv.mp4` lands on disk, the `TranscodeAttempt` records `Disposition='NoReplace'`, `DispositionReason='ComplianceGateFailed'`.
-
 ## Seams
 
 | Seam | Producer | Wire shape | Consumer expects | Verification |
@@ -37,7 +35,7 @@ C13. [BUG-0020] **`_ProcessCompleteFileReplacement` must consult the cascade com
 
 ## Status
 
-ACTIVE -- criteria 1-14 MET. FileReplacement decomposed by SRP via `filereplacement-decompose` directive 2026-06-02: ComplianceGate + TranscodedOutputPlacement extracted to their own files with own feature docs; FileReplacementBusinessService shrank to orchestration + read-only queries (1183 -> 396 lines).
+ACTIVE. FileReplacement decomposed by SRP via `filereplacement-decompose` directive 2026-06-02: TranscodedOutputPlacement extracted to its own file with its own feature doc; whether a stage's output is good enough to replace is decided before FileReplacement runs, by the stage verification in `transcode.flow.md` D2; FileReplacementBusinessService shrank to orchestration + read-only queries (1183 -> 396 lines).
 
 ## Scope
 
@@ -50,7 +48,6 @@ Features/FileReplacement/**
 | File | Role |
 |------|------|
 | Features/FileReplacement/FileReplacementBusinessService.py | Orchestration (ProcessFileReplacement) + read-only queries (GetFailedFileReplacements, GetFileReplacementStatus) + archival + Jellyfin notify |
-| Features/FileReplacement/ComplianceGate.py | Pre-rename cascade gate (see compliance-gated-rename.feature.md) |
 | Features/FileReplacement/TranscodedOutputPlacement.py | .inprogress rename, MediaFiles refresh, original delete (see transcoded-output-placement.feature.md) |
 | Features/FileReplacement/FileReplacementRepository.py | MediaFilesArchive and MediaFiles update queries |
 ## Cross-Vertical Contract
@@ -62,7 +59,6 @@ Features/FileReplacement/**
 | MediaFilesArchive row INSERT | FileReplacementBusinessService._ArchiveOriginal (pre-replace) |
 | MediaFiles.{TranscodedByMediaVortex, RemuxedByMediaVortex} | _UpdateMediaFilesAfterReplacement |
 | MediaFiles.{FileSize, LastModifiedDate, Codec, AudioCodec, AudioComplete, ResolutionCategory, IsInterlaced, AudioLanguages, HasExplicitEnglishAudio} | Post-replace re-probe write (via MediaProbe) |
-| TranscodeAttempts.{Disposition, DispositionReason} | On gate-refused renames |
 | Source file on disk | shutil.move (replace) / rename .inprogress |
 
 ### Columns the FileReplacement vertical READS from external tables
@@ -78,8 +74,6 @@ Features/FileReplacement/**
 | Class.method | External caller(s) |
 |---|---|
 | FileReplacementBusinessService.ProcessFileReplacement(TranscodeAttemptId) -> ReplacementResult | Worker post-encode / post-QT path |
-| ComplianceGate.Evaluate(staged_path, source_id, ffmpeg_cmd) -> GateResult | Pre-rename refusal point |
-
 ### HTTP API surface
 
 None. Internal worker pipeline.

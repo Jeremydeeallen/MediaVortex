@@ -172,7 +172,7 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 
 **Output:** Every MediaFiles row carries an up-to-date bucket. `/Work/<bucket>` pages and queue admission read `WorkBucket`; the Activity compliance widget reads `IsCompliant`. No consumer recomputes.
 
-See `Features/TranscodeQueue/priority-materialization.feature.md` and `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md` for criteria.
+See `Features/TranscodeQueue/priority-materialization.feature.md` for criteria.
 
 ---
 
@@ -259,7 +259,7 @@ Queue admission (whether a file enters the queue at all) is owned by `Features/T
   5. Create TranscodeAttempt record (only if source confirmed present)
   6. Load profile thresholds (CRF, bitrate, codec settings)
   7. File preparation (see File Staging below)
-  8. Build FFmpeg command. Video args are profile-driven (libsvtav1 / av1_nvenc, preset, CRF, film grain, bitrates). **Audio args are produced by the audio vertical's public seam** -- the shape calls `AudioPolicyResolver.GetEffectivePolicy(MediaFile)` + `AudioStreamProbe.Probe(InputPath)` + `AudioFilterEmitter.EmitTracks(MediaFile, Policy, AudioStreams)` and concatenates the returned `TrackBlock`s into the argv. The shape NEVER constructs loudnorm / dialnorm / handler_name args directly; everything audio-related is the audio vertical's contract. Post-flight: `FileReplacement.TranscodedOutputPlacement` calls `AudioStateService.MarkAudioComplete` to flip the row's audio-state machine. See `Features/AudioNormalization/audio-normalization.feature.md` `## Cross-Vertical Contract` for the locked seam list.
+  8. Build FFmpeg command. Video args are profile-driven (libsvtav1 / av1_nvenc, preset, CRF, film grain, bitrates). Audio args follow the job label (D2): a label whose audio op is `Copy` gets the copy args from `AudioSlot`; for the Audio stage, **audio args are produced by the audio vertical's public seam** -- `AudioSlot` calls `AudioPolicyResolver.GetEffectivePolicy(MediaFile)` + `AudioStreamProbe.Probe(InputPath)` + `AudioFilterEmitter.EmitTracks(MediaFile, Policy, AudioStreams)` and concatenates the returned `TrackBlock`s into the argv. The shape NEVER constructs loudnorm / dialnorm / handler_name args directly; everything audio-related is the audio vertical's contract. Post-flight: `FileReplacement.TranscodedOutputPlacement` calls `AudioStateService.MarkAudioComplete` to flip the row's audio-state machine. See `Features/AudioNormalization/audio-normalization.feature.md` `## Cross-Vertical Contract` for the locked seam list.
   9. Execute FFmpeg via `VideoTranscodingService.TranscodeVideo()`
   10. Monitor progress (frames / total_frames), update TranscodeProgress
   11. On completion: record TranscodeAttempt with size reduction, duration, command

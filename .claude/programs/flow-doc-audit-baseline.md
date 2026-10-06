@@ -25,7 +25,7 @@ After this directive closes (`Status: Closed -- Success`), this file may be dele
 | 14 | `Features/ShowSettings/smart-populate.flow.md` | no | no |
 | 15 | `Features/SystemSettings/display-timezone.flow.md` | no | no |
 | 16 | `Features/TeamStatus/TeamStatus.flow.md` | no | no |
-| 17 | `Features/TranscodeQueue/media-tabs.flow.md` | no | no |
+| 17 | `Features/TranscodeQueue/media-tabs.flow.md` | (deleted -- bucket and job-label rules live in `transcode.flow.md` D2 + D4) | -- |
 | 18 | `Features/TranscodeQueue/remux.flow.md` | (deleted -- absorbed into `transcode.flow.md ST6 Strategy variants` by `transcode-worker-unification`) | -- |
 | 19 | `WebService/startup.flow.md` | no | no |
 | 20 | `WorkerService/WorkerService.flow.md` | no | no |

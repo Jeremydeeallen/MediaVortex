@@ -52,9 +52,9 @@ Three contexts, each with explicit boundary + anti-corruption interface to the o
 
 | Change | Where | Why |
 |---|---|---|
-| New `WorkBucket = 'MetadataOnly'` value | `MediaFiles.WorkBucket` enum + repository routing | Bucket-priority sit between `AudioFixOnly` and `None` |
+| New `WorkBucket = 'MetadataOnly'` value | `MediaFiles.WorkBucket` enum + repository routing | Bucket-priority sit between `AudioFix` and `Compliant` |
 | `AudioVertical.Evaluate` returns `(False, 'audio_tags_outdated_vs_cache')` when detection cache exists AND source tags disagree with it AND no other vertical-level issue exists | `Features/AudioNormalization/AudioVertical.py` | Existing data-driven pattern; one new branch |
-| `QueueManagementBusinessService.EvaluateCandidateCompliance` priority: `Transcode > Remux > AudioFixOnly > MetadataOnly > None` | Same file | MetadataOnly slot between AudioFix and None per cheaper-fixes-later ordering |
+| Bucket precedence (`transcode.flow.md` D4, the `WorkBucket` generated column): `Transcode > Remux > AudioFix > MetadataOnly > Compliant` | `MediaFiles.WorkBucket` generated-column migration | MetadataOnly slot between AudioFix and Compliant per cheaper-fixes-later ordering |
 
 ### Anti-Corruption Layers (DDD)
 
@@ -84,7 +84,7 @@ C3. **MetadataUpdateShape exists and is a peer of TranscodeShape/RemuxShape.** I
 
 C4. **MetadataUpdateApplicationService composes Plan + Shape.** Single `Process(MediaFileId)` method: loads cache, runs every active `IMetadataUpdatePolicy` to assemble a `MetadataUpdatePlan`, hands the Plan to `MetadataUpdateShape.Build`, returns `CommandSpec`. Worker invokes it from the existing claim path; file replacement is unchanged. Contract test asserts: identical-tags input → empty plan → no command emitted (no-op); different tags input → plan with N deltas → command contains N metadata args.
 
-C5. **`AudioVertical.Evaluate` identifies metadata-fixable state.** New branch: when `AudioComplianceRules.EnableSpeechLanguageDetection=true` AND cache exists for the MediaFile AND any cached language differs from source tag AND no codec/bitrate/resolution issue exists, returns `(False, 'audio_tags_outdated_vs_cache')`. Routing in `QueueManagementBusinessService.EvaluateCandidateCompliance` maps that reason to `WorkBucket='MetadataOnly'`. Contract test: file with `und` tag + cache says `eng` + clean video/container → bucket `MetadataOnly`.
+C5. **`AudioVertical.Evaluate` identifies metadata-fixable state.** New branch: when `AudioComplianceRules.EnableSpeechLanguageDetection=true` AND cache exists for the MediaFile AND any cached language differs from source tag AND no codec/bitrate/resolution issue exists, returns `(False, 'audio_tags_outdated_vs_cache')`. The `WorkBucket` generated column (`transcode.flow.md` D4) maps that state to `WorkBucket='MetadataOnly'`. Contract test: file with `und` tag + cache says `eng` + clean video/container → bucket `MetadataOnly`.
 
 C6. **All operator levers in the UI.** `/Compliance` Audio Rules tab + `/Admin/Compliance` Audio Rules tab gain six new rows in the existing form (above the current Save button):
 
@@ -177,7 +177,7 @@ These are not options. Each has a specific reason for being this answer and not 
 
 5. **Detection cache stays on `MediaFiles.AudioStreamLanguageDetectionsJson`.** Resist the DDD temptation to extract a separate `AudioStreamLanguageDetections` table. The cache is per-MediaFile, lifecycle is tied to MediaFile, JSON column already exists in the schema. A separate table would add a JOIN cost on every compliance recompute, two-phase commit semantics for cache invalidation, and zero functional benefit.
 
-6. **`ProcessingMode='MetadataOnly'` lives in the same enum as Transcode/Remux/AudioFix.** Not a separate column. Not a separate routing path. Same bucket-priority cascade in `EvaluateCandidateCompliance`. Same worker claim path. The only new thing is `MetadataUpdateShape` registered in `EncodeShapeRegistry` -- same Strategy pattern that already works for the three existing shapes.
+6. **`ProcessingMode='MetadataOnly'` lives in the same enum as Transcode/Remux/AudioFix.** Not a separate column. Not a separate routing path. Same bucket rules (`transcode.flow.md` D4). Same worker claim path. The only new thing is `MetadataUpdateShape` registered in `EncodeShapeRegistry` -- same Strategy pattern that already works for the three existing shapes.
 
 7. **One typed exception per bounded context, not three.** `AudioEnrichmentError(MediaFileId, DetectorName, Reason)` covers all detection failures. `MetadataUpdateError(MediaFileId, Reason)` covers all metadata-update failures. Resist granular exception hierarchies.
 

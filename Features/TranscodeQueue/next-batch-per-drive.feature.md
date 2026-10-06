@@ -9,7 +9,7 @@ Splits the single "Next Batch" card on the Media -> Transcode pane into two stac
 1. **TV - Next Batch** (top) -- the existing card, drive filter pinned to `T:`. Renamed from "Next Batch."
 2. **Movies - Next Batch** (directly below) -- new card, same format, drive filter pinned to `M:`.
 
-Both cards consume the same `/api/WorkBucket/NextTranscodeBatch` endpoint with different `Drive` parameter values. The endpoint is a dedicated transcode-tab read path: WHERE `NeedsTranscode = TRUE` AND not-in-queue AND `SizeMB > 0` AND `HasExplicitEnglishAudio IS NOT FALSE`, ORDER BY `SizeMB DESC NULLS LAST`, count via `COUNT(*) OVER()` window (single roundtrip). Backed by partial index `idx_mediafiles_next_transcode_batch ON MediaFiles (SizeMB DESC NULLS LAST) WHERE NeedsTranscode = TRUE AND SizeMB > 0 AND HasExplicitEnglishAudio IS NOT FALSE`.
+Both cards consume the same `/api/WorkBucket/NextTranscodeBatch` endpoint with different `Drive` parameter values. The endpoint is a dedicated transcode-tab read path: WHERE `WorkBucket = 'Transcode'` (bucket rules: `transcode.flow.md` D4) AND not-in-queue, ORDER BY `SizeMB DESC NULLS LAST`, count via `COUNT(*) OVER()` window (single roundtrip).
 
 Each card maintains its own state (offset, batch items, search term, batch size). Search/size changes on one card do not affect the other. The "Add Batch" button on each card scopes admission to that card's items only.
 
@@ -41,19 +41,17 @@ Operator dogfood (2026-05-30). With TV and Movies on different drives, a single 
 
 ### Endpoint shape
 
-9. The endpoint `POST /api/WorkBucket/NextTranscodeBatch` accepts `Drive`, `Limit` (1-1000), `Offset`, `Search` (max 100 chars). The SQL has no `PriorityScore`, no `Mode`/`Focus` branching, no `SmartPopulate`-style mode multiplexer -- it is single-purpose. Verifiable: grep `QueueManagementBusinessService.NextTranscodeBatch` and confirm the `WHERE m.NeedsTranscode = TRUE` clause + `ORDER BY m.SizeMB DESC NULLS LAST`; no `PriorityScore` token appears in the function body.
+9. The endpoint `POST /api/WorkBucket/NextTranscodeBatch` accepts `Drive`, `Limit` (1-1000), `Offset`, `Search` (max 100 chars). The SQL has no `PriorityScore`, no `Mode`/`Focus` branching, no `SmartPopulate`-style mode multiplexer -- it is single-purpose. Verifiable: grep `QueueManagementBusinessService.NextTranscodeBatch` and confirm the `WHERE m.WorkBucket = 'Transcode'` clause + `ORDER BY m.SizeMB DESC NULLS LAST`; no `PriorityScore` token appears in the function body.
 
 10. Neither card sends a `Mode` parameter (the endpoint is transcode-only by construction). Verifiable: inspect both AJAX payloads -- only `Drive`, `Limit`, `Offset`, `Search`.
 
-11. EXPLAIN ANALYZE on the `NextTranscodeBatch` SQL (no Drive, no Search) shows an `Index Scan` or `Bitmap Index Scan` on `idx_mediafiles_next_transcode_batch` rather than `Seq Scan on mediafiles`. Verifiable: `py Scripts/SQLScripts/AddNextTranscodeBatchIndex.py` prints the post-create EXPLAIN.
-
-12. **[BUG-0061]** MediaFiles whose consecutive `TranscodeAttempts.Success=FALSE` count meets or exceeds the failure cap (`TranscodeQueue.feature.md` C10) are excluded from BOTH cards' results. The `NextTranscodeBatch` SQL adds a NOT EXISTS / subquery predicate that filters out capped MediaFiles. The same filter applies to every other "Next batch" surface on `/Work/<bucket>` (Quick Fix card, Remux / AudioFix Next Batch cards served by `SmartPopulate`). Verifiable: insert N+1 consecutive `TranscodeAttempts(Success=FALSE, MediaFileId=X)` rows where N=cap, hit `/Work/Transcode`, confirm MediaFile X appears in neither the TV/Movies Next Batch nor the Quick Fix card; reset the failure state and confirm X re-appears.
+12. **[BUG-0061]** MediaFiles whose consecutive `TranscodeAttempts.Success=FALSE` count meets or exceeds the failure cap (`TranscodeQueue.feature.md` C10) are excluded from BOTH cards' results. The `NextTranscodeBatch` SQL adds a NOT EXISTS / subquery predicate that filters out capped MediaFiles. The same filter applies to every other "Next batch" surface on `/Work/<bucket>` (Remux / AudioFix Next Batch cards served by `SmartPopulate`). Verifiable: insert N+1 consecutive `TranscodeAttempts(Success=FALSE, MediaFileId=X)` rows where N=cap, hit `/Work/Transcode`, confirm MediaFile X appears in neither the TV nor the Movies Next Batch; reset the failure state and confirm X re-appears.
 
 ## Surface
 
 `/Work/Transcode` (`Templates/WorkBucket.html`) -- the Work Bucket Transcode pane. Two stacked cards instead of one.
 
-The Quick Fix pane (`/media#quickfix`) and Library pane (`/media#library`) are untouched. Other consumers of `SmartPopulate` (the Remux card, the AudioFix card) are also untouched -- they remain TV-pinned per their existing implementations and are out of scope here.
+The Library pane (`/media#library`) is untouched. Other consumers of `SmartPopulate` (the Remux card, the AudioFix card) are also untouched -- they remain TV-pinned per their existing implementations and are out of scope here.
 
 ## See also
 
@@ -86,9 +84,7 @@ Features/TranscodeQueue/next-batch-per-drive.feature.md    -- this file
 |------|------|
 | `Templates/WorkBucket.html` | DOM: TV + Movies cards stacked. JS: `SmartPopulate()` / `SmartPopulateMovies()` POST `/api/WorkBucket/NextTranscodeBatch` with hardcoded Drive. Each card maintains independent state (`AllSuggestions` / `MoviesAllSuggestions`, offsets, sticky sizes under `WorkBucket.BatchSize` and `WorkBucket.MoviesBatchSize`). Priority column removed -- size order is the contract. |
 | `Features/WorkBucket/WorkBucketController.py` | `POST /api/WorkBucket/NextTranscodeBatch` route: validates `Limit` / `Offset` / `Drive` / `Search` (max 100 chars), delegates to `QueueManagementBusinessService.NextTranscodeBatch`. |
-| `Features/TranscodeQueue/QueueManagementBusinessService.py` | `NextTranscodeBatch(Limit, Offset, Drive, Search)`: WHERE `NeedsTranscode = TRUE AND NOT in queue AND SizeMB > 0 AND HasExplicitEnglishAudio IS NOT FALSE`, optional Drive (StorageRootId lookup) and Search (LOWER LIKE on FileName / first RelativePath segment, `EscapeLikePattern` + `ESCAPE '!'`), ORDER BY `SizeMB DESC NULLS LAST`, `COUNT(*) OVER()` window for `TotalCandidates` (single roundtrip). Returns `{Success, Suggestions[], TotalCandidates, Offset, Limit, Search, HasMore}`. No `PriorityScore` field in the response. |
-| `Scripts/SQLScripts/AddNextTranscodeBatchIndex.py` | Idempotent migration: `CREATE INDEX IF NOT EXISTS idx_mediafiles_next_transcode_batch ON MediaFiles (SizeMB DESC NULLS LAST) WHERE NeedsTranscode = TRUE AND SizeMB > 0 AND HasExplicitEnglishAudio IS NOT FALSE`. Prints post-create EXPLAIN ANALYZE. |
-
+| `Features/TranscodeQueue/QueueManagementBusinessService.py` | `NextTranscodeBatch(Limit, Offset, Drive, Search)`: WHERE `WorkBucket = 'Transcode' AND NOT in queue`, optional Drive (StorageRootId lookup) and Search (LOWER LIKE on FileName / first RelativePath segment, `EscapeLikePattern` + `ESCAPE '!'`), ORDER BY `SizeMB DESC NULLS LAST`, `COUNT(*) OVER()` window for `TotalCandidates` (single roundtrip). Returns `{Success, Suggestions[], TotalCandidates, Offset, Limit, Search, HasMore}`. No `PriorityScore` field in the response. |
 ## Deviation from conventions
 
 None. Mirrors the existing parallel-card pattern (Card 1 / Card 1.5 / Card 1.7 in the same template). Single endpoint, multiple parameter values, independent client state.

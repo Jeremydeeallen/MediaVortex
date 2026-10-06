@@ -46,9 +46,9 @@ Phase 3 (stop bleeding, parallelizable after Phase 1)
   ├── BUG-0103: PreEncodeAudioPipeline source-readability preflight
   └── BUG-0102: SubtitleSlot MAX_SUB_SAMPLE_BYTES preflight
 
-Phase 4 (decomposition-driven, after Phase 1)
-  ├── BUG-0101: SQL decompose ComplianceGate cluster (automatic once BUG-0095 lands)
-  └── BUG-0100: Diagnose validator rule; route as pipeline fix OR Terminal
+Phase 4 (closed 2026-10-06 -- no work left)
+  ├── BUG-0101: resolved by `label-decides-command` (the pre-replace gate was deleted)
+  └── BUG-0100: resolved by `label-decides-command` (same)
 
 Phase 5 (recovery ops, operator-driven)
   └── BUG-0072-style regrab via Sonarr / Radarr for Terminal-flagged files
@@ -98,8 +98,7 @@ Phase 5 (recovery ops, operator-driven)
 | `subtitle_sample_too_large` | 40 | `mov_text.*Result too large` | FALSE (drop-and-retry) | Auto-drop stream OR choose mkv variant |
 | `pix_fmt_unsupported` | 50 | `Impossible to convert between the formats.*yuv4[24]2p16` | FALSE | Pipeline fix pending (BUG-0104) |
 | `stereo_downmix_source_unreadable` | 55 | `stereo downmix failed.*moov atom not found` | TRUE | Regrab source |
-| `demucs_daemon_down` | 60 | `DemucsDaemonUnavailableError` | FALSE | Restart worker; auto-retry via D13 |
-| `loudness_invalid_unrecoverable` | 70 | `ComplianceGateFailed: invalid_loudness_measurement` | FALSE (pending BUG-0100 diagnosis) | See BUG-0100 |
+| `demucs_daemon_down` | 60 | `DemucsDaemonUnavailableError` | FALSE | Restart worker; then requeue the job |
 | `ffmpeg_crash_midencode` | 80 | `Segmentation fault\|core dumped` | FALSE | Retry once; escalate if repeats |
 | `codec_map_mismatch` | 90 | `Requested output format.*does not accept` | FALSE | Pipeline fix pending |
 | `orphan_output` | 100 | `Refusing to overwrite existing` | FALSE | Delete `.inprogress` + retry |
@@ -171,8 +170,7 @@ Phase 5 (recovery ops, operator-driven)
 
 **Directive slug:** `bug-0103-source-readability-preflight`
 
-**Root fix:** `PreEncodeAudioPipeline._RunDemucsChain` first substep = `_ProbeSourceReadable(SourceFilePath)` runs `ffprobe -show_format` (cheap; no decode). Non-zero exit → `raise SourceUnreadableError(f"source unreadable: {path}: {stderr_tail}")`. `AudioPreEncodeFacade.Prepare` propagates raise. `JobProcessor.Process` catches + sets `MediaFiles.AdmissionDeferReason='source_unreadable'` + attempt lands `Success=FALSE, ErrorMessage=<SourceUnreadableError body>`. BUG-0095 classifier tags `FailureClass='source_unreadable'` with `Terminal=TRUE`. **NOT** via D13 Copy fallback -- Copy would spawn a second ffmpeg on the same unreadable file and crash identically. Copy fallback is for Demucs-daemon failures, not source-integrity failures.
-
+**Root fix:** `PreEncodeAudioPipeline._RunDemucsChain` first substep = `_ProbeSourceReadable(SourceFilePath)` runs `ffprobe -show_format` (cheap; no decode). Non-zero exit → `raise SourceUnreadableError(f"source unreadable: {path}: {stderr_tail}")`. `AudioPreEncodeFacade.Prepare` propagates raise. `JobProcessor.Process` catches + sets `MediaFiles.AdmissionDeferReason='source_unreadable'` + attempt lands `Success=FALSE, ErrorMessage=<SourceUnreadableError body>`. BUG-0095 classifier tags `FailureClass='source_unreadable'` with `Terminal=TRUE`.
 **Files:**
 - `Features/AudioNormalization/Services/PreEncodeAudioPipeline.py` (+ `_ProbeSourceReadable` helper + `SourceUnreadableError` class)
 - `Features/AudioNormalization/Services/AudioPreEncodeFacade.py` (propagation path)
@@ -214,46 +212,9 @@ Phase 5 (recovery ops, operator-driven)
 
 ---
 
-### BUG-0101 -- ComplianceGate cluster decomposition (Phase 4)
+### BUG-0101 and BUG-0100 (Phase 4) -- resolved 2026-10-06
 
-**Directive slug:** `bug-0101-compliance-gate-decompose`
-
-**Root fix:** after BUG-0095 lands, decomposition is automatic on new failures. One-shot backfill script classifies existing rows.
-
-- Script: `Scripts/SQLScripts/ClassifyExistingComplianceGateFailures.py` -- iterates `TranscodeAttempts WHERE Success=FALSE AND FailureClass IS NULL AND ErrorMessage ILIKE '%ComplianceGateFailed:%'`, runs classifier, writes FailureClass column
-- After backfill, `/FailedJobs` renders each sub-cause with count. Operator picks top-1 for its own directive.
-
-**Files:** one script + optional new seed rules in `FailureClasses` if backfill reveals unmatched sub-causes.
-
-**Blockers / gates:** BUG-0095.
-
-**Directive close criterion:** backfill run + top-3 sub-causes each have a FailureClass row + `/FailedJobs` renders the breakdown. Each downstream sub-cause opens as its own directive.
-
----
-
-### BUG-0100 -- Doctor Who invalid_loudness_measurement diagnosis (Phase 4)
-
-**Directive slug:** `bug-0100-loudness-validator-diagnose`
-
-**Root fix:** step 1 = diagnose. Read `Features/AudioNormalization/LoudnessMeasurementValidator.IsValid` + `Features/Compliance/ComplianceGate.Evaluate` audio-loudness branch. Enumerate every reject reason. Identify which one fires for MediaFileId 709363.
-
-Step 2 branches:
-
-**(A) Stale-snapshot bug:** gate reads pre-remeasure column values, misses fresh writes. Fix per `db-is-authority.md`: no `_cached_*` on validator; fresh DB read per call. Pipeline fix (`FailureClass=Transient after fix`).
-
-**(B) Real quality rule fires legitimately:** e.g. Original LRA=3.1 below hard `MinValidLoudnessRangeLU` floor. Route to `AdmissionDeferReason='operator_review_pending'` per C6 + `FailureClass='loudness_below_measurement_floor'` Terminal=TRUE. Remediation: "source is content-classified low-dynamic-range; accept-untranscoded OR flag for source-quality bypass policy."
-
-**Files (contingent on branch):**
-- `Features/AudioNormalization/LoudnessMeasurementValidator.py`
-- `Features/Compliance/ComplianceGate.py`
-- `Features/AudioNormalization/audio-normalization.feature.md` (C6 extension)
-- `Tests/Contract/TestLoudnessValidatorRules.py`
-
-**Anti-bandaid discipline:** do NOT lower the threshold to make Doctor Who pass. Understand which rule fires, then either fix the real bug OR route legitimately.
-
-**Blockers / gates:** BUG-0095 for Terminal routing if step-2 goes branch (B).
-
-**I9 smoke:** synthetic MediaFile with the exact SourceIntegratedLufs / LRA / TP / Threshold values of 709363 → invoke `LoudnessMeasurementValidator.IsValid` → assert which rule returns invalid → matches production behavior. Then apply fix + assert opposite result.
+Both bugs were about refusals from the pre-replace compliance gate (`ComplianceGateFailed: ...`). Directive `label-decides-command` deleted that gate; a stage's output is now accepted or refused by that stage's own verification (`transcode.flow.md` D2), so these refusals can no longer occur. No Phase 4 directive is needed. Not done: the sub-causes inside the old cluster were never decomposed, and the validator rule that fired on MediaFileId 709363 was never identified.
 
 ---
 
@@ -300,8 +261,8 @@ Operator drives the regrab decisions; assistant executes SQL + Sonarr API calls 
 | BUG-0104 | `bug-0104-video-pixfmt-normalize` | 3 | not started |
 | BUG-0103 | `bug-0103-source-readability-preflight` | 3 | not started |
 | BUG-0102 | `bug-0102-subtitle-sample-size-preflight` | 3 | not started |
-| BUG-0101 | `bug-0101-compliance-gate-decompose` | 4 | not started (blocked on 0095) |
-| BUG-0100 | `bug-0100-loudness-validator-diagnose` | 4 | not started (blocked on 0095) |
+| BUG-0101 | (none -- resolved by `label-decides-command`) | 4 | resolved 2026-10-06 |
+| BUG-0100 | (none -- resolved by `label-decides-command`) | 4 | resolved 2026-10-06 |
 | BUG-0072-style recovery | (ops, no directive) | 5 | ongoing after Phase 3 |
 
 **Update this section as each directive advances / closes.**
