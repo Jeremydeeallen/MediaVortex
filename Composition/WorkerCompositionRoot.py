@@ -9,8 +9,6 @@ from Features.TranscodeJob.Worker.Strategies.JobProcessorRegistry import JobProc
 from Features.TranscodeJob.Worker.Strategies.TranscodeJobStrategy import TranscodeJobStrategy
 from Features.TranscodeJob.Worker.Strategies.RemuxJobStrategy import RemuxJobStrategy
 from Features.TranscodeJob.Worker.Strategies.AudioFixJobStrategy import AudioFixJobStrategy
-from Features.TranscodeJob.Worker.Strategies.QuickJobStrategy import QuickJobStrategy
-from Features.TranscodeJob.Worker.Strategies.SubtitleFixJobStrategy import SubtitleFixJobStrategy
 from Features.TranscodeJob.Worker.WorkerLoopService import WorkerLoopService
 from Features.TranscodeJob.Worker.StuckJobMonitor import StuckJobMonitor
 
@@ -36,14 +34,10 @@ class WorkerCompositionRoot:
         StratReg.Register('Transcode', TranscodeJobStrategy)
         StratReg.Register('Remux', RemuxJobStrategy)
         StratReg.Register('AudioFix', AudioFixJobStrategy)
-        StratReg.Register('Quick', QuickJobStrategy)
-        StratReg.Register('SubtitleFix', SubtitleFixJobStrategy)
         self.JobProcessorRegistry = JobProcessorRegistry({
             'Transcode': JobProcessor(QueueService=self.QueueService, Registry=StratReg),
             'Remux': JobProcessor(QueueService=self.QueueService, Registry=StratReg),
-            'Quick': JobProcessor(QueueService=self.QueueService, Registry=StratReg),
             'AudioFix': JobProcessor(QueueService=self.QueueService, Registry=StratReg),
-            'SubtitleFix': JobProcessor(QueueService=self.QueueService, Registry=StratReg),
             'TestVariant': VariantJobProcessor(self.QueueService),
         })
         self.WorkerLoop = WorkerLoopService(

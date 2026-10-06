@@ -30,11 +30,8 @@ def BuildDefaultRegistry() -> PostFlightRegistry:
     from Features.FileReplacement.PostFlightProcessors.TranscodePostFlight import TranscodePostFlight
     from Features.FileReplacement.PostFlightProcessors.RemuxPostFlight import RemuxPostFlight
     from Features.FileReplacement.PostFlightProcessors.AudioFixPostFlight import AudioFixPostFlight
-    from Features.FileReplacement.PostFlightProcessors.SubtitleFixPostFlight import SubtitleFixPostFlight
     Reg = PostFlightRegistry()
     Reg.Register('Transcode', TranscodePostFlight)
     Reg.Register('Remux', RemuxPostFlight)
-    Reg.Register('Quick', RemuxPostFlight)
     Reg.Register('AudioFix', AudioFixPostFlight)
-    Reg.Register('SubtitleFix', SubtitleFixPostFlight)
     return Reg

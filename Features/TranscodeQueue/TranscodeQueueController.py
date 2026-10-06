@@ -18,7 +18,7 @@ def AggregateStats():
     try:
         from Core.Database.DatabaseService import DatabaseService
         Mode = (request.args.get('mode') or '').strip() or None
-        if Mode is not None and Mode not in ('Transcode', 'Quick', 'Remux', 'AudioFix'):
+        if Mode is not None and Mode not in ('Transcode', 'Remux', 'AudioFix'):
             return jsonify({'Success': False, 'Message': 'Invalid mode'}), 400
         Db = DatabaseService()
         if Mode:
@@ -87,7 +87,7 @@ def GetQueue():
             sortBy = 'Priority'
         if sortOrder not in ['ASC', 'DESC']:
             sortOrder = 'DESC'
-        if mode is not None and mode not in ('Transcode', 'Quick', 'Remux', 'AudioFix'):
+        if mode is not None and mode not in ('Transcode', 'Remux', 'AudioFix'):
             mode = None  # ignore unknown values
 
         viewModel = TranscodeQueueViewModel()

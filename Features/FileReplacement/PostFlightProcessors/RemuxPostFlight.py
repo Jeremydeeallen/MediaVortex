@@ -9,7 +9,7 @@ from Features.FileReplacement.PostFlightProcessors.ITranscodePostFlight import (
 
 # directive: transcode-worker-unification | # see remuxed-flag.C4
 class RemuxPostFlight(ITranscodePostFlight):
-    """Post-flight strategy for Mode in ('Remux','Quick'): sets RemuxedByMediaVortex=TRUE + date. # see remuxed-flag.C4"""
+    """Post-flight strategy for Mode='Remux': sets RemuxedByMediaVortex=TRUE + date. # see remuxed-flag.C4"""
 
     # directive: transcode-worker-unification | # see remuxed-flag.C4
     def __init__(self, MediaFilesRepository=None):

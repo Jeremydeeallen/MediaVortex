@@ -1808,7 +1808,7 @@ class QueueManagementBusinessService:
                 "SELECT WorkBucket FROM MediaFiles WHERE Id = %s", (int(MediaFileId),)
             )
             _Bucket = _BucketRows[0].get('workbucket') if _BucketRows else None
-            EffectiveMode = _Bucket if _Bucket in ('Transcode', 'Remux', 'AudioFix', 'SubtitleFix') else 'Transcode'
+            EffectiveMode = _Bucket if _Bucket in ('Transcode', 'Remux', 'AudioFix') else 'Transcode'
         IsTranscodeMode = ProcessingModeMetadata.GetOrDefault(EffectiveMode)['RequiresProfileGates']
         try:
             LoggingService.LogFunctionEntry("AddJobToQueue", "QueueManagementBusinessService", MediaFileId, Priority)
@@ -2264,7 +2264,7 @@ class QueueManagementBusinessService:
                     SizeMB=mediaFile.SizeMB or 0.0,
                     Priority=0,
                     Status="Pending",
-                    ProcessingMode="SubtitleFix",
+                    ProcessingMode="Remux",
                     DateAdded=datetime.now(timezone.utc)
                 )
 
@@ -2272,7 +2272,7 @@ class QueueManagementBusinessService:
                     itemId = self.Repository.SaveTranscodeQueueItem(queueItem)
                     LoggingService.LogInfo(f"Added subtitle fix queue item {itemId} for {mediaFile.FileName}", "QueueManagementBusinessService", "PopulateQueueForSubtitleFix")
                     itemsAdded += 1
-                    existingFilePaths.add(mediaFile.FilePath)
+                    existingPairs.add((mediaFile.StorageRootId, mediaFile.RelativePath or ''))
                 except Exception as e:
                     LoggingService.LogException(f"Error saving subtitle fix queue item for {mediaFile.FileName}", e, "QueueManagementBusinessService", "PopulateQueueForSubtitleFix")
 

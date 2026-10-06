@@ -76,11 +76,7 @@ class TranscodeQueueModel:
 
     @property
     def IsRemux(self) -> bool:
-        return self.ProcessingMode in ("Quick", "Remux", "AudioFix")
-
-    @property
-    def IsSubtitleFix(self) -> bool:
-        return self.ProcessingMode == "SubtitleFix"
+        return self.ProcessingMode in ("Remux", "AudioFix")
 
     @property
     def IsTestMode(self) -> bool:

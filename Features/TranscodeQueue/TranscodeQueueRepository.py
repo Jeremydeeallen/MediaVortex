@@ -373,7 +373,7 @@ class TranscodeQueueRepository(BaseRepository):
         'DateAdded': 'DateAdded',
         'FileName': 'FileName',
     }
-    QueueItemsModeWhitelist = {'Transcode', 'Quick', 'Remux', 'AudioFix'}
+    QueueItemsModeWhitelist = {'Transcode', 'Remux', 'AudioFix'}
 
     # directive: paged-query-core | # see paged-query.C11
     def GetTranscodeQueueItemsPaginated(self, Query: "PagedQuery"):

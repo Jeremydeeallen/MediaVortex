@@ -38,9 +38,9 @@ class TestJobProcessorRegistry:
             Registry.Get('Unknown')
 
     # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C7
-    def test_supports_five_modes(self):
-        """All five processing modes are retrievable when injected."""
-        Modes = ['Transcode', 'Remux', 'Quick', 'AudioFix', 'SubtitleFix']
+    def test_supports_every_label(self):
+        """All three job labels are retrievable when injected."""
+        Modes = ['Transcode', 'Remux', 'AudioFix']
         Strategies = {Mode: StubProcessor(Mode) for Mode in Modes}
         Registry = JobProcessorRegistry(Strategies)
         for Mode in Modes:

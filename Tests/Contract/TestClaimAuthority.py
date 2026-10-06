@@ -329,7 +329,7 @@ class TestRemuxClaimAuthority(unittest.TestCase):
             ProdPending = self.Db.ExecuteQuery(
                 "SELECT COUNT(*) AS n FROM TranscodeQueue "
                 "WHERE Status='Pending' AND Priority > -1000 "
-                "AND ProcessingMode IN ('Remux','Quick','AudioFix','SubtitleFix')",
+                "AND ProcessingMode IN ('Remux','AudioFix')",
             )
             self.assertGreater(
                 ProdPending[0]["n"], 0,

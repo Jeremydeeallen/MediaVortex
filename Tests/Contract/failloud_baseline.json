@@ -50,7 +50,6 @@
     "Features/FileReplacement/FilesystemRenameWithBackup.py": 2,
     "Features/FileReplacement/PostFlightProcessors/AudioFixPostFlight.py": 1,
     "Features/FileReplacement/PostFlightProcessors/RemuxPostFlight.py": 1,
-    "Features/FileReplacement/PostFlightProcessors/SubtitleFixPostFlight.py": 1,
     "Features/FileReplacement/PostFlightProcessors/TranscodePostFlight.py": 1,
     "Features/FileReplacement/TranscodedOutputPlacement.py": 16,
     "Features/FileScanning/ContinuousScanService.py": 10,

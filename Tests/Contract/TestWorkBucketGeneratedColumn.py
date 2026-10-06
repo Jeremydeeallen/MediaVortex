@@ -44,7 +44,7 @@ class TestWorkBucketGeneratedColumn(unittest.TestCase):
 
     # directive: transcode-flow-canonical -- C33j bucket ProcessingMode validity
     def test_new_buckets_have_valid_processing_mode(self):
-        ValidModes = {'Transcode', 'Remux', 'AudioFix', 'Quick', 'SubtitleFix', 'TestVariant'}
+        ValidModes = {'Transcode', 'Remux', 'AudioFix', 'TestVariant'}
         for UrlKey in ('Compliant', 'Unclassified'):
             Bucket = BucketKey.FromUrlKey(UrlKey)
             self.assertIn(Bucket.ProcessingMode, ValidModes,
