@@ -30,17 +30,20 @@ class AudioSlot:
         if Op == 'Reencode':
             return self._EmitReencode(MediaFile, Context)
         if Op == 'Copy':
-            return AudioEmission(InputArgs=[], StreamArgs=['-map', '0:a?', '-c:a', self._CopyCodec(MediaFile)])
+            return AudioEmission(InputArgs=[], StreamArgs=['-map', '0:a?'] + self._CopyCodecArgs(MediaFile))
         raise ValueError(f"AudioSlot.Emit: unknown Op={Op!r}")
 
     # directive: label-decides-command | # see transcode.ST6
-    def _CopyCodec(self, MediaFile) -> str:
+    def _CopyCodecArgs(self, MediaFile) -> List[str]:
         SourceCodec = (getattr(MediaFile, 'AudioCodec', None) or '').strip().lower()
         if not SourceCodec:
-            return 'copy'
-        Csv = self.RulesRepository.GetRules()['AcceptableAudioCodecsCsv']
-        Copyable = {C.strip().lower() for C in Csv.split(',') if C.strip()}
-        return 'copy' if SourceCodec in Copyable else 'aac'
+            return ['-c:a', 'copy']
+        Rules = self.RulesRepository.GetRules()
+        Copyable = {C.strip().lower() for C in Rules['AcceptableAudioCodecsCsv'].split(',') if C.strip()}
+        if SourceCodec in Copyable:
+            return ['-c:a', 'copy']
+        Kbps = int(Rules['Track0BitratePerChannelKbps']) * int(MediaFile.AudioChannels)
+        return ['-c:a', 'aac', '-b:a', f'{Kbps}k']
 
     # directive: transcode-flow-canonical | # see transcode.ST5
     def _EmitReencode(self, MediaFile, Context: Dict[str, Any]) -> AudioEmission:

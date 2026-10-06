@@ -11,7 +11,7 @@ from Features.TranscodeJob.Worker.JobProcessor import JobProcessor
 
 # directive: label-decides-command | # see transcode.ST6
 def _Rules():
-    return MagicMock(**{'GetRules.return_value': {'AcceptableAudioCodecsCsv': 'aac,ac3,eac3,mp3,opus'}})
+    return MagicMock(**{'GetRules.return_value': {'AcceptableAudioCodecsCsv': 'aac,ac3,eac3,mp3,opus', 'Track0BitratePerChannelKbps': 48}})
 
 
 # directive: label-decides-command | # see transcode.ST6
@@ -24,8 +24,8 @@ class TestAudioCopyStage(unittest.TestCase):
 
     # directive: label-decides-command | # see transcode.ST6
     def test_audio_the_container_cannot_carry_is_converted_plainly(self):
-        Emission = AudioSlot(RulesRepository=_Rules()).Emit('Copy', SimpleNamespace(AudioCodec='wmav2'), {})
-        self.assertEqual(Emission.StreamArgs, ['-map', '0:a?', '-c:a', 'aac'])
+        Emission = AudioSlot(RulesRepository=_Rules()).Emit('Copy', SimpleNamespace(AudioCodec='wmav2', AudioChannels=6), {})
+        self.assertEqual(Emission.StreamArgs, ['-map', '0:a?', '-c:a', 'aac', '-b:a', '288k'])
         self.assertEqual(Emission.InputArgs, [])
 
 
