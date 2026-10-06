@@ -35,7 +35,7 @@ C7. **Two rules at same Priority refused at INSERT.** UNIQUE constraint on `Prio
 
 C8. **Rule references a non-existent ProfileName.** Classifier writes the name; downstream queue admission fails with `MissingProfile` in reason; visible in marginal-savings-gate rollup log. Operator fixes rule or sets `IsActive=FALSE`.
 
-C9. **TV storage root pinned to Tier 1.** `ContentClassificationRules` seed row `TvPinTier1Efficient` at `Priority=20` with `FolderPathPattern='T:\%'` -> `AssignProfileName='AV1 Tier 1 Efficient'`. Wins before any resolution-based default rule. Contract: `TestTvPinTier1Classification.py`. Verifiable via SELECT + `/settings` "Content classification rules" section.
+C9. **A library's default tier beats every rule.** When the file's library has a default tier (`/settings` "Library default tier"; TV = 1), an unprofiled file gets that tier's profile with source `library_default_tier`, whatever its codec, and the rules table is not walked. No rule names a tiered library's path. Contract: `TestTvPinTier1Classification.py`.
 
 ## Seams
 

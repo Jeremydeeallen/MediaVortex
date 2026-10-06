@@ -4,7 +4,7 @@
 
 ## What It Does
 
-Answers one question about each MediaFile: is its container (mp4, mkv, etc.) acceptable, AND is its audio codec compatible with the container choice. Writes `(ContainerCompliant, ContainerCompliantReason)` to `MediaFiles`. One of three per-domain compliance verticals (Audio / Video / Container) that together feed the WorkBucket trigger.
+Answers one question about each MediaFile: is its container (mp4, mkv, etc.) acceptable. Writes `(ContainerCompliant, ContainerCompliantReason)` to `MediaFiles`. One of three per-domain compliance verticals (Audio / Video / Container) that together feed the WorkBucket trigger.
 
 ## Workflows
 
@@ -17,7 +17,7 @@ Answers one question about each MediaFile: is its container (mp4, mkv, etc.) acc
 ## Success Criteria
 
 C1. `ContainerVertical.RecomputeFor(MediaFileIds)` writes `(ContainerCompliant, ContainerCompliantReason)` for each id. Verifiable: post-call `SELECT ContainerCompliant FROM MediaFiles WHERE Id=<id>` is non-NULL.
-C2. Predicate: TRUE iff `ContainerFormat` is in `AcceptableContainersCsv` AND `AudioCodec` is in `AcceptableAudioCodecsCsv`. Otherwise FALSE with reason naming the failing rule. Verifiable: file with `Container='mkv'` + rules excluding mkv -> Compliant=FALSE, Reason='container_not_acceptable:mkv'.
+C2. Predicate: TRUE iff `ContainerFormat` is in `AcceptableContainersCsv` (alias groups per `transcode.flow.md` D4). Audio codec is the Audio vertical's concern, not this one's. Otherwise FALSE with reason naming the container. Verifiable: file with `Container='mkv'` + rules excluding mkv -> Compliant=FALSE, Reason='container:mkv'.
 C3. Rules read fresh per `RecomputeFor` call (`db-is-authority`). Verifiable: UPDATE ContainerComplianceRules; next RecomputeFor call observes the new values without restart.
 C4. Vertical has zero dependency on `Features/Compliance/`. Verifiable: `grep -r 'Features.Compliance' Features/ContainerFormat/` returns 0.
 C5. Failure-loudly: if `ContainerComplianceRules` table has no rows, `_LoadRules` raises `RuntimeError`. Verifiable: empty the table; RecomputeFor raises immediately.

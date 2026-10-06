@@ -405,6 +405,22 @@ Bottom line: fewer expensive full re-encodes, more cheap Remux + AudioFix operat
 
 ---
 
+### 2026-10-06 -- A library's default tier decides its video bucket (TV = Tier 1)
+
+Question: What decides whether a TV file needs Transcode?
+
+Answer: **The TV library's default tier, nothing about the individual file's profile or codec.** The rule table is `transcode.flow.md` D4; this entry records the decisions behind it.
+
+- TV transcodes at Tier 1. That is the library's default, stored as one operator-editable value on the library.
+- Video is non-compliant when source kbps exceeds the bitrate that tier actually encodes the file at, times the per-resolution multiplier. Tier 1 outputs 720p, so 720p / 1080p / 2160p sources are all judged against the Tier 1 720p bitrate.
+- Source codec is not a signal. An AV1 source above the ceiling is re-encoded.
+- A per-series profile changes what that series is encoded at. It never changes the bucket.
+- Our own finished output is never judged on video again, including by the pre-replace check.
+- Supersedes for TV: the 2026-07-26 multiplier table's "Tier 1 target" numbers (ceilings now come from live ladder cells) and the 2026-08-14 same-codec pass.
+- Movies and XXX are undecided: Movies tiers vary by taste (romantic comedy Tier 1, action Tier 2-3). Until decided they keep the assigned-profile rule with the same-codec pass.
+
+---
+
 ## Resolved Domain Questions (2026-07-26)
 
 Answered during `video-compliance-multiplier` directive planning.

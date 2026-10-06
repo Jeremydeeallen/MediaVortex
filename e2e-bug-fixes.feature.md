@@ -91,18 +91,16 @@ Verification: (a) requeue an AudioFix on larry -> `SELECT AttemptDate FROM Trans
 
 ### Group S -- MediaVortex-output compliance exemption (added 2026-07-21)
 
-C31. `VideoVertical.Evaluate` returns `(True, 'mediavortex_output_accepted')` as its first check when `Mf.TranscodedByMediaVortex` is True. Every subsequent video-side rule (codec allowlist, bpp threshold, resolution-exceeds, bitrate-ceiling) is skipped for MV outputs. `AudioVertical` and `ContainerVertical` still run so audio-only or container-only issues route through `AudioFix` / `Remux` as normal.
+C31. MediaVortex's own finished output is never re-queued for video. The terminal rule lives in the `WorkBucket` column, not in the video vertical: see `transcode.flow.md` D4 row 1 + D7.
 
 Domain decision (operator 2026-07-21): a MediaVortex-produced `-mv.mp4` file's original source is gone (deleted at first successful replacement). The current file IS the output MediaVortex intended. Re-transcoding an already-compressed AV1 file at any different profile produces generation-loss without quality recovery -- we cannot recover pixel information already quantized away. If operator wants better quality on already-transcoded shows, the correct path is Sonarr re-download (fresh original) + first-time transcode from that source. Compliance-driven bpp / bitrate-ceiling re-queue on MV outputs is domain-wrong.
 
 Files touched:
 
-- `Features/VideoEncoding/VideoVertical.py` -- `Evaluate` short-circuits on `TranscodedByMediaVortex=TRUE` before any other check.
 - `Features/VideoEncoding/video-encoding.feature.md` -- adds C6 documenting the domain rule.
 - `Scripts/SQLScripts/RecomputeVideoComplianceForMvOutputs_2026_07_21.py` -- one-off migration that calls `VideoVertical.RecomputeFor` for every existing `TranscodedByMediaVortex=TRUE` MediaFile so their `VideoCompliant`/`WorkBucket` flip from the stale non-compliant state to the new exempt state.
-- `Tests/Contract/TestVideoVerticalMvOutputExempt.py` -- asserts `Evaluate` returns `(True, 'mediavortex_output_accepted')` for any TranscodedByMediaVortex=TRUE MediaFile regardless of codec/bpp/bitrate/resolution values.
 
-Verification: (a) `SELECT COUNT(*) FROM MediaFiles WHERE TranscodedByMediaVortex=TRUE AND VideoCompliant=FALSE AND VideoCompliantReason NOT LIKE 'mediavortex_output_accepted%'` returns 0 after migration. (b) `SELECT COUNT(*) FROM MediaFiles WHERE TranscodedByMediaVortex=TRUE AND WorkBucket='Transcode'` returns 0 after compliance recomputer runs. (c) An MV output with a legitimate audio-only issue still routes to `WorkBucket='AudioFix'` (video short-circuit does not block Audio evaluation).
+Verification: (a) `SELECT COUNT(*) FROM MediaFiles WHERE TranscodedByMediaVortex=TRUE AND WorkBucket='Transcode'` returns 0 after compliance recomputer runs. (c) An MV output with a legitimate audio-only issue still routes to `WorkBucket='AudioFix'` (video short-circuit does not block Audio evaluation).
 
 ### Group R -- Success semantic tightened + no self-heal + no retry (added 2026-07-21)
 

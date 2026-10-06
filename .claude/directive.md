@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-06
-**Status:** Active -- phase: VERIFYING
+**Status:** Active -- phase: DELIVERING
 **Slug:** tv-video-rule-tier1
 **Replaces:** `directives/closed/2026-10-06-bug-0095-failure-classification.md` (closed Success)
 
@@ -109,10 +109,27 @@ Seams added or changed (existing `transcode.S*` untouched):
 
 ### Promotions
 
+| Source artifact | Target file |
+|---|---|
+| Bucket + per-dimension rule tables; terminal wording; ST2/ST4/ST9 legacy-column text | `transcode.flow.md` D4, D7, ST2, ST4, ST9 |
+| Video rule, reason format, library tier GUI | `Features/VideoEncoding/video-encoding.feature.md` C1, C2, C4 |
+| Library default tier beats rules | `Features/ContentClassifier/classifier.feature.md` C9; `ingest.flow.md` ST5 |
+| Gate is pass/fail, no video, no bucket | `Features/FileReplacement/compliance-gated-rename.feature.md` C1, C5, S2 |
+| Container rule is container only | `Features/ContainerFormat/container-format.feature.md` C2 |
+| Vertical inputs pointer | `Features/WorkBucket/work-bucket.feature.md` C8 |
+| Terminal rule location | `e2e-bug-fixes.feature.md` C31 |
+| Operator decisions | `DOMAIN.md` 2026-10-06 entry |
+| BUG-0106 fact update | `memory/KNOWN-ISSUES.md` |
+
 ### Verification
 
 - **1:** migration applied twice 2026-10-06; `media_tv=1, movies=NULL, xxx=NULL`.
-- **2, 3, 9 (data half):** pending fleet deploy -> `RetireTvPinRule` -> TV recompute. Live tests `TestTvVideoRuleTier1Live` (2) + `TestTvPinTier1Classification` (2) fail until then, by design.
+- **Deploy:** fleet on `0e325627` 2026-10-06, 9 workers OK, exit 0. dot-3/4 + wakko-3/4 still heartbeat old code but have every capability off.
+- **2, 3, 4, 9:** after `RetireTvPinRule` (1 rule row deleted, 302 unprofiled TV files assigned) + TV recompute (47,537 rows): `TestTvVideoRuleTier1` 9/9, `TestTvPinTier1Classification` 4/4. TV reasons: 47,058 at-or-below, 208 above, 251 `non_video_scope`, 20 `missing_input` (no probe data); all carry `tier=1`.
+- **TV buckets before -> after:** Transcode 34 -> 44, Remux 26 -> 56, AudioFix 2927 -> 3199, Compliant 43955 -> 43952, Unclassified 595 -> 286.
+- **5:** Movies + XXX `(VideoCompliant, Reason, WorkBucket, AssignedProfile)` snapshot, 7,587 rows, before vs after: 0 changed.
+- **6:** `PUT /api/SystemSettings/LibraryTiers {1, 1}` on running I9 WebService -> 200; cascade thread observed writing per-file evaluations (Logs, 15:02 UTC). Completion line `Library tier recompute complete` not yet seen at commit time.
+- **7, 10:** `TestComplianceGatePassFailOnly` 4/4.
 - **Logic:** 60 contract tests pass (`TestTvVideoRuleTier1`, `TestComplianceGatePassFailOnly`, `TestVerticalsAreProfileIndependent`, `TestVideoVerticalCodecMatch`, `TestVideoComplianceMultiplier`, `TestClaimAuthority`, `TestWriterOwnsCascadeEnforcement`, `TestClassifierCascade`, 2 of 4 `TestTvPinTier1Classification`).
 - **6 (partial):** I9 WebService restarted on `32f24fb9`; `GET /api/SystemSettings/LibraryTiers` returns the three libraries; PUT rejects tier 9 (400) and unknown library (404); `/settings` renders the section. Successful PUT + cascade not yet exercised -- it is the TV recompute, held for after fleet deploy.
 - **Read-only evaluation on live rows:** TV AV1 1080p 2086 kbps (Id 616542) -> `source_above_ceiling:2086>2000(tier=1:1000*2.0)` (stored: codec-match compliant). TV unprofiled (Id 700831) -> decided (stored: Unclassified). Movie + XXX samples -> old path, reasons carry `profile=`.

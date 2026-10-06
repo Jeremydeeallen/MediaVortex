@@ -15,7 +15,7 @@ Before promoting a transcoded `.inprogress` file to its final `-mv.<ext>` name, 
 
 ## Success Criteria
 
-C1. `ComplianceGate.Evaluate(LocalStagedPath, SourceMediaFileId, FFmpegCommand)` returns `{'Compliant': True, 'RefusalReason': None}` only when the cascade returns `IsCompliant=True AND RecommendedMode=None`. Verifiable: contract test seeds a known-compliant + a known-noncompliant candidate and asserts the gate matches.
+C1. `ComplianceGate.Evaluate(LocalStagedPath, SourceMediaFileId, FFmpegCommand)` returns `{'Compliant': True, 'RefusalReason': None}` only when the candidate check returns `IsCompliant=True`. Verifiable: contract test seeds a known-compliant + a known-noncompliant candidate and asserts the gate matches.
 
 C2. On refusal, the caller deletes the `.inprogress` and invokes `ComplianceFailureRecorder.Record(attemptId, cascadeReason)`, which UPDATEs `TranscodeAttempts.Disposition='NoReplace'`, `DispositionReason='ComplianceGateFailed'`, `ErrorMessage='ComplianceGateFailed: <reason>'`. Verifiable: force a gate refusal; assert the three column values + the absence of `.inprogress` on disk.
 
@@ -23,7 +23,7 @@ C3. The source MediaFile is untouched on refusal. Verifiable: SELECT the source 
 
 C4. The gate fails closed: any internal exception returns `{'Compliant': False, 'RefusalReason': 'gate_evaluation_error'}`. Verifiable: induce an exception inside `Evaluate` (e.g., DB unreachable); assert refusal, no rename, no source mutation.
 
-C5. The gate uses the same predicate the cascade uses to decide compliance of existing files. There is no separate gate-only logic. Verifiable: `grep -rn "EvaluateCandidateCompliance" --include="*.py"` shows `ComplianceGate.Evaluate` calling it directly; no parallel cascade implementation exists.
+C5. The gate asks the Container and Audio verticals the same question they answer for existing files, and refuses with the failing vertical's own reason. It does not judge video (a finished encode is terminal, `transcode.flow.md` D7) and does not name a bucket -- the bucket is derived only by the `WorkBucket` column. Verifiable: `Tests/Contract/TestComplianceGatePassFailOnly.py`.
 
 C6. Loudnorm-just-ran exemption: when the FFmpeg command emitted for this attempt contains the loudnorm filter, `AudioComplete` is forced True in the candidate row before evaluation. Verifiable: contract test runs the gate on a freshly-loudnormed encode whose source has `AudioComplete=False`; asserts pass.
 
@@ -32,7 +32,7 @@ C6. Loudnorm-just-ran exemption: when the FFmpeg command emitted for this attemp
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
 |---|---|---|---|---|---|
 | S1 | `TranscodedOutputPlacement.Execute -> ComplianceGate.Evaluate` | `_ProcessCompleteFileReplacement` (worker post-encode chain) | `(LocalStagedPath: str, SourceMediaFileId: int, FFmpegCommand: Optional[str])` | `{'Compliant': bool, 'RefusalReason': Optional[str]}` | `Tests/Contract/TestComplianceGate.py` (to be created) |
-| S2 | `ComplianceGate.Evaluate -> QueueManagementBusinessService.EvaluateCandidateCompliance` | `Evaluate` synthesizes candidate row from probe + source carry-forward + in-flight-attempt Dialog-Boost signal | dict with FilePath, Resolution, Codec, ContainerFormat, AudioCodec, AudioChannels, AssignedProfile, HasExplicitEnglishAudio, AudioLanguages, AudioComplete, AudioCorruptSuspect, HasDialogBoostTrack, SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, SourceIntegratedThresholdLufs. `HasDialogBoostTrack` read from `TranscodeAttempts.DialogBoostEmitted BOOL` for the in-flight (`Success IS NULL`) attempt on `SourceMediaFileId` -- see `dialog-boost-marker-unify` for the canonical column. | `{'IsCompliant': bool, 'RecommendedMode': Optional[str], 'RefusalReason': Optional[str]}` | Cascade unit test in TranscodeQueue suite |
+| S2 | `ComplianceGate.Evaluate -> QueueManagementBusinessService.EvaluateCandidateCompliance` | `Evaluate` synthesizes candidate row from probe + source carry-forward + in-flight-attempt Dialog-Boost signal | dict with FilePath, Resolution, Codec, ContainerFormat, AudioCodec, AudioChannels, AssignedProfile, HasExplicitEnglishAudio, AudioLanguages, AudioComplete, AudioCorruptSuspect, HasDialogBoostTrack, SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, SourceIntegratedThresholdLufs. `HasDialogBoostTrack` read from `TranscodeAttempts.DialogBoostEmitted BOOL` for the in-flight (`Success IS NULL`) attempt on `SourceMediaFileId` -- see `dialog-boost-marker-unify` for the canonical column. | `{'IsCompliant': Optional[bool], 'RefusalReason': Optional[str]}` | Cascade unit test in TranscodeQueue suite |
 | S3 | Refusal -> `ComplianceFailureRecorder.Record` | `Evaluate` returns refusal; caller invokes ComplianceFailureRecorder | `(TranscodeAttemptId: int, CascadeReason: str)` | UPDATE TranscodeAttempts SET Disposition='NoReplace', DispositionReason='ComplianceGateFailed', ErrorMessage=...; TFP cleanup chained via AttemptCleanupService | `Tests/Contract/TestDispositionDispatcher.py` + `Tests/Contract/TestPostTranscodeDisposition.py` |
 
 ## Status

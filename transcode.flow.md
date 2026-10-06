@@ -16,23 +16,27 @@ Single source of truth for Transcode / Remux / Audio pipeline shape. Sibling doc
 
 **D4. `WorkBucket` = generated column from the three compliance flags. This section is the single canonical definition -- every other doc points here; none restate it.**
 
-```
-Incoming File
-     |
-     v
-[Check 1: Video Compliant?] --NO--> Pipeline 1: Transcode --+
-     | YES                                                  |
-     v                                                       |
-[Check 2: Container Compliant?] --NO--> Pipeline 2: Remux ---+
-     | YES                                                    |
-     v                                                        |
-[Check 3: Audio Compliant?] --NO--> Pipeline 3: Audio Dialog Boost
-     | YES                                                     |
-     v                                                         v
-              Fully Compliant File <----------------------------
-```
+Bucket, first matching row wins:
 
-Evaluation order (first failing check owns the bucket): `Transcode` (Video=FALSE) > `Remux` (Container=FALSE, Video=TRUE) > `AudioFix` (Audio=FALSE, Video+Container=TRUE) > `Compliant` (all three TRUE) > `Unclassified` (any input NULL -- undecidable, held out of queue).
+| # | Bucket | A file lands here when |
+|---|---|---|
+| 1 | `Compliant` | It is our own finished output: `TranscodedByMediaVortex` AND `HasDialogBoostTrack` (D7) |
+| 2 | `Unclassified` | Any of the three dimensions below is undecided. Held out of the queue |
+| 3 | `Compliant` | Video, Container and Audio all pass |
+| 4 | `Transcode` | Video fails |
+| 5 | `Remux` | Video passes, Container fails |
+| 6 | `AudioFix` | Video and Container pass, Audio fails (`/Work/Audio`) |
+
+The three dimensions:
+
+| Dimension | Fails when | Undecided when | Operator knobs |
+|---|---|---|---|
+| Video, library with a default tier (TV = Tier 1) | source video kbps > (kbps that tier encodes this resolution at) x (multiplier for this resolution). Assigned profile and source codec play no part | no resolution or bitrate probed; no ladder cell for that tier + resolution; audio-only container | `/settings`: Library default tier, Bitrate ladder, Video compliance multipliers |
+| Video, library with no default tier (Movies, XXX) | source codec differs from the assigned profile's codec AND source kbps > (assigned profile's target for this resolution) x multiplier | no assigned profile; no resolution or bitrate; no target cell; audio-only container | same, plus the file's profile |
+| Container | container not in the acceptable list (mp4/mov/m4v and mkv/matroska/webm are alias groups) | no container probed; audio-only container | `/Admin/Compliance` Container rules |
+| Audio | audio codec not in the acceptable list, OR no Dialog Boost track | audio marked corrupt; no audio stream; loudness never validly measured; no audio policy; every track ungainable; audio-only container | `/Admin/Compliance` Audio rules |
+
+"Kbps that tier encodes at" follows the tier's downscale: Tier 1 outputs 720p for 720p, 1080p and 2160p sources, so all three use the Tier 1 720p cell. A library's default tier also gives its unprofiled files that tier's profile; a per-series profile changes what a series is encoded at, never its bucket.
 
 Minimum-scope, single-pass (see D2): landing in a bucket does not mean ONLY that dimension gets fixed -- it means that dimension is the one that DECIDED the bucket. Every dimension still False gets fixed in the same job, same ffmpeg invocation. A video-noncompliant file with also-noncompliant audio gets Dialog Boost in the SAME `Transcode` pass, not a follow-up `AudioFix` job. `AudioFix` as a bucket only exists for files where Video and Container are ALREADY compliant and Audio is the sole remaining gap.
 
@@ -44,7 +48,7 @@ Executable SSoT (must match this section exactly): `Scripts/SQLScripts/RewriteWo
 
 **D6. Audio emission on any Reencode-slot pass = 2 tracks per kept source language.** Track 0 (default) = Dialog Boost from Demucs vocals-isolation on the source (once per encode). Track 1+ = Original per source stream, LRA-preserved. Details in `Features/AudioNormalization/audio-normalization.feature.md`.
 
-**D7. `TranscodedByMediaVortex = TRUE` is a terminal state.** We do not re-encode our own outputs. To change encoding, re-acquire source via Sonarr/Radarr -> fresh scan -> new MediaFile row without the flag. Generated-column implementation of this short-circuit: see D4.
+**D7. `TranscodedByMediaVortex = TRUE` with a Dialog Boost track is a terminal state.** We do not re-encode our own outputs, and the pre-replace check does not judge video on a finished encode (it passes or refuses on Container + Audio only). To change encoding, re-acquire source via Sonarr/Radarr -> fresh scan -> new MediaFile row without the flag. Generated-column implementation of this short-circuit: see D4.
 
 **D8. Source file deleted after successful `ProcessFileReplacement`** (`Features/FileReplacement/TranscodedOutputPlacement.py:220`). Once transcode succeeds + MediaFiles row updated, the original .mkv/.mp4 is removed from disk. Sonarr/Radarr re-fetch is the only way to restore.
 
@@ -122,16 +126,16 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 - `Features/MediaProbe/MediaProbeController.py` -> `MediaProbeBusinessService.ProbeFile()` -> `_ExecuteProbe()`
 - Runs `ffprobe` on each file
 - Extracts: Resolution, Codec, VideoBitrateKbps, AudioBitrateKbps, DurationMinutes, FrameRate, AudioLanguages, HasExplicitEnglishAudio, SubtitleFormats, ContainerFormat, etc.
-- After successful probe: calls `RecomputeForFiles([MediaFileId])` which populates `PriorityScore`, `AssignedProfile`, `IsCompliant`, and `RecommendedMode` in a single pass (see Stage 3.5).
+- After successful probe: calls `RecomputeForFiles([MediaFileId])` which re-evaluates the three compliance dimensions and `PriorityScore` in a single pass (see Stage 3.5).
 
-**Tables written:** MediaFiles (all metadata columns, FFProbeFailureCount, plus PriorityScore/AssignedProfile/IsCompliant/RecommendedMode via the recompute hook)
+**Tables written:** MediaFiles (all metadata columns, FFProbeFailureCount, plus the per-dimension compliance columns, PriorityScore and AssignedProfile via the recompute hook)
 
 **Safety guards:**
 - FFprobe failure limit: files with 3+ failures are permanently skipped (resettable via ResetFailures endpoint)
 - Sets `HasExplicitEnglishAudio`: NULL (not probed), true (English found), false (confirmed non-English)
 - Recompute failure does NOT roll back the probe -- metadata is always saved.
 
-**Output:** MediaFiles rows with full metadata and computed routing fields. `HasExplicitEnglishAudio` is the critical field for queue safety. `RecommendedMode` determines whether the file enters the Transcode or Remux pipeline.
+**Output:** MediaFiles rows with full metadata and computed routing fields. `HasExplicitEnglishAudio` is the critical field for queue safety. `WorkBucket` (D4) says which pipeline, if any, the file needs.
 
 **Path handling note:** `FFmpegService.ExecuteFFprobe` is handed a worker-native path string (the output of `Path.Resolve(Worker)`); it performs no separator translation. The worker OS owns the separator. `ParentDir` / `Normalize` helpers in `Core/Path/LocalPath.py` delegate to `os.path` and do not rewrite separators across platforms.
 
@@ -154,13 +158,9 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 
 ## Stage 3.5: RECOMPUTE -- Priority, Compliance, and Routing Materialization (`ST4`)
 
-`RecomputeForFiles(MediaFileIds)` writes four legacy cached columns (`AssignedProfile`, `PriorityScore`, `IsCompliant`, `RecommendedMode`) and five new bucket columns (`WorkBucket`, `OperationsNeededCsv`, `ComplianceGateBlocked`, `ComplianceEvaluatedAt`, `HasForcedSubtitles`) on each MediaFile in one bulk UPDATE per batch. The compliance evaluation pipeline is owned by `Features/Compliance/compliance.flow.md` and `Features/Compliance/compliance.feature.md`. Triggers: probe completion, file replacement completion, AssignedProfile change, admin `POST /api/Compliance/Recompute`.
+`RecomputeForFiles(MediaFileIds)` runs the Audio, Video and Container verticals for each file; each writes its own `<Dimension>Compliant` + `<Dimension>CompliantReason`. `WorkBucket` and `IsCompliant` are generated columns over those three (rules: D4). It then writes `AssignedProfile` + `PriorityScore` in one bulk UPDATE per batch. Triggers: probe completion, file replacement completion, AssignedProfile change, library default tier change.
 
-**Output:** Every MediaFiles row carries up-to-date routing fields. Consumers:
-- `NextTranscodeBatch(Drive)` reads `NeedsTranscode` for the TV / Movies "Next Batch" cards on the Transcode pane.
-- `SmartPopulateQueue(Mode='Quick'|'Remux'|'AudioFix')` reads `NeedsQuick` / `RecommendedMode` for the Quick Fix / Remux / AudioFix cards.
-- Activity page compliance widget reads `IsCompliant` for library-wide stats.
-- No consumer recomputes -- all read the materialized columns.
+**Output:** Every MediaFiles row carries an up-to-date bucket. `/Work/<bucket>` pages and queue admission read `WorkBucket`; the Activity compliance widget reads `IsCompliant`. No consumer recomputes.
 
 See `Features/TranscodeQueue/priority-materialization.feature.md` and `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md` for criteria.
 
@@ -449,7 +449,7 @@ Adding a new Strategy verify path is one `Strategy.Verify()` implementation + on
      The `-mv` suffix is the canonical MediaVortex on-disk marker -- structurally distinct from the source filename, defending against same-name collision regressions and giving operators a glance-readable "this was transcoded" signal. See `Features/FileReplacement/transcoded-output-placement.feature.md` C4.
   6. Re-probe new file via FFprobe (worker's local FFprobe path on the worker-resolved path).
   7. Update MediaFiles with new metadata; set ONE of `TranscodedByMediaVortex=True` (Mode='Transcode') or `RemuxedByMediaVortex=True` + `RemuxedByMediaVortexDate=NOW()` (Mode in 'Remux','SubtitleFix','AudioFix','Quick'). `MediaFiles.FilePath` (typed pair) now points at `-mv.<ext>`. **On failure** (unique-key collision on `(StorageRootId, RelativePath)`, re-probe error, or any update error): rollback fires -- non-SameSlot deletes the renamed `-mv.<ext>` orphan; SameSlot renames `target -> staged` then `.replacing.bak -> source` then deletes the staging artifact. Returns `Success=False` with the real update error in `ErrorMessage`; source is bit-identical to its pre-call state. See BUG-0067 + `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4. SameSlot only: on update SUCCESS, `.replacing.bak` is removed.
-  8. **Recompute compliance**: `RecomputeForFiles([MediaFileId])` updates `IsCompliant`, `RecommendedMode`, `PriorityScore`, `AssignedProfile`. Clears `RecommendedMode='Remux'` after a successful remux (container is now MP4, audio is normalized) so the file is not re-queued. If the file still needs work (e.g. remuxed but codec is h264), `RecommendedMode` flips to `'Transcode'`. See `transcode-vs-remux-routing.feature.md` criterion 17. Failure of this recompute does NOT roll back -- the file is on disk correctly and the next scheduled recompute will reconcile.
+  8. **Recompute compliance**: `RecomputeForFiles([MediaFileId])` re-evaluates the three compliance dimensions, `PriorityScore` and `AssignedProfile`; `WorkBucket` follows (D4), so a finished file leaves its work bucket and is not re-queued. Failure of this recompute does NOT roll back -- the file is on disk correctly and the next scheduled recompute will reconcile.
   9. Delete source file from disk (non-SameSlot only; SameSlot has no separate source to delete). `MarkAudioComplete` runs if the FFmpeg command contained loudnorm.
 
 **Requeue path (BUG-0079 fix):**
@@ -483,7 +483,7 @@ MediaFiles.HasExplicitEnglishAudio -- set at PROBE, checked at QUEUE
 MediaFiles.AssignedProfile   -- set at RECOMPUTE (cascade from SeriesProfiles/SystemSettings), read at TRANSCODE
 MediaFiles.PriorityScore     -- set at RECOMPUTE, read by non-claim consumers (SmartPopulate helpers, backfill scripts); NOT consulted on the worker claim path (see queue-priority.feature.md)
 MediaFiles.IsCompliant       -- set at RECOMPUTE, checked at QUEUE (compliant files blocked)
-MediaFiles.RecommendedMode   -- set at RECOMPUTE, read by SmartPopulate to route Transcode vs Remux
+MediaFiles.WorkBucket        -- generated from the three compliance columns (D4); read by /Work pages + admission
 MediaFiles.TranscodedByMediaVortex -- set at REPLACE, checked at QUEUE
 
 TranscodeQueue.Status        -- Pending -> Running -> Completed/Failed
@@ -722,7 +722,7 @@ Per-step detail of Stage 8 ACTION above (Replace path). Step IDs match the Stage
 | 7.5 | Verify target | `LocalGetSize(target)` | -- | Logs WARN if zero bytes. |
 | 7.6 | Re-probe + update MediaFiles | `_UpdateMediaFilesAfterReplacement(Mode=...)` -- FFprobe the new file, write all metadata columns. Sets ONE flag: `TranscodedByMediaVortex=True` (Mode='Transcode') or `RemuxedByMediaVortex=True` + `RemuxedByMediaVortexDate=NOW()` (Mode in 'Remux','SubtitleFix','AudioFix','Quick'). Mode comes from `TranscodeAttempts.ProfileName`. See `Features/FileReplacement/remuxed-flag.feature.md`. | `UPDATE MediaFiles SET StorageRootId=..., RelativePath=..., FileName=..., Resolution=..., Codec=..., SizeMB=..., <one of Transcoded/RemuxedByMediaVortex>=TRUE, LastScannedDate=NOW(), NeedsReprobe=FALSE WHERE Id = %s` | MediaFiles reflects the new file with the right flag for the mode. **On failure**: rollback fires (BUG-0067 -- non-SameSlot deletes the renamed `-mv.<ext>` orphan; SameSlot renames target back to staged, then `.replacing.bak` back to source, then deletes staging artifact). Returns `Success=False` with the real error in `ErrorMessage`. See `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4. |
 | 7.7 | Remove SameSlot backup | (only when SameSlot AND step 7.6 succeeded) | -- | `os.remove(source + '.replacing.bak')`. Deferred from step 7.4 so rollback in 7.6 has a valid backup. |
-| 7.8 | Recompute compliance | `QueueManagementBusinessService().RecomputeForFiles([MediaFileId])` | `UPDATE MediaFiles SET IsCompliant=..., RecommendedMode=..., PriorityScore=..., AssignedProfile=... WHERE Id = %s` | Clears `RecommendedMode='Remux'` after successful remux, flips to `'Transcode'` if more work needed. Failure here does NOT roll back -- file is on disk correctly. |
+| 7.8 | Recompute compliance | `QueueManagementBusinessService().RecomputeForFiles([MediaFileId])` | per-vertical `UPDATE MediaFiles SET <Dimension>Compliant=..., <Dimension>CompliantReason=...` then `SET AssignedProfile=..., PriorityScore=...` | `WorkBucket` regenerates (D4). Failure here does NOT roll back -- file is on disk correctly. |
 | 7.9 | Delete source (non-SameSlot only) | `os.remove(LocalOriginalPath)` | -- | SameSlot: no separate source to delete (source path equals target path). |
 | 7.10 | Mark attempt replaced | | `UPDATE TranscodeAttempts SET FileReplaced=TRUE, FileReplacedDate=NOW() WHERE Id = %s` | -- |
 | 7.11 | Cleanup TFP + notify Jellyfin | `PostTranscodeDispositionService.CleanupTemporaryFilePaths(TranscodeAttemptId)` (BUG-0010 chokepoint), `Services/JellyfinNotifyService.NotifyJellyfin([{Path, UpdateType='Modified'}])` | `DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s` | TFP cleared at the disposition chokepoint (one DELETE point, not per-feature). Jellyfin notify posts to `/Library/Media/Updated`; failure is non-fatal (WARNING + continue). Unconditional -- if FileReplacement moved the file, the notify fires. See `jellyfin-push-notify.feature.md`. |

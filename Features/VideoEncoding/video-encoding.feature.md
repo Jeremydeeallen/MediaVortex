@@ -4,7 +4,7 @@
 
 ## What It Does
 
-Answers one question per MediaFile: is the video stream compliant (source bitrate at or below the per-resolution multiplier over Tier 1 target)? Writes `(VideoCompliant, VideoCompliantReason)`. One of three per-domain compliance verticals (Audio / Video / Container). Codec is orthogonal -- not a compliance signal. Compact-source classification IS the gate; there is no separate admission-time exclusion (see DOMAIN.md 2026-07-26).
+Answers one question per MediaFile: is the video stream compliant? Writes `(VideoCompliant, VideoCompliantReason)`. One of three per-domain compliance verticals (Audio / Video / Container). The rule itself lives in `transcode.flow.md` D4. Compact-source classification IS the gate; there is no separate admission-time exclusion.
 
 ## Workflows
 
@@ -16,13 +16,13 @@ Answers one question per MediaFile: is the video stream compliant (source bitrat
 
 ## Success Criteria
 
-C1. `VideoVertical.Evaluate` runs two predicates in order: (a) if `LOWER(Mf.Codec) == LOWER(Profiles.Codec for AssignedProfile)`, returns `(True, 'source_codec_matches_target:<codec>(profile=<name>)')` -- codec-match short-circuit, no re-encode when source is already the target codec (kills AV1->AV1 second-generation compounding). Target codec from `TierLadderRepository.GetProfileCodec(ProfileName)`. (b) Otherwise, returns non-compliant iff `SourceKbps > AssignedProfile.TargetKbps * Multiplier(ResolutionCategory)`. Reason strings: `source_at_or_below_ceiling:<src><=<ceiling>(profile=<name>:<target>*<mult>)` or `source_above_ceiling:<src>><ceiling>(profile=<name>:<target>*<mult>)`. Target kbps from `TierLadderRepository.GetProfileTarget(ProfileName, ContentClass, Resolution)`. Multiplier from `VideoComplianceThresholdsRepository.GetMultiplier(ResolutionCategory)`.
+C1. The video rule is stated once, in `transcode.flow.md` D4 (Video rows). A library with a default tier judges source kbps against the kbps that tier encodes the file's resolution at, times the resolution multiplier; the stored reason names source kbps, ceiling, tier, tier kbps and multiplier (`source_above_ceiling:2086>2000(tier=1:1000*2.0)`). A library with no default tier judges against the file's assigned profile, with a same-codec pass first; its reason names the profile. Verifiable: `Tests/Contract/TestTvVideoRuleTier1.py`, `TestVideoVerticalCodecMatch.py`, `TestVideoComplianceMultiplier.py`.
 
-C2. Codec is not a compliance input. `MediaFiles.Codec` value never influences `VideoCompliant`. Legacy `VideoComplianceRules` table + `acceptablevideocodecscsv` column dropped.
+C2. In a library with a default tier, neither the file's codec nor its assigned profile influences `VideoCompliant`. Verifiable: `SELECT COUNT(*) FROM MediaFiles mf JOIN StorageRoots sr ON sr.Id = mf.StorageRootId WHERE sr.DefaultQualityTier IS NOT NULL AND position('(profile=' in mf.VideoCompliantReason) > 0` returns 0.
 
 C3. `VideoComplianceThresholds(ResolutionCategory UNIQUE, Multiplier NUMERIC(4,2) CHECK>0, LastUpdated)` seeded with `(480p, 1.5), (720p, 2.0), (1080p, 2.0), (2160p, 3.0)`. Every read fresh per `Evaluate` call (`db-is-authority` -- no `__init__` cache).
 
-C4. Operator tunes multipliers via `/settings` GUI. GET `/api/SystemSettings/Transcoding` returns `VideoCompliance: [{ResolutionCategory, Multiplier}, ...]`. PUT persists via `VideoComplianceThresholdsRepository.UpsertAll`. No SQL required.
+C4. Operator tunes multipliers via `/settings` GUI. GET `/api/SystemSettings/Transcoding` returns `VideoCompliance: [{ResolutionCategory, Multiplier}, ...]`. PUT persists via `VideoComplianceThresholdsRepository.UpsertAll`. No SQL required. Each library's default tier (`StorageRoots.DefaultQualityTier`, 1-5 or unset) is viewed and saved on the same card via GET/PUT `/api/SystemSettings/LibraryTiers`; a save re-evaluates every file in that library and the new value is read by the next evaluation without restart.
 
 C5. Fail-loud on ALL missing decision inputs. Missing multiplier row for a MediaFile's ResolutionCategory -> `RuntimeError`; missing MediaFileId -> `ValueError`; no try/except. Missing ResolutionCategory / VideoBitrateKbps / AssignedProfile / Family / Tier1TargetKbps -> `(None, 'missing_input:<field>')`. The aggregator routes any file with `None` from any vertical to `WorkBucket=NULL` (Unclassified). This surfaces probe-not-yet-run / probe-column-null files as Unclassified rather than hiding them in Compliant. Reason: silent `(True, None)` on missing inputs caused Heroes S2 files at 12-14 Mbps to land in Remux because AssignedProfile-derived Family lookup returned None -> compliant-by-default.
 
@@ -65,7 +65,7 @@ C7. Audio-only container files are out of video-compliance scope. `VideoVertical
 ### What is EXPLICITLY NOT a contract
 
 - `_PIXEL_COUNTS` map + `_ASSUMED_FPS=24` (future: probe real fps when available)
-- The format of `VideoCompliantReason` strings (today: `codec:<name>`, `source_at_or_below_target:<src><=<target>`, `source_above_target:<src>><target>`, `mediavortex_output_accepted`)
+- The format of `VideoCompliantReason` strings (today: `source_at_or_below_ceiling:...`, `source_above_ceiling:...`, `source_codec_matches_target:...`, `missing_input:<field>`, `non_video_scope`)
 
 ## Status
 
