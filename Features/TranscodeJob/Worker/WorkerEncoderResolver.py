@@ -30,7 +30,7 @@ QSV_OVERRIDES: Dict[str, Any] = {
     'UseNvidiaHardware': 0,
     'UseIntelHardware': 1,
     'Preset': 1,
-    'RateControlMode': 'icq',
+    'RateControlMode': 'vbr',
     'PixelFormat': 'p010le',
     'AudioCodec': 'libopus',
     'AudioBitrateKbps': 192,

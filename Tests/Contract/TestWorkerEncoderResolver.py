@@ -104,10 +104,10 @@ def test_nvenc_overrides_carries_preset_tune_multipass_rc():
     assert NVENC_OVERRIDES['TemporalAq'] == 1
 
 
-# directive: transcode-flow-canonical
-def test_qsv_overrides_carries_preset_and_icq_rc():
+# directive: label-decides-command | # see transcode.ST6
+def test_qsv_overrides_carries_preset_and_bitrate_rc():
     assert QSV_OVERRIDES['Preset'] == 1
-    assert QSV_OVERRIDES['RateControlMode'] == 'icq'
+    assert QSV_OVERRIDES['RateControlMode'] == NVENC_OVERRIDES['RateControlMode'] == 'vbr'
 
 
 # directive: transcode-flow-canonical

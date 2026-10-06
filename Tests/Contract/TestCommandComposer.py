@@ -122,6 +122,17 @@ class TestVideoSlot(unittest.TestCase):
                 [], None, None,
             )
 
+    # directive: label-decides-command | # see transcode.ST6
+    def test_reencode_qsv_as_resolved_for_a_qsv_worker_emits_the_tier_bitrate(self):
+        from Features.TranscodeJob.Worker.WorkerEncoderResolver import QSV_OVERRIDES
+        Settings = dict(QSV_OVERRIDES, TargetKbps=1000)
+        Argv = VideoSlot().Emit('Reencode', _MediaFile(), Settings, [], None, None)
+        self.assertIn('av1_qsv', Argv)
+        self.assertEqual(Argv[Argv.index('-b:v') + 1], '1000k')
+        self.assertEqual(Argv[Argv.index('-maxrate:v') + 1], '2000k')
+        self.assertNotIn('-global_quality:v', Argv)
+
+    # directive: label-decides-command | # see transcode.ST6
     def test_reencode_qsv_icq_emits_global_quality(self):
         Argv = VideoSlot().Emit(
             'Reencode', _MediaFile(),
