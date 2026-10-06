@@ -1,17 +1,14 @@
 import os
 import threading
-from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker
 from Core.WorkerContext import WorkerContext
 from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalExists, LocalJoin, LocalSplitExt
 from Features.AudioNormalization.Services import AudioPreEncodeFacade
-from Features.AudioNormalization.Services.DemucsDaemonClient import DemucsDaemonUnavailableError
 from Features.ServiceControl.JobPhase import JobPhase
 from Features.TranscodeJob.Emit.OutputFilenameBuilder import OutputFilenameBuilder
 from Features.TranscodeJob.Emit.Plan import PlanFactory
 from Features.TranscodeJob.Worker.JobResult import JobResult
-from Features.TranscodeJob.Worker import PartialCompletion
 
 # directive: transcode-worker-unification | # see worker-loop.C2
 class JobProcessor:
@@ -82,57 +79,35 @@ class JobProcessor:
             TargetLocalPath = LocalJoin(LocalDirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
 
             self.QueueService.DatabaseManager.SetJobPhase(ActiveJobId, JobPhase.PreEncode)
-            # directive: bug-0093-preencode-fail-loud-via-d13 -- pre-encode Demucs failure routes via transcode.D13 partial-completion (AudioSlot=Copy fallback + AudioFix follow-up) instead of silent Track-0-only degrade.
-            PreEncodeError = None
-            try:
-                PreAudio = self._RunPreEncodeAudio(MediaFile, EffectiveInputPath, Job, TranscodeAttemptId)
-            except (DemucsDaemonUnavailableError, RuntimeError) as PreEx:
-                PreAudio = None
-                PreEncodeError = f"{type(PreEx).__name__}: {str(PreEx)[:500]}"
-                LoggingService.LogException(
-                    f"Pre-encode Demucs failure for job {Job.Id}; routing to D13 AudioSlot=Copy fallback",
-                    PreEx, "JobProcessor", "Process",
-                )
-                PartialCompletion.LogPreEncodeFallback(MediaFile.Id, PreEncodeError)
+            PreAudio = self._RunPreEncodeAudio(MediaFile, EffectiveInputPath, Job, TranscodeAttemptId)
             AudioPreEncodeFacade.PersistSourceLoudness(MediaFile.Id, MediaFile, PreAudio)
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, f"Building {Mode} command...")
             # directive: ffmpeg-stderr-deadlock -- FfmpegLogLevel is required by CommandComposer for every ProcessingMode (Remux/Quick/AudioFix/SubtitleFix); read fresh per invocation.
             FfmpegLogLevel = self.QueueService.SystemSettingsRepository.GetSystemSetting('FfmpegLogLevel')
             if FfmpegLogLevel is None:
                 raise ValueError("FfmpegLogLevel setting missing from SystemSettings. Run Scripts/SQLScripts/AddFfmpegLogLevelSetting_2026_08_05.py")
-            CopiedSlot = None
-            # directive: bug-0093-preencode-fail-loud-via-d13 -- pre-encode Demucs failure builds directly with AudioSlot=Copy Plan override; skips normal BuildCommand + skips the sniff-based _TryPartialFallback loop. Single ffmpeg invocation; on failure attempt lands Success=FALSE (both slots-Copy would defeat transcode purpose).
-            if PreEncodeError is not None:
-                FallbackPlan = PlanFactory().FromComplianceState(MediaFile).WithSlotForcedToCopy('AudioSlot')
-                CommandResult = self._BuildFallbackCommand(Job, MediaFile, Strategy, TranscodeAttemptId, PreAudio, FallbackPlan)
-                if CommandResult is None:
-                    self.QueueService.HandleJobFailure(Job, f"{Mode} failed to build AudioSlot=Copy fallback after pre-encode Demucs failure: {PreEncodeError}", TranscodeAttemptId, ActiveJobId)
-                    return JobResult(Success=False, ErrorMessage=f"Pre-encode fallback BuildCommand returned None: {PreEncodeError}")
-                CopiedSlot = 'AudioSlot'
-                PartialCompletion.LogFallbackAttempt(MediaFile.Id, 1, 'AudioSlot')
-            else:
-                CommandResult = Strategy.BuildCommand(
-                    Job, MediaFile,
-                    Context={
-                        'QueueService': self.QueueService,
-                        'InputPath': EffectiveInputPath,
-                        'OutputPath': TargetLocalPath,
-                        'FFmpegPath': self.QueueService.FFmpegPath,
-                        'FFprobePath': self.QueueService.FFprobePath,
-                        'FfmpegLogLevel': FfmpegLogLevel,
-                        'OutputDirectory': LocalDirname(EffectiveInputPath),
-                        'TranscodeAttemptId': TranscodeAttemptId,
-                        'DemucsPremixPath': (PreAudio or {}).get('DemucsPremixPath'),
-                        'VocalsRmsDbfs': (PreAudio or {}).get('VocalsRmsDbfs'),
-                        'PremixMeasuredI': (PreAudio or {}).get('PremixMeasuredI'),
-                        'PremixMeasuredLra': (PreAudio or {}).get('PremixMeasuredLra'),
-                        'PremixMeasuredTp': (PreAudio or {}).get('PremixMeasuredTp'),
-                        'PremixMeasuredThresh': (PreAudio or {}).get('PremixMeasuredThresh'),
-                    },
-                )
-                if not CommandResult:
-                    self.QueueService.HandleJobFailure(Job, f"Failed to build {Mode} command", TranscodeAttemptId, ActiveJobId)
-                    return JobResult(Success=False, ErrorMessage="Command build failed")
+            CommandResult = Strategy.BuildCommand(
+                Job, MediaFile,
+                Context={
+                    'QueueService': self.QueueService,
+                    'InputPath': EffectiveInputPath,
+                    'OutputPath': TargetLocalPath,
+                    'FFmpegPath': self.QueueService.FFmpegPath,
+                    'FFprobePath': self.QueueService.FFprobePath,
+                    'FfmpegLogLevel': FfmpegLogLevel,
+                    'OutputDirectory': LocalDirname(EffectiveInputPath),
+                    'TranscodeAttemptId': TranscodeAttemptId,
+                    'DemucsPremixPath': (PreAudio or {}).get('DemucsPremixPath'),
+                    'VocalsRmsDbfs': (PreAudio or {}).get('VocalsRmsDbfs'),
+                    'PremixMeasuredI': (PreAudio or {}).get('PremixMeasuredI'),
+                    'PremixMeasuredLra': (PreAudio or {}).get('PremixMeasuredLra'),
+                    'PremixMeasuredTp': (PreAudio or {}).get('PremixMeasuredTp'),
+                    'PremixMeasuredThresh': (PreAudio or {}).get('PremixMeasuredThresh'),
+                },
+            )
+            if not CommandResult:
+                self.QueueService.HandleJobFailure(Job, f"Failed to build {Mode} command", TranscodeAttemptId, ActiveJobId)
+                return JobResult(Success=False, ErrorMessage="Command build failed")
 
             SrcId, SrcRel, OutId, OutRel = self.QueueService._ResolveTfpPathParts(Job, CommandResult.OutputPath)
             TemporaryFilePathId = self.QueueService.PrivateCreateTemporaryFilePathRecord(
@@ -149,26 +124,9 @@ class JobProcessor:
                 Job, CommandResult.Command, TranscodeAttemptId, MediaFile, ActiveJobId
             )
             if not TranscodeResult.get("Success", False):
-                if PreEncodeError is not None:
-                    # directive: bug-0093-preencode-fail-loud-via-d13 -- AudioSlot=Copy fallback ffmpeg failed too; no second fallback (both-Copy defeats transcode). Attempt fails.
-                    self.QueueService._DeleteInProgressFile(CommandResult.OutputPath)
-                    ErrText = TranscodeResult.get('ErrorMessage', 'Unknown error')
-                    PartialCompletion.LogBothFallbacksFailed(MediaFile.Id, PreEncodeError, ErrText, '')
-                    self.QueueService.HandleJobFailure(Job, f"{Mode} failed after pre-encode Demucs failure + AudioSlot=Copy ffmpeg failure: pre_encode={PreEncodeError}; ffmpeg={ErrText}", TranscodeAttemptId, ActiveJobId)
-                    return JobResult(Success=False, ErrorMessage=f"Pre-encode + fallback both failed: {PreEncodeError}")
-                # directive: partial-pipeline-completion | # see transcode.D13
-                FallbackOutcome = self._TryPartialFallback(
-                    Job, MediaFile, Strategy, TranscodeAttemptId, ActiveJobId,
-                    CommandResult, TranscodeResult, PreAudio,
-                )
-                if FallbackOutcome is None:
-                    self.QueueService._DeleteInProgressFile(CommandResult.OutputPath)
-                    self.QueueService.HandleJobFailure(Job, f"{Mode} failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
-                    return JobResult(Success=False, ErrorMessage="FFmpeg exec failed")
-                CommandResult, TranscodeResult, CopiedSlot = FallbackOutcome
-            elif PreEncodeError is not None:
-                # AudioSlot=Copy fallback ffmpeg succeeded; log per D13 shape.
-                PartialCompletion.LogFallbackSuccess(MediaFile.Id, 1, 'AudioSlot')
+                self.QueueService._DeleteInProgressFile(CommandResult.OutputPath)
+                self.QueueService.HandleJobFailure(Job, f"{Mode} failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
+                return JobResult(Success=False, ErrorMessage="FFmpeg exec failed")
 
             if not self.QueueService._VerifyInProgressFile(CommandResult.OutputPath):
                 self.QueueService._DeleteInProgressFile(CommandResult.OutputPath)
@@ -200,10 +158,6 @@ class JobProcessor:
 
             self.QueueService.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Finalizing...")
             OwnershipTransferred = True
-            if CopiedSlot is not None:
-                # directive: partial-pipeline-completion | # see transcode.D13
-                self._PreCommitPartialDisposition(TranscodeAttemptId, CopiedSlot)
-                self._EnqueuePartialFollowup(Job, MediaFile, TranscodeAttemptId, CopiedSlot)
             Strategy.HandleResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId, FinalOutputPath, QueueService=self.QueueService)
 
             self.QueueService.CleanupOrContinue(Job)
@@ -235,10 +189,10 @@ class JobProcessor:
                 except Exception as _ScratchEx:
                     LoggingService.LogException(f"Local scratch cleanup failed for MediaFileId={getattr(MediaFile, 'Id', None)}", _ScratchEx, "JobProcessor", "Process")
 
-    # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- gate is compliance-driven (AudioSlot decides Reencode vs Copy from AudioCompliant); Demucs skipped for audiocompliant files
+    # directive: label-decides-command | # see transcode.ST6
     def _RunPreEncodeAudio(self, MediaFile, InputPath, Job, TranscodeAttemptId):
-        """Demucs pre-encode via AudioPreEncodeFacade; skipped when AudioSlot will Copy (audiocompliant=TRUE)."""
-        if getattr(MediaFile, 'AudioCompliant', None) is True:
+        """Demucs pre-encode via AudioPreEncodeFacade; runs only for a label whose audio op is Reencode."""
+        if PlanFactory().FromProcessingMode(Job.ProcessingMode).AudioOp != 'Reencode':
             return None
         def Reporter(Phase, Percent, Info):
             try:
@@ -261,99 +215,3 @@ class JobProcessor:
     def _CleanupPreEncodeScratch(self, PreAudio):
         AudioPreEncodeFacade.Cleanup(self.QueueService.FFmpegPath, PreAudio)
 
-    # directive: partial-pipeline-completion | # see transcode.D13
-    def _TryPartialFallback(self, Job, MediaFile, Strategy, TranscodeAttemptId, ActiveJobId,
-                            OriginalCommandResult, OriginalTranscodeResult, PreAudio):
-        """Attempt up to two ordered fallbacks (audio-copy / video-copy). Return (CommandResult, TranscodeResult, CopiedSlot) on success, None on both-fallbacks-fail or when disabled."""
-        if getattr(Job, 'ParentTranscodeAttemptId', None) is not None:
-            PartialCompletion.LogPartialRetryExhausted(
-                MediaFile.Id, Job.ParentTranscodeAttemptId,
-                OriginalTranscodeResult.get('ErrorMessage', ''),
-            )
-            self.QueueService.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
-                'Disposition': 'Reject',
-                'DispositionReason': 'PartialRetryExhausted',
-                'DispositionDecidedAt': datetime.now(timezone.utc),
-            })
-            return None
-
-        OriginalStderr = OriginalTranscodeResult.get('ErrorMessage', '') or ''
-        FirstSide = PartialCompletion.SniffFirstFallback(OriginalStderr)
-        PartialCompletion.LogSniff(MediaFile.Id, OriginalStderr, FirstSide)
-        SecondSide = PartialCompletion.OppositeSlot(FirstSide)
-
-        OriginalPlan = PlanFactory().FromComplianceState(MediaFile)
-        Attempt1Stderr = None
-        for AttemptNumber, Side in enumerate((FirstSide, SecondSide), start=1):
-            self.QueueService._DeleteInProgressFile(OriginalCommandResult.OutputPath)
-            PartialCompletion.LogFallbackAttempt(MediaFile.Id, AttemptNumber, Side)
-            FallbackPlan = OriginalPlan.WithSlotForcedToCopy(Side)
-            FallbackCommand = self._BuildFallbackCommand(Job, MediaFile, Strategy, TranscodeAttemptId, PreAudio, FallbackPlan)
-            if FallbackCommand is None:
-                Attempt1Stderr = "BuildCommand returned None on fallback"
-                continue
-            FallbackResult = self.QueueService.ExecuteTranscoding(
-                Job, FallbackCommand.Command, TranscodeAttemptId, MediaFile, ActiveJobId
-            )
-            if FallbackResult.get('Success', False) and self.QueueService._VerifyInProgressFile(FallbackCommand.OutputPath):
-                PartialCompletion.LogFallbackSuccess(MediaFile.Id, AttemptNumber, Side)
-                return (FallbackCommand, FallbackResult, Side)
-            if AttemptNumber == 1:
-                Attempt1Stderr = FallbackResult.get('ErrorMessage', '')
-
-        PartialCompletion.LogBothFallbacksFailed(
-            MediaFile.Id, OriginalStderr, Attempt1Stderr or '',
-            FallbackResult.get('ErrorMessage', '') if 'FallbackResult' in locals() else '',
-        )
-        return None
-
-    # directive: partial-pipeline-completion | # see transcode.D13
-    def _BuildFallbackCommand(self, Job, MediaFile, Strategy, TranscodeAttemptId, PreAudio, FallbackPlan):
-        """Re-invoke BuildCommand with PlanOverride injected."""
-        LocalSourcePath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker.Current(Db=self.QueueService.DatabaseManager.DatabaseService))
-        BaseName, _ = LocalSplitExt(LocalBasename(LocalSourcePath))
-        BaseName = OutputFilenameBuilder().CollapseMvSuffix(BaseName)
-        TargetLocalPath = LocalJoin(LocalDirname(LocalSourcePath), BaseName + '-mv.mp4.inprogress')
-        FfmpegLogLevel = self.QueueService.SystemSettingsRepository.GetSystemSetting('FfmpegLogLevel') or 'error'
-        return Strategy.BuildCommand(
-            Job, MediaFile,
-            Context={
-                'QueueService': self.QueueService,
-                'InputPath': LocalSourcePath,
-                'OutputPath': TargetLocalPath,
-                'FFmpegPath': self.QueueService.FFmpegPath,
-                'FFprobePath': self.QueueService.FFprobePath,
-                'FfmpegLogLevel': FfmpegLogLevel,
-                'OutputDirectory': LocalDirname(LocalSourcePath),
-                'TranscodeAttemptId': TranscodeAttemptId,
-                'DemucsPremixPath': (PreAudio or {}).get('DemucsPremixPath'),
-                'VocalsRmsDbfs': (PreAudio or {}).get('VocalsRmsDbfs'),
-                'PremixMeasuredI': (PreAudio or {}).get('PremixMeasuredI'),
-                'PremixMeasuredLra': (PreAudio or {}).get('PremixMeasuredLra'),
-                'PremixMeasuredTp': (PreAudio or {}).get('PremixMeasuredTp'),
-                'PremixMeasuredThresh': (PreAudio or {}).get('PremixMeasuredThresh'),
-                'PlanOverride': FallbackPlan,
-            },
-        )
-
-    # directive: partial-pipeline-completion | # see transcode.D13
-    def _PreCommitPartialDisposition(self, TranscodeAttemptId, CopiedSlot):
-        """Write partial-success DispositionReason so DispositionDispatcher's cached-check honors it."""
-        Reason = PartialCompletion.DispositionReasonForCopiedSlot(CopiedSlot)
-        self.QueueService.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
-            'Disposition': 'Replace',
-            'DispositionReason': Reason,
-            'DispositionDecidedAt': datetime.now(timezone.utc),
-        })
-
-    # directive: partial-pipeline-completion | # see transcode.D13
-    def _EnqueuePartialFollowup(self, Job, MediaFile, ParentAttemptId, CopiedSlot):
-        """Enqueue the retry job for the slot that had to be copied."""
-        from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
-        FollowupPlan = PartialCompletion.FollowupPlanForCopiedSlot(CopiedSlot)
-        QueueManagementBusinessService().EnqueuePartialCompletionFollowup(
-            MediaFileId=MediaFile.Id,
-            ProcessingMode=FollowupPlan['ProcessingMode'],
-            AudioSlotOverride=FollowupPlan['AudioSlotOverride'],
-            ParentTranscodeAttemptId=ParentAttemptId,
-        )

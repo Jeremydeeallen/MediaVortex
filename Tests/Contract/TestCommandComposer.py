@@ -65,26 +65,23 @@ def _Context(**Overrides):
     return Ctx
 
 
-# directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- 8-combo coverage lives in TestPlanFactoryFromComplianceState.py; smoke-check the flip here
+# directive: label-decides-command | # see transcode.ST6
 class TestPlanFactory(unittest.TestCase):
 
-    def test_all_noncompliant_plan_is_fully_reencode(self):
-        P = PlanFactory().FromComplianceState(_MediaFile())
-        self.assertEqual(P, Plan(VideoOp='Reencode', AudioOp='Reencode', SubtitleOp='Preserve', ContainerOp='Mp4'))
+    # directive: label-decides-command | # see transcode.ST6
+    def test_label_decides_every_op(self):
+        Expected = {'Transcode': ('Reencode', 'Copy'), 'Remux': ('Copy', 'Copy'), 'AudioFix': ('Copy', 'Reencode')}
+        for Mode, (VideoOp, AudioOp) in Expected.items():
+            self.assertEqual(
+                PlanFactory().FromProcessingMode(Mode),
+                Plan(VideoOp=VideoOp, AudioOp=AudioOp, SubtitleOp='Preserve', ContainerOp='Mp4'),
+            )
 
-    def test_all_compliant_plan_is_fully_copy(self):
-        P = PlanFactory().FromComplianceState(_MediaFile(VideoCompliant=True, AudioCompliant=True, ContainerCompliant=True))
-        self.assertEqual(P, Plan(VideoOp='Copy', AudioOp='Copy', SubtitleOp='Preserve', ContainerOp='Preserve'))
-
-    def test_video_only_transcode_copies_audio(self):
-        P = PlanFactory().FromComplianceState(_MediaFile(VideoCompliant=False, AudioCompliant=True, ContainerCompliant=True))
-        self.assertEqual(P, Plan(VideoOp='Reencode', AudioOp='Copy', SubtitleOp='Preserve', ContainerOp='Preserve'))
-
-    def test_none_compliance_raises_value_error(self):
-        Mf = _MediaFile()
-        Mf.VideoCompliant = None
-        with self.assertRaises(ValueError):
-            PlanFactory().FromComplianceState(Mf)
+    # directive: label-decides-command | # see transcode.ST6
+    def test_unknown_label_raises(self):
+        for Mode in (None, 'Weird'):
+            with self.assertRaises(ValueError):
+                PlanFactory().FromProcessingMode(Mode)
 
 
 # directive: transcode-flow-canonical | # see transcode.ST5
@@ -258,8 +255,8 @@ def _StubAudioSlot():
 # directive: transcode-flow-canonical | # see transcode.ST5
 class TestCommandComposer(unittest.TestCase):
 
-    # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- Mode is a reporting tag; plan is derived from compliance flags on MediaFile
-    def test_all_noncompliant_produces_reencode_argv(self):
+    # directive: label-decides-command | # see transcode.ST6
+    def test_transcode_label_produces_reencode_argv(self):
         Composer = _MakeComposer()
         Spec = Composer.Build(_MediaFile(), _Job('Transcode'), _Context())
         self.assertIsInstance(Spec, CommandSpec)
@@ -267,33 +264,35 @@ class TestCommandComposer(unittest.TestCase):
         self.assertIn('-b:v', Spec.Command)
         self.assertIn('2400k', Spec.Command)
 
-    def test_video_compliant_produces_stream_copy_argv(self):
+    # directive: label-decides-command | # see transcode.ST6
+    def test_copy_video_labels_produce_stream_copy_argv(self):
         Composer = _MakeComposer()
-        Spec = Composer.Build(_MediaFile(VideoCompliant=True), _Job('Transcode'), _Context())
-        self.assertIn('-c:v copy', Spec.Command)
+        for Mode in ('Remux', 'AudioFix'):
+            Spec = Composer.Build(_MediaFile(), _Job(Mode), _Context())
+            self.assertIn('-c:v copy', Spec.Command, Mode)
 
+    # directive: label-decides-command | # see transcode.ST6
+    def test_compliance_flags_do_not_change_the_command_shape(self):
+        Composer = _MakeComposer()
+        Flagged = Composer.Build(_MediaFile(VideoCompliant=True, AudioCompliant=True, ContainerCompliant=True), _Job('Transcode'), _Context())
+        self.assertIn('av1_nvenc', Flagged.Command)
+        self.assertNotIn('-c:v copy', Flagged.Command)
+
+    # directive: label-decides-command | # see transcode.ST6
     def test_container_slot_always_emits_faststart(self):
         Composer = _MakeComposer()
-        Spec1 = Composer.Build(_MediaFile(), _Job('Transcode'), _Context())
-        Spec2 = Composer.Build(_MediaFile(VideoCompliant=True), _Job('Transcode'), _Context())
-        for Spec in (Spec1, Spec2):
+        for Mode in ('Transcode', 'Remux', 'AudioFix'):
+            Spec = Composer.Build(_MediaFile(), _Job(Mode), _Context())
             self.assertIn('-f mp4', Spec.Command)
             self.assertIn('-movflags +faststart', Spec.Command)
 
+    # directive: label-decides-command | # see transcode.ST6
     def test_subtitle_slot_always_fires_mov_text_on_mp4(self):
         Composer = _MakeComposer()
-        Cases = [
-            ('all-noncompliant', {}),
-            ('video-compliant', {'VideoCompliant': True}),
-            ('audio-compliant', {'AudioCompliant': True}),
-            ('container-compliant', {'ContainerCompliant': True}),
-            ('all-compliant', {'VideoCompliant': True, 'AudioCompliant': True, 'ContainerCompliant': True}),
-        ]
-        for Label, Overrides in Cases:
-            Overrides = dict(Overrides, SubtitleFormats='subrip')
-            Spec = Composer.Build(_MediaFile(**Overrides), _Job('Transcode'), _Context())
-            self.assertIn('-map 0:s?', Spec.Command, f"SubtitleSlot missing on {Label}")
-            self.assertIn('-c:s mov_text', Spec.Command, f"mov_text codec missing on {Label}")
+        for Mode in ('Transcode', 'Remux', 'AudioFix'):
+            Spec = Composer.Build(_MediaFile(SubtitleFormats='subrip'), _Job(Mode), _Context())
+            self.assertIn('-map 0:s?', Spec.Command, f"SubtitleSlot missing on {Mode}")
+            self.assertIn('-c:s mov_text', Spec.Command, f"mov_text codec missing on {Mode}")
 
     def test_subtitle_slot_drops_pgs_with_warn_on_mp4(self):
         Composer = _MakeComposer()
@@ -312,16 +311,20 @@ class TestCommandComposer(unittest.TestCase):
         Spec = Composer.Build(_MediaFile(), _Job('Transcode'), Ctx)
         self.assertIn('-ss 00:00:30', Spec.Command)
 
+    # directive: label-decides-command | # see transcode.ST6
     def test_output_path_is_inprogress_side_by_side_for_streamcopy(self):
         Composer = _MakeComposer()
-        Spec = Composer.Build(_MediaFile(VideoCompliant=True), _Job('Transcode'), _Context())
+        Spec = Composer.Build(_MediaFile(), _Job('Remux'), _Context())
         self.assertTrue(Spec.OutputPath.endswith('-mv.mp4.inprogress'))
 
-    # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- audio-compliant file emits -c:a copy; no reencode inputs
-    def test_audio_compliant_emits_stream_copy_no_demucs_input(self):
-        Composer = _MakeComposer(AudioSlotOverride=AudioSlot())
-        Spec = Composer.Build(_MediaFile(VideoCompliant=False, AudioCompliant=True, ContainerCompliant=True), _Job('Transcode'), _Context())
+    # directive: label-decides-command | # see transcode.ST6
+    def test_transcode_label_copies_audio_with_no_demucs_input(self):
+        Rules = MagicMock()
+        Rules.GetRules.return_value = {'AcceptableAudioCodecsCsv': 'aac,ac3,eac3,mp3,opus'}
+        Composer = _MakeComposer(AudioSlotOverride=AudioSlot(RulesRepository=Rules))
+        Spec = Composer.Build(_MediaFile(), _Job('Transcode'), _Context())
         self.assertIn('-c:a copy', Spec.Command)
+        self.assertEqual(Spec.Command.count(' -i '), 1)
 
 
 if __name__ == '__main__':

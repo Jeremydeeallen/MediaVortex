@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from Features.AudioNormalization.AudioFilterEmitter import AudioFilterEmitter
 from Features.AudioNormalization.AudioPolicyResolver import AudioPolicyResolver
 from Features.AudioNormalization.AudioStrategyResult import AudioPolicyUnresolvedError
+from Features.AudioNormalization.Repositories.AudioComplianceRulesRepository import AudioComplianceRulesRepository
 from Features.AudioNormalization.Services.AudioStreamProbe import AudioStreamProbe
 
 
@@ -18,18 +19,28 @@ class AudioEmission:
 class AudioSlot:
 
     # directive: transcode-flow-canonical | # see transcode.ST5
-    def __init__(self, Resolver=None, Emitter=None, StreamProbe=None):
+    def __init__(self, Resolver=None, Emitter=None, StreamProbe=None, RulesRepository=None):
         self.Resolver = Resolver or AudioPolicyResolver()
         self.Emitter = Emitter or AudioFilterEmitter()
         self.StreamProbe = StreamProbe or AudioStreamProbe()
+        self.RulesRepository = RulesRepository or AudioComplianceRulesRepository()
 
-    # directive: transcode-flow-canonical | # see transcode.ST5
+    # directive: label-decides-command | # see transcode.ST6
     def Emit(self, Op: str, MediaFile, Context: Dict[str, Any]) -> AudioEmission:
         if Op == 'Reencode':
             return self._EmitReencode(MediaFile, Context)
         if Op == 'Copy':
-            return AudioEmission(InputArgs=[], StreamArgs=['-map', '0:a?', '-c:a', 'copy'])
+            return AudioEmission(InputArgs=[], StreamArgs=['-map', '0:a?', '-c:a', self._CopyCodec(MediaFile)])
         raise ValueError(f"AudioSlot.Emit: unknown Op={Op!r}")
+
+    # directive: label-decides-command | # see transcode.ST6
+    def _CopyCodec(self, MediaFile) -> str:
+        SourceCodec = (getattr(MediaFile, 'AudioCodec', None) or '').strip().lower()
+        if not SourceCodec:
+            return 'copy'
+        Csv = self.RulesRepository.GetRules()['AcceptableAudioCodecsCsv']
+        Copyable = {C.strip().lower() for C in Csv.split(',') if C.strip()}
+        return 'copy' if SourceCodec in Copyable else 'aac'
 
     # directive: transcode-flow-canonical | # see transcode.ST5
     def _EmitReencode(self, MediaFile, Context: Dict[str, Any]) -> AudioEmission:

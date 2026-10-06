@@ -102,9 +102,8 @@ class CommandComposer:
                 f"reaching CommandComposer means the classifier gate was bypassed."
             )
         try:
-            # directive: partial-pipeline-completion | # see transcode.D13
-            PlanOverride = Context.get('PlanOverride')
-            Plan_ = PlanOverride if PlanOverride is not None else self.PlanFactory.FromComplianceState(MediaFile)
+            # directive: label-decides-command | # see transcode.D2
+            Plan_ = self.PlanFactory.FromProcessingMode(getattr(Job, 'ProcessingMode', None))
             ProfileSettings = Context.get('ProfileSettings', {}) or {}
             CodecParameters = Context.get('CodecParameters', []) or []
             FFmpegPath = Context.get('FFmpegPath')
@@ -147,7 +146,7 @@ class CommandComposer:
             Parts.extend(AudioEmission_.StreamArgs)
             SubtitleFormats = getattr(MediaFile, 'SubtitleFormats', None)
             SubtitleStreams = self._ProbeSubtitleStreams(Context, InputPath)
-            # directive: plan-factory-driven-by-compliance-flags | # see transcode.D2 -- 'Preserve' maps to mp4 target (D5: container target = .mp4 always)
+            # directive: label-decides-command | # see transcode.D5 -- container target = .mp4 always
             Parts.extend(self.SubtitleSlot.Emit('mp4' if Plan_.ContainerOp in ('Mp4', 'Preserve') else Plan_.ContainerOp.lower(), SubtitleFormats, SubtitleStreams))
             Parts.extend(self.ContainerSlot.Emit(Plan_.ContainerOp))
             Parts.extend(self._BuildProvenanceMetadata(MediaFile, Plan_, ProfileSettings))
