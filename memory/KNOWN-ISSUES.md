@@ -511,6 +511,8 @@ Detector fires -> HandleJobFailure marks attempt failed -> re-set queue row to P
 
 **Cost of the workaround:** loses bitrate-distribution optimization from look-ahead. Quality at matched bitrate may drop ~1-2 VMAF vs the look-ahead path. Acceptable until upstream fix.
 
+**Retest 2026-10-06 (wakko, libmfx-gen 26.3.2, libvpl 2.16.0, iHD 26.3.2, ffmpeg n8.1.2):** crash depends on look-ahead DEPTH, not on the knobs as such. Same 4-minute clip (Slow Horses S06E01, 1000k VBR): `-extbrc 1` alone = byte-identical to no knobs; `-extbrc 1 -look_ahead_depth 8` completes (967 kbps, VMAF 81.07 vs 80.81 baseline at 825 kbps); depth 40 still crashes with `Invalid FrameType:0` (hardware or software decode); depth 40 with `-async_depth 1` completes (971 kbps, VMAF 81.09). Soak at depth 8 in the exact shape `VideoSlot` emits (`-extbrc 1 -look_ahead 1 -look_ahead_depth 8`): 4 full-episode encodes, 249,610 frames, 0 crashes, output 924-1028 kbps. `-adaptive_i/-adaptive_b/-b_strategy` have no effect on output. No newer Intel runtime packages offered by apt. Depth 8 is a candidate to re-enable via `ProfileThresholds.QsvExtBrc=1, QsvLookaheadDepth=8` (`/settings` profile knobs); the original report saw crashes as late as frame 8064, so watch failure counts after enabling.
+
 **Upstream path:** report to Intel `kobuk-team/intel-graphics` PPA + ffmpeg-libvpl issue tracker. Revisit when libmfx-gen ships a fix. Test re-enable per `Scripts/Smoke/_qsv_isolate.sh`.
 
 **See also:** `Docs/superpowers/specs/2026-06-29-wakko-arc-b580-onboarding-design.md` Phase H findings.
