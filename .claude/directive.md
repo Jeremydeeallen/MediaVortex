@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-06
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** auto-handoff
 **Replaces:** `directives/closed/2026-10-06-label-decides-command.md` (closed Success)
 
@@ -87,7 +87,22 @@ Seams added or changed:
 
 ### Promotions
 
+| Source artifact | Target file |
+|---|---|
+| Hand-off after placement; never the label that ran | `transcode.flow.md` ST9 step 10 |
+| Scan confirms the diff against the disk before writing (row-18 root cause) | `ingest.flow.md` ST3 |
+| Grace between claim and active-job record; active-jobs read raises | `Features/ServiceControl/stuck-job-detection.flow.md` ST2 |
+
 ### Verification
+
+- **Commits:** `f7bc7a2a` (scan), `7cda41cf` (hand-off, stuck grace). Pushed.
+- **Contract suite, before vs after** (throwaway worktree at `a5311ec0` vs working tree, same command): before 67 failed / 1139 passed / 20 collection errors; after 67 failed / 1151 passed / 20 errors. New failures: 0. New: `TestAutoHandoff` 9/9, `TestScanReplacementRace` 3/3.
+- **Deploy:** fleet on `7cda41cf` 2026-10-06 23:43 UTC, 9 workers OK, exit 0.
+- **2, live:** MediaFile 750873 (Slow Horses S03E04, zero prior attempts), wakko-worker-1. Queued Transcode 23:44:09 (row 224950). Attempt 99373 Transcode: `Success=TRUE`, `FileReplaced=TRUE`, finished 23:46:57; bucket -> AudioFix. Log 23:46:58 `Hand-off: MediaFileId=750873 Transcode -> AudioFix queued (row 224951)`. Attempt 99374 AudioFix claimed 23:46:59 with no operator action: `Success=TRUE`, `DialogBoostEmitted=TRUE`, finished 00:12:20. File `...WEBRip-720p-mv.mp4`, `TranscodedByMediaVortex=TRUE`, `HasDialogBoostTrack=TRUE`, `WorkBucket='Compliant'`, queue empty.
+- **3, live:** after AudioFix placement the bucket was Compliant; nothing queued. Same-label refusal: contract test.
+- **1, live:** row id 750873 unchanged through both replacements, both attempts still linked, one row for the episode. Since deploy: 2 replaced attempts, 0 with `MediaFileId` NULL. Nine scans completed on the new code with no error (one genuine new file inserted on `X:\`). No scan finished inside a replacement window during the test, so the overlap itself is proven by the contract test; the live count needs a few days of traffic to mean much (old rate ~3.5%).
+- **4, 5, 6:** contract tests. Live: neither test job was declared stuck between claim and its active-job record.
+- **Found, not fixed:** non-forced `AddJobToQueue` refused 750873 with `Upscale (source 1920x960 < profile target 2160p)`; the /Work page forces admission so operators do not see it. Filed as backlog row 21.
 
 ### Decisions Made
 

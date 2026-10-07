@@ -13,7 +13,7 @@ Cross-worker abandonment is not this flow -- it runs through `AttemptAbandonment
 | ID | Step | What happens | Failure mode |
 |---|------|--------------|--------------|
 | ST1 | List candidates | `GetRunningTranscodeJobs()` filtered to `ClaimedBy = self.WorkerName`. Owner-scoped. | Cross-host kills are categorically prevented at this filter. |
-| ST2 | Load ActiveJob | `GetActiveJobsByService('TranscodeService')`, find row where `QueueId == job.Id`. | No ActiveJob row for a Running queue item = orphaned; proceed to cleanup. |
+| ST2 | Load ActiveJob | `GetActiveJobsByService('TranscodeService')`, find row where `QueueId == job.Id`. | No ActiveJob row: not stuck until `SystemSettings.SetupPhaseTimeoutMin` minutes after the claim (`TranscodeQueue.DateStarted`); after that, orphaned -> cleanup. A failed ActiveJobs read raises; it is never read as "no rows". |
 | ST3 | Read Phase | `GetJobPhase(ActiveJobId)` returns `(JobPhase, PhaseTransitionedAt)`. If NULL: not stuck (pre-Setup transition). | Phase-writer race guaranteed short-lived. |
 | ST4 | Dispatch | `PhaseDetectorRegistry.GetDetector(Phase).Detect(Job, ActiveJob, PhaseTransitionedAt)`. Each detector uses its phase-appropriate liveness signal. | Only the current phase's signal is consulted; misuse of other-phase signals is structurally impossible. |
 | ST5 | Cleanup -- host-locality guard | Verify `ActiveJob.WorkerName == WorkerContext.Current().WorkerName` before any `KillProcess` call. If not, log skip and proceed to DB-only cleanup. | Cross-host kills structurally impossible. |
