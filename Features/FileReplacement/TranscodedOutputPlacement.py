@@ -54,6 +54,16 @@ class TranscodedOutputPlacement:
         if not Rows:
             raise RuntimeError(f"Hand-off: MediaFiles row {MediaFileId} not found after placement")
         Bucket = Rows[0]['WorkBucket']
+        Stale = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+            "DELETE FROM TranscodeQueue WHERE MediaFileId = %s AND Status = 'Pending' "
+            "AND ProcessingMode = %s AND TestVariantSetId IS NULL",
+            (int(MediaFileId), LabelThatRan),
+        )
+        if Stale:
+            LoggingService.LogWarning(
+                f"Hand-off: removed {Stale} pending {LabelThatRan} row(s) for MediaFileId={MediaFileId}; that stage just placed its output",
+                "TranscodedOutputPlacement", "_QueueNextStage"
+            )
         if not ProcessingModeMetadata.IsKnown(Bucket):
             return None
         if Bucket == LabelThatRan:
@@ -64,8 +74,9 @@ class TranscodedOutputPlacement:
             return None
         Result = QueueManagementBusinessService().AddJobToQueue(MediaFileId=MediaFileId, ProcessingMode=Bucket)
         if Result.get('Success'):
+            Verb = "already pending" if Result.get('AlreadyQueued') else "queued"
             LoggingService.LogInfo(
-                f"Hand-off: MediaFileId={MediaFileId} {LabelThatRan} -> {Bucket} queued (row {Result.get('ItemId')})",
+                f"Hand-off: MediaFileId={MediaFileId} {LabelThatRan} -> {Bucket} {Verb} (row {Result.get('ItemId')})",
                 "TranscodedOutputPlacement", "_QueueNextStage"
             )
         else:

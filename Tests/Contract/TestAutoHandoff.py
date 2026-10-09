@@ -24,9 +24,25 @@ class _FakeDb:
             raise self.Raises
         return self.Rows
 
+    # directive: auto-handoff | # see transcode.ST9
+    def ExecuteNonQuery(self, Query, Params=None):
+        self.NonQueries = getattr(self, 'NonQueries', []) + [(Query, Params)]
+        return 0
+
 
 # directive: auto-handoff | # see transcode.ST9
 class TestPlacementQueuesNextStage(unittest.TestCase):
+
+    # directive: auto-handoff | # see transcode.ST9
+    def test_PendingRowsForTheLabelThatRanAreRemoved(self):
+        with mock.patch(QMBS_PATH) as Svc:
+            Svc.return_value.AddJobToQueue.return_value = {'Success': True, 'ItemId': 1}
+            Placement = self._Placement('AudioFix')
+            Placement._QueueNextStage(5, 'Transcode')
+            Query, Params = Placement.DatabaseManager.DatabaseService.NonQueries[0]
+            self.assertIn('DELETE FROM TranscodeQueue', Query)
+            self.assertIn("Status = 'Pending'", Query)
+            self.assertEqual(Params, (5, 'Transcode'))
 
     # directive: auto-handoff | # see transcode.ST9
     def _Placement(self, Bucket):
