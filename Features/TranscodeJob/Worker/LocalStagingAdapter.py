@@ -59,7 +59,7 @@ class LocalStagingAdapter:
 
     # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C11
     def CopyBackStagedOutput(self, LocalOutputPath: str, CanonicalOutputPath: str, MediaFileId: int) -> bool:
-        """Mode B copy-back: ship local .inprogress to canonical NFS path before downstream consumers read it."""
+        """Mode B copy-back: ship local .ip to canonical NFS path before downstream consumers read it."""
         try:
             if not LocalOutputPath or not CanonicalOutputPath:
                 LoggingService.LogError(f"Copy-back missing path: local={LocalOutputPath} canonical={CanonicalOutputPath} mid={MediaFileId}", "LocalStagingAdapter", "CopyBackStagedOutput")

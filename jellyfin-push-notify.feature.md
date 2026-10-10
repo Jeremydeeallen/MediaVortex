@@ -270,7 +270,7 @@ The Jellyfin 2h interval scan stays on -- see Out of scope.
       and `FinalizePartialReplacement` choke points)
 - [x] 10. Audit remaining mutation points (see Audit below). Wired
       DuplicateDetectionService; other hits are non-Jellyfin-visible
-      (`.inprogress` artifacts, TempDir clips).
+      (`.ip` artifacts, TempDir clips).
 - [x] 8. Dry-run validation complete (2026-05-22). Found and fixed XXX
       path mismatch (`/mnt/SynologyXXX/` -> `/mnt/XXX/`); BrainTv and
       SynologyMovies seeds verified correct against Jellyfin's actual
@@ -305,9 +305,9 @@ under `Features/` and `Services/` (2026-05-22):
 |---|---|
 | `Features/FileReplacement/FileReplacementBusinessService.py` (rename + delete) | NOTIFY -- via `_NotifyJellyfinOfReplacement` after `ProcessFileReplacement` / `FinalizePartialReplacement` success |
 | `Features/FileScanning/DuplicateDetectionService.py:96` (duplicate delete) | NOTIFY -- batched `Deleted` updates after each group; only effective on Windows worker where disk paths are canonical (`T:\...`); Linux disk paths fail translation and skip with WARNING |
-| `Features/TranscodeJob/ProcessTranscodeQueueService.py:757,1666` | SKIP -- `.inprogress` artifact and partial output cleanup; Jellyfin does not index these filenames |
-| `Features/QualityTesting/QualityTestingBusinessService.py:1534` | SKIP -- staged `.inprogress` requeue cleanup |
-| `Features/ServiceControl/CrashRecoveryService.py:440` | SKIP -- orphaned `.inprogress` cleanup |
+| `Features/TranscodeJob/ProcessTranscodeQueueService.py:757,1666` | SKIP -- `.ip` artifact and partial output cleanup; Jellyfin does not index these filenames |
+| `Features/QualityTesting/QualityTestingBusinessService.py:1534` | SKIP -- staged `.ip` requeue cleanup |
+| `Features/ServiceControl/CrashRecoveryService.py:440` | SKIP -- orphaned `.ip` cleanup |
 | `Features/ClipBuilder/ClipBuilderBusinessService.py:100,111,116` | SKIP -- VMAF analysis clips in `TempDir` |
 | `Services/FileManagerService.py:789` (`ReplaceFile`) | DEAD CODE -- no callers; left alone, out of scope to delete |
 

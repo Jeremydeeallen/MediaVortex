@@ -129,7 +129,7 @@ class LanguageEnrichmentService:
             raise LanguageEnrichmentError(MediaFileId, 'ffmpeg_path_unresolved')
         OrigDir = LocalDirname(LocalFilePath)
         BaseName, Ext = LocalSplitExt(LocalBasename(LocalFilePath))
-        InProgressPath = LocalJoin(OrigDir, f'{BaseName}.langfix.inprogress{Ext}')
+        InProgressPath = LocalJoin(OrigDir, f'{BaseName}.langfix.ip{Ext}')
         Cmd = [FfmpegPath, '-hide_banner', '-nostdin', '-i', LocalFilePath, '-map', '0', '-c', 'copy']
         for Idx, Lang in Stamps:
             Cmd += [f'-metadata:s:a:{Idx}', f'language={Lang}']

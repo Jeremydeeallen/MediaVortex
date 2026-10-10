@@ -6,7 +6,7 @@ The single source of truth for how MediaVortex code reaches the workers. Operato
 
 Set by the operator (2026-08-02); do NOT re-derive.
 
-1. **Drain lives in the code, not the operator's head.** Every worker deploy pauses, waits for in-flight work to complete, then restarts. Operator does not check "is anyone busy" before firing. Mid-encode kills leave `.inprogress` files + noise + wasted encode time -- not acceptable for planned deploys.
+1. **Drain lives in the code, not the operator's head.** Every worker deploy pauses, waits for in-flight work to complete, then restarts. Operator does not check "is anyone busy" before firing. Mid-encode kills leave `.ip` files + noise + wasted encode time -- not acceptable for planned deploys.
 2. **Per-worker independence.** Worker A's drain does not block worker B's restart, and worker B's return to Online. No cross-worker or cross-host barriers. Wakko workers restart the moment wakko sync finishes; larry's slow sync does not block them.
 3. **Zero-parameter fleet script.** `py deploy/deploy-fleet.py` deploys every Enabled worker in parallel. No flags to opt out, override, or narrow. Selective per-worker use is available via `py deploy/deploy-worker.py <WorkerName>` for operator recovery.
 4. **Parallel rollout.** Once code is tested and ready, all workers roll out concurrently. Fleet wall time is bounded by the slowest-draining single worker, not the sum.

@@ -79,7 +79,7 @@ class LocalStagingService:
 
     # directive: local-staging | # see local-staging.C7
     def ResolveLocalOutputPath(self, WorkerName: str, MediaFileId: int, OutputBasename: str) -> Optional[str]:
-        """Compose the local .inprogress output path inside the per-job scratch subdir."""
+        """Compose the local .ip output path inside the per-job scratch subdir."""
         try:
             WorkerConfig = self._GetWorkerStagingConfig(WorkerName)
             if not WorkerConfig:

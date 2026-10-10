@@ -63,7 +63,7 @@ class TemporaryFilePathsService:
 
     # directive: perfect-solid-transcode-pipeline-phase3 | # see perfect-solid-transcode-pipeline-phase3.C10
     def CleanupFailedAttempt(self, TranscodeAttemptId: int) -> None:
-        """Cleanup orphaned .inprogress + TFP rows for a failed attempt."""
+        """Cleanup orphaned .ip + TFP rows for a failed attempt."""
         try:
             LoggingService.LogInfo(f"Cleaning up files for failed TranscodeAttempt {TranscodeAttemptId}",
                                  "TemporaryFilePathsService", "CleanupFailedAttempt")

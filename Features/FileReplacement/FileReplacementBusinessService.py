@@ -201,7 +201,7 @@ class FileReplacementBusinessService:
                     'ErrorMessage': f'Transcoded file not found at: {LocalTranscodedPath}',
                 }
 
-            # directive: e2e-bug-fixes | # see e2e-bug-fixes.C29 -- ProcessingMode is now an SSOT column on TranscodeAttempts; do NOT infer from ProfileName. C22 forced ProfileName to be the real profile name; the inference broke silently and orphaned every -mv.mp4.inprogress this session.
+            # directive: e2e-bug-fixes | # see e2e-bug-fixes.C29 -- ProcessingMode is now an SSOT column on TranscodeAttempts; do NOT infer from ProfileName. C22 forced ProfileName to be the real profile name; the inference broke silently and orphaned every -mv.mp4.ip this session.
             from Features.TranscodeJob import ProcessingModeMetadata
             AttemptMode = transcode_attempt.ProcessingMode
             if not AttemptMode:

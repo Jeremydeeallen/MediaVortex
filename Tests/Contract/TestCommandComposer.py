@@ -237,7 +237,7 @@ def _MakeComposer(AudioSlotOverride=None):
     Resolution.CalculateScaleFilter = lambda Src, Tgt, Mf, Ps: None
     Filename = MagicMock()
     Filename.NormalizeFfmpegPath = lambda P: (P or '').strip().strip('"')
-    Filename.GenerateOutputFileName = lambda Fn, Sr, Tr, Ct, Crf: 'Test-mv.mp4.inprogress'
+    Filename.GenerateOutputFileName = lambda Fn, Sr, Tr, Ct, Crf: 'Test-mv.mp4.ip'
     Filename.CollapseMvSuffix = lambda B: B
     Probe = MagicMock()
     Probe.RunAnalysis = lambda P: None
@@ -326,7 +326,7 @@ class TestCommandComposer(unittest.TestCase):
     def test_output_path_is_inprogress_side_by_side_for_streamcopy(self):
         Composer = _MakeComposer()
         Spec = Composer.Build(_MediaFile(), _Job('Remux'), _Context())
-        self.assertTrue(Spec.OutputPath.endswith('-mv.mp4.inprogress'))
+        self.assertTrue(Spec.OutputPath.endswith('-mv.mp4.ip'))
 
     # directive: label-decides-command | # see transcode.ST6
     def test_transcode_label_copies_audio_with_no_demucs_input(self):

@@ -179,12 +179,12 @@ class CommandComposer:
         else:
             BaseName = os.path.splitext(MediaFile.FileName)[0]
             BaseName = self.OutputFilenameBuilder.CollapseMvSuffix(BaseName)
-            OutputFileName = BaseName + "-mv.mp4.inprogress"
+            OutputFileName = BaseName + "-mv.mp4.ip"
             OutputDirectory = LocalDirname(InputPath)
             OutputPath = self.OutputFilenameBuilder.NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
         if LocalSamePath(OutputPath, InputPath):
             LoggingService.LogError(
-                f"CommandComposer.Build: OutputPath equals InputPath ({InputPath}). OutputPath must be a `.inprogress` side-by-side file.",
+                f"CommandComposer.Build: OutputPath equals InputPath ({InputPath}). OutputPath must be a `.ip` side-by-side file.",
                 "CommandComposer", "_ResolveOutputPath",
             )
             return None

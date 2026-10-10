@@ -49,7 +49,7 @@ Operator dogfood, 2026-05-10. Two adjacent topics surfaced in the same conversat
 
 8. Pre-existing transcoded files keep their current names. No bulk rename. Verifiable: pre-cutover rows are identified by the absence of the `-mv` suffix on `FileName` together with `TranscodedByMediaVortex=TRUE`; the cleanup script does not rename them. The `-mv` convention applies only to new replacements.
 
-10. The collision check at FileReplacement time refuses to overwrite an existing target. Verifiable: pre-place a `Show-mv.mp4` in the source directory, then trigger replacement for a transcode that would produce the same path. `TranscodedOutputPlacement.Execute` refuses BEFORE any rename happens (LocalExists check on TargetPath), returns `Success=False` with `ErrorMessage='Refusing to overwrite existing file at target: ...'`. No rollback is required because the rename has not occurred; the staged `.inprogress` file remains and the source is bit-identical to its pre-call state.
+10. The collision check at FileReplacement time refuses to overwrite an existing target. Verifiable: pre-place a `Show-mv.mp4` in the source directory, then trigger replacement for a transcode that would produce the same path. `TranscodedOutputPlacement.Execute` refuses BEFORE any rename happens (LocalExists check on TargetPath), returns `Success=False` with `ErrorMessage='Refusing to overwrite existing file at target: ...'`. No rollback is required because the rename has not occurred; the staged `.ip` file remains and the source is bit-identical to its pre-call state.
 
 ### D. Migration
 
@@ -59,7 +59,7 @@ Operator dogfood, 2026-05-10. Two adjacent topics surfaced in the same conversat
 
 ### E. Rollback on MediaFiles update failure (BUG-0067)
 
-13. When `_UpdateMediaFilesAfterReplacement` returns `Success=False` after the `.inprogress` -> `<basename>-mv.<ext>` rename has landed, `Execute` rolls the rename back and returns `Success=False` carrying the actual `_UpdateMediaFilesAfterReplacement` error. No orphan `-mv.<ext>` is left on disk; the source survives bit-identical. The `FinalizePartialReplacement` crash-recovery path returns `Success=False` with the real error rather than masking the failure as success. Verifiable: `Tests/Contract/TestFileReplacementRollbackOnUpdateFailure.py` mocks `_UpdateMediaFilesAfterReplacement` to return `Success=False` for both same-slot and non-same-slot inputs; the test asserts `Execute['Success']==False`, the target `-mv.<ext>` is absent, and the source file is intact at its pre-call path.
+13. When `_UpdateMediaFilesAfterReplacement` returns `Success=False` after the `.ip` -> `<basename>-mv.<ext>` rename has landed, `Execute` rolls the rename back and returns `Success=False` carrying the actual `_UpdateMediaFilesAfterReplacement` error. No orphan `-mv.<ext>` is left on disk; the source survives bit-identical. The `FinalizePartialReplacement` crash-recovery path returns `Success=False` with the real error rather than masking the failure as success. Verifiable: `Tests/Contract/TestFileReplacementRollbackOnUpdateFailure.py` mocks `_UpdateMediaFilesAfterReplacement` to return `Success=False` for both same-slot and non-same-slot inputs; the test asserts `Execute['Success']==False`, the target `-mv.<ext>` is absent, and the source file is intact at its pre-call path.
 
 ## Status
 
@@ -78,7 +78,7 @@ Operator dogfood, 2026-05-10. Two adjacent topics surfaced in the same conversat
 - [x] 9. **Phase 1.5.** Update `transcode.flow.md` Stage 8 with the new naming.
 - [x] 10. **Phase 1.6.** Smoke script `Scripts/Smoke/RunPostDispositionPipelineTest.py` to verify attempt 4394 end-to-end (lower threshold + manual disposition + FileReplacement + restore threshold).
 - [x] 11. **Phase 2 (2026-05-21).** SQL migration `Scripts/SQLScripts/drop_local_staging_2026_05_21.py` drops `Workers.StagingDirectory` and deletes the `TranscodeFileMode` SystemSettings row in a single transaction. Idempotent: re-running the dry-run reports zero changes. Code refactor lands in the same branch: `Core/WorkerContext`, `Repositories/DatabaseManager` RegisterWorker / GetWorkerConfig, `WorkerService/Main.py` + `WebService/Main.py` init, `ProcessTranscodeQueueService` (LocalStaging branches removed from ProcessJob / ProcessRemuxJob / ProcessSubtitleFixJob / _ProcessSingleVariant; `GetTranscodeFileMode` / `GetTranscodeOutputMode` / `GetLocalStagingDir` / `CopyBackFromLocalStaging` / `CleanupLocalStagingFiles` deleted). `Features/TranscodeJob/TranscodingFileManagerService.py` and `archive_TranscodeService/` + `archive_QualityTestService/` removed outright.
-- [x] 12. **Phase 2.** Cross-worker integration smoke test: in-place output places `.inprogress` next to source on the shared NFS mount, so any worker can claim the VMAF row. No further per-worker reachability concern.
+- [x] 12. **Phase 2.** Cross-worker integration smoke test: in-place output places `.ip` next to source on the shared NFS mount, so any worker can claim the VMAF row. No further per-worker reachability concern.
 
 ## Scope
 
@@ -97,10 +97,10 @@ transcode.flow.md
 | File | Role |
 |---|---|
 | `Features/TranscodeJob/ProcessTranscodeQueueService.py` | Compute staging path side-by-side; stop reading `Workers.StagingDirectory` |
-| `Features/FileReplacement/TranscodedOutputPlacement.py` | `Execute` owns the `.inprogress` -> `<basename>-mv.<ext>` rename, the MediaFiles re-probe, and the source delete. `FinalizePartialReplacement` is the crash-recovery completion path. Both fail loud + roll back when `_UpdateMediaFilesAfterReplacement` fails (C13). |
+| `Features/FileReplacement/TranscodedOutputPlacement.py` | `Execute` owns the `.ip` -> `<basename>-mv.<ext>` rename, the MediaFiles re-probe, and the source delete. `FinalizePartialReplacement` is the crash-recovery completion path. Both fail loud + roll back when `_UpdateMediaFilesAfterReplacement` fails (C13). |
 | `Features/FileReplacement/FileReplacementBusinessService.py` | Orchestration only -- `ProcessFileReplacement` validates disposition + dispatches to `TranscodedOutputPlacement.Execute`. |
 | `Features/TranscodeQueue/QueueManagementBusinessService.py` | Refuse to admit queue rows whose source ends in `-mv.<ext>` |
-| `Features/TranscodeJob/Worker/JobProcessor.py` | Names the staged output `<basename>-mv.mp4.inprogress` next to the source for every job label |
+| `Features/TranscodeJob/Worker/JobProcessor.py` | Names the staged output `<basename>-mv.mp4.ip` next to the source for every job label |
 | `Scripts/SQLScripts/drop_local_staging_2026_05_21.py` | One-shot, idempotent column drop |
 | `transcode.flow.md` | Stage 6 inputs no longer reference `StagingDirectory`; Stage 8 ACTION + Phase 7 lifecycle describe the current rename / re-probe / source-delete / rollback shape. |
 | `memory/KNOWN-ISSUES.md` | Cross-worker hand-off (Risk 5 in 2026-05-10 sight pass) closed by criterion 3 |
@@ -111,7 +111,7 @@ transcode.flow.md
 |---|---|---|---|---|---|
 | S1 | `FileReplacementBusinessService.ProcessFileReplacement -> TranscodedOutputPlacement.Execute` | Orchestrator dispatches after disposition is validated + archive snapshot taken | `(OriginalFilePath, TranscodedFilePath, NetworkOriginalPath, FFmpegCommand, SourceMediaFileId, Mode)` all canonical | `Execute` returns `{Success, StepsCompleted, ErrorMessage, CanonicalOriginalPath, CanonicalNewPath}` | Canary attempt 27614 (Impractical Jokers S07E11) 2026-06-03: dot-worker-1 executed end-to-end, source `.mkv` (756.0 MB) -> `-mv.mp4` (205.4 MB, 72.8% reduction); MediaFiles re-probed to `Codec='av1'`; TFP row deleted by dispositioner chokepoint. |
 | S3 | `TranscodedOutputPlacement.FinalizePartialReplacement <- CrashRecoveryService` | CrashRecoveryService is the sole external caller (post-2026-06-02 extraction) | `(OriginalLocalPath, FinalLocalPath, CanonicalOriginalPath)` | `Execute`-compatible result dict; idempotent if either source file is missing | CrashRecoveryService import grep: 1 hit at the FinalizePartialReplacement call site |
-| S4 | `TranscodedOutputPlacement.Execute -> filesystem rollback on update failure` | `Execute` after `_UpdateMediaFilesAfterReplacement` returns `Success=False` | Non-SameSlot: `os.remove(TargetPath)` reversing the `.inprogress` -> `-mv.<ext>` rename. SameSlot: `os.rename(TargetPath, LocalStagedPath)` + `os.rename(BackupPath, LocalOriginalPath)` reversing the rename dance. | Caller receives `{Success: False, ErrorMessage: <real update error>}`; filesystem is bit-identical to pre-call state minus the now-deleted `.inprogress` staging output. | `Tests/Contract/TestFileReplacementRollbackOnUpdateFailure.py` -- both branches; criterion C13. |
+| S4 | `TranscodedOutputPlacement.Execute -> filesystem rollback on update failure` | `Execute` after `_UpdateMediaFilesAfterReplacement` returns `Success=False` | Non-SameSlot: `os.remove(TargetPath)` reversing the `.ip` -> `-mv.<ext>` rename. SameSlot: `os.rename(TargetPath, LocalStagedPath)` + `os.rename(BackupPath, LocalOriginalPath)` reversing the rename dance. | Caller receives `{Success: False, ErrorMessage: <real update error>}`; filesystem is bit-identical to pre-call state minus the now-deleted `.ip` staging output. | `Tests/Contract/TestFileReplacementRollbackOnUpdateFailure.py` -- both branches; criterion C13. |
 
 ## Deviation from conventions
 

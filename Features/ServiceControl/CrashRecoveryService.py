@@ -151,7 +151,7 @@ class CrashRecoveryService:
                 "Message": (
                     f"Recovered {JobsRecovered} jobs, killed {OrphanedProcessesKilled} orphaned processes, "
                     f"cleaned {OrphanedCleaned} orphaned progress records, "
-                    f"deleted {InProgressFilesCleaned} .inprogress artifacts, "
+                    f"deleted {InProgressFilesCleaned} .ip artifacts, "
                     f"completed {PartialReplacementsCompleted} partial replacements, "
                     f"swept {LocalStagingOrphansCleaned} local-staging scratch orphans"
                 ),
@@ -350,10 +350,10 @@ class CrashRecoveryService:
         """Sweep disk artifacts left by a prior crash/restart for this worker.
 
         For every TemporaryFilePaths row owned by this worker:
-          - If the final (`.inprogress` stripped) file exists AND the original
+          - If the final (`.ip` stripped) file exists AND the original
             source still exists, finalize the partial replacement (rename was
             done, original-delete was not). Criterion 12.
-          - Otherwise, delete any leftover `.inprogress` artifact. Criterion 11.
+          - Otherwise, delete any leftover `.ip` artifact. Criterion 11.
 
         TemporaryFilePaths rows are deleted on successful FileReplacement, so
         a surviving row implies the attempt did not complete cleanly. After
@@ -415,9 +415,9 @@ class CrashRecoveryService:
                 if not LocalOutput:
                     continue
 
-                # OutputRelativePath stores the final path; the .inprogress variant lives next to it on disk during encode.
-                FinalPath = LocalOutput[:-len('.inprogress')] if LocalOutput.endswith('.inprogress') else LocalOutput
-                InProgressPath = FinalPath + '.inprogress'
+                # OutputRelativePath stores the final path; the .ip variant lives next to it on disk during encode.
+                FinalPath = LocalOutput[:-len('.ip')] if LocalOutput.endswith('.ip') else LocalOutput
+                InProgressPath = FinalPath + '.ip'
 
                 FinalExists = LocalExists(FinalPath)
                 OriginalExists = bool(LocalSource) and LocalExists(LocalSource)
@@ -450,12 +450,12 @@ class CrashRecoveryService:
                         os.remove(InProgressPath)
                         InProgressDeleted += 1
                         LoggingService.LogWarning(
-                            f"Crash recovery: deleted orphaned .inprogress file {InProgressPath}",
+                            f"Crash recovery: deleted orphaned .ip file {InProgressPath}",
                             "CrashRecoveryService", "_RecoverInProgressArtifacts"
                         )
                     except Exception as RmEx:
                         LoggingService.LogException(
-                            f"Crash recovery: could not delete .inprogress {InProgressPath}",
+                            f"Crash recovery: could not delete .ip {InProgressPath}",
                             RmEx, "CrashRecoveryService", "_RecoverInProgressArtifacts"
                         )
 

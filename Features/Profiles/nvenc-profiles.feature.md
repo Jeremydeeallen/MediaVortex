@@ -15,7 +15,7 @@ Both use `Profiles.usenvidiahardware=1`. The CommandBuilder NVENC branch hardcod
 
 - **Profile assignment**: existing folder-assignment UI (Scanning page). NVENC profiles appear in the same dropdown as SVT profiles.
 - **Worker routing**: queue claim (`DatabaseManager.ClaimNextPendingTranscodeJob`) gates jobs whose assigned profile has `usenvidiahardware=1` to workers where `Workers.nvenccapable=TRUE`. Non-NVENC profiles are unaffected.
-- **Replacement pipeline**: unchanged. NVENC encodes produce `-mv.mp4.inprogress` outputs and flow through the standard FileReplacement + VMAF + disposition path. Source is replaced on disposition=Replace, archived to MediaFilesArchive, MediaFiles re-probed, exactly as with SVT-AV1.
+- **Replacement pipeline**: unchanged. NVENC encodes produce `-mv.mp4.ip` outputs and flow through the standard FileReplacement + VMAF + disposition path. Source is replaced on disposition=Replace, archived to MediaFilesArchive, MediaFiles re-probed, exactly as with SVT-AV1.
 - **Audio**: unchanged. Both encoder branches share `AudioCompletionService.ShouldStreamCopyAudio` + `BuildAudioCodecArgs` + `BuildAudioFilters` (loudnorm, completion gating). NVENC profile is video-only.
 
 ## Success Criteria
@@ -25,7 +25,7 @@ Both use `Profiles.usenvidiahardware=1`. The CommandBuilder NVENC branch hardcod
 3. `DatabaseManager.ClaimNextPendingTranscodeJob` claims jobs assigned to NVENC profiles only when the calling worker has `nvenccapable=TRUE`. Non-NVENC profiles claim normally on any TranscodeEnabled worker.
 4. `Models/CommandBuilder.AddCodecParameters` emits the full NVENC quality knob set when `ProfileSettings.UseNvidiaHardware=1`: `-preset p<N> -tune uhq -multipass fullres -rc vbr -b:v 0 -cq <Q> -spatial-aq 1 -temporal-aq 1 -aq-strength 15 -rc-lookahead 32 -bf 7 -b_ref_mode middle`. Preset and Quality come from the profile; the rest are fixed.
 5. `Models/CommandBuilder.AddPixelFormatParameter` emits `-pix_fmt p010le` for NVENC, `-pix_fmt yuv420p10le` for software (existing behavior preserved).
-6. NVENC encodes produce outputs at the existing `-mv.mp4.inprogress` path; the FileReplacement vertical replaces the source unchanged.
+6. NVENC encodes produce outputs at the existing `-mv.mp4.ip` path; the FileReplacement vertical replaces the source unchanged.
 7. Audio handling is identical to SVT-AV1 profiles: stream-copy when AudioComplete=true, otherwise the standard loudnorm/acompressor chain.
 8. Film grain is NOT emitted for NVENC (already gated in `AddFilmGrainParameter` -- NVENC doesn't support it).
 
@@ -46,7 +46,7 @@ If future NVENC tuning needs to vary per profile (e.g. tune=hq for fast-motion l
 | `Profiles.usenvidiahardware` → claim gate | `Profiles.usenvidiahardware BIGINT` (1=NVENC, 0/NULL=software) | EXISTS subquery: `p.usenvidiahardware = 1` ANDed with `Workers.nvenccapable = TRUE` in `BuildClaimPredicate` | `DatabaseManager.ClaimNextPendingTranscodeJob` — NVENC jobs claimed only by workers where `Workers.nvenccapable=TRUE` | `py -m pytest Tests/Contract/TestClaimAuthority.py` |
 | `Workers.nvenccapable` → claim gate | Migration `AddNvencProfiles.py` sets `nvenccapable=TRUE` for I9-2024; all others FALSE | `Workers.nvenccapable BOOLEAN DEFAULT FALSE` | `BuildClaimPredicate` SQL fragment includes `w.nvenccapable = TRUE` for NVENC profiles | `SELECT workername, nvenccapable FROM Workers ORDER BY workername` |
 | `Profiles.usenvidiahardware` → CommandBuilder NVENC branch | `EncoderKnobs.UseNvidiaHardware Optional[int]` (0/1/None) read by `EncoderKnobRepository` | Python int; `CommandBuilder` checks `== 1` (not truthiness) | `CommandBuilder.AddCodecParameters` branches on `ProfileSettings['UseNvidiaHardware'] == 1` → emits `-c:v av1_nvenc` + full shootout-winner knob set | Smoke: output contains `av1_nvenc -preset p7 -tune uhq` for an NVENC profile |
-| NVENC encode output → FileReplacement | Worker writes `-mv.mp4.inprogress` path (same convention as SVT) | Standard inprogress file path | FileReplacement vertical consumes path unchanged; no NVENC-specific logic | Canary 2026-05-29: FileReplacement defense-in-depth triggered correctly (NewSize >= OldSize refused) |
+| NVENC encode output → FileReplacement | Worker writes `-mv.mp4.ip` path (same convention as SVT) | Standard inprogress file path | FileReplacement vertical consumes path unchanged; no NVENC-specific logic | Canary 2026-05-29: FileReplacement defense-in-depth triggered correctly (NewSize >= OldSize refused) |
 
 ## Scope
 

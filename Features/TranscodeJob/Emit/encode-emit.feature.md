@@ -22,7 +22,7 @@ C1. **CommandSpec is a typed frozen value object.** `Features/TranscodeJob/Emit/
 
 C2. **ResolutionCalculator owns target-resolution + scale-filter math.** Pure value computation, no DB, no logging, no class state beyond the methods. `CalculateScaleFilter` is a thin facade over `WidthAnchoredScalePolicy` (see `resolution-types.C3`): builds a `Resolution` via `Resolution.FromAny`, resolves the target tier via `ResolutionTierRegistry.FromCategory`, emits `Decision.AsFfmpegArg()` (or `None`). Verifiable: `Tests/Contract/TestResolutionCalculator.py`.
 
-C3. **OutputFilenameBuilder owns filename + path normalization.** `-mv.mp4.inprogress` convention preserved; `-mv-mv` collapse via `CollapseMvSuffix`. Verifiable: `Tests/Contract/TestOutputFilenameBuilder.py`.
+C3. **OutputFilenameBuilder owns filename + path normalization.** `-mv.mp4.ip` convention preserved; `-mv-mv` collapse via `CollapseMvSuffix`. Verifiable: `Tests/Contract/TestOutputFilenameBuilder.py`.
 
 C4. **VideoSlot owns video-track argv emission.** `Emit(Op, MediaFile, ProfileSettings, CodecParameters, ScaleFilter, MaxCpuThreads)`. `Op='Copy'` emits `-map 0:v:0 -c:v copy` plus `-tag:v hvc1` on hevc source. `Op='Reencode'` emits `-map 0:v:0 -c:v <codec>` + `-threads` + codec-specific rate-control args (NVENC VBR reads `ProfileThresholds.TargetKbps + MaxBitrateMultiplier`; NVENC CQ reads `Quality`; QSV VBR reads `TargetKbps` -- every tier profile runs QSV by tier bitrate, see `profile-tier-ladder.feature.md`; SVT-AV1 delegates to `SvtAv1EncoderArgsStrategy`) + video filter + film-grain + pix-fmt. Verifiable: `Tests/Contract/TestCommandComposer.py::test_video_slot_*`.
 

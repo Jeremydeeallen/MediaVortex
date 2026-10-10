@@ -13,7 +13,7 @@ from Features.FileReplacement.PostFlightProcessors.PostFlightRegistry import Bui
 
 # directive: filereplacement-uses-path | # see path.S5
 class TranscodedOutputPlacement:
-    """Owns .inprogress rename, MediaFiles refresh, original delete; see transcoded-output-placement.feature.md."""
+    """Owns .ip rename, MediaFiles refresh, original delete; see transcoded-output-placement.feature.md."""
 
     # directive: transcode-flow-canonical | # see path.C21
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
@@ -90,7 +90,7 @@ class TranscodedOutputPlacement:
     def Execute(self, OriginalFilePath: str, TranscodedFilePath: str, NetworkOriginalPath: str = None,
                 FFmpegCommand: Optional[str] = None, SourceMediaFileId: Optional[int] = None,
                 Mode: str = 'Transcode') -> Dict[str, Any]:
-        """Rename .inprogress -> final, refresh MediaFiles, delete original; see transcoded-output-placement.C4."""
+        """Rename .ip -> final, refresh MediaFiles, delete original; see transcoded-output-placement.C4."""
         try:
             LocalOriginalPath = Path.FromLegacyString(OriginalFilePath, self._GetStorageRoots()).Resolve(self._GetWorker())
             LocalStagedPath = Path.FromLegacyString(TranscodedFilePath, self._GetStorageRoots()).Resolve(self._GetWorker())
@@ -105,15 +105,15 @@ class TranscodedOutputPlacement:
                 LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
                 return {'Success': False, 'ErrorMessage': ErrorMsg}
 
-            if not LocalStagedPath.endswith('.inprogress'):
+            if not LocalStagedPath.endswith('.ip'):
                 ErrorMsg = (
-                    f"Staged file does not end in .inprogress: {LocalStagedPath}. "
-                    f"The .inprogress pattern is the only supported producer for FileReplacement."
+                    f"Staged file does not end in .ip: {LocalStagedPath}. "
+                    f"The .ip pattern is the only supported producer for FileReplacement."
                 )
                 LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
                 return {'Success': False, 'ErrorMessage': ErrorMsg}
 
-            TargetPath = LocalStagedPath[:-len('.inprogress')]
+            TargetPath = LocalStagedPath[:-len('.ip')]
 
             SameSlotReplacement = LocalSamePath(TargetPath, LocalOriginalPath)
 
@@ -146,12 +146,12 @@ class TranscodedOutputPlacement:
                 Renamer.Apply()
                 StepsCompleted.append(f"Renamed {LocalBasename(LocalStagedPath)} -> {LocalBasename(TargetPath)}")
                 LoggingService.LogInfo(
-                    f"Dropped .inprogress suffix: {LocalStagedPath} -> {TargetPath}",
+                    f"Dropped .ip suffix: {LocalStagedPath} -> {TargetPath}",
                     "TranscodedOutputPlacement", "Execute"
                 )
             except Exception as RenameEx:
                 Renamer.Rollback()
-                ErrorMsg = f"Failed to rename .inprogress to final target: {str(RenameEx)}"
+                ErrorMsg = f"Failed to rename .ip to final target: {str(RenameEx)}"
                 LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
                 return {'Success': False, 'ErrorMessage': ErrorMsg}
 

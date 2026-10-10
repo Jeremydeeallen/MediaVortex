@@ -10,7 +10,7 @@ Retires the legacy "no capable worker -> silent stuck-file" decision branch. Tha
 
 ## Concern
 
-Discovered 2026-05-29 during the NVENC canary. I9 finished a successful transcode while every worker had `QualityTestEnabled=FALSE`. The disposition function (per the prior decision table) returned `NoReplace/VmafServicePaused`, no queue row was created, and the `.inprogress` output sat on disk with zero operator visibility. The only way to recover was manual SQL surgery (insert QualityTestingQueue row + restart worker with capability flipped). Operator's correct read: "if VMAF is on, the item should be on the queue so I can see it -- and I should be able to override Replace right there." This feature is that.
+Discovered 2026-05-29 during the NVENC canary. I9 finished a successful transcode while every worker had `QualityTestEnabled=FALSE`. The disposition function (per the prior decision table) returned `NoReplace/VmafServicePaused`, no queue row was created, and the `.ip` output sat on disk with zero operator visibility. The only way to recover was manual SQL surgery (insert QualityTestingQueue row + restart worker with capability flipped). Operator's correct read: "if VMAF is on, the item should be on the queue so I can see it -- and I should be able to override Replace right there." This feature is that.
 
 ## Success Criteria
 
@@ -34,7 +34,7 @@ C5. **WebService override endpoint.** `POST /api/QualityTest/Override` accepts `
    - UPDATE `QualityTestingQueue` SET `ForceDisposition=$forceDisposition`, `OverrideSetAt=NOW()`, `Status='Cancelled'` WHERE `Id=$queueId AND Status='Pending'`
    - UPDATE `TranscodeAttempts` SET `Disposition=$d`, `DispositionReason=$r`, `DispositionDecidedAt=NOW()` where `$d`='Replace' for Replace, 'Reject' for Reject; `$r`='OperatorForcedReplace' or 'OperatorDiscarded'
    - For Replace: call `FileReplacementBusinessService.ProcessFileReplacement(attemptId)` synchronously, return the result
-   - For Reject: delete the `.inprogress` output file via `TemporaryFilePaths.LocalOutputPath`, delete the TFP row, return success
+   - For Reject: delete the `.ip` output file via `TemporaryFilePaths.LocalOutputPath`, delete the TFP row, return success
    - Response: `{Success, AttemptId, Disposition, Reason, FileReplaced?}`
    Verifiable: POST with `forceDisposition='Replace'` on a real pending row; observe the file replaces on disk, MediaFiles re-probed, audit columns set; second POST on the same queueId returns 409 Conflict (Status no longer Pending).
 

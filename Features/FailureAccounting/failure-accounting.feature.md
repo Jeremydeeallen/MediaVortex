@@ -80,7 +80,7 @@ C11. **[BUG-0095 amendment 2026-09-16] Terminal-vs-Transient discrimination + no
   | `demucs_daemon_down` | 60 | `DemucsDaemonUnavailableError` | FALSE | Restart worker; then requeue the job |
   | `ffmpeg_crash_midencode` | 80 | `Segmentation fault\|core dumped` | FALSE | Retry once; escalate if repeats within 24h |
   | `codec_map_mismatch` | 90 | `Requested output format.*does not accept` | FALSE | Pipeline fix pending; codec assignment audit |
-  | `orphan_output` | 100 | `Refusing to overwrite existing` | FALSE | Delete `.inprogress` at path; then retry |
+  | `orphan_output` | 100 | `Refusing to overwrite existing` | FALSE | Delete `.ip` at path; then retry |
   | `unclassified` | 9999 | `.*` (catch-all) | FALSE | Investigate manually via /FailedJobs modal attempt history |
 
   `/FailedJobs` renders Terminal class cards with a single CSS class `card--terminal` + static Remediation text from the JOINed `FailureClasses.Remediation` column. No dynamic badge component, no per-row JS, no new API. Terminal rows list in their own section separate from transient failures so operator visual scan distinguishes "waiting for regrab" from "waiting for retry."

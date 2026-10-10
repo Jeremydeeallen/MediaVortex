@@ -21,7 +21,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - Worker isolation: all destructive operations (shutdown cleanup, crash recovery, stuck detection, stop) are scoped to the calling worker via ClaimedBy/WorkerName. No worker may reset, kill, or interfere with another worker's jobs.
 - Interlaced routing: workers with AcceptsInterlaced=FALSE skip interlaced files in the claim query. Interlaced files remain Pending until a capable worker claims them.
 - Conditional deinterlacing: yadif is applied by CommandBuilder only when MediaFile.IsInterlaced=TRUE, not based on profile settings. Progressive files never get yadif regardless of profile.
-- True in-place output: transcoded file is written to the same directory as the source file. Output filename ends in `-mv.mp4.inprogress` so it coexists with the original until FileReplacement renames it and swaps the source out. There is no staging directory and no `TranscodeOutputMode` setting; in-place is the only mode.
+- True in-place output: transcoded file is written to the same directory as the source file. Output filename ends in `-mv.mp4.ip` so it coexists with the original until FileReplacement renames it and swaps the source out. There is no staging directory and no `TranscodeOutputMode` setting; in-place is the only mode.
 - VMAF quality test toggle: SystemSettings.QualityTestEnabled (global on/off, default OFF). Workers.QualityTestEnabled (per-worker override, NULL = use global). TranscodeAttempts.QualityTestRequired is set from these at job creation time, not hardcoded.
 - Per-worker FFprobe: Workers.FFprobePath flows through ProcessTranscodeQueueService -> CommandBuilderService -> FFmpegAnalysisService -> FFmpegService. Audio stream selection (English preferred) uses the worker's local FFprobe, not the global SystemSettings path.
 - [FIXED] Progress display must not depend on TranscodeQueue: any job with an active TranscodeProgress record and TranscodeAttempts.Success IS NULL must appear in the progress UI, regardless of whether a TranscodeQueue row exists.
@@ -52,7 +52,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 |---|---|---|---|---|
 | `TranscodeQueue` claim | `QueueManagementBusinessService` | `TranscodeQueue.(StorageRootId BIGINT, RelativePath TEXT, AssignedProfile TEXT, ProcessingMode TEXT, AcceptsInterlaced BOOLEAN) Status='Pending'` | `DatabaseManager.ClaimNextPendingTranscodeJob` (`FOR UPDATE OF tq SKIP LOCKED`); NVENC profiles additionally gate on `Workers.nvenccapable=TRUE` | `SELECT COUNT(*) FROM TranscodeQueue WHERE Status='Pending'` decrements after claim |
 | `EncoderKnobRepository` → `GetTranscodingSettings` | `Profiles` + `ProfileThresholds` DB join on ProfileName + normalized resolution category | `EncoderKnobs` dataclass `.ToDict()` dict; `ProcessTranscodeQueueService.GetTranscodingSettings` injects `SourceVideoBitrateKbps=MediaFile.VideoBitrateKbps`. Normalization: long-edge bucket via `_NormalizeResolution` -- `max(W,H) >= 3840 → '2160p'`, `>= 1920 → '1080p'`, `>= 1280 → '720p'`, else `'480p'`. So `'1920x802'` (letterbox crop) → `'1080p'`, not `'720p'` | `CommandBuilder` reads `ProfileSettings` dict keys | Smoke: `py /tmp/smoke_legacy.py` (SVT) + `py /tmp/smoke_canary.py` (NVENC VBR) |
-| In-place output path | `CommandBuilder.GenerateOutputFileName` | Worker-local path `{source_dir}/{basename}-mv.mp4.inprogress`. No `StagingDirectory`. `TranscodeOutputMode` row was vestigial (unread); removed by `Scripts/SQLScripts/RemoveVestigialOutputModeSetting.py` | `PrivateCreateTemporaryFilePathRecord` writes canonical form to `TemporaryFilePaths.(OutputStorageRootId, OutputRelativePath)` | After encode: `{source_dir}/{basename}-mv.mp4.inprogress` exists adjacent to source on shared mount |
+| In-place output path | `CommandBuilder.GenerateOutputFileName` | Worker-local path `{source_dir}/{basename}-mv.mp4.ip`. No `StagingDirectory`. `TranscodeOutputMode` row was vestigial (unread); removed by `Scripts/SQLScripts/RemoveVestigialOutputModeSetting.py` | `PrivateCreateTemporaryFilePathRecord` writes canonical form to `TemporaryFilePaths.(OutputStorageRootId, OutputRelativePath)` | After encode: `{source_dir}/{basename}-mv.mp4.ip` exists adjacent to source on shared mount |
 | `TemporaryFilePaths` → VMAF / FileReplacement | `ProcessTranscodeQueueService.PrivateCreateTemporaryFilePathRecord` | `TemporaryFilePaths.(TranscodeAttemptId BIGINT, OriginalPath TEXT, LocalSourcePath TEXT, LocalOutputPath TEXT, OutputStorageRootId BIGINT, OutputRelativePath TEXT)` -- paths in canonical DB form | `QualityTestingBusinessService` and `FileReplacementBusinessService` both read this row to locate the transcoded file. `UpdateTemporaryFilePath` is called after encode to write `LocalOutputPath` | `SELECT COUNT(*) FROM TemporaryFilePaths tfp JOIN TranscodeAttempts ta ON ta.Id = tfp.TranscodeAttemptId WHERE ta.Success IS NULL AND ta.FileReplaced IS NOT TRUE` → count of in-flight encodes |
 | `MediaFiles.IsInterlaced` → CommandBuilder yadif | `MediaFiles.isinterlaced BOOLEAN NULL` (NULL = not probed = treated as progressive) | Python check: `str(RawInterlaced).strip().lower() in ('1','true','yes','t')` | `CommandBuilder.BuildVideoFilters` applies yadif only when `IsInterlaced` evaluates True | `SELECT COUNT(*) FROM MediaFiles WHERE isinterlaced IS NULL AND transcodedbymedavortex IS NULL` → files not yet probed (treated as progressive) |
 
@@ -63,7 +63,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - [x] Fix: worker isolation -- SignalHandler, CrashRecovery, StuckJobDetector, QueueManagement scoped by WorkerName
 - [x] Interlaced routing: AcceptsInterlaced flag on Workers, claim query filters by IsInterlaced
 - [x] Conditional deinterlacing: CommandBuilder applies yadif based on MediaFile.IsInterlaced, not profile
-- [x] True in-place output: CommandBuilder writes the `.inprogress` output next to the source.
+- [x] True in-place output: CommandBuilder writes the `.ip` output next to the source.
 - [x] VMAF toggle: add QualityTestEnabled global setting (default OFF) and per-worker column
 - [x] Per-worker FFprobe: WorkerContext singleton provides FFprobePath to FFmpegService automatically, no explicit threading needed
 - [ ] Fix: concurrent job progress isolation (see memory/KNOWN-ISSUES.md)
@@ -78,7 +78,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 | TranscodeAttempts.{Success, FfpmpegCommand, OutputFileSize, ErrorMessage, Disposition, VmafScore} | Per-attempt updates |
 | ActiveJobs row INSERT/DELETE | Claim + completion path |
 | TranscodeProgress.{CurrentFPS, CurrentSpeed, CurrentFrame, TotalFrames, LastUpdated} | FFmpeg progress parser |
-| Output file on disk (.inprogress then renamed by FileReplacement) | FFmpeg subprocess |
+| Output file on disk (.ip then renamed by FileReplacement) | FFmpeg subprocess |
 | TranscodeQueue.{Status, ClaimedBy, ClaimedAt, DateStarted} | Claim + completion |
 
 ### Columns the TranscodeJob vertical READS from external tables
@@ -108,5 +108,5 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 
 - The internal claim SQL -- routes through WorkerCapabilityPredicate.BuildClaimPredicate
 - Per-mode dispatch internals -- single decision tree per `Features/TranscodeJob/Emit/encode-emit.feature.md` (CommandBuilder god class decomposed 2026-06-10)
-- The .inprogress filename suffix -- file-replacement seam owns the rename
+- The .ip filename suffix -- file-replacement seam owns the rename
 - The TranscodeAttempts.ffpmpegcommand typo (double p) -- known invariant

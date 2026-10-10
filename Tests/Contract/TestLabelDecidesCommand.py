@@ -71,14 +71,14 @@ class TestVideoCopyStageVerification(unittest.TestCase):
         Service.DispatchDisposition = MagicMock()
         Job = SimpleNamespace(Id=5, ProcessingMode=Mode, SizeBytes=1000, FilePath='T:\\x.mkv', MediaFileId=3)
         with patch('Features.AudioNormalization.Services.AudioPreEncodeFacade.WasDialogBoostEmitted', return_value=BoostEmitted):
-            Service.HandleRemuxResult(Job, {'NewSizeBytes': 900, 'OutputFilePath': 'x-mv.mp4.inprogress'}, 11, 22, 'x-mv.mp4.inprogress')
+            Service.HandleRemuxResult(Job, {'NewSizeBytes': 900, 'OutputFilePath': 'x-mv.mp4.ip'}, 11, 22, 'x-mv.mp4.ip')
         return Service
 
     # directive: label-decides-command | # see transcode.ST8
     def test_checksum_mismatch_fails_the_job_and_replaces_nothing(self):
         Service = self._Handle('Remux', ChecksumOk=False, BoostEmitted=False)
         Service.DispatchDisposition.assert_not_called()
-        Service._DeleteInProgressFile.assert_called_once_with('x-mv.mp4.inprogress')
+        Service._DeleteInProgressFile.assert_called_once_with('x-mv.mp4.ip')
         Service.HandleJobFailure.assert_called_once()
         self.assertIn('checksum mismatch', Service.HandleJobFailure.call_args[0][1])
 
@@ -113,7 +113,7 @@ class TestVideoCopyStageVerification(unittest.TestCase):
         Service.UpdateTranscodeFileRecord = MagicMock()
         Service.DispatchDisposition = MagicMock(side_effect=RuntimeError('replacement refused'))
         Job = SimpleNamespace(Id=5, ProcessingMode='Remux', SizeBytes=1000, FilePath='T:\\x.mkv', MediaFileId=3)
-        Service.HandleRemuxResult(Job, {'NewSizeBytes': 900, 'OutputFilePath': 'x-mv.mp4.inprogress'}, 11, 22, 'x-mv.mp4.inprogress')
+        Service.HandleRemuxResult(Job, {'NewSizeBytes': 900, 'OutputFilePath': 'x-mv.mp4.ip'}, 11, 22, 'x-mv.mp4.ip')
         Service.HandleJobFailure.assert_called_once()
         self.assertIn('replacement refused', Service.HandleJobFailure.call_args[0][1])
 

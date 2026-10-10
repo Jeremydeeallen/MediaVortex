@@ -48,7 +48,7 @@ Features/FileReplacement/**
 | File | Role |
 |------|------|
 | Features/FileReplacement/FileReplacementBusinessService.py | Orchestration (ProcessFileReplacement) + read-only queries (GetFailedFileReplacements, GetFileReplacementStatus) + archival + Jellyfin notify |
-| Features/FileReplacement/TranscodedOutputPlacement.py | .inprogress rename, MediaFiles refresh, original delete (see transcoded-output-placement.feature.md) |
+| Features/FileReplacement/TranscodedOutputPlacement.py | .ip rename, MediaFiles refresh, original delete (see transcoded-output-placement.feature.md) |
 | Features/FileReplacement/FileReplacementRepository.py | MediaFilesArchive and MediaFiles update queries |
 ## Cross-Vertical Contract
 
@@ -59,7 +59,7 @@ Features/FileReplacement/**
 | MediaFilesArchive row INSERT | FileReplacementBusinessService._ArchiveOriginal (pre-replace) |
 | MediaFiles.{TranscodedByMediaVortex, RemuxedByMediaVortex} | _UpdateMediaFilesAfterReplacement |
 | MediaFiles.{FileSize, LastModifiedDate, Codec, AudioCodec, AudioComplete, ResolutionCategory, IsInterlaced, AudioLanguages, HasExplicitEnglishAudio} | Post-replace re-probe write (via MediaProbe) |
-| Source file on disk | shutil.move (replace) / rename .inprogress |
+| Source file on disk | shutil.move (replace) / rename .ip |
 
 ### Columns the FileReplacement vertical READS from external tables
 
@@ -80,7 +80,7 @@ None. Internal worker pipeline.
 
 ### What is EXPLICITLY NOT a contract
 
-- The internal staging-path layout (.inprogress filename pattern) -- changes with the workflow
+- The internal staging-path layout (.ip filename pattern) -- changes with the workflow
 - Whether re-probe is invoked synchronously or queued -- today synchronous
 - The exact archive payload columns -- MediaFilesArchive schema evolves with MediaFiles
 - Cross-OS path math (ntpath.dirname vs os.path.dirname) -- the invariant is canonical-path math succeeds on any host

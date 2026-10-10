@@ -49,7 +49,7 @@ class TestFileReplacementRollbackOnUpdateFailure(unittest.TestCase):
     def test_rollback_nonsameslot_removes_orphan_and_keeps_source(self):
         SourceBytes = b'SRC' * 100
         SourcePath = self._MakeFile('Show.mkv', SourceBytes)
-        StagedPath = self._MakeFile('Show-mv.mp4.inprogress', b'NEW' * 100)
+        StagedPath = self._MakeFile('Show-mv.mp4.ip', b'NEW' * 100)
         TargetPath = os.path.join(self.TempDir, 'Show-mv.mp4')  # allow: local-path; test-local target
         self.AddPaths.append(TargetPath)
         Inst = self._Placement()
@@ -75,7 +75,7 @@ class TestFileReplacementRollbackOnUpdateFailure(unittest.TestCase):
     def test_rollback_sameslot_restores_source_and_removes_staging(self):
         SourceBytes = b'SRC' * 100
         SourcePath = self._MakeFile('Show-mv.mkv', SourceBytes)
-        StagedPath = os.path.join(self.TempDir, 'Show-mv.mkv.inprogress')  # allow: local-path; test-local staged
+        StagedPath = os.path.join(self.TempDir, 'Show-mv.mkv.ip')  # allow: local-path; test-local staged
         with open(StagedPath, 'wb') as F:
             F.write(b'NEW' * 100)
         self.AddPaths.append(StagedPath)
@@ -97,7 +97,7 @@ class TestFileReplacementRollbackOnUpdateFailure(unittest.TestCase):
         self.assertFalse(Result.get('Success'), 'Execute must return Success=False on update failure')
         self.assertIn('reprobe failed', Result.get('ErrorMessage', ''))
         self.assertFalse(LocalExists(BackupPath), 'Backup must not survive rollback (renamed back to source)')
-        self.assertFalse(LocalExists(StagedPath), 'Staging .inprogress artifact must not survive rollback')
+        self.assertFalse(LocalExists(StagedPath), 'Staging .ip artifact must not survive rollback')
         self.assertTrue(LocalExists(SourcePath), 'Source must be restored')
         with open(SourcePath, 'rb') as F:
             self.assertEqual(F.read(), SourceBytes, 'Restored source bytes must match pre-call state')

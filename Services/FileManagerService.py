@@ -77,23 +77,13 @@ class FileManagerService:
             return False
     
     def IsMediaFile(self, filePath: str) -> bool:
-        """Check if a file is a media file based on its extension.
-
-        Skips MediaVortex artifacts:
-          - `.old.<ext>` -- legacy backup left by pre-2026-05-16 file
-            replacements (KeepSource=True). Not a separate media file.
-          - `.inprogress` -- in-flight FFmpeg output, not yet verified.
-            See worker-lifecycle.feature.md criterion 6.
-          - `.orig` -- legacy mid-replacement backup from the pre-`.inprogress`
-            pattern. Filtered defensively.
-        See Features/FileReplacement/transcoded-output-placement.feature.md criterion 9.
-        """
+        """True for media extensions; skips MediaVortex artifacts (.old.<ext>, .ip in-flight output, .orig); see worker-lifecycle.feature.md C6."""
         try:
             FileNameLower = Path(filePath).name.lower()
             Stem = Path(FileNameLower).stem
             if Stem.endswith(".old"):
                 return False
-            if FileNameLower.endswith(".inprogress"):
+            if FileNameLower.endswith(".ip"):
                 return False
             if FileNameLower.endswith(".orig"):
                 return False

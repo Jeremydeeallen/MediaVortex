@@ -12,5 +12,5 @@ class RetainInprogressPolicy:
 
     # directive: transcode-flow-canonical | # see transcode.ST7
     def ShouldRetain(self, Reason: str) -> bool:
-        """True iff the .inprogress artifact should stay on disk for operator inspection."""
+        """True iff the .ip artifact should stay on disk for operator inspection."""
         return Reason in self.RETAIN_REASONS

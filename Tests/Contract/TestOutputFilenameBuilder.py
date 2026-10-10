@@ -14,38 +14,38 @@ class TestOutputFilenameBuilder:
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C3
     def test_same_resolution_emits_mv_mp4_inprogress(self):
-        """Identical src/target => '<base>-mv.mp4.inprogress'."""
+        """Identical src/target => '<base>-mv.mp4.ip'."""
         Builder = OutputFilenameBuilder()
         Result = Builder.GenerateOutputFileName('Show.S01E01.mkv', '1080p', '1080p')
-        assert Result == 'Show.S01E01-mv.mp4.inprogress'
+        assert Result == 'Show.S01E01-mv.mp4.ip'
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C3
     def test_mv_suffix_collapses_when_source_ends_in_mv(self):
         """Input with `-mv` suffix collapses to single `-mv` in output."""
         Builder = OutputFilenameBuilder()
         Result = Builder.GenerateOutputFileName('Show-mv.mkv', '1080p', '1080p')
-        assert Result == 'Show-mv.mp4.inprogress'
+        assert Result == 'Show-mv.mp4.ip'
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C3
     def test_mv_suffix_collapses_greedily(self):
         """Multiple `-mv` suffixes collapse greedily to single `-mv`."""
         Builder = OutputFilenameBuilder()
         Result = Builder.GenerateOutputFileName('Show-mv-mv.mkv', '1080p', '1080p')
-        assert Result == 'Show-mv.mp4.inprogress'
+        assert Result == 'Show-mv.mp4.ip'
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C3
     def test_resolution_token_replaced_when_present_in_filename(self):
         """Source resolution token in filename replaced with target token."""
         Builder = OutputFilenameBuilder()
         Result = Builder.GenerateOutputFileName('Show-1080p.mkv', '1080p', '720p')
-        assert Result == 'Show-720p-mv.mp4.inprogress'
+        assert Result == 'Show-720p-mv.mp4.ip'
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C3
     def test_resolution_token_appended_when_absent(self):
         """Source resolution token absent => target token appended to basename."""
         Builder = OutputFilenameBuilder()
         Result = Builder.GenerateOutputFileName('Show.mkv', '1080p', '720p')
-        assert Result == 'Show720p-mv.mp4.inprogress'
+        assert Result == 'Show720p-mv.mp4.ip'
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C3
     def test_extract_resolution_from_filename_finds_720p(self):

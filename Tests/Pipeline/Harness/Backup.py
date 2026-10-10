@@ -201,7 +201,7 @@ _RES_TAG_RE = re.compile(r'-\d+p$', re.IGNORECASE)
 
 # directive: compliance-solid-refactor | # see compliance-solid-refactor.C15
 def _SweepPostTestArtifacts(OriginalLocalPath: str) -> int:
-    """Delete same-dir files matching post-pipeline naming (-mv*.mp4, .inprogress, -mv-thumb.jpg); preserves original + non-mv sidecars."""
+    """Delete same-dir files matching post-pipeline naming (-mv*.mp4, .ip, -mv-thumb.jpg); preserves original + non-mv sidecars."""
     Dir = LocalDirname(OriginalLocalPath)
     OriginalBase = LocalBasename(OriginalLocalPath)
     Stem, _OriginalExt = LocalSplitExt(OriginalBase)
@@ -216,7 +216,7 @@ def _SweepPostTestArtifacts(OriginalLocalPath: str) -> int:
         if not EntryStem.startswith(ResolutionFreeStem):
             continue
         Tail = Entry[len(ResolutionFreeStem):]
-        if '-mv' in Tail or Tail.endswith('.inprogress'):
+        if '-mv' in Tail or Tail.endswith('.ip'):
             Full = LocalJoin(Dir, Entry)
             try:
                 os.remove(Full)

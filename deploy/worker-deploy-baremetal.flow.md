@@ -289,7 +289,7 @@ The deploy verifies the worker reaches Online. The per-step behavior that produc
 | Register share mappings | -- | UPSERT `WorkerShareMappings` from `MEDIAVORTEX_SHARE_MAPPINGS` |
 | Mount validation | `worker-lifecycle.feature.md` crit 20, 21 | Each storage mount checked exists, non-empty, not local-fs |
 | Load capabilities | `WorkerService.feature.md` crit 1, 2 | TranscodeEnabled / QualityTestEnabled / ScanEnabled / RemuxEnabled read |
-| Crash recovery | `worker-lifecycle.feature.md` crit 10-13 | Orphaned ActiveJobs cleaned, `.inprogress` files removed |
+| Crash recovery | `worker-lifecycle.feature.md` crit 10-13 | Orphaned ActiveJobs cleaned, `.ip` files removed |
 | Health loop | -- | Heartbeat every 30s |
 | Status poll | `worker-lifecycle.feature.md` crit 1-5 | Online/Paused transitions |
 | Capability poll | `WorkerService.feature.md` crit 2 | Capability + concurrency changes within 15s |

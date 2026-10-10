@@ -88,7 +88,7 @@ for how `AudioComplete` is decided.
 
 Which job label a file is queued under, and what that label's command does to the file, is defined once in `transcode.flow.md` D2 (labels) + D4 (buckets). Not restated here.
 
-17b. **[BUG-0005]** Every command builder writing to a `.inprogress` output filename MUST include the FFmpeg `-f mp4` flag (or the appropriate muxer name when not MP4). FFmpeg's auto-detection reads only the LAST filename extension, sees `.inprogress`, fails to find a muxer, and exits with `AVERROR(EINVAL) = -22`. Verifiable: build a Remux command for any MediaFile, observe `-f mp4` appears between the codec args and the output path; running the command end-to-end completes without the "Unable to choose an output format" error.
+17b. **[BUG-0005]** Every command builder writing to a `.ip` output filename MUST include the FFmpeg `-f mp4` flag (or the appropriate muxer name when not MP4). FFmpeg's auto-detection reads only the LAST filename extension, sees `.ip`, fails to find a muxer, and exits with `AVERROR(EINVAL) = -22`. Verifiable: build a Remux command for any MediaFile, observe `-f mp4` appears between the codec args and the output path; running the command end-to-end completes without the "Unable to choose an output format" error.
 
 17c. **[BUG-0006]** `Remux` and `AudioFix` queue rows are claimed under `Workers.RemuxEnabled`, NOT under `TranscodeEnabled` (see `Features/ServiceControl/capability-control-plane.feature.md` criterion 6). Verifiable: with `Workers.RemuxEnabled=true, TranscodeEnabled=false` on a worker, queue a row with `ProcessingMode='Remux'`; observe the worker claims it within the capability-poll interval. Symmetric: with `RemuxEnabled=false, TranscodeEnabled=true`, that same row is NOT claimed by that worker.
 

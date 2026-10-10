@@ -31,7 +31,7 @@ The most common wrong call. Always know which kind of path is in hand.
 **Canonical** -- came from a DB column (`MediaFiles.FilePath`, `TranscodeQueue.FilePath`, `MediaFilesArchive.FilePath`, etc.). Shape is Windows-flavored regardless of host OS. Cannot do I/O directly; needs `Resolve` or one of the canonical-aware wrappers.
 - Use: `Exists(canonical, worker)`, `IsFile(canonical, worker)`, `GetSize(canonical, worker)`, `Resolve(...)`, `ToLocal(...)`.
 
-**Local** -- already worker-resolved, or born local: ffmpeg binary path, `.inprogress` staging artifact, return value of `Resolve()`, the `LocalPath` field on `TemporaryFilePaths`.
+**Local** -- already worker-resolved, or born local: ffmpeg binary path, `.ip` staging artifact, return value of `Resolve()`, the `LocalPath` field on `TemporaryFilePaths`.
 - Use: `LocalExists(p)`, `LocalIsFile(p)`, `LocalGetSize(p)`.
 
 **Pure string comparison** -- neither side is about to hit the filesystem (excluded-dirs membership, self-overwrite guard, dedup keys). Use `Normalize(p)` to canonicalize and `PathsEqual(a, b)` to compare.

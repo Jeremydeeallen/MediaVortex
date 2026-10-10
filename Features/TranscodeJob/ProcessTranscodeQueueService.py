@@ -501,12 +501,11 @@ class ProcessTranscodeQueueService:
 
     # directive: nvenc-rate-anchored-remediation
     def _VerifyInProgressFile(self, LocalInProgressPath: str) -> bool:
-        """FFprobe a freshly-written `.inprogress` file to confirm it is a valid
-        media file. Owns worker-lifecycle.feature.md criterion 7."""
+        """FFprobe a freshly-written `.ip` file to confirm it is valid media; see worker-lifecycle.feature.md C7."""
         try:
             if not LocalExists(LocalInProgressPath):
                 LoggingService.LogError(
-                    f"FFprobe verify failed: .inprogress file not found at {LocalInProgressPath}",
+                    f"FFprobe verify failed: .ip file not found at {LocalInProgressPath}",
                     "ProcessTranscodeQueueService", "_VerifyInProgressFile"
                 )
                 return False
@@ -521,22 +520,19 @@ class ProcessTranscodeQueueService:
             return True
         except Exception as e:
             LoggingService.LogException(
-                f"Exception verifying .inprogress file {LocalInProgressPath}",
+                f"Exception verifying .ip file {LocalInProgressPath}",
                 e, "ProcessTranscodeQueueService", "_VerifyInProgressFile"
             )
             return False
 
     # directive: nvenc-rate-anchored-remediation
     def _DeleteInProgressFile(self, LocalInProgressPath: str) -> None:
-        """Best-effort delete of a `.inprogress` artifact after FFmpeg or
-        FFprobe-verify failure. Owns worker-lifecycle.feature.md criterion 9.
-        Defensive: refuses to delete any path that does not end in `.inprogress`
-        so a bad caller can never destroy a source or finalized output."""
+        """Delete a `.ip` artifact after encode or verify failure; refuses any path not ending in `.ip` so a source or final file is never deleted; see worker-lifecycle.feature.md C9."""
         if not LocalInProgressPath:
             return
-        if not LocalInProgressPath.endswith('.inprogress'):
+        if not LocalInProgressPath.endswith('.ip'):
             LoggingService.LogWarning(
-                f"_DeleteInProgressFile refused to delete non-.inprogress path: {LocalInProgressPath}",
+                f"_DeleteInProgressFile refused to delete non-.ip path: {LocalInProgressPath}",
                 "ProcessTranscodeQueueService", "_DeleteInProgressFile"
             )
             return
@@ -544,12 +540,12 @@ class ProcessTranscodeQueueService:
             if LocalExists(LocalInProgressPath):
                 os.remove(LocalInProgressPath)
                 LoggingService.LogInfo(
-                    f"Deleted .inprogress artifact: {LocalInProgressPath}",
+                    f"Deleted .ip artifact: {LocalInProgressPath}",
                     "ProcessTranscodeQueueService", "_DeleteInProgressFile"
                 )
         except Exception as e:
             LoggingService.LogWarning(
-                f"Could not delete .inprogress artifact at {LocalInProgressPath}: {str(e)}",
+                f"Could not delete .ip artifact at {LocalInProgressPath}: {str(e)}",
                 "ProcessTranscodeQueueService", "_DeleteInProgressFile"
             )
 
@@ -600,7 +596,7 @@ class ProcessTranscodeQueueService:
         try:
             NewSizeBytes = TranscodeResult.get("NewSizeBytes", 0)
             RawOutputFilePath = TranscodeResult.get("OutputFilePath", OutputPath)
-            OutputFilePath = RawOutputFilePath[:-len('.inprogress')] if RawOutputFilePath.endswith('.inprogress') else RawOutputFilePath
+            OutputFilePath = RawOutputFilePath[:-len('.ip')] if RawOutputFilePath.endswith('.ip') else RawOutputFilePath
             OldSizeBytes = Job.SizeBytes
 
             SizeReductionBytes = OldSizeBytes - NewSizeBytes if NewSizeBytes > 0 and OldSizeBytes > 0 else 0
@@ -1105,7 +1101,7 @@ class ProcessTranscodeQueueService:
                 # Use pre-calculated file size from ExecuteTranscoding (captured immediately after transcode)
                 NewSizeBytes = TranscodeResult.get("NewSizeBytes", 0)
                 RawOutputFilePath = TranscodeResult.get("OutputFilePath", "")
-                OutputFilePath = RawOutputFilePath[:-len('.inprogress')] if RawOutputFilePath.endswith('.inprogress') else RawOutputFilePath
+                OutputFilePath = RawOutputFilePath[:-len('.ip')] if RawOutputFilePath.endswith('.ip') else RawOutputFilePath
 
                 # Calculate size reduction metrics
                 SizeReductionBytes = 0
@@ -1595,15 +1591,7 @@ class ProcessTranscodeQueueService:
 
     # directive: nvenc-rate-anchored-remediation
     def _ResolveTfpPathParts(self, Job, OutputPath: str):
-        """Compute (SrcId, SrcRel, OutId, OutRel) for TemporaryFilePaths writes.
-        Output side is derived from Job.RelativePath (canonical, always '/'-separated)
-        and the basename of the worker-local OutputPath. The .inprogress file
-        always lands next to the source, so OutputStorageRootId == source
-        StorageRootId and OutRel == <dirname(Job.RelativePath)>/<output_basename>.
-        Parsing the worker-local OutputPath against StorageRoots was fragile
-        (Linux os.path.basename on a Windows-shaped canonical string returned
-        the whole string, polluting the stored relative path with 'T:/'
-        fragments)."""
+        """Compute (SrcId, SrcRel, OutId, OutRel) for TemporaryFilePaths; output side = dirname(Job.RelativePath) + basename of the worker-local OutputPath, never parsed from the local path (the .ip file sits next to the source)."""
         SrcId = getattr(Job, 'StorageRootId', None)
         SrcRel = getattr(Job, 'RelativePath', None) or None
         OutBase = LocalBasename(OutputPath) if OutputPath else ''
@@ -1633,7 +1621,7 @@ class ProcessTranscodeQueueService:
 
     # directive: local-staging | # see local-staging.C10
     def _ResolveCanonicalOutputPath(self, OutputStorageRootId, OutputRelativePath) -> Optional[str]:
-        """Resolve the canonical typed-pair output path to the worker-native mount path (e.g. M:\\Show\\foo-mv.mp4.inprogress)."""
+        """Resolve the canonical typed-pair output path to the worker-native mount path (e.g. M:\\Show\\foo-mv.mp4.ip)."""
         try:
             if OutputStorageRootId is None or OutputRelativePath is None:
                 return None
@@ -1644,7 +1632,7 @@ class ProcessTranscodeQueueService:
 
     # directive: local-staging | # see local-staging.C10
     def _CopyBackStagedOutput(self, LocalOutputPath: str, CanonicalOutputPath: str, MediaFileId: int) -> bool:
-        """Copy local .inprogress back to the canonical side-by-side path; size-verify; return False on any failure."""
+        """Copy local .ip back to the canonical side-by-side path; size-verify; return False on any failure."""
         try:
             if not LocalOutputPath or not CanonicalOutputPath:
                 LoggingService.LogError(f"Copy-back missing path: local={LocalOutputPath} canonical={CanonicalOutputPath} mid={MediaFileId}", "ProcessTranscodeQueueService", "_CopyBackStagedOutput")

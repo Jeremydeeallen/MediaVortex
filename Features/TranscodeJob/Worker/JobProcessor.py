@@ -76,7 +76,7 @@ class JobProcessor:
 
             BaseName, _ = LocalSplitExt(LocalBasename(EffectiveInputPath))
             BaseName = OutputFilenameBuilder().CollapseMvSuffix(BaseName)
-            TargetLocalPath = LocalJoin(LocalDirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
+            TargetLocalPath = LocalJoin(LocalDirname(EffectiveInputPath), BaseName + '-mv.mp4.ip')
 
             self.QueueService.DatabaseManager.SetJobPhase(ActiveJobId, JobPhase.PreEncode)
             PreAudio = self._RunPreEncodeAudio(MediaFile, EffectiveInputPath, Job, TranscodeAttemptId)
@@ -133,7 +133,7 @@ class JobProcessor:
                 self.QueueService.HandleJobFailure(Job, f"{Mode} output failed FFprobe verification", TranscodeAttemptId, ActiveJobId)
                 return JobResult(Success=False, ErrorMessage="Output verification failed")
 
-            # # see local-staging.S4 -- when local-staging is active, ship .inprogress back to canonical before disposition
+            # # see local-staging.S4 -- when local-staging is active, ship .ip back to canonical before disposition
             FinalOutputPath = CommandResult.OutputPath
             _LocalSrc, LocalOut = self.QueueService._GetLocalStagingPathsIfActive(EffectiveInputPath, CommandResult.OutputPath)
             if LocalOut:

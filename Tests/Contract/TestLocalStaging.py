@@ -120,10 +120,10 @@ class TestStageSourceRoundTrip(unittest.TestCase):
     def test_resolve_local_output_path_lands_in_per_job_subdir(self):
         S = LocalStagingService(self.Db)
         MediaFileId = 999002
-        OutPath = S.ResolveLocalOutputPath(WORKER_A, MediaFileId, 'sample-mv.mp4.inprogress')
+        OutPath = S.ResolveLocalOutputPath(WORKER_A, MediaFileId, 'sample-mv.mp4.ip')
         self.assertIsNotNone(OutPath)
         self.assertIn(str(MediaFileId), OutPath)
-        self.assertTrue(OutPath.endswith('sample-mv.mp4.inprogress'))
+        self.assertTrue(OutPath.endswith('sample-mv.mp4.ip'))
 
 
 class TestCleanupIdempotency(unittest.TestCase):
@@ -142,13 +142,13 @@ class TestCleanupIdempotency(unittest.TestCase):
 
     def test_cleanup_on_existing_file_succeeds(self):
         S = LocalStagingService(self.Db)
-        F = tempfile.NamedTemporaryFile(delete=False, dir=self.ScratchDir, suffix='.inprogress').name
+        F = tempfile.NamedTemporaryFile(delete=False, dir=self.ScratchDir, suffix='.ip').name
         self.assertTrue(S.Cleanup(F))
         self.assertFalse(os.path.exists(F))
 
     def test_cleanup_on_nonexistent_path_returns_true(self):
         S = LocalStagingService(self.Db)
-        self.assertTrue(S.Cleanup(os.path.join(self.ScratchDir, 'never_existed.inprogress')))
+        self.assertTrue(S.Cleanup(os.path.join(self.ScratchDir, 'never_existed.ip')))
 
     def test_cleanup_on_none_returns_true(self):
         S = LocalStagingService(self.Db)

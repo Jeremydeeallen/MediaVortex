@@ -15,26 +15,26 @@ class TestCollapseMvSuffixAgainstRealRemuxJobInputs(unittest.TestCase):
     # directive: worker-runtime-state
     def _Compose(self, EffectiveInputBase: str) -> str:
         BaseName = self.Builder.CollapseMvSuffix(EffectiveInputBase)
-        return BaseName + '-mv.mp4.inprogress'
+        return BaseName + '-mv.mp4.ip'
 
     def test_single_mv_source_stays_single(self):
         Out = self._Compose('Black Butler - S01E22 - His Butler, Dissolution Bluray-1080p-mv')
-        self.assertTrue(Out.endswith('-mv.mp4.inprogress'))
+        self.assertTrue(Out.endswith('-mv.mp4.ip'))
         self.assertNotIn('-mv-mv', Out)
 
     def test_double_mv_source_collapses_to_single(self):
         Out = self._Compose('Black Butler - S01E22 - His Butler, Dissolution Bluray-1080p-mv-mv')
-        self.assertTrue(Out.endswith('-mv.mp4.inprogress'))
+        self.assertTrue(Out.endswith('-mv.mp4.ip'))
         self.assertNotIn('-mv-mv', Out)
 
     def test_triple_mv_source_collapses_to_single(self):
         Out = self._Compose('Obi-Wan Kenobi - S01E06 - Part VI WEBRip-720p-mv-mv-mv')
-        self.assertTrue(Out.endswith('-mv.mp4.inprogress'))
+        self.assertTrue(Out.endswith('-mv.mp4.ip'))
         self.assertNotIn('-mv-mv', Out)
 
     def test_no_mv_source_gets_single_mv(self):
         Out = self._Compose('Foo - S01E01 - Pilot WEBDL-720p')
-        self.assertTrue(Out.endswith('-mv.mp4.inprogress'))
+        self.assertTrue(Out.endswith('-mv.mp4.ip'))
         self.assertNotIn('-mv-mv', Out)
 
 

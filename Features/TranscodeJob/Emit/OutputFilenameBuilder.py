@@ -6,11 +6,11 @@ from typing import Optional
 
 # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C3
 class OutputFilenameBuilder:
-    """Single source of truth for `-mv.<container>.inprogress` output naming."""
+    """Single source of truth for `-mv.<container>.ip` output naming."""
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C3
     def GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4', CrfValue: int = None) -> str:
-        """Build `<basename>[-resolution]-mv.<ext>.inprogress` per worker-lifecycle.feature.md C6."""
+        """Build `<basename>[-resolution]-mv.<ext>.ip` per worker-lifecycle.feature.md C6."""
         try:
             import ntpath as _ntpath
             OriginalFileName = _ntpath.basename(_ntpath.basename(OriginalFileName or ''))
@@ -18,24 +18,24 @@ class OutputFilenameBuilder:
             BaseName = self.CollapseMvSuffix(BaseName)
 
             if SourceResolution == TargetResolution:
-                return f"{BaseName}-mv.{ContainerType}.inprogress"
+                return f"{BaseName}-mv.{ContainerType}.ip"
 
             SourceResolutionStr = self.ExtractResolutionFromFilename(OriginalFileName)
             if not SourceResolutionStr:
                 TargetResolutionStr = self.FormatResolutionForFilename(TargetResolution)
-                return f"{BaseName}{TargetResolutionStr}-mv.{ContainerType}.inprogress"
+                return f"{BaseName}{TargetResolutionStr}-mv.{ContainerType}.ip"
 
             TargetResolutionStr = self.FormatResolutionForFilename(TargetResolution)
             NewBaseName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
             NewBaseName = os.path.splitext(NewBaseName)[0]
             NewBaseName = self.CollapseMvSuffix(NewBaseName)
 
-            return f"{NewBaseName}-mv.{ContainerType}.inprogress"
+            return f"{NewBaseName}-mv.{ContainerType}.ip"
 
         except Exception:
             BaseName = os.path.splitext(OriginalFileName)[0]
             BaseName = self.CollapseMvSuffix(BaseName)
-            return f"{BaseName}-mv.{ContainerType}.inprogress"
+            return f"{BaseName}-mv.{ContainerType}.ip"
 
     # directive: perfect-solid-transcode-pipeline-phase2 | # see perfect-solid-transcode-pipeline-phase2.C3
     def ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
