@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-06
-**Status:** Active -- phase: DELIVERING
+**Status:** Closed 2026-10-10
 **Slug:** auto-handoff
 **Replaces:** `directives/closed/2026-10-06-label-decides-command.md` (closed Success)
 
