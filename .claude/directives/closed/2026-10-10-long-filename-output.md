@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-10
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Closed 2026-10-10
 **Slug:** long-filename-output
 **Replaces:** `directives/closed/2026-10-10-auto-handoff.md` (closed Success)
 
@@ -71,6 +71,27 @@ Seam changed:
 
 ### Promotions
 
+| Source artifact | Target file |
+|---|---|
+| In-flight suffix is `.ip`; same-slot backup suffix is `.bak` | `transcode.flow.md` (ST6, ST9 steps 5-7), `WorkerService/worker-lifecycle.feature.md`, `Features/FileReplacement/transcoded-output-placement.feature.md`, `Features/TranscodeJob/local-staging.feature.md`, `.claude/rules/worker-deploy.md`, and the 16 other living docs that named the old suffix (same commit as the code) |
+
 ### Verification
 
+- **Commits:** `3fef5d2f` (`.inprogress` -> `.ip`), `dd3bb783` (`.replacing.bak` -> `.bak`). Pushed. Fleet on `dd3bb783`, 9 workers OK.
+- **Tests:** naming, placement, staging, disposition, hand-off suites 103/103; placement + hand-off 24/24 after the backup change. Claim tests not run (they take live queue rows).
+- **2:** production grep for the old suffix returns 0.
+- **1 + 3, live on wakko-worker-1 2026-10-10 (UTC):**
+  - 701679 Bullwinkle S01E126-E130 (source name 239 bytes, 17 prior `File name too long` failures): attempt 99811 Transcode placed 19:30:53; hand-off queued Audio; attempt 99816 AudioFix placed 20:17:36. Compliant on all three dimensions. Final name 246 bytes, ends `DVD480p-mv.mp4`.
+  - 699449 Interspecies Reviewers S01E10 (243 bytes): attempt 99812 Remux placed 19:31:07; hand-off queued Audio; attempt 99815 AudioFix placed 20:07:04. Compliant. Final name 246 bytes, ends `Bluray-1080p-mv.mp4`.
+  - 698773 Greatest American Hero S01E01-E08 (246 bytes): attempt 99810 encoded to `...-mv.mp4.ip` without a filename error; rejected `InsufficientSavings_13pct_below_20pct`, so not placed. The filename failure is gone; what remains is the savings rule (backlog row 22).
+- **Found on the way:** the first Audio attempts on the two placed files (99813, 99814) failed renaming the in-place backup: `<name>-mv.mp4.replacing.bak` is 260 bytes. Fixed by `dd3bb783`; the re-runs above passed.
+- **Not caused by this change:** dot's GPU became unusable after an OS auto-update of the NVIDIA libraries at 06:03 local 2026-10-10 (library 595.99.02 vs loaded kernel module 595.84); the deploy restart exposed it. dot-worker-1 is Paused until the host is rebooted (backlog row 24).
+- **Left on disk:** 27 old `.inprogress` files on `T:\` (about 14 GB, July-October), listed to the operator, not deleted.
+
 ### Decisions Made
+
+- Plain literal replace, no shared constant, as the operator asked.
+- The same-slot backup suffix was shortened too: without it a long-named file passes its first stage and fails every later one.
+- Source filenames were not renamed; all three fit once the suffixes shrank.
+- `Scripts/SQLScripts/CleanupStaleInProgressFiles.py` still targets the old suffix: it is the tool for the leftovers.
+- Three multi-line docstrings on edited lines were collapsed to one line (R12).
