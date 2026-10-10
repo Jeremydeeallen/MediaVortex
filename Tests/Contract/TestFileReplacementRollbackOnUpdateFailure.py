@@ -79,7 +79,7 @@ class TestFileReplacementRollbackOnUpdateFailure(unittest.TestCase):
         with open(StagedPath, 'wb') as F:
             F.write(b'NEW' * 100)
         self.AddPaths.append(StagedPath)
-        BackupPath = SourcePath + '.replacing.bak'
+        BackupPath = SourcePath + '.bak'
         self.AddPaths.append(BackupPath)
         Inst = self._Placement()
         Inst._UpdateMediaFilesAfterReplacement = MagicMock(

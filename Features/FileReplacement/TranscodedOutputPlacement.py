@@ -125,7 +125,7 @@ class TranscodedOutputPlacement:
                 LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
                 return {'Success': False, 'ErrorMessage': ErrorMsg}
 
-            BackupPath = LocalOriginalPath + '.replacing.bak' if SameSlotReplacement else None
+            BackupPath = LocalOriginalPath + '.bak' if SameSlotReplacement else None
             if SameSlotReplacement and LocalExists(BackupPath):
                 try:
                     os.remove(BackupPath)

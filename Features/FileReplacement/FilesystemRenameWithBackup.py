@@ -12,7 +12,7 @@ class FilesystemRenameWithBackup:
         # see filereplacement.C11
         self.SourcePath = SourcePath
         self.TargetPath = TargetPath
-        self.BackupPath = BackupPath or (SourcePath + '.replacing.bak')
+        self.BackupPath = BackupPath or (SourcePath + '.bak')
         self._RenameDone = False
         self._BackupCreated = False
 
