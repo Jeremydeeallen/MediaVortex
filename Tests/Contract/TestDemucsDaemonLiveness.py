@@ -38,7 +38,7 @@ EXITS = "import time\ntime.sleep(1)\n"
 
 # directive: demucs-liveness | # see demucs-daemon.C8
 def _ClientAround(Script):
-    Client = DemucsDaemonClient(StallTimeoutSec=STALL_SEC)
+    Client = DemucsDaemonClient('cpu', StallTimeoutSec=STALL_SEC)
     Client._Proc = subprocess.Popen(
         [sys.executable, '-c', Script],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -89,7 +89,7 @@ class TestDemucsDaemonLiveness(unittest.TestCase):
 
     # directive: demucs-liveness | # see demucs-daemon.C8
     def test_client_has_no_total_duration_cap(self):
-        Client = DemucsDaemonClient()
+        Client = DemucsDaemonClient('cpu')
         self.assertFalse(hasattr(Client, '_IsolateReadTimeoutSec'))
 
 

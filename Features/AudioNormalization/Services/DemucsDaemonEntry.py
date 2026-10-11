@@ -1,5 +1,6 @@
 import json
 import os
+import platform
 import shutil
 import sys
 import traceback
@@ -10,6 +11,7 @@ from Core.Path.LocalPath import LocalJoin
 from Features.AudioNormalization.Services.DemucsChunking import CHUNKS_MARKER, JoinStem, SplitWav
 
 from Features.AudioNormalization.Services.DemucsDaemonProtocol import (
+    DEVICE_ERROR_MARKER,
     DecodeRequest,
     EncodeResponse,
     IsolateResponse,
@@ -17,25 +19,21 @@ from Features.AudioNormalization.Services.DemucsDaemonProtocol import (
 )
 
 
-def _DetectDevice():
-    try:
-        import torch
-        if torch.cuda.is_available():
-            return 'cuda'
-        if hasattr(torch, 'xpu') and torch.xpu.is_available():
-            return 'xpu'
-    except ImportError:
-        pass
-    return 'cpu'
-
-
-def _PreWarmXpu(Device):
-    if Device != 'xpu':
-        return
-    try:
-        import intel_extension_for_pytorch
-    except ImportError:
-        pass
+# directive: demucs-liveness | # see demucs-daemon.C5 -- the caller names the device; the daemon proves torch can use it or exits before READY
+def _RequireDevice(Argv):
+    if len(Argv) != 3 or Argv[1] != '--device' or Argv[2] not in ('cuda', 'xpu', 'cpu'):
+        raise SystemExit(f'{DEVICE_ERROR_MARKER} daemon must be started with --device cuda|xpu|cpu; got {Argv[1:]!r}')
+    Required = Argv[2]
+    import torch
+    Available = {
+        'cuda': torch.cuda.is_available,
+        'xpu': lambda: hasattr(torch, 'xpu') and torch.xpu.is_available(),
+        'cpu': lambda: True,
+    }[Required]()
+    if not Available:
+        raise SystemExit(
+            f"{DEVICE_ERROR_MARKER} required device '{Required}' is not usable by torch {torch.__version__} on {platform.node()}; refusing to separate on any other device")
+    return Required
 
 
 # directive: transcode-flow-canonical -- demucs.separate.main + torch print() to stdout; those bytes MUST NOT reach our protocol stdout or clients read them as garbage responses
@@ -101,9 +99,9 @@ def _IsolateOnce(Req, Device):
     return Vocals, Instrumental
 
 
+# directive: demucs-liveness | # see demucs-daemon.C5
 def Main():
-    Device = _DetectDevice()
-    _PreWarmXpu(Device)
+    Device = _RequireDevice(sys.argv)
     sys.stdout.write(READY_LINE + '\n')
     sys.stdout.flush()
     for Line in sys.stdin:

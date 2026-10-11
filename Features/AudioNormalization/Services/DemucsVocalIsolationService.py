@@ -62,6 +62,56 @@ class DemucsIsolationResult:
         self.PremixWavPath = PremixWavPath
 
 
+# directive: demucs-liveness | # see demucs-daemon.C5 -- hardware flags decide the device; cpu only when the worker has neither GPU flag
+def DeviceForCapabilities(NvencCapable, QsvCapable):
+    if NvencCapable:
+        return 'cuda'
+    if QsvCapable:
+        return 'xpu'
+    return 'cpu'
+
+
+# directive: demucs-liveness | # see demucs-daemon.C5 -- reads this worker's Workers row fresh; a missing row raises
+def RequiredDemucsDevice():
+    from Core.Database.DatabaseService import DatabaseService
+    from Core.WorkerContext import WorkerContext
+    WorkerName = WorkerContext.Current().WorkerName
+    Rows = DatabaseService().ExecuteQuery(
+        "SELECT NvencCapable, QsvCapable FROM Workers WHERE WorkerName = %s", (WorkerName,))
+    if not Rows:
+        raise RuntimeError(f"RequiredDemucsDevice: no Workers row for '{WorkerName}'")
+    return DeviceForCapabilities(bool(Rows[0]['NvencCapable']), bool(Rows[0]['QsvCapable']))
+
+
+# directive: demucs-liveness | # see demucs-daemon.C13 -- pulls the loudnorm JSON block out of ffmpeg stderr; no block or a missing field raises
+def ParseLoudnormMeasurement(StderrText, What):
+    Match = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", StderrText, re.DOTALL)
+    if not Match:
+        raise RuntimeError(f"{What}: ffmpeg loudnorm printed no measurement block. stderr tail={StderrText[-400:]}")
+    try:
+        Payload = json.loads(Match.group(0))
+        return (
+            float(Payload["input_i"]),
+            float(Payload["input_lra"]),
+            float(Payload["input_tp"]),
+            float(Payload["input_thresh"]),
+        )
+    except (ValueError, KeyError) as Ex:
+        raise RuntimeError(f"{What}: ffmpeg loudnorm block unreadable ({Ex}). block={Match.group(0)[:400]}") from Ex
+
+
+# directive: demucs-liveness | # see demucs-daemon.C13 -- last "RMS level dB" in astats output; "-inf" is true silence and maps to the floor; no line or an unreadable value raises
+def ParseAstatsRmsDbfs(StderrText, What):
+    Values = []
+    for Line in StderrText.splitlines():
+        if "RMS level dB:" in Line:
+            Token = Line.split("RMS level dB:")[1].strip()
+            Values.append(SILENCE_FLOOR_DBFS if Token == "-inf" else float(Token))
+    if not Values:
+        raise RuntimeError(f"{What}: ffmpeg astats printed no RMS level. stderr tail={StderrText[-400:]}")
+    return Values[-1]
+
+
 # directive: audio-dialog-boost-real | # see audio-normalization.C14
 class DemucsVocalIsolationService:
 
@@ -97,10 +147,11 @@ class DemucsVocalIsolationService:
             VocalsRmsDbfs=VocalsRms,
         )
 
+    # directive: demucs-liveness | # see demucs-daemon.C5
     def _GetDaemon(self):
         if self._Daemon is None:
             from Features.AudioNormalization.Services.DemucsDaemonClient import GetOrStartDaemon
-            self._Daemon = GetOrStartDaemon(PythonExe=self.PythonExe)
+            self._Daemon = GetOrStartDaemon(RequiredDemucsDevice(), PythonExe=self.PythonExe)
         return self._Daemon
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
@@ -137,30 +188,7 @@ class DemucsVocalIsolationService:
             [self.FfmpegPath, "-hide_banner", "-i", SourcePath, "-map", "0:a:0", "-af", Filter, "-f", "null", "-"],
             ProgressCallback,
         )
-        class _R: pass
-        Result = _R()
-        Result.stderr = StderrText
-        Match = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", Result.stderr, re.DOTALL)
-        if not Match:
-            LoggingService.LogWarning(
-                f"Source loudnorm measurement returned no JSON block for {SourcePath}. stderr tail={Result.stderr[-400:]}",
-                "DemucsVocalIsolationService", "MeasureSourceLoudnorm",
-            )
-            return None, None, None, None
-        try:
-            Payload = json.loads(Match.group(0))
-            return (
-                float(Payload["input_i"]),
-                float(Payload["input_lra"]),
-                float(Payload["input_tp"]),
-                float(Payload["input_thresh"]),
-            )
-        except (ValueError, KeyError) as Ex:
-            LoggingService.LogWarning(
-                f"Source loudnorm JSON parse failed for {SourcePath} ({Ex}); block={Match.group(0)[:400]}",
-                "DemucsVocalIsolationService", "MeasureSourceLoudnorm",
-            )
-            return None, None, None, None
+        return ParseLoudnormMeasurement(StderrText, f"Source loudness of {SourcePath}")
 
     # directive: audio-preencode-progress -- premix loudnorm measurement streams ffmpeg time= per second; drop -nostats. Same shape as MeasureSourceLoudnorm.
     def MeasurePremixLoudnorm(self, WavPath, TargetLufs, TargetLra, TargetTruePeakDbtp, ProgressCallback=None):
@@ -169,30 +197,7 @@ class DemucsVocalIsolationService:
             [self.FfmpegPath, "-hide_banner", "-i", WavPath, "-af", Filter, "-f", "null", "-"],
             ProgressCallback,
         )
-        class _R: pass
-        Result = _R()
-        Result.stderr = StderrText
-        Match = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", Result.stderr, re.DOTALL)
-        if not Match:
-            LoggingService.LogWarning(
-                f"Premix loudnorm measurement returned no JSON block; falling back to dynamic loudnorm. stderr tail={Result.stderr[-400:]}",
-                "DemucsVocalIsolationService", "MeasurePremixLoudnorm",
-            )
-            return None, None, None, None
-        try:
-            Payload = json.loads(Match.group(0))
-            return (
-                float(Payload["input_i"]),
-                float(Payload["input_lra"]),
-                float(Payload["input_tp"]),
-                float(Payload["input_thresh"]),
-            )
-        except (ValueError, KeyError) as Ex:
-            LoggingService.LogWarning(
-                f"Premix loudnorm JSON parse failed ({Ex}); falling back to dynamic loudnorm. block={Match.group(0)[:400]}",
-                "DemucsVocalIsolationService", "MeasurePremixLoudnorm",
-            )
-            return None, None, None, None
+        return ParseLoudnormMeasurement(StderrText, f"Premix loudness of {WavPath}")
 
     # directive: audio-dialog-boost-real | # see audio-normalization.C14
     def _MeasureWavRmsDbfs(self, WavPath):
@@ -200,17 +205,4 @@ class DemucsVocalIsolationService:
             [self.FfmpegPath, "-i", WavPath, "-map", "0:a:0", "-af", "astats", "-f", "null", "-"],
             capture_output=True, text=True, timeout=120, creationflags=NoWindowFlags()
         )
-        Values = []
-        for Line in Result.stderr.splitlines():
-            if "RMS level dB:" in Line:
-                Token = Line.split("RMS level dB:")[1].strip()
-                if Token == "-inf":
-                    Values.append(SILENCE_FLOOR_DBFS)
-                else:
-                    try:
-                        Values.append(float(Token))
-                    except ValueError:
-                        pass
-        if not Values:
-            return SILENCE_FLOOR_DBFS
-        return Values[-1]
+        return ParseAstatsRmsDbfs(Result.stderr, f"Vocals level of {WavPath}")

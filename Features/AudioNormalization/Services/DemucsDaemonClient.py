@@ -38,12 +38,13 @@ _SINGLETON = None
 _SINGLETON_LOCK = threading.Lock()
 
 
-def GetOrStartDaemon(PythonExe=None, StartTimeoutSec=180):
+# directive: demucs-liveness | # see demucs-daemon.C5 -- RequiredDevice is mandatory; there is no detected or default device
+def GetOrStartDaemon(RequiredDevice, PythonExe=None, StartTimeoutSec=180):
     """Process-singleton accessor: create + start on first call, return existing daemon after."""
     global _SINGLETON
     with _SINGLETON_LOCK:
         if _SINGLETON is None or _SINGLETON._Proc is None or _SINGLETON._Proc.poll() is not None:
-            _SINGLETON = DemucsDaemonClient(PythonExe=PythonExe, StartTimeoutSec=StartTimeoutSec)
+            _SINGLETON = DemucsDaemonClient(RequiredDevice, PythonExe=PythonExe, StartTimeoutSec=StartTimeoutSec)
             _SINGLETON.Start()
         return _SINGLETON
 
@@ -53,7 +54,8 @@ class DemucsDaemonClient:
     """Owns the long-lived Demucs subprocess for one WorkerService instance."""
 
     # directive: demucs-liveness | # see demucs-daemon.C8 -- no total cap on a request; StallTimeoutSec is the longest gap with no stderr output and no CPU time consumed before the daemon counts as hung
-    def __init__(self, PythonExe=None, StartTimeoutSec=180, StallTimeoutSec=300):
+    def __init__(self, RequiredDevice, PythonExe=None, StartTimeoutSec=180, StallTimeoutSec=300):
+        self._RequiredDevice = RequiredDevice
         self._PythonExe = PythonExe or sys.executable
         self._StartTimeoutSec = StartTimeoutSec
         self._StallTimeoutSec = StallTimeoutSec
@@ -68,6 +70,7 @@ class DemucsDaemonClient:
         self._ProgressCallback = None
         self._LastStderrLine = ""
 
+    # directive: demucs-liveness | # see demucs-daemon.C5 -- a daemon that exits before READY (device not usable, import failure) raises with its last stderr line
     def Start(self):
         with self._Lock:
             if self._Proc is not None and self._Proc.poll() is None:
@@ -77,7 +80,7 @@ class DemucsDaemonClient:
                 'DemucsDaemonEntry.py',
             )
             self._Proc = subprocess.Popen(
-                [self._PythonExe, Entry],
+                [self._PythonExe, Entry, '--device', self._RequiredDevice],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -93,8 +96,10 @@ class DemucsDaemonClient:
             self._StderrDrainThread.start()
             Ready = self._WaitForReady()
             if not Ready:
+                self._StderrDrainThread.join(timeout=5)
+                Reason = self._LastStderrLine
                 self._Kill()
-                raise DemucsDaemonUnavailableError('Demucs daemon did not emit READY line')
+                raise DemucsDaemonUnavailableError(f"Demucs daemon did not start on device '{self._RequiredDevice}': {Reason}")
             LoggingService.LogInfo('Demucs daemon ready', 'DemucsDaemonClient', 'Start')
 
     def _StdoutReaderLoop(self):
@@ -141,11 +146,6 @@ class DemucsDaemonClient:
                 Line = self._StdoutQueue.get(timeout=1.0)
             except queue.Empty:
                 if self._Proc.poll() is not None:
-                    Stderr = (self._Proc.stderr.read() or '')[:1000]
-                    LoggingService.LogError(
-                        f'Demucs daemon exited before READY (rc={self._Proc.returncode}): {Stderr}',
-                        'DemucsDaemonClient', '_WaitForReady',
-                    )
                     return False
                 continue
             if Line is None:

@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-11
-**Status:** Active -- phase: DELIVERING
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** demucs-liveness
 **Replaces:** `directives/closed/2026-10-11-remove-savings-gate.md` (closed Success)
 
@@ -18,6 +18,8 @@ A vocal-separation run is failed as hung only when it has stopped working, not b
 5. Separating a long episode uses about the same memory as separating a 20-minute one. Verify: live Audio job on a ~2-hour episode completes on dot-worker-1 (killed at its 24 GB cap before) and on a long episode on wakko-worker-1 (killed at its 14 GB cap before), with no kernel memory kill.
 6. The joined result has no gap, repeat or click where pieces meet. Verify: contract test splits and rejoins a known signal and gets the same signal back; prototype measurement (below) shows piece boundaries match whole-file output better than the rest of the file does.
 7. Episodes short enough for one piece are separated exactly as before. Verify: contract test of the piece plan.
+8. Separation runs on the device the worker's hardware calls for -- NVIDIA GPU where the worker has one, Intel GPU where it has one, CPU only on a worker with neither -- or the job fails with an error naming the required device and the host. It never runs on a slower device than the hardware calls for. Verify: contract tests; live: wakko-worker-1 (Intel GPU not visible to torch since the 2026-09-22 kernel change) fails an Audio job with that error instead of running 4x slower on CPU; dot-worker-1 and a CPU-only worker still complete.
+9. A loudness or level measurement in the separation path that yields no usable number fails the job with the measurement's output in the error. It is never replaced by silence, by "unknown", or by a different loudness method. Verify: contract tests.
 
 ## Call-Graph Audit
 
@@ -29,7 +31,8 @@ A vocal-separation run is failed as hung only when it has stopped working, not b
 
 ## Out of Scope
 
-- (b) wakko's separator runs on CPU because torch sees no Intel GPU device. Host/BIOS matter for the operator.
+- (b) Restoring wakko's Intel GPU for torch (kernel 6.14 -> 7.0 on 2026-09-22; compute runtime enumerates no GPU since) is a host change: reboot into the still-installed 6.14 kernel. Operator executes. Until then criterion 8 makes wakko's Audio jobs fail loud.
+- (b) Found, not Demucs: `AudioPreEncodeFacade.PersistSourceLoudness` logs and swallows a failed DB write; `PreEncodeAudioPipeline._SelectPreferredAudioIndex` logs a warning and picks the first stream when the preference lookup throws. Named here, not changed.
 - (b) The 180-second start-up handshake timeout stays: start-up length does not depend on the input.
 - (b) Other fixed timeouts in the audio vertical (ffmpeg downmix 1800 s, OpenVINO path 3600 s) are untouched; only the separation request the operator named.
 - (b) The stall window is a constructor default (300 s), as the old cap was; not a settings-page knob. Piece length (20 min) and overlap (10 s) are constants for the same reason: they bound memory, they are not operator tuning.
@@ -46,6 +49,7 @@ A vocal-separation run is failed as hung only when it has stopped working, not b
 
 - Operator 2026-10-11: detection is "is the process still working", not elapsed time.
 - Operator 2026-10-11, after the prototype: "do chunking". Absorbed here because criterion 1 cannot be shown live without it: the wakko live run got past 30 minutes and was then killed for memory at 14 GB.
+- Operator 2026-10-11: "we cannot close demucs if there are bugs. The demucs needs to be a complete solution. If it isn't working somewhere it needs to FAIL loud. Fallbacks are not acceptable." Criteria 8-9.
 
 ## Status
 
@@ -58,6 +62,9 @@ Tests/Contract/TestDemucsDaemonLiveness.py (new)
 Features/AudioNormalization/Services/DemucsDaemonEntry.py
 Features/AudioNormalization/Services/DemucsChunking.py (new)
 Tests/Contract/TestDemucsChunking.py (new)
+Features/AudioNormalization/Services/DemucsVocalIsolationService.py
+Tests/Contract/TestDemucsNoFallback.py (new)
+Features/AudioNormalization/Services/DemucsDaemonProtocol.py
 ```
 
 ### Plan
@@ -67,6 +74,10 @@ One commit. In `DemucsDaemonClient`: record the time of the last sign of work. A
 Second commit (chunking). The daemon cuts the input into 20-minute pieces that overlap by 10 seconds, separates all pieces in one separator call, crossfades each overlap and writes one vocals file and one background file in the place the caller already reads. An input that fits in one piece takes the old path untouched. The daemon announces the piece count so the client can report progress across the whole episode instead of restarting at each piece.
 
 Prototype (I9, Dancing with the Stars S29E11, 84 min): whole-file peak 16-19 GB, chunked 6-7.4 GB, same wall time (~105 s). Chunked vs whole-file difference -27 dB (vocals) against -31 dB between two ordinary whole-file runs; at the four piece boundaries -38 dB.
+
+Third commit (no fallbacks). The required device comes from the worker's hardware flags in `Workers` (`NvencCapable` -> cuda, else `QsvCapable` -> xpu, else cpu), read when the daemon is started, and is passed to the daemon on its command line. The daemon checks torch can use that device before announcing ready and exits with a named error otherwise; the client puts that error in the exception. Auto-detection and the optional Intel pre-warm import are deleted. The three measurement helpers (vocals level, source loudness, premix loudness) raise when ffmpeg gives no parsable number.
+
+Deleted code, by bucket: `_DetectDevice` cpu return and the `None`/silence returns are defensive defaults on decision inputs -- producers audited (torch device, ffmpeg astats/loudnorm output), replaced by raises. `_PreWarmXpu` is an orphan: the package it imports is in no requirements file and torch 2.6 has native xpu.
 
 Seam changed:
 
@@ -84,6 +95,7 @@ Deleted code, by bucket: the 1800 s cap is a defensive default against a hung da
 |---|---|
 | Hang detection is lack of work (stderr output + CPU time), no total cap | `Features/AudioNormalization/Services/demucs-daemon.feature.md` C8 (same commit as the code) |
 | Long input is separated in overlapping pieces and joined; progress marker line | `Features/AudioNormalization/Services/demucs-daemon.feature.md` C12, S3, S4, Files (same commit as the code) |
+| Device is required from worker hardware flags, never detected; measurements raise instead of defaulting | `Features/AudioNormalization/Services/demucs-daemon.feature.md` C5, C13 (same commit as the code) |
 
 ### Verification
 
