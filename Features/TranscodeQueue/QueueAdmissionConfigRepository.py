@@ -21,8 +21,7 @@ class QueueAdmissionConfigRepository(BaseRepository):
             Rows = self.ExecuteQuery(
                 "SELECT Id, MinTranscodeSavingsMB, MissingEstimatePolicy, "
                 "       MinAudioBitrateKbpsMono, MinAudioBitrateKbpsStereo, "
-                "       MinAudioBitrateKbpsSurround, PreEncodeSavingsThresholdPercent, "
-                "       LastUpdated "
+                "       MinAudioBitrateKbpsSurround, LastUpdated "
                 "FROM QueueAdmissionConfig WHERE Id = 1"
             )
             if not Rows:
@@ -40,7 +39,6 @@ class QueueAdmissionConfigRepository(BaseRepository):
                 MinAudioBitrateKbpsMono=R['MinAudioBitrateKbpsMono'],
                 MinAudioBitrateKbpsStereo=R['MinAudioBitrateKbpsStereo'],
                 MinAudioBitrateKbpsSurround=R['MinAudioBitrateKbpsSurround'],
-                PreEncodeSavingsThresholdPercent=R['PreEncodeSavingsThresholdPercent'],
                 LastUpdated=R.get('LastUpdated'),
             )
         except Exception as Ex:
@@ -49,10 +47,9 @@ class QueueAdmissionConfigRepository(BaseRepository):
             )
             return QueueAdmissionConfigModel()
 
-    # directive: pre-encode-savings-gate
+    # directive: remove-savings-gate | # see marginal-savings-gate.C14
     def Update(self, MinTranscodeSavingsMB: Optional[int] = None,
-               MissingEstimatePolicy: Optional[str] = None,
-               PreEncodeSavingsThresholdPercent: Optional[int] = None) -> bool:
+               MissingEstimatePolicy: Optional[str] = None) -> bool:
         try:
             Sets = []
             Values = []
@@ -69,23 +66,6 @@ class QueueAdmissionConfigRepository(BaseRepository):
                     return False
                 Sets.append("MissingEstimatePolicy = %s")
                 Values.append(MissingEstimatePolicy)
-            if PreEncodeSavingsThresholdPercent is not None:
-                try:
-                    Pct = int(PreEncodeSavingsThresholdPercent)
-                except (TypeError, ValueError):
-                    LoggingService.LogError(
-                        f"Update rejected: PreEncodeSavingsThresholdPercent={PreEncodeSavingsThresholdPercent!r} not integer",
-                        "QueueAdmissionConfigRepository", "Update",
-                    )
-                    return False
-                if Pct < 1 or Pct > 99:
-                    LoggingService.LogError(
-                        f"Update rejected: PreEncodeSavingsThresholdPercent={Pct} out of range [1,99]",
-                        "QueueAdmissionConfigRepository", "Update",
-                    )
-                    return False
-                Sets.append("PreEncodeSavingsThresholdPercent = %s")
-                Values.append(Pct)
             if not Sets:
                 return True
             Sets.append("LastUpdated = NOW()")

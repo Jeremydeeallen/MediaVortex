@@ -339,7 +339,6 @@ The disposition decision is **the only post-transcode branch point**. It reads f
 | Input | Source |
 |---|---|
 | `TranscodeAttempt.QualityTestRequired` | per-attempt flag, set at attempt creation from `Profiles.QualityTestRequired` (per-profile column, editable on `/settings` profile cogs modal). When the profile's flag is FALSE, every attempt for that profile skips VMAF. |
-| `TranscodeAttempt.NewSizeBytes` vs `OldSizeBytes` | post-flight savings gate |
 | `QualityTestResults.VMAFScore` | populated by VMAF run, NULL when no test ran |
 | `VmafCapableWorkerOnline` (computed) | `SELECT 1 FROM Workers WHERE QualityTestEnabled=TRUE AND Status='Online' AND LastHeartbeat > NOW() - INTERVAL '90 seconds'`. Replaces the legacy `ServiceStatus.QualityTestService` row, which was a fossil written only by the retired QualityTestService process. |
 | `PostTranscodeGateConfig.VmafAutoReplaceMinThreshold` | typed column, default 88 |
@@ -354,15 +353,16 @@ Post `transcode-flow-canonical` C14 + C16 (Reset 10):
 - `QualityTestEnabled=false` globally (`PostTranscodeGateConfig.QualityTestEnabled`): `Replace/QualityTestingGloballyDisabled` early-return, restored from Reset 9's overshoot. See directive C16 + `vmaf-smart-sampling.feature.md`.
 - `SmartConfidenceSkip` branch: when the source's `(ProfileId, SourceCodec, SourceResolutionTier, BitratePerPixelBucket, ContentClass)` bucket has `SampleCount >= MinConfidenceSampleCount AND PassRate >= MinConfidencePassRate AND (VmafMean - SigmaMargin * VmafStdDev) >= VmafAutoReplaceMinThreshold`, returns `Replace/QualityTestConfident`. VMAF skipped; bucket stats trusted. Rolling window in `VmafConfidenceStats`; DB-fresh per call. See `vmaf-smart-sampling.feature.md`.
 
-| Success | NewSize >= OldSize | QualityTestRequired | VMAF score | Disposition | Reason |
-|---|---|---|---|---|---|
-| false | n/a | n/a | n/a | `Reject` | `TranscodeFailed` |
-| true | true (no savings) | any | any | `Reject` | `NoSavings` |
-| true | false | false | n/a | `Replace` | `QualityTestNotRequired` |
-| true | false | true | NULL | `Pending` | `AwaitingVmaf` |
-| true | false | true | < min | `Requeue` | `VmafBelowMin` |
-| true | false | true | >= min, <= max | `Replace` | `VmafPassed` |
-| true | false | true | > max | `Reject` | `VmafAboveMax` |
+Output size is not an input: a successful encode is never rejected for saving too little space, or for being larger than its source.
+
+| Success | QualityTestRequired | VMAF score | Disposition | Reason |
+|---|---|---|---|---|
+| false | n/a | n/a | `Reject` | `TranscodeFailed` |
+| true | false | n/a | `Replace` | `QualityTestNotRequired` |
+| true | true | NULL | `Pending` | `AwaitingVmaf` |
+| true | true | < min | `Requeue` | `VmafBelowMin` |
+| true | true | >= min, <= max | `Replace` | `VmafPassed` |
+| true | true | > max | `Reject` | `VmafAboveMax` |
 
 **Note (2026-05-29):** the legacy `VmafCapableWorkerOnline` / `WhenVmafUnavailable` branching is retired. `Pending/AwaitingVmaf` is now the only outcome when VMAF is required and no score is available -- the row is enqueued to `QualityTestingQueue` regardless of whether a capable worker is currently online. Operators see the pending work in the queue surface (Stage 7) and either bring a capable worker online OR override the row to force an immediate disposition. `VmafServicePaused` / `VmafServicePausedBypassed` reasons remain in the closed enum for audit history (legacy attempts) but are no longer emitted by new decisions. See `Features/QualityTesting/qt-queue-visibility-and-override.feature.md`.
 
@@ -371,7 +371,7 @@ Post `transcode-flow-canonical` C14 + C16 (Reset 10):
 | Disposition | What happens |
 |---|---|
 | `Replace` | FileReplacement proceeds: archive original, rename `.ip` -> `-mv.<ext>`, re-probe, update MediaFiles, delete source. On post-rename update failure the rename is rolled back (no orphan, source intact) and `Success=False` is returned with the real error. See `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4. |
-| `Reject` | Verify-failure / operator-fail terminal. Reasons: `VmafAboveMax`, `NoSavings`, `TranscodeFailed`, `RetryBudgetExhausted`, `OperatorDiscarded`, `TestMode`. `RetainInprogressPolicy.ShouldRetain(Reason)` decides `.ip` disposal: `TestMode` retains for A/B comparison; every other reason deletes. TFP row always cleared. |
+| `Reject` | Verify-failure / operator-fail terminal. Reasons: `VmafAboveMax`, `TranscodeFailed`, `RetryBudgetExhausted`, `OperatorDiscarded`, `TestMode`. `RetainInprogressPolicy.ShouldRetain(Reason)` decides `.ip` disposal: `TestMode` retains for A/B comparison; every other reason deletes. TFP row always cleared. |
 | `Requeue` | Staged file deleted; TFP row cleared; `NextTierAdjuster.Get(currentProfile)` returns next-tier sibling Profile via `(Family, QualityTier+1, ContentClass, TargetResolutionCategory)` tuple lookup. If non-None, new `TranscodeQueue` row inserted for the same `MediaFileId` with the escalated ProfileId via canonical `AddJobToQueue(ForceAdd=True)`. Chain terminates at Tier 5 -> Reject/QualityCeilingReached. `RetryBudgetService.HasBudgetRemaining=False` overrides to `Reject/RetryBudgetExhausted` regardless of tier. BUG-0079 + `profile-tier-ladder.feature.md`. |
 | `Pending` | Awaiting VMAF. The row lands in `QualityTestingQueue`; disposition re-evaluated when the score lands. |
 

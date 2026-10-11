@@ -43,7 +43,6 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
             VmafAutoReplaceMaxThreshold=float(GateCfg.VmafAutoReplaceMaxThreshold),
             WhenVmafUnavailable=GateCfg.WhenVmafUnavailable,
             QualityTestEnabled=True,
-            SavingsThresholdPercent=20,
         )
         Outcome = self.Decider.Decide(Defaults, GateInput)
         return (Outcome.Action, Outcome.Reason)
@@ -57,10 +56,10 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
     def test_Row1_TranscodeFailed(self):
         self._AssertDeterministic(('Reject', 'TranscodeFailed'), Success=False)
 
-    # directive: pre-encode-savings-gate -- Reset 9 reordering preserved; NoSavings retired -> InsufficientSavings at 20% threshold.
-    def test_Row2_InsufficientSavings(self):
+    # directive: remove-savings-gate | # see transcode.ST7
+    def test_LargerOutput_IsNotRejectedForSize(self):
         self._AssertDeterministic(
-            ('Reject', 'InsufficientSavings_-20pct_below_20pct'),
+            ('Pending', 'AwaitingVmaf'),
             Success=True, OldSize=500_000_000, NewSize=600_000_000,
         )
 
@@ -120,10 +119,10 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
             GateConfig=FakeGateConfig(WhenVmafUnavailable='bypass'),
         )
 
-    # directive: pre-encode-savings-gate -- InsufficientSavings beats QualityTestNotRequired (savings gate runs first).
-    def test_InsufficientSavings_BeatsQualityTestNotRequired(self):
+    # directive: remove-savings-gate | # see transcode.ST7
+    def test_LargerOutput_QualityTestNotRequired_Replaces(self):
         self._AssertDeterministic(
-            ('Reject', 'InsufficientSavings_-20pct_below_20pct'),
+            ('Replace', 'QualityTestNotRequired'),
             Success=True, OldSize=500_000_000, NewSize=600_000_000,
             QualityTestRequired=False,
         )

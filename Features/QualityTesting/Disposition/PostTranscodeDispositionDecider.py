@@ -16,16 +16,6 @@ class PostTranscodeDispositionDecider:
         if not Success:
             return Disposition(Action='Reject', Reason='TranscodeFailed')
 
-        # directive: videoslotstrategy-persisted -- InsufficientSavings gate applies ONLY when VideoSlotStrategy='Reencode'. Copy/AudioFix/Remux paths don't shrink video by design; NULL (historical rows / missing) treated as safe-skip per D2.
-        OldSize = Attempt.get('OldSize') or 0
-        NewSize = Attempt.get('NewSize') or 0
-        VideoSlotStrategy = Attempt.get('VideoSlotStrategy')
-        if NewSize and OldSize and VideoSlotStrategy == 'Reencode':
-            SavingsPct = int(round((1 - NewSize / OldSize) * 100))
-            ThresholdPct = int(GateConfig.get('SavingsThresholdPercent', 0))
-            if SavingsPct < ThresholdPct:
-                return Disposition(Action='Reject', Reason=f'InsufficientSavings_{SavingsPct}pct_below_{ThresholdPct}pct')
-
         # C16 restore: global QualityTestEnabled=False short-circuits to Replace regardless of per-attempt flag
         if not self._QualityTestGloballyEnabled(GateConfig):
             return Disposition(Action='Replace', Reason='QualityTestingGloballyDisabled')

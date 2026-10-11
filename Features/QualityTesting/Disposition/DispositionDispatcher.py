@@ -14,10 +14,9 @@ class DispositionDispatcher:
     TERMINAL_DISPOSITIONS = ('Reject', 'Requeue')
     VALID_DISPOSITIONS = ('Pending', 'Replace', 'Reject', 'Requeue')
 
-    # directive: pre-encode-savings-gate
+    # directive: remove-savings-gate | # see disposition.C4
     def __init__(self, Decider, GateConfigRepository, AttemptCleanupService, DatabaseService,
-                 RetryBudgetService=None, RequeueScheduler=None, RetainInprogressPolicy=None,
-                 AdmissionConfigRepository=None):
+                 RetryBudgetService=None, RequeueScheduler=None, RetainInprogressPolicy=None):
         self.Decider = Decider
         self.GateConfigRepository = GateConfigRepository
         self.AttemptCleanupService = AttemptCleanupService
@@ -26,10 +25,6 @@ class DispositionDispatcher:
         self.RequeueScheduler = RequeueScheduler
         from Features.QualityTesting.Disposition.RetainInprogressPolicy import RetainInprogressPolicy as _DefaultPolicy
         self.RetainPolicy = RetainInprogressPolicy or _DefaultPolicy()
-        if AdmissionConfigRepository is None:
-            from Features.TranscodeQueue.QueueAdmissionConfigRepository import QueueAdmissionConfigRepository
-            AdmissionConfigRepository = QueueAdmissionConfigRepository()
-        self.AdmissionConfigRepository = AdmissionConfigRepository
 
     # directive: e2e-bug-fixes | # see e2e-bug-fixes.C30 -- EncodeSucceeded is a caller fact (ffmpeg returncode), not a DB read; Success stays NULL through the pipeline until HandleTranscodingResult flips it after full pipeline success.
     def Dispatch(self, TranscodeAttemptId: int, EncodeSucceeded: Optional[bool] = None) -> DispositionResult:
@@ -229,9 +224,8 @@ class DispositionDispatcher:
             return [0.03, 0.06, 0.10, 0.16]
         return json.loads(Raw)
 
-    # directive: pre-encode-savings-gate
+    # directive: remove-savings-gate | # see disposition.S2
     def _BuildGateInput(self, GateConfig) -> dict:
-        AdmissionConfig = self.AdmissionConfigRepository.Get()
         return {
             'VmafAutoReplaceMinThreshold': float(GateConfig.VmafAutoReplaceMinThreshold),
             'VmafAutoReplaceMaxThreshold': float(GateConfig.VmafAutoReplaceMaxThreshold),
@@ -240,7 +234,6 @@ class DispositionDispatcher:
             'MinConfidenceSampleCount': int(getattr(GateConfig, 'MinConfidenceSampleCount', 10)),
             'MinConfidencePassRate': float(getattr(GateConfig, 'MinConfidencePassRate', 0.95)),
             'SigmaMargin': float(getattr(GateConfig, 'SigmaMargin', 2.0)),
-            'SavingsThresholdPercent': int(getattr(AdmissionConfig, 'PreEncodeSavingsThresholdPercent', 20)),
         }
 
     # directive: perfect-solid-transcode-pipeline | # see perfect-solid-transcode-pipeline.C8

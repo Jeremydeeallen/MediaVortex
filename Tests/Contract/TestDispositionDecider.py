@@ -12,7 +12,6 @@ def DefaultGate(**Overrides):
         'VmafAutoReplaceMinThreshold': 80.0,
         'VmafAutoReplaceMaxThreshold': 97.0,
         'WhenVmafUnavailable': 'block',
-        'SavingsThresholdPercent': 20,
     }
     Cfg.update(Overrides)
     return Cfg
@@ -45,47 +44,23 @@ class TestPostTranscodeDispositionDecider(unittest.TestCase):
         self.assertEqual(Result.Action, 'Replace')
         self.assertEqual(Result.Reason, 'QualityTestNotRequired')
 
-    # directive: videoslotstrategy-persisted -- gate fires only when VideoSlotStrategy='Reencode'
-    def test_insufficient_savings_reencode_zero_pct_returns_reject(self):
+    # directive: remove-savings-gate | # see transcode.ST7
+    def test_reencode_small_savings_is_not_rejected(self):
+        Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 870, 'QualityTestRequired': True, 'VmafScore': 90.0, 'VideoSlotStrategy': 'Reencode'}
+        Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate())
+        self.assertEqual((Result.Action, Result.Reason), ('Replace', 'VmafPassed'))
+
+    # directive: remove-savings-gate | # see transcode.ST7
+    def test_reencode_zero_savings_is_not_rejected(self):
         Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 1000, 'QualityTestRequired': True, 'VmafScore': 90.0, 'VideoSlotStrategy': 'Reencode'}
         Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate())
-        self.assertEqual(Result.Action, 'Reject')
-        self.assertTrue(Result.Reason.startswith('InsufficientSavings_0pct_below_20pct'))
+        self.assertEqual((Result.Action, Result.Reason), ('Replace', 'VmafPassed'))
 
-    # directive: videoslotstrategy-persisted
-    def test_insufficient_savings_reencode_negative_returns_reject(self):
+    # directive: remove-savings-gate | # see transcode.ST7
+    def test_reencode_larger_output_is_not_rejected(self):
         Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 1200, 'QualityTestRequired': True, 'VmafScore': 90.0, 'VideoSlotStrategy': 'Reencode'}
         Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate())
-        self.assertEqual(Result.Action, 'Reject')
-        self.assertTrue(Result.Reason.startswith('InsufficientSavings_-20pct_below_20pct'))
-
-    # directive: videoslotstrategy-persisted -- Copy strategy skips savings gate (remux/audiofix don't shrink)
-    def test_savings_gate_skipped_for_copy_strategy(self):
-        Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 1000, 'QualityTestRequired': True, 'VmafScore': 90.0, 'VideoSlotStrategy': 'Copy'}
-        Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate())
-        self.assertEqual(Result.Action, 'Replace')
-        self.assertEqual(Result.Reason, 'VmafPassed')
-
-    # directive: videoslotstrategy-persisted -- NULL strategy skips gate (safe default per D2)
-    def test_savings_gate_skipped_for_null_strategy(self):
-        Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 1200, 'QualityTestRequired': True, 'VmafScore': 90.0, 'VideoSlotStrategy': None}
-        Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate())
-        self.assertEqual(Result.Action, 'Replace')
-        self.assertEqual(Result.Reason, 'VmafPassed')
-
-    # directive: pre-encode-savings-gate
-    def test_savings_above_threshold_passes_to_vmaf_flow(self):
-        Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 700, 'QualityTestRequired': True, 'VmafScore': 90.0}
-        Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate(SavingsThresholdPercent=20))
-        self.assertEqual(Result.Action, 'Replace')
-        self.assertEqual(Result.Reason, 'VmafPassed')
-
-    # directive: pre-encode-savings-gate
-    def test_savings_boundary_at_threshold_passes(self):
-        Attempt = {'Success': True, 'OldSize': 1000, 'NewSize': 800, 'QualityTestRequired': True, 'VmafScore': 90.0}
-        Result = PostTranscodeDispositionDecider().Decide(Attempt, DefaultGate(SavingsThresholdPercent=20))
-        self.assertEqual(Result.Action, 'Replace')
-        self.assertEqual(Result.Reason, 'VmafPassed')
+        self.assertEqual((Result.Action, Result.Reason), ('Replace', 'VmafPassed'))
 
     # directive: transcode-flow-canonical | # see transcode.ST7
     def test_vmaf_below_min_returns_requeue(self):
