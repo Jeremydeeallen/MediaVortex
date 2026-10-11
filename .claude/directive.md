@@ -115,6 +115,10 @@ Deleted code, by bucket: the 1800 s cap is a defensive default against a hung da
   - dot-worker-1, attempt 99830 (S32E06, 84 min): completed on cuda in 16.4 minutes wall, Dialog Boost emitted, placed, Compliant.
   - I9, real daemon: `--device cuda` starts in 1.1 s; `--device xpu` refused with the same error naming I9-2024.
   - CPU-only worker not run live (all four are Paused); covered by contract test.
+- **wakko GPU restored 2026-10-11 (operator, BIOS):** Resizable BAR enabled; card memory window 256 MB -> 16 GB; Intel OpenCL lists `Intel(R) Arc(TM) B580 Graphics`; torch xpu available. Intel's tracker (intel/compute-runtime #872) states the runtime does not enable the card when Resizable BAR is off. The earlier kernel theory was wrong: booting 6.14 alone changed nothing.
+- **8, wakko live after the fix:** attempt 99833, S28E05 (85 min), wakko-worker-1: daemon running with `--device xpu`, completed in 12.6 minutes wall (55.3 minutes on CPU earlier the same day for a 127-minute episode), Dialog Boost emitted, placed, Compliant. Cgroup peak 12.8 GiB of 14 GiB, no kernel memory kill, same boot id before and after.
+- **Unexplained:** wakko reset without a clean shutdown twice within ten minutes of the BIOS change (boots at 15:23 and 15:33 MDT), the second seconds after attempt 99831 was claimed. Not reproduced since: stepped torch xpu test, Demucs on a 3-minute clip, and the full job above all ran with no reset.
+- **Found, not fixed:** on boot after that reset, crash recovery logged `Unknown job type AudioFix` and `Failed to reset job ... in queue`; the job waited 31 minutes for stuck-job detection to release it.
 - **9:** contract tests (no block, missing field, no level, unreadable value all raise; `-inf` stays a value).
 - **wakko GPU cause (evidence):** apt history shows kernel 6.14.0-37 -> 7.0.0-31 on 2026-09-22; current boot is 7.0.0-31; Intel OpenCL lists only the CPU device; torch reports zero xpu devices; BIOS P3.10 (2022) unchanged. Audio wall time on wakko: 7.3-8.0 min per hour of audio for weeks of 2026-08-10 through 2026-09-14, 30.0 for week of 2026-10-05.
 
