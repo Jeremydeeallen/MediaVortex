@@ -96,6 +96,15 @@ ssh root@<ip> '
 ssh root@<ip> 'echo "<git rev-parse HEAD>" > /opt/mediavortex/VERSION'
 ```
 
+### Required-device check and GPU package hold (end of `ST3`)
+
+After requirements install, before the unit is rendered:
+
+1. **Required device.** The script reads `Workers.NvencCapable` / `Workers.QsvCapable` for the host's worker names and maps them with `DeviceForCapabilities` (the function the Demucs runtime uses): any NVENC worker -> `cuda`, else any QSV worker -> `xpu`, else `cpu`. It then runs a small tensor operation on that device with the venv just built. If torch cannot use the device the step prints `[FAIL]` with torch's message and the script exits 2; the fleet run reports the host FAILED and does not restart its workers. There is no downgrade to another device.
+2. **GPU package hold.** On a `cuda` host every installed package whose name contains `nvidia` is put on `apt-mark hold`. On an `xpu` host the Intel compute runtime (`intel-opencl-icd`, `libze-intel-gpu1`, `libze1`, `libigc2`, `libigdgmm12`), the media driver (`intel-media-va-driver-non-free`, `libmfx-gen*`, `libvpl2`) and the HWE kernel metapackages (the Intel GPU driver ships in the kernel) are held. Held packages are skipped by `unattended-upgrades` and by a manual "install all updates". Upgrading them is a deliberate act: `apt-mark unhold`, upgrade, reboot, redeploy (which re-checks the device and re-holds). A GPU host where the pattern matches nothing fails the step.
+
+A host with no `Workers` rows yet (first deploy) skips both steps with `[SKIP]`; the next deploy runs them.
+
 ## Systemd Apply (`ST4`)
 
 Systemd template unit at `/etc/systemd/system/mediavortex-worker@.service`:
@@ -264,7 +273,7 @@ Common causes:
 | PyTorch xpu wheel install fails | `pip install torch==*+xpu` returns 403 or timeout | Retry; check `download.pytorch.org/whl/xpu/` availability. |
 | DB unreachable at unit start | `psycopg2.OperationalError` in journalctl, unit restarts | Verify `10.0.0.15:5432` is reachable from the target; check `pg_hba.conf`. |
 | NFS mount missing on host | FFmpeg writes fail with ENOENT or EACCES | `mount -a`; verify `/etc/fstab`. |
-| torch xpu STFT unavailable on new Arc SKU | Demucs runs but exits with `OpenCL error -1` on `torch.stft` | Track Intel's XPU kernel coverage; interim: fall back to CPU demucs per host, or use OpenVINO EP path. |
+| Required device not usable by torch | Deploy stops at the required-device check with `[FAIL]`; at runtime an Audio job fails with `DEMUCS_DEVICE_ERROR required device '<cuda\|xpu>' is not usable` | Fix the host; there is no CPU downgrade. Intel Arc: `lspci -vv -s <slot> \| grep 'BAR 2'` must show the full size, not 256MB -- Intel's compute runtime does not enable the card when Resizable BAR is off (BIOS: CSM disabled, Above 4G Decoding enabled, Re-Size BAR Support enabled; intel/compute-runtime issue 872). NVIDIA: userland libraries and loaded kernel module must be the same version (`nvidia-smi`); reboot after any driver upgrade. |
 
 ## Seams
 

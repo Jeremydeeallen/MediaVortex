@@ -214,6 +214,64 @@ def StepInstallRequirements(Target: str, VenvPath: str, SrcPath: str, DepsFinger
     return True
 
 
+# directive: demucs-liveness | # see worker-deploy-baremetal.ST3 -- required device from the host's Workers hardware flags, same mapping the runtime uses; None when the host has no Workers rows yet
+def _RequiredDeviceForHost(Friendly: str, Count: int) -> Optional[str]:
+    sys.path.insert(0, str(MediaVortexRoot))
+    from Core.Database.DatabaseService import DatabaseService
+    from Features.AudioNormalization.Services.DemucsVocalIsolationService import DeviceForCapabilities
+    Names = [f"{Friendly}-worker-{N}" for N in range(1, Count + 1)]
+    Rows = DatabaseService().ExecuteQuery(
+        "SELECT NvencCapable, QsvCapable FROM Workers WHERE WorkerName = ANY(%s)", (Names,))
+    if not Rows:
+        return None
+    return DeviceForCapabilities(any(R['NvencCapable'] for R in Rows), any(R['QsvCapable'] for R in Rows))
+
+
+# directive: demucs-liveness | # see worker-deploy-baremetal.ST3 -- proves torch in the new venv can compute on the required device; no downgrade to another device
+def StepVerifyRequiredDevice(Target: str, VenvPath: str, Device: Optional[str]) -> bool:
+    if Device is None:
+        _Status(11, 12, "verify required device", "SKIPPED", "no Workers rows for this host yet")
+        return True
+    Probe = (
+        "import torch; "
+        f"x = torch.ones(8, device='{Device}'); "
+        "print('DEVICE_OK', float((x + x).sum()))"
+    )
+    R = _Ssh(Target, f'{VenvPath}/bin/python -c "{Probe}" 2>&1 | tail -3', Timeout=300)
+    Out = (R.stdout or "").strip()
+    if "DEVICE_OK 16.0" not in Out:
+        _Status(11, 12, "verify required device", "FAILED", f"torch cannot use '{Device}': {Out[-300:]}")
+        return False
+    _Status(11, 12, "verify required device", "OK", f"torch computes on '{Device}'")
+    return True
+
+
+# directive: demucs-liveness | # see worker-deploy-baremetal.ST3
+_GpuHoldPatternByDevice = {
+    "cuda": "nvidia",
+    "xpu": "^(intel-opencl-icd|libze-intel-gpu1|libze1|libigc2|libigdgmm12|intel-media-va-driver-non-free|libmfx-gen|libvpl2|linux-generic-hwe|linux-image-generic-hwe|linux-headers-generic-hwe)",
+}
+
+
+# directive: demucs-liveness | # see worker-deploy-baremetal.ST3 -- holds the GPU driver packages so no updater replaces them; a GPU host where nothing matches fails
+def StepHoldGpuPackages(Target: str, Device: Optional[str]) -> bool:
+    Pattern = _GpuHoldPatternByDevice.get(Device or "")
+    if Pattern is None:
+        _Status(12, 12, "hold GPU packages", "SKIPPED", f"device={Device}")
+        return True
+    R = _Ssh(Target, (
+        f"P=$(dpkg-query -W -f='${{Package}}\\n' | grep -E '{Pattern}'); "
+        "[ -n \"$P\" ] && apt-mark hold $P > /dev/null; "
+        f"apt-mark showhold | grep -cE '{Pattern}'"
+    ), Timeout=60)
+    Held = (R.stdout or "").strip().splitlines()[-1:] or ["0"]
+    if not Held[0].isdigit() or int(Held[0]) == 0:
+        _Status(12, 12, "hold GPU packages", "FAILED", f"no packages held for device={Device}: {(R.stderr or '')[-200:]}")
+        return False
+    _Status(12, 12, "hold GPU packages", "OK", f"{Held[0]} package(s) held for device={Device}")
+    return True
+
+
 def StepRenderSystemdUnit(Target: str, Friendly: str, Count: int, SrcPath: str, VenvPath: str) -> bool:
     # see .claude/rules/worker-deploy.md
     MemoryMax = _MemoryMaxByHost.get(Friendly, _MemoryMaxDefault)
@@ -329,6 +387,11 @@ def main():
     if not StepShipSchemaSnapshot(Target, SrcPath):
         return 2
     if not StepInstallRequirements(Target, VenvPath, SrcPath, DepsFingerprint):
+        return 2
+    RequiredDevice = _RequiredDeviceForHost(Friendly, Count)
+    if not StepVerifyRequiredDevice(Target, VenvPath, RequiredDevice):
+        return 2
+    if not StepHoldGpuPackages(Target, RequiredDevice):
         return 2
     if not StepRenderSystemdUnit(Target, Friendly, Count, SrcPath, VenvPath):
         return 2

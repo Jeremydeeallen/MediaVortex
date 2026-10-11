@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-11
-**Status:** Active -- phase: DELIVERING
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** demucs-liveness
 **Replaces:** `directives/closed/2026-10-11-remove-savings-gate.md` (closed Success)
 
@@ -20,6 +20,8 @@ A vocal-separation run is failed as hung only when it has stopped working, not b
 7. Episodes short enough for one piece are separated exactly as before. Verify: contract test of the piece plan.
 8. Separation runs on the device the worker's hardware calls for -- NVIDIA GPU where the worker has one, Intel GPU where it has one, CPU only on a worker with neither -- or the job fails with an error naming the required device and the host. It never runs on a slower device than the hardware calls for. Verify: contract tests; live: wakko-worker-1 (Intel GPU not visible to torch since the 2026-09-22 kernel change) fails an Audio job with that error instead of running 4x slower on CPU; dot-worker-1 and a CPU-only worker still complete.
 9. A loudness or level measurement in the separation path that yields no usable number fails the job with the measurement's output in the error. It is never replaced by silence, by "unknown", or by a different loudness method. Verify: contract tests.
+10. A deploy to a host fails, naming the device, when the device its workers require for separation is not usable there; the host's workers are not restarted onto the new code by that run. Verify: live fleet deploy passes the check on dot (cuda) and wakko (xpu); the check run against a device the host lacks fails.
+11. After a deploy, the GPU driver packages on a GPU host are held, so neither the automatic updater nor a manual "install all updates" replaces them. Verify: `apt-mark showhold` on dot and wakko after a fleet deploy.
 
 ## Call-Graph Audit
 
@@ -64,6 +66,8 @@ Features/AudioNormalization/Services/DemucsChunking.py (new)
 Tests/Contract/TestDemucsChunking.py (new)
 Features/AudioNormalization/Services/DemucsVocalIsolationService.py
 Tests/Contract/TestDemucsNoFallback.py (new)
+deploy/deploy-baremetal-worker.py
+deploy/worker-deploy-baremetal.flow.md
 Features/AudioNormalization/Services/DemucsDaemonProtocol.py
 ```
 
@@ -78,6 +82,8 @@ Prototype (I9, Dancing with the Stars S29E11, 84 min): whole-file peak 16-19 GB,
 Third commit (no fallbacks). The required device comes from the worker's hardware flags in `Workers` (`NvencCapable` -> cuda, else `QsvCapable` -> xpu, else cpu), read when the daemon is started, and is passed to the daemon on its command line. The daemon checks torch can use that device before announcing ready and exits with a named error otherwise; the client puts that error in the exception. Auto-detection and the optional Intel pre-warm import are deleted. The three measurement helpers (vocals level, source loudness, premix loudness) raise when ffmpeg gives no parsable number.
 
 Deleted code, by bucket: `_DetectDevice` cpu return and the `None`/silence returns are defensive defaults on decision inputs -- producers audited (torch device, ffmpeg astats/loudnorm output), replaced by raises. `_PreWarmXpu` is an orphan: the package it imports is in no requirements file and torch 2.6 has native xpu.
+
+Fourth commit (deploy guard). `deploy-baremetal-worker.py` gains two steps after requirements install: read the host's workers' hardware flags from `Workers`, map them to the required device with the same function the runtime uses, and prove in the freshly built venv that torch can run a small operation on that device; then `apt-mark hold` the GPU driver packages (NVIDIA packages on a cuda host; Intel compute runtime, media driver and the kernel metapackages that carry the Intel GPU driver on an xpu host). A host with no `Workers` rows yet (first deploy) skips both, visibly. The deploy doc loses its "fall back to CPU demucs" advice.
 
 Seam changed:
 
@@ -96,6 +102,7 @@ Deleted code, by bucket: the 1800 s cap is a defensive default against a hung da
 | Hang detection is lack of work (stderr output + CPU time), no total cap | `Features/AudioNormalization/Services/demucs-daemon.feature.md` C8 (same commit as the code) |
 | Long input is separated in overlapping pieces and joined; progress marker line | `Features/AudioNormalization/Services/demucs-daemon.feature.md` C12, S3, S4, Files (same commit as the code) |
 | Device is required from worker hardware flags, never detected; measurements raise instead of defaulting | `Features/AudioNormalization/Services/demucs-daemon.feature.md` C5, C13 (same commit as the code) |
+| Deploy proves the required device and holds GPU driver packages; CPU-downgrade advice removed | `deploy/worker-deploy-baremetal.flow.md` ST3 subsection + Failure Modes row (same commit as the code) |
 
 ### Verification
 
