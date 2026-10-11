@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-11
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** demucs-liveness
 **Replaces:** `directives/closed/2026-10-11-remove-savings-gate.md` (closed Success)
 
@@ -109,6 +109,14 @@ Deleted code, by bucket: the 1800 s cap is a defensive default against a hung da
   - wakko-worker-1, attempt 99827 (above): completed, Dialog Boost emitted, placed, Compliant. No kernel memory kill, no restart. Cgroup peak reads equal to the 14 GiB cap; that counter includes file cache, so it shows the cap was reached and reclaimed from, not how much headroom the separator had.
 - **6:** split-then-join of a random signal returns it within 1 LSB. Through the real daemon on I9 (84-minute input): one vocals + one background file, piece directory removed, progress 0 -> 100 without going backwards, -27.3 dB vs whole-file on vocals (prototype: -27 dB; two whole-file runs differ by -31 dB).
 - **7:** piece-plan contract tests; inputs up to 21 minutes are not split.
+- **Third commit:** `24923d5f`, pushed. Fleet on `24923d5f`, 9 workers OK. Demucs + audio-pipeline suites 53 pass; `TestAudioPipelineNoSilentFallback::test_audio_filter_emitter_routes_review_through_disposition_resolver` fails on `AudioFilterEmitter.py`, a file this directive does not touch.
+- **8, live 2026-10-11:**
+  - wakko-worker-1, attempt 99829 (S32E07): failed at once with `Demucs daemon did not start on device 'xpu': DEMUCS_DEVICE_ERROR required device 'xpu' is not usable by torch 2.6.0+xpu on client-b450m-01; refusing to separate on any other device`. No CPU run.
+  - dot-worker-1, attempt 99830 (S32E06, 84 min): completed on cuda in 16.4 minutes wall, Dialog Boost emitted, placed, Compliant.
+  - I9, real daemon: `--device cuda` starts in 1.1 s; `--device xpu` refused with the same error naming I9-2024.
+  - CPU-only worker not run live (all four are Paused); covered by contract test.
+- **9:** contract tests (no block, missing field, no level, unreadable value all raise; `-inf` stays a value).
+- **wakko GPU cause (evidence):** apt history shows kernel 6.14.0-37 -> 7.0.0-31 on 2026-09-22; current boot is 7.0.0-31; Intel OpenCL lists only the CPU device; torch reports zero xpu devices; BIOS P3.10 (2022) unchanged. Audio wall time on wakko: 7.3-8.0 min per hour of audio for weeks of 2026-08-10 through 2026-09-14, 30.0 for week of 2026-10-05.
 
 ### Decisions Made
 
