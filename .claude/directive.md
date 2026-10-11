@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-11
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** demucs-liveness
 **Replaces:** `directives/closed/2026-10-11-remove-savings-gate.md` (closed Success)
 
@@ -126,6 +126,9 @@ Deleted code, by bucket: the 1800 s cap is a defensive default against a hung da
 - **8, wakko live after the fix:** attempt 99833, S28E05 (85 min), wakko-worker-1: daemon running with `--device xpu`, completed in 12.6 minutes wall (55.3 minutes on CPU earlier the same day for a 127-minute episode), Dialog Boost emitted, placed, Compliant. Cgroup peak 12.8 GiB of 14 GiB, no kernel memory kill, same boot id before and after.
 - **Unexplained:** wakko reset without a clean shutdown twice within ten minutes of the BIOS change (boots at 15:23 and 15:33 MDT), the second seconds after attempt 99831 was claimed. Not reproduced since: stepped torch xpu test, Demucs on a 3-minute clip, and the full job above all ran with no reset.
 - **Found, not fixed:** on boot after that reset, crash recovery logged `Unknown job type AudioFix` and `Failed to reset job ... in queue`; the job waited 31 minutes for stuck-job detection to release it.
+- **Fourth commit:** `2a0d5e83`, pushed. Fleet on `2a0d5e83`, 9 workers OK.
+- **10, live fleet deploy 2026-10-11:** `verify required device` OK on dot (`cuda`), wakko (`xpu`), mediavortex-workers (`cpu`). Negative: the same step asked for `xpu` on dot printed `[FAIL] ... torch cannot use 'xpu': ... Torch not compiled with XPU enabled` and returned False.
+- **11, live:** `hold GPU packages` held 23 packages on dot and 11 on wakko; `apt-mark showhold` on each host lists them. CPU host skipped.
 - **9:** contract tests (no block, missing field, no level, unreadable value all raise; `-inf` stays a value).
 - **wakko GPU cause (evidence):** apt history shows kernel 6.14.0-37 -> 7.0.0-31 on 2026-09-22; current boot is 7.0.0-31; Intel OpenCL lists only the CPU device; torch reports zero xpu devices; BIOS P3.10 (2022) unchanged. Audio wall time on wakko: 7.3-8.0 min per hour of audio for weeks of 2026-08-10 through 2026-09-14, 30.0 for week of 2026-10-05.
 
