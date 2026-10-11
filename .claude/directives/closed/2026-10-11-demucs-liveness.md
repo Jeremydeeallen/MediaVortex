@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-11
-**Status:** Active -- phase: DELIVERING
+**Status:** Closed 2026-10-11
 **Slug:** demucs-liveness
 **Replaces:** `directives/closed/2026-10-11-remove-savings-gate.md` (closed Success)
 
