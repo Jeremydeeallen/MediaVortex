@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-11
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** remove-savings-gate
 **Replaces:** `directives/closed/2026-10-10-long-filename-output.md` (closed Success)
 
@@ -81,4 +81,17 @@ Deleted code, by bucket: the savings branch is a rule the operator retired (not 
 
 ### Verification
 
+- **Commit:** `2c47bf86`, pushed. Fleet on `2c47bf86`, 9 workers OK (`deploy-fleet.py`, 467.8s, drained).
+- **Tests:** decider, disposition table, dispatcher suites 40/40. `TestFailLoud` baseline tests fail identically with and without this change (baseline file is stale); not touched. Claim tests not run (they take live queue rows).
+- **1:** decider tests at 13%, 0% and -20% savings return `Replace/VmafPassed`.
+- **2, live 2026-10-11 (UTC):**
+  - 698773 Greatest American Hero S01E01-E08: attempt 99821 Transcode on wakko-worker-1, 15.0% smaller, `Replace`, placed. VideoCompliant, bucket moved Transcode -> AudioFix; hand-off queued Audio (attempt 99824 running). Prior attempt 99810 was rejected `InsufficientSavings_13pct_below_20pct`.
+  - 751141 Loki S02E03: attempt 99822 Transcode on dot-worker-1, 11.7% smaller, `Replace`, placed. VideoCompliant, bucket AudioFix; Audio attempt 99823 running.
+- **3:** running WebService: GET `/api/SystemSettings/QueueAdmissionConfig` returns no savings-percent field; PUT of the two remaining fields round-trips; `/settings` loads (200) with no savings-percent input.
+- **4:** production grep returns 0.
+
 ### Decisions Made
+
+- No replacement rule: an output larger than its source is also kept, as "remove altogether" reads.
+- The dead setting was removed from the page and API in the same commit rather than left as a knob that does nothing.
+- Both files were queued with the API's force flag: manual add without it was refused as `Upscale` against a 2160p default profile target, which is unrelated to this rule.
