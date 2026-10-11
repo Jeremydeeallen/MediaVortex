@@ -11,6 +11,7 @@ import psutil
 
 from Core.Logging.LoggingService import LoggingService
 from Core.SubprocessUtil import NoWindowFlags
+from Features.AudioNormalization.Services.DemucsChunking import CHUNKS_LINE_RE, TRACK_START_PREFIX, ScaleChunkProgress
 from Features.AudioNormalization.Services.DemucsDaemonProtocol import (
     EncodeRequest,
     DecodeResponse,
@@ -57,6 +58,9 @@ class DemucsDaemonClient:
         self._StartTimeoutSec = StartTimeoutSec
         self._StallTimeoutSec = StallTimeoutSec
         self._LastActivityAt = time.monotonic()
+        self._ChunkTotal = 0
+        self._ChunkIndex = 0
+        self._ChunkTotalSeconds = 0.0
         self._Proc = None
         self._Lock = threading.Lock()
         self._StdoutQueue = None
@@ -108,12 +112,20 @@ class DemucsDaemonClient:
             for Line in iter(self._Proc.stderr.readline, ''):
                 self._LastActivityAt = time.monotonic()
                 Stripped = Line.rstrip()
+                ChunksMatch = CHUNKS_LINE_RE.match(Stripped)
+                if ChunksMatch:
+                    self._ChunkTotal = int(ChunksMatch.group(1))
+                    self._ChunkTotalSeconds = float(ChunksMatch.group(2))
+                    self._ChunkIndex = 0
+                    continue
+                if Stripped.startswith(TRACK_START_PREFIX):
+                    self._ChunkIndex += 1
                 Match = _TQDM_LINE_RE.match(Stripped)
                 if Match:
                     Callback = self._ProgressCallback
                     if Callback is not None:
                         try:
-                            Callback(int(Match.group(1)), float(Match.group(2)), float(Match.group(3)))
+                            Callback(*self._ProgressArgs(int(Match.group(1)), float(Match.group(2)), float(Match.group(3))))
                         # fail-loud-ok: progress callback errors must not kill the daemon drain thread; failure surfaces via missing progress rows, not a crashed daemon
                         except Exception:
                             pass
@@ -142,6 +154,12 @@ class DemucsDaemonClient:
                 return True
         return False
 
+    # directive: demucs-liveness | # see demucs-daemon.S4 -- single-piece run passes the tick through; multi-piece run scales it to the whole input
+    def _ProgressArgs(self, Percent, DoneSec, TotalSec):
+        if self._ChunkTotal > 1:
+            return ScaleChunkProgress(self._ChunkIndex, self._ChunkTotal, self._ChunkTotalSeconds, Percent)
+        return Percent, DoneSec, TotalSec
+
     # directive: audio-preencode-progress -- ProgressCallback receives (percent, done, total) per tqdm tick from the daemon's stderr line parser; cleared in finally so ticks from one request cannot leak into another
     def IsolateVocals(self, InputWavPath, OutputDir, ModelName='htdemucs', ProgressCallback=None):
         with self._Lock:
@@ -154,6 +172,8 @@ class DemucsDaemonClient:
                 ModelName=ModelName,
             )
             self._ProgressCallback = ProgressCallback
+            self._ChunkTotal = 0
+            self._ChunkIndex = 0
             try:
                 self._Proc.stdin.write(EncodeRequest(Req) + '\n')
                 self._Proc.stdin.flush()

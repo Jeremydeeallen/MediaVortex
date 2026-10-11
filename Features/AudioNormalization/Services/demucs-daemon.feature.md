@@ -32,13 +32,16 @@ C10. **Protocol stdout stays JSON-only.** `_IsolateOnce` swaps `sys.stdout` to `
 
 C11. **Stderr never pipe-blocks the daemon + emits per-tqdm-tick progress.** `DemucsDaemonClient._StderrDrainLoop` runs a daemon-thread `readline()` loop over the stderr pipe (universal-newline mode splits demucs' `\r`-terminated tqdm ticks into lines). Every line is consumed: pipe-buffer safety preserved by draining, not by tail retention. Lines matching `_TQDM_LINE_RE` (`^\s*(\d+)%\|.*?\|\s*([\d.]+)/([\d.]+)`) invoke the caller-supplied `ProgressCallback(percent, done_sec, total_sec)` so `/Activity` renders live percent during Demucs; non-tqdm lines are kept as `_LastStderrLine` (500-char tail) for post-crash diagnostic. Verifiable: no `DemucsDaemonUnavailableError` timeout-string hits during a 100-job batch; `Tests/Contract/TestDemucsProgressParser.py` asserts the regex round-trip.
 
+C12. **Separation memory does not grow with input length.** An input longer than one piece (20 minutes, plus a tail allowance of 60 seconds) is cut into 20-minute pieces that overlap by 10 seconds; all pieces go to the separator in one call; each overlap is linearly crossfaded and the pieces are written as one vocals file and one background file at the paths the caller already reads. An input that fits in one piece is separated whole, exactly as without this criterion. The joined result has no gap, repeat or discontinuity at piece boundaries. Before a multi-piece run the daemon writes `MV_DEMUCS_CHUNKS <n> <total_seconds>` on stderr and the client reports progress across the whole input rather than restarting at each piece. Verifiable: `Tests/Contract/TestDemucsChunking.py` (piece plan; split then join of a known signal returns that signal); a ~2-hour input completes on a worker whose memory cap a whole-file run exceeds.
+
 ## Seams
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
 |---|---|---|---|---|---|
 | S1 | `DemucsVocalIsolationService -> DemucsDaemonClient.IsolateVocals` (function-call) | Service | `(StereoInputWavPath, OutputDir, ModelName)` | `IsolateResponse` (Success + paths OR ErrorMessage) | `TestDemucsDaemonProtocol` + live smoke |
 | S2 | `DemucsDaemonClient -> subprocess stdin` (wire) | Client | `EncodeRequest(IsolateRequest) + '\n'` | Daemon reads one line, matches `RequestId` on response | Protocol test |
-| S3 | `DemucsDaemonEntry -> demucs.separate.main` (function-call) | Daemon | `sys.argv = ['demucs.separate', '-n', model, '-d', device, '--two-stems', 'vocals', '-o', outdir, '--filename', '{stem}.{ext}', input]` | Vocals + instrumental WAVs land in `OutputDir/<ModelName>/` | Live smoke; response validates paths exist |
+| S3 | `DemucsDaemonEntry -> demucs.separate.main` (function-call) | Daemon | `sys.argv = ['demucs.separate', '-n', model, '-d', device, '--two-stems', 'vocals', '-o', outdir, '--filename', '{stem}.{ext}', input]` | Vocals + instrumental WAVs land in `OutputDir/<ModelName>/`. Multi-piece input (C12): the separator gets N piece files and writes under `OutputDir/demucs_chunks/`; the daemon joins them into the same two `OutputDir/<ModelName>/` files (16-bit PCM at the separator's sample rate) and deletes the piece directory | Live smoke; response validates paths exist; `TestDemucsChunking` |
+| S4 | `DemucsDaemonEntry -> DemucsDaemonClient` progress (wire, stderr) | Daemon | line `MV_DEMUCS_CHUNKS <n> <total_seconds>` before a multi-piece run; separator then prints `Separating track ...` once per piece and tqdm ticks per piece | Client counts pieces and scales each tick to whole-input percent + seconds | `TestDemucsChunking` |
 
 ## Status
 
@@ -50,6 +53,7 @@ ACTIVE -- shipped 2026-07-15 commit 5c47322. Wired via `DemucsVocalIsolationServ
 |---|---|
 | `Features/AudioNormalization/Services/DemucsDaemonProtocol.py` | Wire-format dataclasses + encode/decode + READY sentinel |
 | `Features/AudioNormalization/Services/DemucsDaemonEntry.py` | Long-lived subprocess entrypoint; loads torch + IPEX + demucs; reads requests loop |
+| `Features/AudioNormalization/Services/DemucsChunking.py` | C12 piece plan, split, crossfade join, progress scaling |
 | `Features/AudioNormalization/Services/DemucsDaemonClient.py` | Owns `Popen`; process-singleton via `GetOrStartDaemon`; IsolateVocals returns `IsolateResponse` |
 | `Features/AudioNormalization/Services/DemucsVocalIsolationService.py` | Client of daemon; retains `_MeasureWavRmsDbfs` + `MixBoostedPremix` + `MeasureSourceLoudnorm` (non-daemon-owned methods) |
 | `Tests/Contract/TestDemucsDaemonProtocol.py` | Protocol encode/decode + READY constant |
