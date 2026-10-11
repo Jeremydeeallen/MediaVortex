@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-11
-**Status:** Active -- phase: DELIVERING
+**Status:** Closed 2026-10-11
 **Slug:** remove-savings-gate
 **Replaces:** `directives/closed/2026-10-10-long-filename-output.md` (closed Success)
 
