@@ -7,6 +7,8 @@ import threading
 import time
 import uuid
 
+import psutil
+
 from Core.Logging.LoggingService import LoggingService
 from Core.SubprocessUtil import NoWindowFlags
 from Features.AudioNormalization.Services.DemucsDaemonProtocol import (
@@ -24,6 +26,10 @@ class DemucsDaemonUnavailableError(RuntimeError):
 
 # directive: audio-preencode-progress -- tqdm line shape verified 2026-07-30: ` 17%|<bar>| 5.85/35.099... [00:01<00:09, 2.96seconds/s]`. Universal-newline mode splits Demucs' '\r'-terminated updates into readline() lines.
 _TQDM_LINE_RE = re.compile(r"^\s*(\d+)%\|.*?\|\s*([\d.]+)\s*/\s*([\d.]+)\b")
+
+
+# directive: demucs-liveness | # see demucs-daemon.C8 -- CPU seconds the daemon must burn between samples to count as working; an idle daemon blocked on a read burns none
+_CPU_ACTIVITY_MIN_SECONDS = 0.5
 
 
 # directive: transcode-flow-canonical -- process-singleton amortizes model load + XPU compile across every job the worker handles
@@ -45,11 +51,12 @@ def GetOrStartDaemon(PythonExe=None, StartTimeoutSec=180):
 class DemucsDaemonClient:
     """Owns the long-lived Demucs subprocess for one WorkerService instance."""
 
-    # directive: audio-preencode-progress -- IsolateReadTimeoutSec caps blocking read so a hung daemon does not deadlock the WorkerService thread; ProgressCallback receives per-tqdm-tick (percent, done, total) from stderr line parser during an active IsolateVocals call
-    def __init__(self, PythonExe=None, StartTimeoutSec=180, IsolateReadTimeoutSec=1800):
+    # directive: demucs-liveness | # see demucs-daemon.C8 -- no total cap on a request; StallTimeoutSec is the longest gap with no stderr output and no CPU time consumed before the daemon counts as hung
+    def __init__(self, PythonExe=None, StartTimeoutSec=180, StallTimeoutSec=300):
         self._PythonExe = PythonExe or sys.executable
         self._StartTimeoutSec = StartTimeoutSec
-        self._IsolateReadTimeoutSec = IsolateReadTimeoutSec
+        self._StallTimeoutSec = StallTimeoutSec
+        self._LastActivityAt = time.monotonic()
         self._Proc = None
         self._Lock = threading.Lock()
         self._StdoutQueue = None
@@ -99,6 +106,7 @@ class DemucsDaemonClient:
     def _StderrDrainLoop(self):
         try:
             for Line in iter(self._Proc.stderr.readline, ''):
+                self._LastActivityAt = time.monotonic()
                 Stripped = Line.rstrip()
                 Match = _TQDM_LINE_RE.match(Stripped)
                 if Match:
@@ -150,7 +158,7 @@ class DemucsDaemonClient:
                 self._Proc.stdin.write(EncodeRequest(Req) + '\n')
                 self._Proc.stdin.flush()
                 try:
-                    ResponseLine = self._ReadLineWithDeadline(self._IsolateReadTimeoutSec)
+                    ResponseLine = self._ReadLineUntilStalled(self._StallTimeoutSec)
                 except DemucsDaemonUnavailableError:
                     self._Kill()
                     raise
@@ -166,22 +174,36 @@ class DemucsDaemonClient:
             finally:
                 self._ProgressCallback = None
 
-    # directive: transcode-flow-canonical -- deadline read via reader-thread queue; cross-platform (Windows select() rejects pipe fds); returns '' on daemon exit, raises on wall-clock timeout
-    def _ReadLineWithDeadline(self, TimeoutSec):
-        Deadline = time.monotonic() + TimeoutSec
+    # directive: demucs-liveness | # see demucs-daemon.C8 -- waits as long as the daemon keeps working; returns '' on daemon exit, raises only after StallSec with no stderr line and no CPU time consumed
+    def _ReadLineUntilStalled(self, StallSec):
+        self._LastActivityAt = time.monotonic()
+        LastCpuSeconds = self._DaemonCpuSeconds()
         while True:
-            Remaining = Deadline - time.monotonic()
-            if Remaining <= 0:
-                raise DemucsDaemonUnavailableError(f'Demucs daemon response timeout after {TimeoutSec}s')
             try:
-                Line = self._StdoutQueue.get(timeout=min(1.0, Remaining))
+                Line = self._StdoutQueue.get(timeout=1.0)
             except queue.Empty:
                 if self._Proc.poll() is not None:
                     return ''
+                CpuSeconds = self._DaemonCpuSeconds()
+                if CpuSeconds - LastCpuSeconds >= _CPU_ACTIVITY_MIN_SECONDS:
+                    LastCpuSeconds = CpuSeconds
+                    self._LastActivityAt = time.monotonic()
+                Idle = time.monotonic() - self._LastActivityAt
+                if Idle >= StallSec:
+                    raise DemucsDaemonUnavailableError(
+                        f'Demucs daemon stalled: no progress output and no CPU activity for {int(Idle)}s')
                 continue
             if Line is None:
                 return ''
             return Line
+
+    # directive: demucs-liveness | # see demucs-daemon.C8 -- user+system CPU seconds the daemon process has consumed; a process that vanished mid-sample reports 0.0 and the exit is caught by poll() on the next loop
+    def _DaemonCpuSeconds(self):
+        try:
+            Times = psutil.Process(self._Proc.pid).cpu_times()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return 0.0
+        return Times.user + Times.system
 
     def Stop(self):
         with self._Lock:
