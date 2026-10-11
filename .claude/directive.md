@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-11
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** demucs-liveness
 **Replaces:** `directives/closed/2026-10-11-remove-savings-gate.md` (closed Success)
 
@@ -87,4 +87,21 @@ Deleted code, by bucket: the 1800 s cap is a defensive default against a hung da
 
 ### Verification
 
+- **Commits:** `82549971` (liveness), `f2e5da1a` (chunking). Pushed. Fleet on `f2e5da1a`, 9 workers OK.
+- **Tests:** chunking, liveness, protocol, progress-parser suites 24/24. Claim tests not run (they take live queue rows). `TestFailLoud` baseline tests fail the same with and without these changes.
+- **1, live:** wakko-worker-1, attempt 99827, Dancing with the Stars S33E10 (127 min): 55.3 minutes wall on CPU, well past the old 1800 s mark, completed, placed. Earlier the same day (liveness only, before chunking) attempt 99826 ran 30 min 36 s without a timeout and was then killed for memory at 14 GB.
+- **2, 3:** contract tests (silent process failed as stalled within the window; exited process reported at once).
+- **4:** production grep returns 0.
+- **5, live 2026-10-11:**
+  - dot-worker-1, attempt 99828, S31E03 (120 min): 12.3 minutes wall, completed, Dialog Boost emitted, placed, Compliant. Worker cgroup peak 14.6 GiB of a 24 GiB cap, no kernel memory kill, no restart. The 119-minute S31E01 was killed at 24.2 GB on 2026-10-08.
+  - wakko-worker-1, attempt 99827 (above): completed, Dialog Boost emitted, placed, Compliant. No kernel memory kill, no restart. Cgroup peak reads equal to the 14 GiB cap; that counter includes file cache, so it shows the cap was reached and reclaimed from, not how much headroom the separator had.
+- **6:** split-then-join of a random signal returns it within 1 LSB. Through the real daemon on I9 (84-minute input): one vocals + one background file, piece directory removed, progress 0 -> 100 without going backwards, -27.3 dB vs whole-file on vocals (prototype: -27 dB; two whole-file runs differ by -31 dB).
+- **7:** piece-plan contract tests; inputs up to 21 minutes are not split.
+
 ### Decisions Made
+
+- Chunking was absorbed into this directive rather than opened as its own: the liveness criterion could not be shown live without it.
+- Liveness uses two signals, stderr output and CPU time, because the separator prints nothing while it writes its output files.
+- Pieces go to the separator in one call, so the model loads once per episode as before.
+- Split and join use the standard library and numpy; no new dependency.
+- Chunked output is not sample-identical to whole-file output; the operator approved building it after seeing the measurements.
