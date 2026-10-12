@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-11
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: VERIFYING
 **Slug:** crash-recovery-audiofix-type
 **Replaces:** `directives/closed/2026-10-11-demucs-liveness.md` (closed Success)
 
@@ -104,4 +104,15 @@ Seams changed:
 
 ### Verification
 
+- **Commit:** `104ee697`, pushed. I9-2024 restarted onto it 2026-10-12 15:34 UTC (`Workers.Version` = `104ee697...`, heartbeat fresh, 2 worker processes).
+- **Criteria 2, 5, 6, 7:** `py -m pytest Tests/Contract/TestCrashRecoveryOwnership.py` -> 7 passed, 3 subtests (Transcode, Remux, AudioFix). Rows live in an uncommitted transaction; `MediaFiles` leftovers = 0 after the run.
+- **Boot on new code (I9-2024, ST5):** Logs 64274879-64274898: `Crash recovery completed for I9-2024: {'JobsReleased': 0, 'AttemptsFailed': 0, ... 'LocalStagingOrphansCleaned': 1}`, then `ActiveJobs sweep: deleted 0 row(s)`. No `Unknown job type` line.
+- **Criteria 1, 3, 4:** OPEN. The approved live kill cannot run on I9-2024: its `Workers.RemuxEnabled` and `TranscodeEnabled` are FALSE, so it never claims an Audio job. Waiting on operator.
+- **Regression:** `TestAbandonmentSweeper`, `TestClaimAuthority` pass. `TestFailLoud` 2 failures are the stale-baseline pair already in backlog row 30; none of this directive's files appear in them.
+
 ### Decisions Made
+
+- Disk cleanup at boot (`.ip` files, partial replacements, local scratch) now runs on every boot. Before, it ran only when leftover active-job records existed. First boot removed `C:\MediaVortex\699524`, a staged copy left by failed attempt 90385 (2026-09-09).
+- `CrashRecoveryService` requires a worker name; the "all workers" mode had only the deleted scripts as callers.
+- The contract test uses one uncommitted transaction instead of committed sentinel rows: a released test row would be `Pending` and claimable by a live worker.
+- Fail-loud baseline lowered only for the three files this directive touched.
