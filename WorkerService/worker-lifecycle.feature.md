@@ -42,7 +42,7 @@ Simplify worker status model from three states (Online/Draining/Paused) to two (
 10. Crash and kill follow the same recovery path. There is no special DB state for a killed worker. When a worker starts, crash recovery runs and cleans up all orphaned state from any prior run.
 11. Crash recovery rule 1: any `.ip` file on disk for this worker's active jobs is deleted (incomplete output).
 12. Crash recovery rule 2: if a `-mv.mp4` file AND the original source both exist, delete the original and update MediaFiles.FilePath (replacement succeeded but cleanup didn't finish).
-13. Crash recovery rule 3: orphaned ActiveJobs rows for this worker are deleted. TranscodeAttempts with no CompletedDate for this worker are marked failed with reason "worker crashed/restarted".
+13. Crash recovery rule 3: every job this worker still owns from a prior run is released, whatever kind of job it is: its in-flight attempt is marked failed with reason "worker crashed/restarted", its queue row returns to Pending, and this worker's ActiveJobs rows are deleted. No other worker's rows change. If recovery cannot complete, the worker does not start. Steps: `WorkerService/WorkerService.flow.md` `## Boot Recovery (ST5)`.
 
 ### UI
 

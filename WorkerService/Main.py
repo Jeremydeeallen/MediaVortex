@@ -694,29 +694,19 @@ class WorkerServiceApp:
         except Exception as e:
             LoggingService.LogException("Error ensuring ServiceStatus exists", e, "WorkerService", "_EnsureServiceStatusExists")
 
+    # directive: crash-recovery-audiofix-type | # see workerservice.ST5
     def _RecoverFromCrash(self):
         # see worker-lifecycle.C13 -- ActiveJobs rows are valid only while the owning process is alive; every boot enforces this invariant across all capability services this worker runs.
-        try:
-            LoggingService.LogInfo("Starting crash recovery...", "WorkerService", "_RecoverFromCrash")
-            from Services.CrashRecoveryService import CrashRecoveryService
-            RecoveryService = CrashRecoveryService(self.DatabaseManager, WorkerName=self.WorkerName)
-            Result = RecoveryService.RecoverServiceJobs("TranscodeService")
-            if Result.get("Success", False):
-                LoggingService.LogInfo(
-                    f"Crash recovery completed: {Result.get('JobsRecovered', 0)} jobs recovered, {Result.get('OrphanedProcessesKilled', 0)} orphaned processes killed",
-                    "WorkerService", "_RecoverFromCrash"
-                )
-            else:
-                LoggingService.LogError(f"Crash recovery failed: {Result.get('Message', 'Unknown error')}", "WorkerService", "_RecoverFromCrash")
-            SweepRows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                "DELETE FROM ActiveJobs WHERE WorkerName = %s", (self.WorkerName,)
-            )
-            LoggingService.LogInfo(
-                f"ActiveJobs sweep: deleted {SweepRows} row(s) for WorkerName={self.WorkerName}",
-                "WorkerService", "_RecoverFromCrash",
-            )
-        except Exception as e:
-            LoggingService.LogException("Error during crash recovery", e, "WorkerService", "_RecoverFromCrash")
+        LoggingService.LogInfo("Starting crash recovery...", "WorkerService", "_RecoverFromCrash")
+        from Features.ServiceControl.CrashRecoveryService import CrashRecoveryService
+        CrashRecoveryService(self.DatabaseManager, WorkerName=self.WorkerName).RecoverOwnedJobs()
+        SweepRows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+            "DELETE FROM ActiveJobs WHERE WorkerName = %s", (self.WorkerName,)
+        )
+        LoggingService.LogInfo(
+            f"ActiveJobs sweep: deleted {SweepRows} row(s) for WorkerName={self.WorkerName}",
+            "WorkerService", "_RecoverFromCrash",
+        )
 
     def _DetectAndCleanStuckJobs(self):
         """Detect and clean up stuck jobs."""
@@ -1359,7 +1349,8 @@ def Main():
 
         # Start the service (runs indefinitely)
         LoggingService.LogInfo("WorkerService is now running. Press Ctrl+C to stop.", "WorkerService", "Main")
-        App.Run()
+        if not App.Run():
+            sys.exit(1)
 
     except KeyboardInterrupt:
         LoggingService.LogInfo("Received keyboard interrupt, shutting down...", "WorkerService", "Main")

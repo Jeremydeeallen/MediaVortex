@@ -304,9 +304,9 @@ class TranscodeJobRepository(BaseRepository):
         Result = self.DatabaseService.ExecuteNonQuery(Query, (ErrorMessage,))
         return int(Result) if Result is not None else 0
 
-    # see failure-accounting.ST1.5 -- crash-recovery bulk write inlines classifier so FailureClass populates
-    def MarkInflightAttemptsCrashedForQueue(self, QueueId: int, DefaultErrorMessage: str = 'worker crashed/restarted') -> int:
-        """Mark Success IS NULL attempts for the MediaFileId behind QueueId as Success=FALSE with inline FailureClasses classification. Returns rowcount."""
+    # directive: crash-recovery-audiofix-type | # see workerservice.ST5
+    def MarkInflightAttemptsCrashedForWorker(self, WorkerName: str, DefaultErrorMessage: str = 'worker crashed/restarted') -> int:
+        """Fail this worker's in-flight attempts (Success IS NULL), skipping those awaiting a quality test; FailureClass classified inline. Returns rowcount."""
         Query = (
             "UPDATE TranscodeAttempts ta "
             "SET Success = FALSE, CompletedDate = NOW(), "
@@ -319,33 +319,13 @@ class TranscodeJobRepository(BaseRepository):
             "      'unclassified' "
             "    ) "
             "WHERE ta.Success IS NULL "
-            "  AND ta.MediaFileId = (SELECT MediaFileId FROM TranscodeQueue WHERE Id = %s)"
-        )
-        Result = self.DatabaseService.ExecuteNonQuery(Query, (DefaultErrorMessage, DefaultErrorMessage, QueueId))
-        return int(Result) if Result is not None else 0
-
-    # see failure-accounting.ST1.5 -- global orphan sweep inlines classifier so FailureClass populates
-    def MarkOrphanedInflightAttemptsCrashed(self, DefaultErrorMessage: str = 'worker crashed/restarted', RecentProgressMinutes: int = 5) -> int:
-        """Mark Success IS NULL attempts (except recently-active ones) as Success=FALSE with inline FailureClasses classification. Returns rowcount."""
-        Query = (
-            "UPDATE TranscodeAttempts ta "
-            "SET Success = FALSE, CompletedDate = NOW(), "
-            "    ErrorMessage = COALESCE(ta.ErrorMessage, %s), "
-            "    FailureClass = COALESCE( "
-            "      ta.FailureClass, "
-            "      (SELECT fc.ClassName FROM FailureClasses fc "
-            "       WHERE COALESCE(ta.ErrorMessage, %s) ~* fc.ErrorPattern "
-            "       ORDER BY fc.Priority ASC LIMIT 1), "
-            "      'unclassified' "
-            "    ) "
-            "WHERE ta.Success IS NULL "
-            "  AND ta.Id NOT IN ( "
-            "    SELECT TranscodeAttemptId FROM TranscodeProgress "
-            "    WHERE LastProgressUpdate > NOW() - (%s || ' minutes')::interval "
+            "  AND ta.WorkerName = %s "
+            "  AND NOT EXISTS ( "
+            "    SELECT 1 FROM QualityTestingQueue qtq "
+            "    WHERE qtq.TranscodeAttemptId = ta.Id AND qtq.DateCompleted IS NULL "
             "  )"
         )
-        Result = self.DatabaseService.ExecuteNonQuery(Query, (DefaultErrorMessage, DefaultErrorMessage, str(RecentProgressMinutes)))
-        return int(Result) if Result is not None else 0
+        return int(self.DatabaseService.ExecuteNonQuery(Query, (DefaultErrorMessage, DefaultErrorMessage, WorkerName)))
 
     # directive: e2e-bug-fixes | # see e2e-bug-fixes.C32 -- AttemptDate is set once at INSERT and is IMMUTABLE. UpdateTranscodeAttempt refuses it; caller attempting to write AttemptDate is a bug.
     def UpdateTranscodeAttempt(self, AttemptId: int, Updates: Dict[str, Any]) -> bool:

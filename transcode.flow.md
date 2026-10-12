@@ -603,11 +603,7 @@ Every worker's `StuckJobDetectionService` runs only over jobs it owns (SELECT-la
 
 ### Crash Recovery
 
-`CrashRecoveryService.RecoverServiceJobs("TranscodeService")` runs at startup, scoped to this worker:
-- Finds ActiveJobs for this service AND this worker (WorkerName filter)
-- Verifies if their processes are still running locally
-- Resets orphaned jobs (dead process) back to Pending, clears ClaimedBy
-- Never touches other workers' jobs
+See `WorkerService/WorkerService.flow.md` `## Boot Recovery (ST5)`.
 
 ### MaxConcurrentJobs
 
@@ -657,7 +653,7 @@ End-to-end trace from worker installation through finished product. Every functi
 | 1.2 | Register + load config | `_RegisterAndLoadWorkerConfig()` | `INSERT INTO Workers ... ON CONFLICT DO UPDATE SET Status='Online', LastHeartbeat=NOW()` then `SELECT * FROM Workers WHERE WorkerName = %s` | Workers.Status = `Online` |
 | 1.3 | Initialize WorkerContext | `WorkerContext.Initialize()` | -- | Singleton stores FFmpeg/FFprobe paths, share mappings for all services in the process |
 | 1.4 | Create ProcessTranscodeQueueService | `ProcessTranscodeQueueService.__init__()` | -- | PathTranslationService initialized from WorkerContext |
-| 1.5 | Crash recovery | `RecoverFromCrash()` -> `CrashRecoveryService.RecoverServiceJobs()` | `UPDATE TranscodeQueue SET Status='Pending' WHERE Status='Running'` (for orphaned jobs) | Orphaned jobs -> `Pending` |
+| 1.5 | Boot recovery | `RecoverFromCrash()` -> `CrashRecoveryService.RecoverOwnedJobs()` | see `WorkerService/WorkerService.flow.md` `## Boot Recovery (ST5)` | This worker's leftover jobs -> `Pending` |
 | 1.6 | Stuck job detection | `DetectAndCleanStuckJobs()` -> `StuckJobDetectionService.DetectAndCleanStuckTranscodeJobs()` | Checks `ActiveJobs`, `Workers.LastHeartbeat`, `TranscodeProgress` | Stuck jobs -> `Failed` |
 | 1.7 | Start health monitor | `_StartHealthMonitoring()` -> `_HealthCheckLoop()` (30s interval) | `UPDATE Workers SET LastHeartbeat = NOW()` | Heartbeat ticking |
 | 1.8 | Start status polling | `_StartStatusPolling()` -> `_StatusPollingLoop()` (5s interval) | `SELECT Status FROM Workers WHERE WorkerName = %s` | Watching for Online/Draining/Offline |

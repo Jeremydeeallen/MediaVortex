@@ -94,7 +94,7 @@
     "Features/SQLQueries/SQLQueriesController.py": 10,
     "Features/ServiceControl/ActiveJobRepository.py": 14,
     "Features/ServiceControl/AttemptAbandonmentSweeper.py": 1,
-    "Features/ServiceControl/CrashRecoveryService.py": 16,
+    "Features/ServiceControl/CrashRecoveryService.py": 6,
     "Features/ServiceControl/GracefulStopService.py": 1,
     "Features/ServiceControl/OrphanCleanupService.py": 6,
     "Features/ServiceControl/ServiceCommandService.py": 7,
@@ -146,7 +146,6 @@
     "Repositories/DatabaseManager.py": 3,
     "Services/CoreTopologyService.py": 5,
     "Services/CpuAffinityService.py": 7,
-    "Services/DatabaseCleanupService.py": 7,
     "Services/FFmpegAnalysisService.py": 6,
     "Services/FFmpegScreenshotService.py": 4,
     "Services/FFmpegService.py": 12,
@@ -165,7 +164,7 @@
     "WebService/Main.py": 28,
     "WebService/TestNetworkDriveValidation.py": 1,
     "WorkerService/LanguageWorker.py": 9,
-    "WorkerService/Main.py": 56,
+    "WorkerService/Main.py": 55,
     "WorkerService/ProbeWorker.py": 6
   }
 }

@@ -11,7 +11,7 @@ Manages the lifecycle and health of microservices (WebService, WorkerService). P
 1. Each microservice can be started, stopped, paused, and resumed independently from the /Status page.
 2. Health monitoring polls each service's heartbeat every 30 seconds via the ServiceStatus table.
 3. Stuck job detection identifies transcode jobs that have been running beyond a configurable timeout with no progress updates.
-4. Crash recovery detects orphaned processes (service died without cleanup) and resets their queue items to Pending.
+4. A worker that starts after dying mid-job returns its leftover queue items to Pending before it claims new work. Contract: `WorkerService/worker-lifecycle.feature.md` C13; steps: `WorkerService/WorkerService.flow.md` `## Boot Recovery (ST5)`.
 5. Graceful shutdown waits for the current job to complete before stopping the service.
 6. Inter-service commands are queued via the ServiceCommands table (no direct inter-process messaging).
 7. System resource monitoring (CPU usage, memory, disk space) is displayed on the /Status page.
@@ -45,7 +45,7 @@ Features/ServiceControl/**
 |---|---|
 | ServiceStatus.* (Status, LastHeartbeat, ProcessId) | ServiceStatusService.RegisterServiceStartup + heartbeat tracker |
 | ServiceCommands.* | Inter-service command queueing |
-| (resets TranscodeQueue.Status for crash recovery) | StuckJobDetectionService |
+| TranscodeQueue.Status (release to Pending) | StuckJobDetectionService (stuck job, live owner); CrashRecoveryService (owner's boot) |
 
 ### Columns READS
 

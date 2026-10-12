@@ -51,7 +51,7 @@ C10. **Mode B (cross-worker VMAF hand-off) -- `Workers.LocalVmafFirst=FALSE` OR 
 
 C11. Local scratch files deleted on every attempt-finalize code path: encode success (after VMAF disposition or copy-back), encode failure, crash recovery, stuck-job cleanup. Idempotent.
 
-C12. Crash-recovery (`CrashRecoveryService.RecoverServiceJobs`) extended to delete orphaned files in `Workers.LocalScratchDir` whose `TemporaryFilePaths` row has been finalized (attempt complete). Only the calling worker's scratch dir; never reaches across hosts.
+C12. Crash-recovery (`CrashRecoveryService.RecoverOwnedJobs`) extended to delete orphaned files in `Workers.LocalScratchDir` whose `TemporaryFilePaths` row has been finalized (attempt complete). Only the calling worker's scratch dir; never reaches across hosts.
 
 C13. `/Activity` worker modal "Local Staging" section: scratch dir input, "Enable staging" toggle, "Local VMAF first" toggle (disabled in UI when `QualityTestEnabled=FALSE`). Save POSTs to `POST /api/TeamStatus/Workers/<name>/LocalStaging` with `{LocalScratchDir, LocalStagingEnabled, LocalVmafFirst}`; validates non-empty path when Enabled=TRUE; standard `{Success, Message, Data}` envelope.
 

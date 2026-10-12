@@ -1,371 +1,81 @@
 #!/usr/bin/env python3
-"""
-Crash Recovery Service
-Automated crash recovery for transcoding and quality testing jobs
-Implements MVVM pattern using MVVM architecture
-"""
-
-import json
 import os
-from typing import Dict, List, Optional
-from datetime import datetime, timezone
+from typing import Dict, Optional
 from Core.Logging.LoggingService import LoggingService
-from Core.DateTimeHelpers import ToUtcIsoZ
 from Core.Path.LocalPath import LocalExists
 from Services.ProcessManagementService import ProcessManagementService
 from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
 from Features.TranscodeJob.TranscodeJobRepository import TranscodeJobRepository
 
 
-# directive: path-schema-migration | # see path.S9
+# directive: crash-recovery-audiofix-type | # see workerservice.ST5
 class CrashRecoveryService:
-    """Service for automated crash recovery of stuck jobs."""
+    """Boot-time recovery: releases everything the database says this worker still owns from a prior run."""
 
-    def __init__(self, DatabaseManagerInstance, WorkerName: str = None, ActiveJobRepositoryInstance: Optional[ActiveJobRepository] = None):
-        """Initialize the crash recovery service."""
+    # directive: crash-recovery-audiofix-type | # see workerservice.ST5
+    def __init__(self, DatabaseManagerInstance, WorkerName: str, ActiveJobRepositoryInstance: Optional[ActiveJobRepository] = None):
+        if not WorkerName:
+            raise ValueError("CrashRecoveryService requires a WorkerName")
         self.DatabaseManager = DatabaseManagerInstance
         self.ProcessManager = ProcessManagementService()
         self.WorkerName = WorkerName
-        LoggingService.LogInfo(f"CrashRecoveryService initialized (worker={WorkerName or 'all'})", "CrashRecoveryService", "__init__")
         self.ActiveJobRepository = ActiveJobRepositoryInstance or ActiveJobRepository()
 
-    def RecoverServiceJobs(self, ServiceName: str) -> Dict:
-        """Recover stuck jobs for a specific service, scoped to this worker's jobs only."""
-        try:
-            LoggingService.LogInfo(f"Starting crash recovery for service: {ServiceName}, worker: {self.WorkerName or 'all'}", "CrashRecoveryService", "RecoverServiceJobs")
+    # directive: crash-recovery-audiofix-type | # see workerservice.ST5
+    def RecoverOwnedJobs(self) -> Dict:
+        """Release this worker's leftover jobs by ownership; a failed database write raises and stops the boot."""
+        Db = self.DatabaseManager.DatabaseService
+        ProcessesKilled = self._KillLeftoverProcesses()
+        AttemptsFailed = TranscodeJobRepository(Db).MarkInflightAttemptsCrashedForWorker(self.WorkerName)
+        ProgressDeleted = Db.ExecuteNonQuery(
+            "DELETE FROM TranscodeProgress WHERE TranscodeAttemptId IN ("
+            "SELECT Id FROM TranscodeAttempts WHERE WorkerName = %s AND Success = FALSE)",
+            (self.WorkerName,),
+        )
+        JobsReleased = Db.ExecuteNonQuery(
+            "UPDATE TranscodeQueue tq "
+            "SET Status = 'Pending', DateStarted = NULL, ClaimedBy = NULL, ClaimedAt = NULL "
+            "WHERE tq.ClaimedBy = %s AND tq.Status = 'Running' "
+            "AND NOT EXISTS (SELECT 1 FROM TranscodeAttempts ta WHERE ta.MediaFileId = tq.MediaFileId AND ta.Success IS NULL)",
+            (self.WorkerName,),
+        )
+        # see worker-lifecycle.feature.md C11/C12
+        InProgressFilesCleaned, PartialReplacementsCompleted = self._RecoverInProgressArtifacts()
+        LocalStagingOrphansCleaned = self._SweepLocalStagingOrphans()
+        Result = {
+            "JobsReleased": JobsReleased,
+            "AttemptsFailed": AttemptsFailed,
+            "ProgressDeleted": ProgressDeleted,
+            "ProcessesKilled": ProcessesKilled,
+            "InProgressFilesCleaned": InProgressFilesCleaned,
+            "PartialReplacementsCompleted": PartialReplacementsCompleted,
+            "LocalStagingOrphansCleaned": LocalStagingOrphansCleaned,
+        }
+        LoggingService.LogInfo(f"Crash recovery completed for {self.WorkerName}: {Result}", "CrashRecoveryService", "RecoverOwnedJobs")
+        return Result
 
-            # Get active jobs scoped to this worker (all statuses for recovery)
-            from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
-            Query = ActiveJobRepository.BuildActiveJobsQuery(ServiceName, WorkerName=self.WorkerName, RunningOnly=False)
-            active_jobs = list(self.ActiveJobRepository.GetActiveJobsByService(Query))
-
-            if not active_jobs:
-                LoggingService.LogInfo(f"No active jobs found for service {ServiceName}", "CrashRecoveryService", "RecoverServiceJobs")
-                return {
-                    "Success": True,
-                    "Message": "No active jobs found",
-                    "JobsRecovered": 0,
-                    "OrphanedProcessesKilled": 0
-                }
-
-            LoggingService.LogInfo(f"Found {len(active_jobs)} active jobs for service {ServiceName}", "CrashRecoveryService", "RecoverServiceJobs")
-
-            JobsRecovered = 0
-            OrphanedProcessesKilled = 0
-            RecoveryDetails = []
-
-            # Process each active job
-            for job in active_jobs:
-                job_id = job.get('Id')
-                process_id = job.get('ProcessId')
-                queue_id = job.get('QueueId')
-                job_type = job.get('JobType')
-
-                LoggingService.LogInfo(f"Processing job {job_id} (PID: {process_id}, QueueId: {queue_id})", "CrashRecoveryService", "RecoverServiceJobs")
-
-                # see workerservice.C10 -- self-kill guard: skip live-process check when recorded PID matches own PID
-                own_pid = os.getpid()
-                if process_id and process_id == own_pid:
-                    process_exists = False
-                    LoggingService.LogInfo(f"Skipping process check for PID {process_id} (matches own PID, treating as dead)", "CrashRecoveryService", "RecoverServiceJobs")
-                else:
-                    process_exists = self.ProcessManager.IsProcessRunning(process_id) if process_id else False
-
-                recovery_action = "ProcessNotFound"
-                if process_exists:
-                    # Process is orphaned - kill it
-                    if self.ProcessManager.KillProcess(process_id, Graceful=True):
-                        recovery_action = "OrphanedProcessKilled"
-                        OrphanedProcessesKilled += 1
-                        LoggingService.LogWarning(f"Killed orphaned process {process_id} for job {job_id}", "CrashRecoveryService", "RecoverServiceJobs")
-                    else:
-                        recovery_action = "FailedToKillProcess"
-                        LoggingService.LogError(f"Failed to kill orphaned process {process_id} for job {job_id}", "CrashRecoveryService", "RecoverServiceJobs")
-                else:
-                    LoggingService.LogInfo(f"Process {process_id} for job {job_id} is not running", "CrashRecoveryService", "RecoverServiceJobs")
-
-                # Clean up progress records BEFORE resetting/deleting queue records
-                self.CleanupProgressRecords(queue_id, job_type)
-
-                # Reset the job in the appropriate queue
-                if self.ResetJobInQueue(queue_id, job_type):
-                    JobsRecovered += 1
-                    LoggingService.LogInfo(f"Reset job {job_id} in queue (QueueId: {queue_id})", "CrashRecoveryService", "RecoverServiceJobs")
-                else:
-                    LoggingService.LogError(f"Failed to reset job {job_id} in queue (QueueId: {queue_id})", "CrashRecoveryService", "RecoverServiceJobs")
-
-                # Record recovery details
-                RecoveryDetails.append({
-                    "JobId": job_id,
-                    "ProcessId": process_id,
-                    "QueueId": queue_id,
-                    "JobType": job_type,
-                    "RecoveryAction": recovery_action,
-                    "ProcessWasOrphaned": process_exists
-                })
-
-            # Clean up ActiveJobs records
-            DeletedActiveJobs = self.CleanupActiveJobs(ServiceName)
-
-            # Sweep orphaned progress records from prior crashes (SIGKILL, OOM,
-            # power loss) where the signal handler never ran and ActiveJobs were
-            # cleaned by a previous crash recovery pass without reaching all
-            # associated TranscodeProgress rows.
-            InProgressFilesCleaned = 0
-            PartialReplacementsCompleted = 0
-            LocalStagingOrphansCleaned = 0
-            if ServiceName == "TranscodeService":
-                OrphanedCleaned = self.CleanupOrphanedProgressRecords()
-                # see worker-lifecycle.feature.md C11/C12
-                InProgressFilesCleaned, PartialReplacementsCompleted = self._RecoverInProgressArtifacts()
-                LocalStagingOrphansCleaned = self._SweepLocalStagingOrphans()
+    # directive: crash-recovery-audiofix-type | # see workerservice.ST5
+    def _KillLeftoverProcesses(self) -> int:
+        """Kill a still-running process recorded on this worker's leftover ActiveJobs rows; never this process."""
+        Query = ActiveJobRepository.BuildActiveJobsQuery("TranscodeService", WorkerName=self.WorkerName, RunningOnly=False)
+        Killed = 0
+        for Job in self.ActiveJobRepository.GetActiveJobsByService(Query):
+            ProcessId = Job.get('ProcessId')
+            # see workerservice.C10 -- a recorded PID equal to our own is a reused PID from the prior run
+            if not ProcessId or ProcessId == os.getpid():
+                continue
+            if not self.ProcessManager.IsProcessRunning(ProcessId):
+                continue
+            if self.ProcessManager.KillProcess(ProcessId, Graceful=True):
+                Killed += 1
+                LoggingService.LogWarning(f"Killed leftover process {ProcessId} for ActiveJobs row {Job.get('Id')}", "CrashRecoveryService", "_KillLeftoverProcesses")
             else:
-                OrphanedCleaned = 0
+                LoggingService.LogError(f"Failed to kill leftover process {ProcessId} for ActiveJobs row {Job.get('Id')}", "CrashRecoveryService", "_KillLeftoverProcesses")
+        return Killed
 
-            # Special handling for QualityTestService: Delete only crashed jobs and reset interrupted tests
-            if ServiceName == "QualityTestService":
-                # Only delete jobs that were in ActiveJobs (actually crashed)
-                CrashedQueueIds = [detail['QueueId'] for detail in RecoveryDetails]
-                if CrashedQueueIds:
-                    Placeholders = ','.join(['%s'] * len(CrashedQueueIds))
-                    DeleteQuery = f"DELETE FROM QualityTestingQueue WHERE Id IN ({Placeholders})"
-                    DeletedCount = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                        DeleteQuery, CrashedQueueIds
-                    )
-                    LoggingService.LogInfo(
-                        f"Deleted {DeletedCount} crashed quality test queue items",
-                        "CrashRecoveryService", "RecoverServiceJobs"
-                    )
-
-                    # Reset failed quality test results for interrupted tests so they can be restarted
-                    ResetCount = self.ResetInterruptedQualityTests(CrashedQueueIds)
-                else:
-                    LoggingService.LogInfo("No crashed quality test queue items to delete",
-                                          "CrashRecoveryService", "RecoverServiceJobs")
-
-            # Log recovery summary
-            self.LogRecoverySummary(ServiceName, JobsRecovered, OrphanedProcessesKilled, RecoveryDetails)
-
-            result = {
-                "Success": True,
-                "Message": (
-                    f"Recovered {JobsRecovered} jobs, killed {OrphanedProcessesKilled} orphaned processes, "
-                    f"cleaned {OrphanedCleaned} orphaned progress records, "
-                    f"deleted {InProgressFilesCleaned} .ip artifacts, "
-                    f"completed {PartialReplacementsCompleted} partial replacements, "
-                    f"swept {LocalStagingOrphansCleaned} local-staging scratch orphans"
-                ),
-                "JobsRecovered": JobsRecovered,
-                "OrphanedProcessesKilled": OrphanedProcessesKilled,
-                "ActiveJobsCleaned": DeletedActiveJobs,
-                "OrphanedProgressCleaned": OrphanedCleaned,
-                "InProgressFilesCleaned": InProgressFilesCleaned,
-                "PartialReplacementsCompleted": PartialReplacementsCompleted,
-                "LocalStagingOrphansCleaned": LocalStagingOrphansCleaned,
-                "RecoveryDetails": RecoveryDetails
-            }
-
-            # Add quality test reset count for QualityTestService
-            if ServiceName == "QualityTestService" and 'ResetCount' in locals():
-                result["QualityTestsReset"] = ResetCount
-
-            LoggingService.LogInfo(f"Crash recovery completed for {ServiceName}: {result['Message']}", "CrashRecoveryService", "RecoverServiceJobs")
-            return result
-
-        except Exception as e:
-            error_msg = f"Error during crash recovery for service {ServiceName}: {str(e)}"
-            LoggingService.LogException(error_msg, e, "CrashRecoveryService", "RecoverServiceJobs")
-            return {
-                "Success": False,
-                "Message": error_msg,
-                "JobsRecovered": 0,
-                "OrphanedProcessesKilled": 0
-            }
-
-    def ResetJobInQueue(self, QueueId: int, JobType: str) -> bool:
-        """Reset a job in the appropriate queue table."""
-        try:
-            if JobType == "Transcode":
-                return self.ResetTranscodeQueue([QueueId])
-            elif JobType == "QualityTest":
-                return self.ResetQualityTestQueue([QueueId])
-            else:
-                LoggingService.LogWarning(f"Unknown job type {JobType} for queue ID {QueueId}", "CrashRecoveryService", "ResetJobInQueue")
-                return False
-
-        except Exception as e:
-            LoggingService.LogException(f"Error resetting job {QueueId} of type {JobType}", e, "CrashRecoveryService", "ResetJobInQueue")
-            return False
-
-    def ResetTranscodeQueue(self, QueueIds: List[int]) -> bool:
-        """Reset transcode queue jobs to Pending status."""
-        try:
-            if not QueueIds:
-                return True
-
-            # Reset status to Pending and clear ownership
-            query = """
-                UPDATE TranscodeQueue
-                SET Status = 'Pending', DateStarted = NULL, ClaimedBy = NULL, ClaimedAt = NULL
-                WHERE Id IN ({})
-            """.format(','.join(['%s'] * len(QueueIds)))
-
-            affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, QueueIds)
-
-            LoggingService.LogInfo(f"Reset {affected_rows} transcode queue jobs to Pending", "CrashRecoveryService", "ResetTranscodeQueue")
-            return affected_rows > 0
-
-        except Exception as e:
-            LoggingService.LogException(f"Error resetting transcode queue jobs {QueueIds}", e, "CrashRecoveryService", "ResetTranscodeQueue")
-            return False
-
-    def ResetQualityTestQueue(self, QueueIds: List[int]) -> bool:
-        """Delete running quality test queue jobs (they'll be recreated by RecoverMissedQualityTests if needed)."""
-        try:
-            if not QueueIds:
-                return True
-
-            # Delete running jobs from queue (they'll be recreated by RecoverMissedQualityTests if needed)
-            query = """
-                DELETE FROM QualityTestingQueue
-                WHERE Id IN ({})
-            """.format(','.join(['%s'] * len(QueueIds)))
-
-            affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, QueueIds)
-
-            LoggingService.LogInfo(f"Deleted {affected_rows} running quality test queue jobs", "CrashRecoveryService", "ResetQualityTestQueue")
-            return affected_rows > 0
-
-        except Exception as e:
-            LoggingService.LogException(f"Error deleting running quality test queue jobs {QueueIds}", e, "CrashRecoveryService", "ResetQualityTestQueue")
-            return False
-
-    def CleanupProgressRecords(self, QueueId: int, JobType: str) -> int:
-        """Clean up progress records for a specific job."""
-        try:
-            if JobType == "Transcode":
-                # see failure-accounting.ST1.5 -- repo method inlines classifier; keeps FailureClass populated for crash-recovery writes
-                failed_rows = TranscodeJobRepository().MarkInflightAttemptsCrashedForQueue(QueueId)
-                if failed_rows > 0:
-                    LoggingService.LogInfo(f"Marked {failed_rows} incomplete transcode attempts as failed for queue {QueueId}", "CrashRecoveryService", "CleanupProgressRecords")
-
-                # Clean up TranscodeProgress records
-                query = """
-                    DELETE FROM TranscodeProgress
-                    WHERE TranscodeAttemptId IN (
-                        SELECT Id FROM TranscodeAttempts
-                        WHERE MediaFileId = (SELECT MediaFileId FROM TranscodeQueue WHERE Id = %s)
-                        AND Success = FALSE
-                    )
-                """
-                affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (QueueId,))
-
-            elif JobType == "QualityTest":
-                # Clean up QualityTestProgress records
-                query = "DELETE FROM QualityTestProgress WHERE TranscodeAttemptId IN (SELECT TranscodeAttemptId FROM QualityTestingQueue WHERE Id = %s)"
-                affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (QueueId,))
-
-            else:
-                LoggingService.LogWarning(f"Unknown job type {JobType} for progress cleanup", "CrashRecoveryService", "CleanupProgressRecords")
-                return 0
-
-            if affected_rows > 0:
-                LoggingService.LogInfo(f"Cleaned up {affected_rows} progress records for {JobType} job {QueueId}", "CrashRecoveryService", "CleanupProgressRecords")
-
-            return affected_rows
-
-        except Exception as e:
-            LoggingService.LogException(f"Error cleaning up progress records for {JobType} job {QueueId}", e, "CrashRecoveryService", "CleanupProgressRecords")
-            return 0
-
-    def CleanupOrphanedProgressRecords(self) -> int:
-        """Delete TranscodeProgress rows for any non-successful TranscodeAttempt.
-        Covers both explicit failures (Success = FALSE) and incomplete attempts
-        (Success IS NULL) left by hard kills (SIGKILL, OOM) where no signal handler ran."""
-        try:
-            # see failure-accounting.ST1.5 -- repo method inlines classifier for orphan crash-recovery writes
-            marked_rows = TranscodeJobRepository().MarkOrphanedInflightAttemptsCrashed()
-            if marked_rows > 0:
-                LoggingService.LogInfo(f"Marked {marked_rows} incomplete transcode attempts as failed", "CrashRecoveryService", "CleanupOrphanedProgressRecords")
-
-            # Then delete progress rows for all failed attempts
-            query = """
-                DELETE FROM TranscodeProgress
-                WHERE TranscodeAttemptId IN (
-                    SELECT Id FROM TranscodeAttempts WHERE Success = FALSE
-                )
-            """
-            affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, ())
-            if affected_rows > 0:
-                LoggingService.LogInfo(f"Cleaned up {affected_rows} orphaned TranscodeProgress records for failed attempts", "CrashRecoveryService", "CleanupOrphanedProgressRecords")
-            return affected_rows
-        except Exception as e:
-            LoggingService.LogException("Error cleaning up orphaned progress records", e, "CrashRecoveryService", "CleanupOrphanedProgressRecords")
-            return 0
-
-    def CleanupActiveJobs(self, ServiceName: str) -> int:
-        """Clean up ActiveJobs records for a service, scoped to this worker."""
-        try:
-            if self.WorkerName:
-                query = "DELETE FROM ActiveJobs WHERE ServiceName = %s AND WorkerName = %s"
-                affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (ServiceName, self.WorkerName))
-            else:
-                query = "DELETE FROM ActiveJobs WHERE ServiceName = %s"
-                affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (ServiceName,))
-
-            LoggingService.LogInfo(f"Cleaned up {affected_rows} ActiveJobs records for service {ServiceName} (worker={self.WorkerName or 'all'})", "CrashRecoveryService", "CleanupActiveJobs")
-            return affected_rows
-
-        except Exception as e:
-            LoggingService.LogException(f"Error cleaning up ActiveJobs for service {ServiceName}", e, "CrashRecoveryService", "CleanupActiveJobs")
-            return 0
-
-    def ResetInterruptedQualityTests(self, CrashedQueueIds: List[int]) -> int:
-        """Reset failed quality test results for interrupted tests so they can be retried."""
-        try:
-            if not CrashedQueueIds:
-                return 0
-
-            # Use DatabaseManager method to reset failed quality test results
-            AffectedRows = self.DatabaseManager.ResetFailedQualityTestResultsForRetry()
-
-            if AffectedRows > 0:
-                LoggingService.LogInfo(
-                    f"Reset {AffectedRows} failed quality test results for retry",
-                    "CrashRecoveryService", "ResetInterruptedQualityTests"
-                )
-            else:
-                LoggingService.LogInfo(
-                    "No failed quality test results found to reset",
-                    "CrashRecoveryService", "ResetInterruptedQualityTests"
-                )
-
-            return AffectedRows
-
-        except Exception as e:
-            LoggingService.LogException(f"Error resetting interrupted quality tests", e, "CrashRecoveryService", "ResetInterruptedQualityTests")
-            return 0
-
+    # directive: crash-recovery-audiofix-type | # see worker-lifecycle.C11
     def _RecoverInProgressArtifacts(self) -> tuple:
-        """Sweep disk artifacts left by a prior crash/restart for this worker.
-
-        For every TemporaryFilePaths row owned by this worker:
-          - If the final (`.ip` stripped) file exists AND the original
-            source still exists, finalize the partial replacement (rename was
-            done, original-delete was not). Criterion 12.
-          - Otherwise, delete any leftover `.ip` artifact. Criterion 11.
-
-        TemporaryFilePaths rows are deleted on successful FileReplacement, so
-        a surviving row implies the attempt did not complete cleanly. After
-        cleanup, the surviving TemporaryFilePaths row is left in place; the
-        associated TranscodeAttempt is already (or about to be) marked
-        Success=FALSE by the standard recovery flow, and a subsequent queue
-        re-pop will create a fresh attempt+TFP pair.
-
-        Returns (InProgressFilesDeleted, PartialReplacementsCompleted).
-        """
-        if not self.WorkerName:
-            return 0, 0
+        """Sweep disk artifacts of this worker's terminal attempts: finalize a partial replacement (C12), else delete the leftover .ip (C11). Returns (InProgressFilesDeleted, PartialReplacementsCompleted)."""
         try:
             # directive: path-schema-migration | # see path.S8
             from Core.Path.Path import Path as _PathCR, PathError as _PECR
@@ -394,7 +104,6 @@ class CrashRecoveryService:
             PartialCompleted = 0
 
             for Row in Rows:
-                TaId = Row.get('ta_id')
                 SrcSid = Row.get('src_sid')
                 SrcRel = Row.get('src_rel')
                 OutSid = Row.get('out_sid')
@@ -467,11 +176,9 @@ class CrashRecoveryService:
             )
             return 0, 0
 
-    # directive: local-staging | # see local-staging.C12
+    # directive: crash-recovery-audiofix-type | # see local-staging.C12
     def _SweepLocalStagingOrphans(self) -> int:
         """Delete orphaned per-job scratch subdirs under this worker's LocalScratchDir; orphan = no in-flight TFP row for that MediaFileId."""
-        if not self.WorkerName:
-            return 0
         try:
             from Core.Path.LocalPath import LocalIsDir, LocalJoin
             Rows = self.DatabaseManager.DatabaseService.ExecuteQuery("SELECT LocalScratchDir FROM Workers WHERE WorkerName = %s", (self.WorkerName,))
@@ -511,46 +218,3 @@ class CrashRecoveryService:
         except Exception as Ex:
             LoggingService.LogException("Error during _SweepLocalStagingOrphans", Ex, "CrashRecoveryService", "_SweepLocalStagingOrphans")
             return 0
-
-    def LogRecoverySummary(self, ServiceName: str, JobsRecovered: int, OrphanedProcessesKilled: int, RecoveryDetails: List[Dict]):
-        """Log a summary of the recovery operation to the Logs table."""
-        try:
-            summary_data = {
-                "ServiceName": ServiceName,
-                "JobsRecovered": JobsRecovered,
-                "OrphanedProcessesKilled": OrphanedProcessesKilled,
-                "RecoveryDetails": RecoveryDetails,
-                "Timestamp": ToUtcIsoZ(datetime.now(timezone.utc))
-            }
-
-            # Log the summary
-            LoggingService.LogInfo(
-                f"Crash recovery summary for {ServiceName}: {JobsRecovered} jobs recovered, {OrphanedProcessesKilled} orphaned processes killed",
-                "LogRecoverySummary",
-                "CrashRecoveryService"
-            )
-
-        except Exception as e:
-            LoggingService.LogException(f"Error logging recovery summary for {ServiceName}", e, "CrashRecoveryService", "LogRecoverySummary")
-
-    def GetRecoveryStatistics(self, ServiceName: str) -> Dict:
-        """Get statistics about recent recovery operations."""
-        try:
-            from Features.ServiceControl.ActiveJobRepository import ActiveJobRepository
-            Query = ActiveJobRepository.BuildActiveJobsQuery(ServiceName)
-            active_jobs = self.ActiveJobRepository.GetActiveJobsByService(Query)
-
-            return {
-                "ServiceName": ServiceName,
-                "CurrentActiveJobs": len(active_jobs),
-                "LastRecoveryCheck": ToUtcIsoZ(datetime.now(timezone.utc))
-            }
-
-        except Exception as e:
-            LoggingService.LogException(f"Error getting recovery statistics for {ServiceName}", e, "CrashRecoveryService", "GetRecoveryStatistics")
-            return {
-                "ServiceName": ServiceName,
-                "CurrentActiveJobs": 0,
-                "LastRecoveryCheck": None,
-                "Error": str(e)
-            }

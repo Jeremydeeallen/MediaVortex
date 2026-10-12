@@ -17,7 +17,7 @@ Replaces the former `TranscodeService/Main.py` + `QualityTestService/Main.py` du
 | ST2 | `_RegisterAndLoadWorkerConfig()` (register worker) | Resolves FFmpeg/FFprobe via `_ResolveBundledOrPathBinary()` (project-bundled `FFmpegMaster/bin/<binary>{.exe?}` first, then `shutil.which`). Raises `RuntimeError` if neither resolves. UPSERTs Workers row (WorkerName, Platform, FFmpegPath, FFprobePath, Status=Online). Parses `MEDIAVORTEX_SHARE_MAPPINGS` env var and UPSERTs into WorkerShareMappings. Loads config (MaxConcurrentJobs, share mappings). |
 | ST3 | `WorkerContext.Initialize()` | Singleton stores FFmpegPath, FFprobePath, ShareMappings. All services in the process resolve tool paths from WorkerContext. |
 | ST4 | `_EnsureServiceStatusExists()` (service status) | Ensures a ServiceStatus row exists for "WorkerService" |
-| ST5 | `_RecoverFromCrash()` (crash recovery) | CrashRecoveryService resets orphaned Running/Processing jobs for this worker |
+| ST5 | `_RecoverFromCrash()` (boot recovery) | Releases everything the database says this worker still owns from a prior run. See `## Boot Recovery (ST5)`. A failure here stops the boot. |
 | ST6 | `_DetectAndCleanStuckJobs()` (stuck job cleanup) | StuckJobDetectionService cleans stuck transcode and quality test jobs |
 | ST7 | `_LoadCapabilitiesFromDB()` (load capabilities) | Reads TranscodeEnabled, QualityTestEnabled, ScanEnabled, Status from Workers row |
 | ST7a | `_ValidateStorageMounts()` + `_ApplyMountValidationResult()` (mount validation) | Cross-platform. For each `StorageRootResolutions` row for this worker, checks the `AbsolutePath` is a directory, readable, and non-empty. Empty = local filesystem showing through where a share should be mounted. On failure: writes a single-line summary to `Workers.MountValidationError`, forces `Workers.Status='Paused'`, logs ERROR per mount, and capabilities never start. On success: clears `MountValidationError`. Re-runs on every Paused -> Online transition in `_HandleStatusChange()`. |
@@ -42,6 +42,7 @@ Replaces the former `TranscodeService/Main.py` + `QualityTestService/Main.py` du
 | S6 | `ST11` capability polling | `_StartCapabilityPolling` thread reads | `Workers.(TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, MaxConcurrent*Jobs)` | `_ApplyCapabilities` + `_ApplyConcurrencyChanges` start/stop services and rebind pool size | UPDATE `Workers.TranscodeEnabled=FALSE`; observe `_StopTranscodeCapability` within `CapabilityPollingIntervalSec` |
 | S7 | `ST12` queue producers/consumers | Services started here drive the seams in `transcode.flow.md::S1` (all modes including Remux; see `transcode.flow.md ST6 Strategy variants`) | per-capability claim queries | Pending rows in `TranscodeQueue` / `QualityTestingQueue` / `RootFolders` are consumed | The cross-flow verifications listed in those seams |
 | S8 | `ST14` worker-authored truth columns | `WorkerStateReporter.Transition()` -- the only writer | `Workers.(RuntimeState TEXT, CurrentAttemptId BIGINT NULL)` UPDATE | `AdminWorkersRepository.GetTiles` reads + derives `IntentDiverges` flag against `Workers.Status` when worker is FRESH (heartbeat within `HeartbeatStaleThresholdSec`); `/Admin/Workers` Truth badge renders the RuntimeState | `grep -rn 'UPDATE Workers SET .*RuntimeState\|CurrentAttemptId' Features/ WebService/` returns 0 matches; `Tests/Contract/TestWorkerRuntimeStateAuthorship.py` |
+| S10 | `ST5` ownership read | `TranscodeQueueRepository.ClaimNextPendingJob` writes `TranscodeQueue.(Status='Running', ClaimedBy)`; `CreateTranscodeAttempt` writes `TranscodeAttempts.(Success NULL, WorkerName)` | `ClaimedBy TEXT` / `WorkerName TEXT` equal to the worker's `MEDIAVORTEX_WORKER_NAME` | `CrashRecoveryService.RecoverOwnedJobs` matches both columns against its own name; job type and `ActiveJobs` are not consulted | `Tests/Contract/TestCrashRecoveryOwnership.py` |
 | S9 | `ST14 + ST15` hung-encode signal | `Workers.(RuntimeState, CurrentAttemptId)` UPDATE + heartbeat freshness on `Workers.LastHeartbeat` + `TranscodeProgress.LastProgressUpdate` UPDATE | `(RuntimeState='Encoding', AttemptId BIGINT, HeartbeatAge int, ProgressAge int)` joined per worker | `HungEncodeDetector` classifies; `StuckJobDetectionService` auto-recovers; `AdminWorkersRepository.GetTiles` derives `IsHung` for tile rendering; `ActivityRepository.GetHungAttempts` for the /Activity banner | `Tests/Contract/TestHungEncodeDetector.py` |
 
 ## Version
@@ -130,19 +131,26 @@ The endpoint validates the column name against the allowlist `{TranscodeEnabled,
 | 4. Release DB pool | `DatabaseService._pool.closeall()` | Closes all idle psycopg2 connections so they don't linger after `os._exit` bypasses atexit. Required to prevent connection leaks during crash-restart loops. |
 | 5. Exit | `os._exit(0)` | Immediate process termination |
 
-Queue items left in Running state by this worker are reset to Pending on next startup by crash recovery.
+Queue items left in Running state by this worker are released on next startup by boot recovery (ST5).
 
-## Crash Recovery (self-kill guard)
+## Boot Recovery (ST5)
 
-`Features/ServiceControl/CrashRecoveryService.RecoverServiceJobs()` walks ActiveJobs left over from a prior run and tries to kill any still-running OS process referenced by `ActiveJobs.ProcessId`. PID reuse after a systemd restart can make a stale recorded ProcessId match the new WorkerService process. Pre-2026-05-08 the worker would SIGTERM itself during recovery, exit cleanly via SignalHandler, and the systemd `Restart=always` policy would loop forever.
+This section is the single description of what a worker does at startup about work left over from a prior run. Other docs point here.
 
-The guard:
+A process that has just started cannot be running a job, so anything the database still shows as in flight for this worker's name is left over. `Features/ServiceControl/CrashRecoveryService.RecoverOwnedJobs()` releases it by ownership. The kind of job (Transcode, Remux, AudioFix, test variant) is never read, and a job that died before its `ActiveJobs` row was written is released the same way. Every statement is scoped to this worker's name; no other worker's rows are read or written.
 
-```python
-own_pid = os.getpid()
-if process_id and process_id == own_pid:
-    process_exists = False  # treat as stale, skip kill, just clean up DB rows
-```
+| Step | What happens |
+|---|---|
+| 1 | A process id recorded on this worker's leftover `ActiveJobs` rows is killed if it is still running. A recorded id equal to the new process's own id is skipped: after a systemd restart the old id can be reused by the new worker, and killing it would loop the unit forever. |
+| 2 | This worker's in-flight attempts (`TranscodeAttempts.Success IS NULL AND WorkerName = self`) are marked `Success = FALSE`, `ErrorMessage = 'worker crashed/restarted'`, with `FailureClass` classified. An attempt that finished encoding and has an unfinished `QualityTestingQueue` row is skipped; it is still legitimately waiting. |
+| 3 | `TranscodeProgress` rows of this worker's failed attempts are deleted. |
+| 4 | This worker's queue rows (`TranscodeQueue.ClaimedBy = self AND Status = 'Running'`) return to `Pending` with claim columns cleared, unless the file still has an in-flight attempt (step 2's skipped case). |
+| 5 | Disk cleanup for this worker's terminal attempts: a finished replacement whose source was not yet removed is completed; leftover `.ip` files are deleted; orphaned local-staging scratch folders are removed. |
+| 6 | `WorkerService.Main` deletes every `ActiveJobs` row for this worker (`worker-lifecycle-invariants.md` I1). |
+
+Steps 2-4 and 6 raise on a database error. `_RecoverFromCrash` does not catch it: `Run()` returns False and the process exits non-zero before any capability starts (`worker-lifecycle-invariants.md` I4).
+
+Quality-test jobs this worker was scoring are released by ST6 (`StuckJobDetectionService`), not here.
 
 ## Environment Variables
 
