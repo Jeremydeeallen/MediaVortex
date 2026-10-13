@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-13
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** movies-video-rule
 **Replaces:** `directives/closed/2026-10-13-crash-recovery-audiofix-type.md` (closed)
 
@@ -142,7 +142,28 @@ Seams added or changed:
 - **Logic:** 84 contract tests pass (`TestMoviesVideoRule` 23, `TestTvVideoRuleTier1`, `TestVerticalsAreProfileIndependent`, `TestWriterOwnsCascadeEnforcement`, `TestNoAudioResolver`, `TestClassifierCascade`, `TestTvPinTier1Classification`, `TestVideoVerticalCodecMatch`, `TestVideoComplianceMultiplier`, `TestNonVideoContainersExcluded`, `TestRecomputeForFilesRowIsolation`).
 - **Not run:** `TestClaimAuthority` (queue held 25 pending + 2 running jobs; the test claims live rows; no claim code changed). `TestFailLoud`: the same 2 baseline tests fail with and without this change; none of the changed files is named.
 - **1 (partial):** I9 WebService restarted on `1555686e` 2026-10-13. `GET /api/SystemSettings/GenreTiers` returns the 19 genres with tiers; PUT rejects tier 9 (400) and an unknown genre (404); `/settings` renders the Genre tiers section. A successful PUT with its cascade is not exercised yet: it re-evaluates Movies, held for after activation.
-- **Pending:** fleet deploy, activation, criteria 1-9 on live data.
+- **Deploy:** fleet on `5efe1389` 2026-10-13, 9 workers OK, exit 0, no job running at the time. dot-3/4 and wakko-3/4 still heartbeat old code with every capability off.
+- **Activation:** `ActivateMoviesGenreTiers_2026_10_13.py` 2026-10-13 18:08 UTC: Movies `DefaultQualityTier=2`, `GenreSource='radarr'`; genres recorded for 3,427 files (5 with none); 2,616 profiles reassigned; 3,427 files re-evaluated.
+- **1:** on the running I9 WebService, `PUT /api/SystemSettings/GenreTiers {Action, 3}` (its current value) -> 200; log `Library tier recompute complete: StorageRootId=2, 3427 files` at 18:11:37 UTC.
+- **2:** Movies files with `Genres IS NULL`: 0. With empty genres: 5 (3 not in Radarr, 2 with no genre in Radarr).
+- **3, 4, 5, 6:** `TestMoviesVideoRuleLive` 4/4 against live rows after activation (verdict equals the rule; reason names the recomputed tier and a genre; no profile or codec reason; every non-operator profile equals its tier's profile). Sample: `source_above_ceiling:2249>2000(tier=1:1000*2.0,genre=Documentary)`. Movies video verdicts: 3,403 pass, 24 fail. Profiles: Tier 3 1,718, Tier 1 992, Tier 2 717; the 4 `series`-sourced profiles kept.
+- **Movies buckets before -> after:** Transcode 57 -> 21, Remux 461 -> 457, AudioFix 2,414 -> 2,410, Compliant 490 -> 538, Unclassified 5 -> 1.
+- **7:** MediaFile 618475: recorded genres cleared, `POST /api/Sync/Path` for its folder -> scan `df288fef` on worker I9-2024 logged `Genres recorded for 1 files` at 18:11:30 UTC, before `Scan complete`; genres, tier 3 reason and profile restored with no other action. No movie has arrived from Radarr since activation; this is the same code path a new file takes.
+- **8:** same file, live database, Radarr client pointed at a closed port: fetch raised `URLError`, nothing written, video verdict stayed undecided with reason `missing_input:Genres`; the next fetch with the real Radarr restored it. `PerformScan` returns the error as the scan's failure message (read in code, not driven live: Radarr was not taken down).
+- **9:** TV + XXX snapshot `(VideoCompliant, VideoCompliantReason, WorkBucket, AssignedProfile)`, 51,819 rows, before deploy vs after activation: 0 changed, 0 added, 0 removed.
+- **10:** `transcode.flow.md` D4 carries the rule; see Promotions.
+
+### Delivery
+
+```
+DIRECTIVE: movies get their tier, bucket and encode quality from their Radarr genres
+STATUS: Done, awaiting operator closure
+WHAT SHIPPED: genre tiers on /settings; Movies judged by genre tier with the TV rule; profiles follow the genre tier; genres fetched at the end of every scan
+HOW TO USE IT: /settings -> Transcoding -> "Genre tiers (Movies)". Pick a tier per genre and Save; Movies re-evaluate in the background. "Library default" follows the Movies default tier in the table above it. To pin one movie, set its profile by hand; that changes its encode, not its bucket.
+WHAT YOU NEED TO EXECUTE: nothing. 21 movies sit in the Transcode bucket; queue them from /Work when wanted.
+DECISIONS I MADE: see Decisions Made.
+KNOWN GAPS / DEFERRED: none inside this directive. XXX and the deletion of the old profile-and-codec path are the next directive (`xxx-video-rule`).
+```
 
 ### Decisions Made
 
