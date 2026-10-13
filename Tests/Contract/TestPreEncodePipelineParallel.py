@@ -121,7 +121,7 @@ class TestPreEncodePipelineParallel(unittest.TestCase):
         # Sequential predecessor would be ~0.60s (0.30 + 0.30). Parallel should be near 0.30s + orchestration overhead. Allow 0.55s cap.
         self.assertLess(Elapsed, 0.55, f"parallel wall {Elapsed:.3f}s should beat sequential 0.60s")
 
-    # directive: bug-0093-preencode-fail-loud-via-d13 -- C4 failure propagation: SourceMeasure raise propagates to caller (JobProcessor routes via transcode.D13)
+    # directive: bug-0107-close | # see audio-normalization.ST2 -- failure propagation: a SourceMeasure raise reaches the caller, which fails the attempt (transcode.D2)
     def test_source_measure_exception_propagates_after_chain_join(self):
         Demucs = _FakeDemucs(
             SourceMeasureDelay=0.05,

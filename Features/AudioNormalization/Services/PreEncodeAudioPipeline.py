@@ -32,7 +32,7 @@ class PreEncodeAudioPipeline:
         self._RulesRepo = RulesRepo or AudioComplianceRulesRepository()
         self._Report = ProgressReporter or (lambda Phase, Percent, Info: None)
 
-    # directive: bug-0093-preencode-fail-loud-via-d13 -- pre-encode failure raises; caller (JobProcessor) routes via transcode.D13 partial-completion (AudioSlot=Copy fallback + AudioFix follow-up). Silent-fallback sentinel removed.
+    # directive: bug-0107-close | # see audio-normalization.ST2 -- pre-encode failure raises; the attempt fails and the file on disk is untouched (transcode.D2). No fallback command.
     def Run(self, SourceFilePath, JobId, MediaFileId=None):
         ScratchDir = LocalJoin(self.ScratchRoot, f"mv_audio_{JobId}")
         R = self._RulesRepo.GetRules()

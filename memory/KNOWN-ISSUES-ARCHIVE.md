@@ -960,3 +960,18 @@ The pipeline had TWO fallbacks stacked: (1) Strategy classifier silently demoted
 
 ---
 
+### [BUG-0107] Audio jobs recorded Success without a Dialog Boost track; the file stayed in the Audio bucket and was re-run every ~5 minutes | resolved: 2026-10-13
+**Date:** 2026-10-13 | **Area:** audio-pipeline
+
+**What broke:** An Audio job finished `Success=TRUE`, `Disposition='Replace'`, but emitted only the `Original` track (no `Dialog Boost`). The file stayed `WorkBucket='AudioFix'`, was queued again, and the same thing happened. Each pass re-encoded the audio of the previous pass's output.
+
+**Evidence:** Homestead Rescue 27706 had 43 such attempts through 2026-09-09, about 5 minutes apart on that day (`90662`, `90664`, `90668`, `90670`, `90672`); 27700 (38), 27701 (27), 27712 (14), 27710 (11), 27725 (11). Library-wide, 29 files in a work bucket had 3 or more successful attempts since 2026-09-01; the worst had 180. Found 2026-10-13 while releasing six queue rows that leaked test claims had held since 2026-09-09 (BUG-0092).
+
+**Fix:** directive `label-decides-command`, closed 2026-10-06. An Audio job is verified by "Dialog Boost emitted"; a job that adds none fails and leaves the file untouched instead of recording success (`transcode.flow.md` D2; the keep-the-good-half fallback D13 was deleted). Directive `demucs-liveness` (2026-10-11) removed the remaining Demucs fallbacks. The bug was filed after the fix had shipped; nothing new was changed in code to close it.
+
+**Verified 2026-10-13 on commit `71035fe9`:** every file run that day finished one Audio job with a Dialog Boost track and left the bucket: 27706, 27712, 27710, 38505, 29892, 37320 (attempts 99884, 99886-99890) and Homestead Rescue 27717, 61327, 52278, 27725 (99893, 99892, 99894, 99895), the last four untouched since their September loop. None was queued for Audio again.
+
+**Left open (backlog rows 40-41):** unused `TranscodeQueue.AudioSlotOverride` / `ParentTranscodeAttemptId` columns from the deleted fallback; whether the files re-encoded many times in September (and rows flagged `HasDoubleBoostSuspect`) should be re-acquired.
+
+---
+

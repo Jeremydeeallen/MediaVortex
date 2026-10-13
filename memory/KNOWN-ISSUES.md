@@ -84,33 +84,6 @@ B. **WorkBucket terminal short-circuit ordering** (`transcode.flow.md` D4/D7; li
 
 ### audio-pipeline
 
-### [BUG-0107] Audio jobs recorded Success without a Dialog Boost track; the file stayed in the Audio bucket and was re-run every ~5 minutes
-**Date:** 2026-10-13 | **Area:** audio-pipeline
-
-**What breaks:** An Audio job finishes `Success=TRUE`, `Disposition='Replace'`, but emits only the `Original` track (no `Dialog Boost`). The file stays `WorkBucket='AudioFix'`, `AudioCompliant=FALSE`, `HasDialogBoostTrack=FALSE`, gets queued again, and the same thing happens. Each pass re-encodes the audio of the previous pass's output.
-
-**Repro:** not reproduced on current code. Query the history: `SELECT Id, AttemptDate, AudioTracksEmittedJson FROM TranscodeAttempts WHERE MediaFileId=27706 AND Success ORDER BY Id` -- 43 attempts through 2026-09-09 emit `Original` only, about 5 minutes apart on 2026-09-09 (`90662`, `90664`, `90668`, `90670`, `90672`).
-
-**Evidence:**
-- Homestead Rescue: 27706 (44 successes), 27700 (38), 27701 (27), 27712 (14), 27710 (11), 27725 (11).
-- 27706, 27712, 27710 were re-run 2026-10-13 on commit `71035fe9` (attempts 99886 and siblings): Dialog Boost emitted, files now `Compliant`. The loop did not recur on those three.
-- Still in the Audio bucket with zero Dialog Boost emissions, last attempted 2026-09-08: 27725, 27717, 52278, 61327.
-- Library-wide: 29 files in a work bucket have 3 or more successful attempts since 2026-09-01; the worst has 180.
-- Many Homestead Rescue rows that did reach `Compliant` carry `HasDoubleBoostSuspect=TRUE`.
-
-**First place to look:**
-- `BUG-0093` fix (2026-09-01): on Demucs failure the job completes with the audio copied and an Audio follow-up is queued. If Demucs fails every time, that is this loop.
-- Closed directive `2026-10-11-demucs-liveness` (no CPU fallback, fail loud): may already have removed the path. Confirm by running one of the four remaining files.
-- `Features/AudioNormalization/Services/PreEncodeAudioPipeline.py`, `Features/TranscodeJob/Worker/JobProcessor.py` (partial-completion handling).
-
-**Proposed criterion:** `audio-normalization.feature.md` C43.
-
-**Out of scope for /b:** deciding whether the repeatedly re-encoded files need re-acquiring; the 29-file library sweep.
-
-**Fix with:** `/t BUG-0107`.
-
----
-
 ### [BUG-0093 -- RESOLVED 2026-09-01] Demucs daemon repeatedly closes stdout / times out; blocks Dialog Boost track emission -> ComplianceGate refuses TV Transcode replacements. FIX: pre-encode swallowers deleted; failure raises to JobProcessor; routed via `transcode.D13` partial-completion (AudioSlot=Copy fallback + AudioFix follow-up); FileReplacementBusinessService bypasses ComplianceGate on `DispositionReason` startswith `PartialSuccess_`. Directive `bug-0093-preencode-fail-loud-via-d13`.
 **Date:** 2026-08-26 | **Area:** audio-pipeline
 
