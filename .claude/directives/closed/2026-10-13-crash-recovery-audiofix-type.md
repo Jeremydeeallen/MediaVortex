@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-10-11
-**Status:** Active -- phase: VERIFYING
+**Status:** Closed 2026-10-13
 **Slug:** crash-recovery-audiofix-type
 **Replaces:** `directives/closed/2026-10-11-demucs-liveness.md` (closed Success)
 
@@ -76,31 +76,14 @@ Tests/Contract/failloud_baseline.json                  -- EDIT: ratchet the thre
 .claude/directives/backlog/_bucket-rules-phase-2.md    -- EDIT: close row 28, add rows 35-38
 ```
 
-### Plan
-
-Boot recovery (`CrashRecoveryService`), every statement scoped to the booting worker's name, in this order:
-
-1. Kill a still-running process recorded on this worker's leftover active-job records (existing behaviour, self-kill guard kept).
-2. Fail this worker's in-flight attempts (`Success IS NULL AND WorkerName = self`), except those with an unfinished `QualityTestingQueue` row. Message `worker crashed/restarted`, failure class filled as today.
-3. Delete progress rows of this worker's failed attempts.
-4. Release this worker's queue rows (`ClaimedBy = self AND Status = 'Running'`) whose media file has no in-flight attempt left.
-5. Existing disk cleanup (`.ip` artifacts, local scratch), unchanged.
-6. `WorkerService.Main` deletes this worker's active-job records (existing).
-
-Steps 2-4 raise on failure; `_RecoverFromCrash` does not catch.
-
-Commits: (1) code + test + deletions; (2) docs. Then restart I9, release the six rows, live kill.
-
-Seams changed:
-
-| Seam | Producer | Wire shape | Consumer expects | Verification |
-|---|---|---|---|---|
-| Claim -> boot recovery | `TranscodeQueueRepository.ClaimNextPendingJob` | `TranscodeQueue.(Status='Running', ClaimedBy=WorkerName TEXT)` | recovery matches `ClaimedBy = self` | contract test, live kill |
-| Attempt create -> boot recovery | `CreateTranscodeAttempt` | `TranscodeAttempts.(Success NULL, WorkerName TEXT)` | recovery matches `WorkerName = self` | contract test, live kill |
-| Encode -> quality test (`transcode.S2`) | encode success | attempt `Success NULL` + `QualityTestingQueue` row `DateCompleted NULL` | recovery skips it | contract test (criterion 6) |
-| Recovery -> boot | `CrashRecoveryService` | exception on failure | `WorkerService.Main.Run` exits non-zero | contract test (criterion 7) |
-
 ### Promotions
+
+| Source artifact | Target file | Commit |
+|---|---|---|
+| Boot recovery steps (by ownership, quality-test skip, failure stops the boot) and the ownership seam | `WorkerService/WorkerService.flow.md` `## Boot Recovery (ST5)`, ST5 row, seam S10 | `104ee697` |
+| Criterion: every leftover job released whatever its kind; no other worker's rows change; failed recovery stops the worker | `WorkerService/worker-lifecycle.feature.md` C13 | `104ee697` |
+| Pointers replacing duplicate descriptions | `transcode.flow.md` (Crash Recovery, stage 1.5), `Features/ServiceControl/ServiceControl.feature.md` (criterion 4, writes table), `Features/TranscodeJob/local-staging.feature.md` C12 | `104ee697` |
+| Invariants I2 (boot recovery is the writer) and I4 (boot recovery failure is a boot failure) | `.claude/rules/worker-lifecycle-invariants.md` | `104ee697` |
 
 ### Verification
 
@@ -110,7 +93,7 @@ Seams changed:
 - **Fleet:** `py deploy/deploy-fleet.py` 2026-10-12 16:17 UTC, 9 workers OK on `71035fe9`.
 - **Criteria 1, 3, 4 -- real kill, I9-2024, AudioFix (2026-10-13 UTC):** `RemuxEnabled` set TRUE on I9 for the test, queue row 221750 released, I9 claimed it 02:09:55. At 02:10:34 the job was mid-flight (ActiveJobs 1534432 `JobType=AudioFix`, phase PreEncode, Demucs 20%, attempt 99885). Worker processes hard-killed 02:10:41; before restart the row was `Running`/`I9-2024`, attempt in flight, 1 active-job record. Worker started 02:10:58. Logs 64300983-64300988: `Crash recovery completed for I9-2024: {'JobsReleased': 1, 'AttemptsFailed': 1, 'ProgressDeleted': 1, ...}`, `ActiveJobs sweep: deleted 1 row(s)`; no `Unknown job type`, no `Failed to reset job`. Attempt 99885: `Success=FALSE`, `ErrorMessage='worker crashed/restarted'`, `FailureClass='worker_crashed_restarted'`. Queue row re-claimed by dot-worker-1 at 02:11:01 (3 s after boot, 20 s after the kill; grace is 30 min), new attempt 99886. `RemuxEnabled` restored to FALSE while the worker was down.
 - **Staged leftover, I9-2024:** row 221752 + in-flight attempt 99883 + AudioFix active-job record staged under I9's name with the worker stopped. Boot 02:08:53: `JobsReleased: 1`, active-job record deleted, row re-claimed by wakko-worker-1 at 02:08:55. The attempt had already been failed `owner_abandoned` by the abandonment sweeper (I9 was Paused and down for hours), so `AttemptsFailed: 0` there.
-- **Real kill on a Linux worker:** NOT RUN. The session's permission classifier refuses the remote kill over ssh; needs the operator to run it on the host.
+- **Real kill, dot-worker-1 (Linux, systemd), AudioFix (2026-10-13 UTC):** queue row 225445 claimed by dot, attempt 99891 at Demucs (ActiveJobs 1534471 `JobType=AudioFix`). `systemctl kill -s KILL mediavortex-worker@1.service` at 16:16:43; systemd restarted the unit at 16:16:53 (`NRestarts=1`, MainPID 14132 -> 17507). Logs 64344888-64344889: `Crash recovery completed for dot-worker-1: {'JobsReleased': 1, 'AttemptsFailed': 1, 'ProgressDeleted': 1, ...}`, `ActiveJobs sweep: deleted 1 row(s)`; no `Unknown job type`. Row 225445 `Pending`, no claimant; attempt 99891 `Success=FALSE`, `worker crashed/restarted`, `worker_crashed_restarted`. dot claimed its next job at 16:16:54.
 - **Test side effects:** scan jobs orphaned by the two hard kills on I9 were marked `Failed` by hand (97633 and the one running at 02:10:41). The four other stale test-claimed rows (214664, 214784, 221749, 221751) released to `Pending` 02:12 UTC. dot-worker-1 paused 02:09-02:10 to steer the claim, restored.
 - **Regression:** `TestAbandonmentSweeper`, `TestClaimAuthority` pass. `TestFailLoud` 2 failures are the stale-baseline pair already in backlog row 30; none of this directive's files appear in them.
 
