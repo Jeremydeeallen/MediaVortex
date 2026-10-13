@@ -141,6 +141,7 @@ Seams added or changed:
 - **Migration:** `AddGenreQualityTiers_2026_10_13.py` applied twice 2026-10-13; 19 genres seeded (5 at Tier 3, 7 at Tier 1, 7 at library default); `MediaFiles.Genres` and `StorageRoots.GenreSource` exist, all NULL. No verdict changed: Movies has no default tier until activation.
 - **Logic:** 84 contract tests pass (`TestMoviesVideoRule` 23, `TestTvVideoRuleTier1`, `TestVerticalsAreProfileIndependent`, `TestWriterOwnsCascadeEnforcement`, `TestNoAudioResolver`, `TestClassifierCascade`, `TestTvPinTier1Classification`, `TestVideoVerticalCodecMatch`, `TestVideoComplianceMultiplier`, `TestNonVideoContainersExcluded`, `TestRecomputeForFilesRowIsolation`).
 - **Not run:** `TestClaimAuthority` (queue held 25 pending + 2 running jobs; the test claims live rows; no claim code changed). `TestFailLoud`: the same 2 baseline tests fail with and without this change; none of the changed files is named.
+- **1 (partial):** I9 WebService restarted on `1555686e` 2026-10-13. `GET /api/SystemSettings/GenreTiers` returns the 19 genres with tiers; PUT rejects tier 9 (400) and an unknown genre (404); `/settings` renders the Genre tiers section. A successful PUT with its cascade is not exercised yet: it re-evaluates Movies, held for after activation.
 - **Pending:** fleet deploy, activation, criteria 1-9 on live data.
 
 ### Decisions Made
