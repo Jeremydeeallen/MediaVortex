@@ -1,4 +1,9 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(py Scripts/SQLScripts/QueryDatabase.py sql:*)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {

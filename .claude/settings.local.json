@@ -1,6 +1,5 @@
 {
   "permissions": {
-    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(find:*)",
       "Bash(sqlite3:*)",
@@ -24,7 +23,6 @@
       "Bash(pip install -r requirements.txt)",
       "Bash(/c/Code/Automation/MediaVortex/WebService/venv/Scripts/pip.exe install psycopg2-binary)",
       "Bash(/c/Code/Automation/MediaVortex/WebService/venv/Scripts/python.exe -c \"import sys; print\\(sys.executable\\); print\\(sys.path\\)\")",
-      "Bash(/c/Code/Automation/MediaVortex/WebService/venv/Scripts/python.exe -c \"import psycopg2; print\\(''found''\\)\")",
       "Bash(/c/Code/Automation/MediaVortex/WebService/venv/Scripts/python.exe -m pip install psycopg2-binary)",
       "Bash(PGPASSWORD=mediavortex psql -h localhost -U mediavortex -d mediavortex -c \"SELECT id, filename, status, dateadded, datestarted FROM transcodequeue ORDER BY dateadded DESC LIMIT 20;\")",
       "Bash(\"C:/Program Files/PostgreSQL/17/bin/psql.exe\" -h localhost -U mediavortex -d mediavortex -c \"SELECT id, filename, status, dateadded, datestarted FROM transcodequeue ORDER BY dateadded DESC LIMIT 20;\")",
@@ -91,6 +89,7 @@
       "Write(.claude/commands/**)",
       "Edit(.claude/commands/**)",
       "Bash(scp *)"
-    ]
+    ],
+    "defaultMode": "bypassPermissions"
   }
 }
