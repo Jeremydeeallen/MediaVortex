@@ -590,6 +590,10 @@
                     <p class="text-muted small mb-2">A library with a default tier judges every file against that tier's bitrate &times; the multiplier above, whatever profile or codec the file has. New files in it get that tier's profile. Changing a tier re-evaluates the whole library in the background.</p>
                     <div id="LibraryTiersContainer" class="mb-3"><em class="text-muted small">Loading&hellip;</em></div>
 
+                    <h6 class="mb-2">Genre tiers (Movies)</h6>
+                    <p class="text-muted small mb-2">A movie takes the highest tier among its genres; that tier sets its bitrate ceiling and the profile it is encoded with. A genre set to Library default uses the Movies default tier above. A profile you set on a movie by hand is kept. Changing a tier re-evaluates every movie in the background.</p>
+                    <div id="GenreTiersContainer" class="mb-3"><em class="text-muted small">Loading&hellip;</em></div>
+
                     <h6 class="mb-2">VMAF confidence-skip</h6>
                     <table class="table settings-table mb-3">
                         <tbody>
@@ -2432,6 +2436,46 @@ function LoadTranscodingSettings() {
         RenderConfidenceStats(R.ConfidenceStats || []);
     }).fail(function(X) { alert('Load failed: ' + X.responseText); });
     LoadLibraryTiers();
+    LoadGenreTiers();
+}
+
+function LoadGenreTiers() {
+    var Container = $('#GenreTiersContainer').html('<em class="text-muted small">Loading&hellip;</em>');
+    $.get('/api/SystemSettings/GenreTiers').done(function(R) {
+        if (!R.Success) { Container.html('<span class="text-danger small">' + (R.Message || 'Load failed') + '</span>'); return; }
+        var H = '<table class="table table-sm table-bordered mb-0" style="max-width: 640px;">';
+        H += '<thead><tr><th>Genre</th><th>Movies</th><th>Tier</th><th></th></tr></thead><tbody>';
+        (R.Data.Genres || []).forEach(function(G) {
+            H += '<tr data-genre="' + $('<span>').text(G.Genre).html() + '"><td class="fw-bold">' + $('<span>').text(G.Genre).html() + '</td><td>' + G.FileCount + '</td>';
+            H += '<td><select class="form-select form-select-sm genre-tier" style="max-width: 200px;">';
+            H += '<option value=""' + (G.QualityTier == null ? ' selected' : '') + '>Library default</option>';
+            for (var T = 1; T <= 5; T++) {
+                var Label = (_TranscodingSettings.TierLabels || {})[T];
+                H += '<option value="' + T + '"' + (G.QualityTier === T ? ' selected' : '') + '>Tier ' + T + (Label ? ' (' + Label + ')' : '') + '</option>';
+            }
+            H += '</select></td><td><button type="button" class="btn btn-sm btn-primary" onclick="SaveGenreTier(this)">Save</button> <span class="text-muted small genre-tier-status"></span></td></tr>';
+        });
+        H += '</tbody></table>';
+        Container.html(H);
+    }).fail(function() { Container.html('<span class="text-danger small">Could not load genre tiers</span>'); });
+}
+
+function SaveGenreTier(Button) {
+    var Tr = $(Button).closest('tr');
+    var Raw = Tr.find('.genre-tier').val();
+    var Status = Tr.find('.genre-tier-status').text('Saving…');
+    $(Button).prop('disabled', true);
+    $.ajax({
+        url: '/api/SystemSettings/GenreTiers',
+        method: 'PUT',
+        contentType: 'application/json',
+        timeout: 15000,
+        data: JSON.stringify({ Genre: String(Tr.data('genre')), QualityTier: Raw === '' ? null : parseInt(Raw, 10) })
+    }).done(function(R) {
+        Status.text(R.Success ? 'Saved. Re-evaluating movies in background.' : (R.Message || 'Save failed'));
+    }).fail(function(X) {
+        Status.text((X.responseJSON && X.responseJSON.Message) || 'Save failed');
+    }).always(function() { $(Button).prop('disabled', false); });
 }
 
 function LoadLibraryTiers() {

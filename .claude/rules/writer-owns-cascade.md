@@ -25,6 +25,7 @@ Any write to a tier-1 column that another tier's derivation reads MUST recompute
 | `AssignedProfile` | `VideoVertical.Evaluate` (post `video-compliance-multiplier` 2026-07-26) | same |
 | `SourceIntegratedLufs` / `SourceLoudnessRangeLU` / `SourceTruePeakDbtp` | `AudioVertical.Evaluate` (loudness gate) | same |
 | `TranscodedByMediaVortex` | `VideoVertical.Evaluate` (mv-output-accepted branch) | same |
+| `Genres` | `VideoVertical.Evaluate` (genre tier, via `FileTierResolver`) | same |
 
 The cascade target is a single call: `QueueManagementBusinessService().RecomputeForFiles([MediaFileId])`. Phase 1 (three verticals write booleans; trigger derives WorkBucket) + Phase 2 (re-fetch + compute profile + priority + AudioFix folder pin + bulk UPDATE) as documented in that function.
 

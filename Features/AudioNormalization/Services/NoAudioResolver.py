@@ -3,6 +3,7 @@ import os
 import re
 import urllib.request
 
+from Core.Arr.RadarrClient import RadarrClient
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Features.MediaFiles.MediaFilesRepository import MediaFilesRepository
@@ -117,14 +118,13 @@ class NoAudioResolver:
                 return S.get('id')
         return None
 
+    # directive: movies-video-rule | # see ingest.ST3
     def _MatchMovie(self, Movies, WantedFolder):
-        Wanted = (WantedFolder or '').strip()
-        for M in Movies:
-            Tail = self._PathTail(M.get('path') or '')
-            if Tail == Wanted:
-                MovieFile = M.get('movieFile') or {}
-                return M.get('id'), MovieFile.get('id') or 0
-        return None, 0
+        M = RadarrClient.FolderIndex(Movies).get((WantedFolder or '').strip())
+        if M is None:
+            return None, 0
+        MovieFile = M.get('movieFile') or {}
+        return M.get('id'), MovieFile.get('id') or 0
 
     def _PathTail(self, ArrPath):
         Stripped = ArrPath.rstrip('/').rstrip('\\')

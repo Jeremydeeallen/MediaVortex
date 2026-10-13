@@ -45,6 +45,11 @@ class LibraryDefaultTierRepository:
             for R in Rows
         ]
 
+    # directive: movies-video-rule | # see video-encoding.C4
+    def ListGenreSourcedLibraryIds(self) -> List[int]:
+        Rows = self.Db.ExecuteQuery("SELECT Id FROM StorageRoots WHERE GenreSource IS NOT NULL ORDER BY Id")
+        return [int(R.get('Id')) for R in Rows]
+
     # directive: tv-video-rule-tier1
     def SetDefaultQualityTier(self, StorageRootId: int, Tier: Optional[int]) -> int:
         if Tier is not None and not (1 <= int(Tier) <= 5):

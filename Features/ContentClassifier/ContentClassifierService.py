@@ -1,5 +1,5 @@
 # directive: tv-tier1-classifier-pin | # see classifier.feature.md
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 from Core.Logging.LoggingService import LoggingService
@@ -8,7 +8,7 @@ from Features.ContentClassifier.Models.ContentClassificationRuleModel import (
     ContentClassificationRuleModel,
 )
 from Features.MediaFiles.ProfileAssignmentService import ProfileAssignmentService
-from Features.Profiles.LibraryDefaultTierRepository import LibraryDefaultTierRepository
+from Features.Profiles.FileTierResolver import FileTierResolver
 from Features.Profiles.TierLadderRepository import TierLadderRepository
 
 
@@ -16,6 +16,8 @@ _SKIP_SENTINEL = "__skip__"
 _SKIP_SOURCE = "classifier_skip_av1"
 _CLASSIFIER_SOURCE = "classifier"
 _LIBRARY_TIER_SOURCE = "library_default_tier"
+_GENRE_TIER_SOURCE = "genre_tier"
+_OPERATOR_SOURCES = ['operator', 'series', 'root_folder', 'manual_sql']
 
 
 def _MatchesNumericRange(Value, MinV, MaxV) -> bool:
@@ -76,23 +78,49 @@ def _RuleMatches(Rule: ContentClassificationRuleModel, Media: dict, Db: Database
 
 
 class ContentClassifierService:
-    # directive: tv-tier1-classifier-pin
+    # directive: movies-video-rule | # see classifier.C9
     def __init__(self, ProfileWriter: Optional[ProfileAssignmentService] = None):
         self.Repository = ContentClassifierRepository()
         self.Db = DatabaseService()
         self.ProfileWriter = ProfileWriter or ProfileAssignmentService(Db=self.Db)
-        self.LibraryTiers = LibraryDefaultTierRepository(self.Db)
+        self.FileTiers = FileTierResolver(self.Db)
         self.Tiers = TierLadderRepository(self.Db)
 
-    # directive: tv-video-rule-tier1 | # see classifier.C9
-    def _LibraryDefaultProfile(self, Media: dict) -> Optional[str]:
-        Tier = self.LibraryTiers.GetDefaultQualityTier(Media.get('StorageRootId') or Media.get('storagerootid'))
-        if Tier is None:
+    # directive: movies-video-rule | # see classifier.C9
+    def _TierProfile(self, StorageRootId, MediaFileId) -> Optional[Tuple[Optional[str], str]]:
+        Resolved = self.FileTiers.Resolve(StorageRootId, MediaFileId)
+        if Resolved is None:
             return None
-        ProfileName = self.Tiers.GetTierProfileName(Tier)
+        if Resolved.Tier is None:
+            return (None, Resolved.Origin)
+        ProfileName = self.Tiers.GetTierProfileName(Resolved.Tier)
         if not ProfileName:
-            raise RuntimeError(f"No Family='ANY' profile exists for library default tier {Tier}")
-        return ProfileName
+            raise RuntimeError(f"No Family='ANY' profile exists for tier {Resolved.Tier}")
+        return (ProfileName, _GENRE_TIER_SOURCE if Resolved.Origin else _LIBRARY_TIER_SOURCE)
+
+    # directive: movies-video-rule | # see classifier.C9
+    def ReassignTierProfiles(self, MediaFileIds: List[int]) -> int:
+        Ids = [int(I) for I in (MediaFileIds or [])]
+        if not Ids:
+            return 0
+        Rows = self.Db.ExecuteQuery(
+            "SELECT mf.Id, mf.StorageRootId, mf.AssignedProfile FROM MediaFiles mf "
+            "JOIN StorageRoots sr ON sr.Id = mf.StorageRootId "
+            "WHERE mf.Id = ANY(%s) AND sr.GenreSource IS NOT NULL "
+            "  AND COALESCE(mf.AssignedProfileSource, '') <> ALL(%s) "
+            "ORDER BY mf.Id",
+            (Ids, _OPERATOR_SOURCES),
+        )
+        Targets = {}
+        for R in Rows:
+            Target = self._TierProfile(R.get('StorageRootId'), R.get('Id'))
+            if Target is None or Target[0] is None or Target[0] == R.get('AssignedProfile'):
+                continue
+            Targets.setdefault(Target, []).append(int(R.get('Id')))
+        Written = 0
+        for (ProfileName, Source), Group in Targets.items():
+            Written += len(self.ProfileWriter.Assign(Group, ProfileName, Source))
+        return Written
 
     # directive: tv-video-rule-tier1 | # see classifier.C2
     def _Walk(self, Rules: List[ContentClassificationRuleModel], Media: dict) -> Optional[ContentClassificationRuleModel]:
@@ -115,11 +143,18 @@ class ContentClassifierService:
             if Media.get("AssignedProfile"):
                 return Media.get("AssignedProfile")
 
-            LibraryProfile = self._LibraryDefaultProfile(Media)
-            if LibraryProfile:
-                self.ProfileWriter.Assign([MediaFileId], LibraryProfile, _LIBRARY_TIER_SOURCE, IfUnsetOnly=True)
+            TierProfile = self._TierProfile(Media.get('StorageRootId') or Media.get('storagerootid'), MediaFileId)
+            if TierProfile is not None:
+                LibraryProfile, TierSource = TierProfile
+                if LibraryProfile is None:
+                    LoggingService.LogInfo(
+                        f"ContentClassifier: MediaFileId {MediaFileId} has no tier yet ({TierSource}); profile left unset",
+                        "ContentClassifierService", "ClassifyAndAssign",
+                    )
+                    return None
+                self.ProfileWriter.Assign([MediaFileId], LibraryProfile, TierSource, IfUnsetOnly=True)
                 LoggingService.LogInfo(
-                    f"ContentClassifier: library default tier -> profile '{LibraryProfile}' for MediaFileId {MediaFileId}",
+                    f"ContentClassifier: {TierSource} -> profile '{LibraryProfile}' for MediaFileId {MediaFileId}",
                     "ContentClassifierService", "ClassifyAndAssign",
                 )
                 return LibraryProfile
@@ -171,9 +206,12 @@ class ContentClassifierService:
                 if not Media or Media.get("AssignedProfile"):
                     Skipped += 1
                     continue
-                LibraryProfile = self._LibraryDefaultProfile(Media)
-                if LibraryProfile:
-                    LibraryProfileToIds.setdefault(LibraryProfile, []).append(MfId)
+                TierProfile = self._TierProfile(Media.get('StorageRootId') or Media.get('storagerootid'), MfId)
+                if TierProfile is not None:
+                    if TierProfile[0] is None:
+                        Unmatched += 1
+                        continue
+                    LibraryProfileToIds.setdefault(TierProfile, []).append(MfId)
                     HitCounts['LibraryDefaultTier'] = HitCounts.get('LibraryDefaultTier', 0) + 1
                     continue
                 Matched = self._Walk(Rules, Media)
@@ -192,8 +230,8 @@ class ContentClassifierService:
                 )
         if SkipIds:
             self.ProfileWriter.Assign(SkipIds, None, _SKIP_SOURCE, IfUnsetOnly=True)
-        for ProfileName, Ids in LibraryProfileToIds.items():
-            self.ProfileWriter.Assign(Ids, ProfileName, _LIBRARY_TIER_SOURCE, IfUnsetOnly=True)
+        for (ProfileName, TierSource), Ids in LibraryProfileToIds.items():
+            self.ProfileWriter.Assign(Ids, ProfileName, TierSource, IfUnsetOnly=True)
         for ProfileName, Ids in ProfileToIds.items():
             self.ProfileWriter.Assign(Ids, ProfileName, _CLASSIFIER_SOURCE, IfUnsetOnly=True)
         return {"HitCounts": HitCounts, "Skipped": Skipped, "Unmatched": Unmatched}

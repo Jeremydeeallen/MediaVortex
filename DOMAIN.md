@@ -413,7 +413,20 @@ Answer: **The TV library's default tier, nothing about the individual file's pro
 - A per-series profile changes what that series is encoded at. It never changes the bucket.
 - Our own finished output is never judged on video again.
 - Supersedes for TV: the 2026-07-26 multiplier table's "Tier 1 target" numbers (ceilings now come from live ladder cells) and the 2026-08-14 same-codec pass.
-- Movies and XXX are undecided: Movies tiers vary by taste (romantic comedy Tier 1, action Tier 2-3). Until decided they keep the assigned-profile rule with the same-codec pass.
+- XXX is undecided. Until decided it keeps the assigned-profile rule with the same-codec pass. Movies: see the 2026-10-13 entry.
+
+### 2026-10-13 -- A movie's tier comes from its genre
+
+Question: Movies vary by taste; what decides a movie's tier and whether it needs Transcode?
+
+Answer: **Its genres, from Radarr.** The rule table is `transcode.flow.md` D4; this entry records the decisions behind it.
+
+- Each genre carries a quality tier the operator edits on `/settings`. A movie takes the highest tier among its genres. Action and visually heavy films keep more bitrate; romantic comedies and slow films are tiered lower.
+- Starting tiers approved by the operator: Tier 3 = Action, Adventure, Science Fiction, Fantasy, War. Tier 1 = Romance, Comedy, Drama, Documentary, Music, History, TV Movie. Every other genre, and a movie with no genre, uses the Movies library default, Tier 2.
+- The bucket rule is the TV rule with the movie's genre tier in place of the library tier. Profile and source codec are not signals.
+- A movie's profile follows its genre tier. A profile the operator sets on one movie by hand is kept and changes the encode only, never the bucket.
+- When Radarr cannot be reached a movie stays undecided; it is not given the library default quietly.
+- Movies already encoded by MediaVortex are not re-encoded when their genre tier is higher than the tier they were encoded at.
 
 ---
 

@@ -43,12 +43,14 @@ The three dimensions:
 
 | Dimension | Fails when | Undecided when | Operator knobs |
 |---|---|---|---|
-| Video, library with a default tier (TV = Tier 1) | source video kbps > (kbps that tier encodes this resolution at) x (multiplier for this resolution). Assigned profile and source codec play no part | no resolution or bitrate probed; no ladder cell for that tier + resolution; audio-only container | `/settings`: Library default tier, Bitrate ladder, Video compliance multipliers |
-| Video, library with no default tier (Movies, XXX) | source codec differs from the assigned profile's codec AND source kbps > (assigned profile's target for this resolution) x multiplier | no assigned profile; no resolution or bitrate; no target cell; audio-only container | same, plus the file's profile |
+| Video, library with a default tier (TV = Tier 1, Movies = Tier 2) | source video kbps > (kbps the file's tier encodes this resolution at) x (multiplier for this resolution). Assigned profile and source codec play no part | no resolution or bitrate probed; no ladder cell for that tier + resolution; audio-only container; genres not fetched yet in a library that tiers by genre | `/settings`: Library default tier, Genre tiers, Bitrate ladder, Video compliance multipliers |
+| Video, library with no default tier (XXX) | source codec differs from the assigned profile's codec AND source kbps > (assigned profile's target for this resolution) x multiplier | no assigned profile; no resolution or bitrate; no target cell; audio-only container | same, plus the file's profile |
 | Container | container not in the acceptable list (mp4/mov/m4v and mkv/matroska/webm are alias groups) | no container probed; audio-only container | `/Admin/Compliance` Container rules |
 | Audio | audio codec not in the acceptable list, OR no Dialog Boost track | audio marked corrupt; no audio stream; loudness never validly measured; no audio policy; every track ungainable; audio-only container | `/Admin/Compliance` Audio rules |
 
 "Kbps that tier encodes at" follows the tier's downscale: Tier 1 outputs 720p for 720p, 1080p and 2160p sources, so all three use the Tier 1 720p cell. A library's default tier also gives its unprofiled files that tier's profile; a per-series profile changes what a series is encoded at, never its bucket.
+
+The file's tier: in a library with a genre source (Movies, genres from Radarr) each genre carries a tier on `/settings`, and a movie takes the highest tier among its genres. A genre set to "Library default", and a movie with no genre, use the library's default tier. In a library with no genre source (TV) the file's tier is the library's default tier. A movie's profile follows its genre tier unless the operator set that movie's profile by hand; a hand-set profile changes what the movie is encoded at, never its bucket.
 
 The bucket names the next stage (D2). A stage fixes its own dimension only (Transcode and Remux both write mp4, so container is fixed by either); the file then re-buckets and moves to the next stage until all three pass.
 

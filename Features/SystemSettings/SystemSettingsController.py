@@ -78,6 +78,8 @@ def _SpawnLibraryRecompute(StorageRootId: int):
             from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
             Rows = DatabaseService().ExecuteQuery("SELECT Id FROM MediaFiles WHERE StorageRootId = %s ORDER BY Id", (StorageRootId,))
             Ids = [int(R.get('Id')) for R in Rows]
+            from Features.ContentClassifier.ContentClassifierService import ContentClassifierService
+            ContentClassifierService().ReassignTierProfiles(Ids)
             Service = QueueManagementBusinessService()
             for I in range(0, len(Ids), 500):
                 Service.RecomputeForFiles(Ids[I:I + 500])
@@ -625,6 +627,40 @@ class SystemSettingsController:
             except Exception as e:
                 LoggingService.LogException("Error updating library tier", e, 'UpdateLibraryTier', 'SystemSettingsController')
                 return jsonify({'Success': False, 'Message': 'Could not save library tier'}), 500
+
+        @self.Blueprint.route('/GenreTiers', methods=['GET'])
+        # directive: movies-video-rule | # see video-encoding.C4
+        def GetGenreTiers():
+            try:
+                from Features.Profiles.GenreQualityTierRepository import GenreQualityTierRepository
+                return jsonify({'Success': True, 'Data': {'Genres': GenreQualityTierRepository().ListGenreTiers()}}), 200
+            # fail-loud-ok: HTTP boundary; logged and surfaced as Success=False
+            except Exception as e:
+                LoggingService.LogException("Error getting genre tiers", e, 'GetGenreTiers', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Message': 'Could not load genre tiers'}), 500
+
+        @self.Blueprint.route('/GenreTiers', methods=['PUT'])
+        # directive: movies-video-rule | # see video-encoding.C4
+        def UpdateGenreTier():
+            try:
+                Data = request.get_json() or {}
+                Genre = Data.get('Genre')
+                Tier = Data.get('QualityTier')
+                if not isinstance(Genre, str) or not Genre:
+                    return jsonify({'Success': False, 'Message': 'Genre (text) is required'}), 400
+                if Tier is not None and (not isinstance(Tier, int) or not 1 <= Tier <= 5):
+                    return jsonify({'Success': False, 'Message': 'QualityTier must be 1-5 or null'}), 400
+                from Features.Profiles.GenreQualityTierRepository import GenreQualityTierRepository
+                from Features.Profiles.LibraryDefaultTierRepository import LibraryDefaultTierRepository
+                if GenreQualityTierRepository().SetTier(Genre, Tier) == 0:
+                    return jsonify({'Success': False, 'Message': f'No genre named {Genre}'}), 404
+                for StorageRootId in LibraryDefaultTierRepository().ListGenreSourcedLibraryIds():
+                    _SpawnLibraryRecompute(StorageRootId)
+                return jsonify({'Success': True, 'Message': 'Genre tier saved; re-evaluating movies in the background', 'Data': {'Genre': Genre, 'QualityTier': Tier}}), 200
+            # fail-loud-ok: HTTP boundary; logged and surfaced as Success=False
+            except Exception as e:
+                LoggingService.LogException("Error updating genre tier", e, 'UpdateGenreTier', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Message': 'Could not save genre tier'}), 500
 
         @self.Blueprint.route('/TestFFmpegPaths', methods=['POST'])
         def TestFFmpegPaths():

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from Core.Database.DatabaseService import DatabaseService
+from Features.Profiles.FileTierResolver import FileTier
 from Features.Profiles.TierLadderRepository import TierLadderRepository
 from Features.VideoEncoding.VideoVertical import VideoVertical
 
@@ -19,13 +20,13 @@ def _Mf(**Overrides):
 # directive: tv-video-rule-tier1 | # see video-encoding.C1
 class TestTvVideoRuleTier1(unittest.TestCase):
 
-    # directive: tv-video-rule-tier1 | # see video-encoding.C1
+    # directive: movies-video-rule | # see video-encoding.C1
     def _Vert(self, Tier=1, TierKbps=1000):
         self.Tiers = Mock(**{'GetTierEncodeKbps.return_value': TierKbps})
         return VideoVertical(
             Thresholds=Mock(**{'GetMultiplier.return_value': 2.0}),
             Tiers=self.Tiers,
-            LibraryTiers=Mock(**{'GetDefaultQualityTier.return_value': Tier}),
+            FileTiers=Mock(**{'Resolve.return_value': FileTier(Tier, '') if Tier is not None else None}),
         )
 
     # directive: tv-video-rule-tier1 | # see video-encoding.C1
@@ -85,11 +86,11 @@ class TestTvVideoRuleTier1Live(unittest.TestCase):
         for R in Rows:
             self.assertEqual(Repo.GetTierEncodeKbps(1, 'live_action', R.get('SrcRes')), int(R.get('Kbps')))
 
-    # directive: tv-video-rule-tier1 | # see video-encoding.C1
+    # directive: movies-video-rule | # see video-encoding.C1
     def test_stored_verdicts_match_rule_for_tiered_libraries(self):
         Rows = DatabaseService().ExecuteQuery(
             "SELECT COUNT(*) AS N FROM MediaFiles mf "
-            "JOIN StorageRoots sr ON sr.Id = mf.StorageRootId AND sr.DefaultQualityTier IS NOT NULL "
+            "JOIN StorageRoots sr ON sr.Id = mf.StorageRootId AND sr.DefaultQualityTier IS NOT NULL AND sr.GenreSource IS NULL "
             "JOIN Profiles p ON p.Family = 'ANY' AND p.QualityTier = sr.DefaultQualityTier AND p.QualityLabel IS NOT NULL "
             "JOIN ProfileThresholds src ON src.ProfileId = p.Id AND src.ContentClass = 'live_action' AND src.Resolution = mf.ResolutionCategory "
             "JOIN ProfileThresholds tgt ON tgt.ProfileId = p.Id AND tgt.ContentClass = 'live_action' "

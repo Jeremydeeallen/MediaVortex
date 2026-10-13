@@ -25,6 +25,7 @@ _COMPLIANCE_INPUT_COLUMNS = [
     'SourceLoudnessRangeLU',
     'SourceTruePeakDbtp',
     'TranscodedByMediaVortex',
+    'Genres',
 ]
 
 

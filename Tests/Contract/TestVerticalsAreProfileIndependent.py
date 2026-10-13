@@ -53,14 +53,15 @@ class TestVerticalsAreProfileIndependent(unittest.TestCase):
         self.assertNotIn('EffectiveProfileResolver', Src,
             "AudioVertical must not reference EffectiveProfileResolver per C33")
 
-    # directive: tv-video-rule-tier1 | # see video-encoding.C1
+    # directive: movies-video-rule | # see video-encoding.C1
     def test_video_vertical_accepts_null_assigned_profile(self):
         from unittest.mock import Mock
-        Tiered = Mock(**{'GetDefaultQualityTier.return_value': 1})
+        from Features.Profiles.FileTierResolver import FileTier
+        Tiered = Mock(**{'Resolve.return_value': FileTier(1, '')})
         Ladder = Mock(**{'GetTierEncodeKbps.return_value': 1000})
         Mult = Mock(**{'GetMultiplier.return_value': 2.0})
         Mf = _FakeMf(AssignedProfile=None)
-        Compliant, Reason = VideoVertical(Db=_StubVideoDb(), Thresholds=Mult, Tiers=Ladder, LibraryTiers=Tiered).Evaluate(Mf)
+        Compliant, Reason = VideoVertical(Db=_StubVideoDb(), Thresholds=Mult, Tiers=Ladder, FileTiers=Tiered).Evaluate(Mf)
         self.assertTrue(Compliant)
         self.assertEqual(Reason, 'source_at_or_below_ceiling:500<=2000(tier=1:1000*2.0)')
 
