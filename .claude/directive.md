@@ -116,7 +116,7 @@ Seams changed:
 
 ### Decisions Made
 
-- Disk cleanup at boot (`.ip` files, partial replacements, local scratch) now runs on every boot. Before, it ran only when leftover active-job records existed. First boot removed `C:\MediaVortex\699524`, a staged copy left by failed attempt 90385 (2026-09-09).
+- Disk cleanup at boot (`.ip` files, partial replacements, local scratch) now runs on every boot. Before, it ran only when leftover active-job records existed. Each boot logs `swept local-staging orphan C:\MediaVortex\699524` (staged copy from failed attempt 90385) but the folder remains: its file is read-only and the delete ignores errors. Backlog row 35.
 - `CrashRecoveryService` requires a worker name; the "all workers" mode had only the deleted scripts as callers.
 - The contract test uses one uncommitted transaction instead of committed sentinel rows: a released test row would be `Pending` and claimable by a live worker.
 - Fail-loud baseline lowered only for the three files this directive touched.

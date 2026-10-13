@@ -5,6 +5,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 
 ## Active
 
+- BUG-0107 | active | audio-pipeline | Audio jobs recorded Success with only the Original track (no Dialog Boost); file stayed in the Audio bucket and was re-run about every 5 minutes (27706: 43 such attempts through 2026-09-09). Not reproduced on `71035fe9`; four Homestead Rescue files and a 29-file library set still to check | 2026-10-13
 - BUG-0106 | active | compliance | READ FIRST -- suspected wrong WorkBucket classifications; one open suspect: WorkBucket terminal short-circuit may mask retiered files needing re-transcode (unconfirmed, query in KNOWN-ISSUES.md). The other suspect (pre-replace check) was deleted by `label-decides-command` 2026-10-06 | 2026-09-28
 - BUG-0024 | active | file-scanning | Scan pipeline perf + observability (FindFuzzyFileMatch O(NxM), missing counters, single-threaded stats, silent progress writer) | 2026-05-15
 - BUG-0025 | active | worker-lifecycle | Worker status / capability model cleanup (Draining broken, non-data-driven concurrency, UI-uneditable flags) | 2026-05-14
