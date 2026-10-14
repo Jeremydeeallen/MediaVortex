@@ -1906,6 +1906,15 @@ Tier 2 (upstream, cross-vertical): a previous transcode wrote a corrupt `-mv.mp4
 
 ---
 
+### video-encode
+
+- BUG-0108 | Intel QSV (wakko, Arc B580) Tier 1 downscale scores 12-16 VMAF points below NVENC because of the hardware resize path (`-hwaccel qsv -hwaccel_output_format qsv` + `scale_qsv`), not the av1_qsv encoder | criterion: Features/Profiles/profile-tier-ladder.feature.md#C7 | 2026-10-14
+  Repro: encode Spider-Man Brand New Day (MediaFile 751016) at Tier 1 with the production wakko command (`-hwaccel qsv -hwaccel_output_format qsv ... -c:v av1_qsv -preset 1 -b:v 1000k -maxrate:v 2000k -bufsize:v 2000k -extbrc 1 -look_ahead 1 -look_ahead_depth 8 -vf scale_qsv=w=1280:h=-1`) and the production NVENC command on I9; VMAF both against the original. Test files + logs: `C:\MediaVortex\spiderman_tier1_test\` (clip tests in `isolate\`); scripts in the 2026-10-14 session scratchpad.
+  Evidence: full film (208,607 frames): NVENC VMAF 96.4 at encoded resolution / 92.9 upscaled-to-source (TV view); QSV 84.1 / 77.0; sizes 1.443 vs 1.451 GB. Same 60-second stream-copied clip on wakko: production 85.4; same hardware resize at 20 Mbps 89.7; software resize (`-vf scale=w=1280:h=-2,format=p010le`, no qsv hwaccel) + same av1_qsv 1000k 95.7 at the same size. Brightness/colour levels identical across versions; gap uniform across the film (83-86 per tenth). Not proven visible: frame at 41:00 looks as sharp as the original; suspected resize sampling difference that VMAF punishes. Impact: every wakko Tier 1 downscale; wakko quality-gate VMAF understated. Mitigation 2026-10-14: `wakko-worker-1` `TranscodeEnabled=FALSE` (Remux/Audio still on); set back to TRUE when fixed. Side note: pipeline VMAF scores at the encoded resolution, so it never measures downscale loss.
+  First place to look: QSV video slot -- `WorkerEncoderResolver.QSV_OVERRIDES` and the QSV branch of `VideoSlot` that emits `-hwaccel qsv -hwaccel_output_format qsv` and `scale_qsv`. Measure full-film encode speed + VMAF with software resize before changing it.
+
+---
+
 ## Resolved
 
 ### [BUG-0100] Compliance gate rejects transcode with `invalid_loudness_measurement` despite plausible source + achieved measurements -- Doctor Who S08E10 3x

@@ -28,6 +28,8 @@ C5. NVENC VBR video slot consumes `TargetKbps` directly. Emits `-b:v <TargetKbps
 
 C6. Intel QSV workers encode by tier bitrate, the same as NVENC. Every tier profile has `RateControlMode='vbr'`; the QSV video slot emits `-b:v <TargetKbps>k -maxrate:v <TargetKbps * MaxBitrateMultiplier>k -bufsize:v <same>k`. No production encode on any worker selects a quality-level rate control. All five tier profiles carry the Intel-only knobs `QsvExtBrc=1` and `QsvLookaheadDepth=8` (look-ahead depth 40 crashes the encoder -- BUG-0071). Verifiable: `Tests/Contract/TestCommandComposer` asserts a QSV-resolved tier profile emits the raw TargetKbps value; `SELECT DISTINCT RateControlMode FROM Profiles` over the tier profiles returns only `vbr`.
 
+C7. [BUG-0108] A downscaling tier encode scores the same quality whichever encoder runs it. For the same source and tier, the Intel QSV output's VMAF (scored at the encoded resolution, and again upscaled to the source resolution) is within 2 points of the NVIDIA NVENC output's. Verifiable: encode one film at Tier 1 on a QSV worker and an NVENC worker with the production commands; VMAF both against the source.
+
 C7. `NextTierAdjuster.Get(currentProfile)` returns `Optional[Profile]` by walking the UNIQUE tuple with `QualityTier + 1`. Returns None when ceiling hit (Tier 5). Verifiable: `Tests/Contract/TestNextTierAdjuster.py` covers tier-1 -> tier-5 chain + ceiling terminates.
 
 C8. `DispositionDispatcher._MaybeScheduleRequeue` passes escalated `ProfileId` to `AddJobToQueue` when adjuster returns non-None. Chain terminates at Tier 5 -> Reject/QualityCeilingReached (folds through RetryBudget). Verifiable: dispatcher contract test proves ProfileId in the requeued queue row differs from previous when adjuster escalates.

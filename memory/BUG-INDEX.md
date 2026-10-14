@@ -54,6 +54,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0102 | active | subtitle-emit | mov_text `Result too large` (ffmpeg exit 4294967262) on oversized subtitle samples in mp4 output; add MAX_SUB_SAMPLE_BYTES filter alongside BUG-0090 whitelist | 2026-09-15
 - BUG-0103 | active | audio-pre-encode | Source unreadable (missing moov atom on Weeds S02E12 `-mv.mp4`); no source-readability preflight in PreEncodeAudioPipeline; downmix ffmpeg is first substep to crash. Fix: preflight ffprobe + SourceUnreadableError + operator-review routing; separate bug for FileReplacement pre-swap validation | 2026-09-15
 - BUG-0104 | active | video-encode | ffmpeg exit 218 / 4294967274 on source with yuv422p16le / yuv444p16le; VideoSlot lacks pix_fmt normalization to encoder-supported format | 2026-09-15
+- BUG-0108 | active | video-encode | Intel QSV (wakko) Tier 1 downscale scores 12-16 VMAF below NVENC due to hardware resize (scale_qsv), not the encoder; software resize + av1_qsv scores 95.7 vs 85.4 on the same clip; wakko-worker-1 TranscodeEnabled=FALSE until fixed | 2026-10-14
 
 ## Recently Resolved (last 10)
 
