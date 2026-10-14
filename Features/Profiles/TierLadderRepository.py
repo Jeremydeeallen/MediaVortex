@@ -28,21 +28,6 @@ class TierLadderRepository:
     def __init__(self, Db: Optional[DatabaseService] = None):
         self.Db = Db or DatabaseService()
 
-    # directive: video-compliance-multiplier | # see video-encoding.DS3
-    def GetTier1Target(self, Family: str, ContentClass: str, Resolution: str) -> Optional[int]:
-        Row = self.Db.ExecuteQuery(
-            "SELECT pt.TargetKbps FROM Profiles p "
-            "JOIN ProfileThresholds pt ON pt.ProfileId = p.Id "
-            "WHERE p.Family = %s AND p.QualityTier = 1 AND p.ContentClass = %s "
-            "  AND pt.Resolution = %s AND pt.TargetKbps IS NOT NULL "
-            "ORDER BY p.Id LIMIT 1",
-            (Family, ContentClass, Resolution),
-        )
-        if not Row:
-            return None
-        Value = Row[0].get('targetkbps')
-        return int(Value) if Value is not None else None
-
     # directive: tv-video-rule-tier1 | # see video-encoding.C1
     def GetTierEncodeKbps(self, Tier: int, ContentClass: str, Resolution: str) -> Optional[int]:
         Row = self.Db.ExecuteQuery(

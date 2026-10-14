@@ -4,7 +4,7 @@
 
 ## What It Does
 
-Assigns `MediaFiles.AssignedProfile` by walking an operator-tunable rules table and picking the first-match profile. Runs as a hook after probe writes metadata. Sticky: only writes when `AssignedProfile IS NULL`. Cascades compliance recompute after write.
+Assigns `MediaFiles.AssignedProfile`: in a library with a default tier, the profile of the file's tier (genre tier for Movies, C9); elsewhere by walking an operator-tunable rules table and picking the first-match profile. Runs as a hook after probe writes metadata. Sticky: only writes when `AssignedProfile IS NULL`. Cascades compliance recompute after write.
 
 Pipeline stage `ST5` in `ingest.flow.md`.
 

@@ -135,6 +135,8 @@ Seams added or changed:
 | Operator decisions and starting tiers | `DOMAIN.md` 2026-10-13 entry |
 | `Genres` is a compliance-input column | `.claude/rules/writer-owns-cascade.md` |
 | XXX is next up | `.claude/directives/backlog/_bucket-rules-phase-2.md` rows 1, 12 |
+| Design decisions (DRY / SSoT), seams S4-S5, missing-input list | `Features/VideoEncoding/video-encoding.feature.md` |
+| Genre tier, library default tier, quality tier | `GLOSSARY.md`; `ARCHITECTURE.md` roster, cross-cutting, data flow |
 
 ### Verification
 

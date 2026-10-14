@@ -148,10 +148,7 @@ class MediaProbeBusinessService:
                         PriorityEx, "MediaProbeBusinessService", "_ExecuteProbe"
                     )
 
-                # ContentClassifier: auto-assign profile if AssignedProfile is still NULL
-                # after the cascade above. Operator overrides are respected (the service
-                # short-circuits on non-NULL AssignedProfile). Failure never blocks probe.
-                # See Features/ContentClassifier/content-classifier.feature.md.
+                # see ingest.ST5 -- classifier assigns the file's tier profile (or walks rules) when AssignedProfile is NULL
                 try:
                     from Features.ContentClassifier.ContentClassifierService import ContentClassifierService
                     ContentClassifierService().ClassifyAndAssign(MediaFile.Id)

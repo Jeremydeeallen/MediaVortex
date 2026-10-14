@@ -33,12 +33,15 @@
 - **Disposition** -- verify outcome per `TranscodeAttempts` row. Valid post-cutover: `Replace` / `Reject` / `Requeue`. See BypassReplace (deprecated). Source: `transcode.flow.md` ST9 ACTION.
 - **EBUR128** -- FFmpeg loudness measurement filter. `Summary:` block is the only reliable parse anchor (silence-floor progress lines otherwise leak). Source: memory `feedback_ebur128_parser_anchor`.
 - **FFmpeg / FFprobe** -- transcoder + prober binaries. FFprobe reads metadata; FFmpeg produces output. Source: `ARCHITECTURE.md#topology`.
+- **Genre tier** -- the quality tier set per Radarr genre on `/settings` (`GenreQualityTiers`); a movie takes the highest tier among its genres, and a genre set to "Library default" uses the library default tier. Source: `transcode.flow.md` D4; `Features/Profiles/FileTierResolver.py`.
+- **Library default tier** -- quality tier set per library on `/settings` (`StorageRoots.DefaultQualityTier`; TV = 1, Movies = 2, XXX unset). Decides the video bucket of files in that library; refined by genre tier where the library has a genre source. Source: `transcode.flow.md` D4.
 - **Linear loudnorm** -- audio loudness normalization mode preserved by `linear-loudnorm.feature.md`. Enforcement: `Tests/Contract/TestLinearLoudnormEnforcement.py`. Source: `Features/AudioNormalization/linear-loudnorm.feature.md`.
 - **LUFS** -- Loudness Units relative to Full Scale. Track 0 integrated LUFS target read from `TargetIntegratedLufs`. Source: `Features/AudioNormalization/`.
 - **NVENC** -- NVIDIA hardware encoder. Gated by `Workers.nvenccapable` flag. Post-deploy capability probe, not startup-time. Source: memory `feedback_deploy_time_capability_probe`.
 - **Plan** -- per-job encode plan `{VideoOp, AudioOp, SubtitleOp, ContainerOp}`, read from the job label alone (`PlanFactory.FromProcessingMode`). Orchestration is Plan-blind. Source: `transcode.flow.md` D2.
 - **Probe** -- FFprobe pass at ST3 that fills `MediaFiles.Resolution` + audio/subtitle stream metadata. Source: `transcode.flow.md` ST3.
 - **Profile** -- named encode configuration (bitrate, codec, container, thresholds). Rows in `Profiles`; thresholds in `ProfileThresholds`. Read-only at CommandBuilder + decision layers. Source: `Features/Profiles/`.
+- **Quality tier** -- one of five encode levels (1 Efficient .. 5 Reference); each tier is a `Family='ANY'` profile with one bitrate cell and one output resolution per source resolution, edited on `/settings`. Source: `Features/Profiles/profile-tier-ladder.feature.md`.
 - **Quick** -- **deprecated** job label. No replacement; the three labels are `Transcode` / `Remux` / `AudioFix`. Source: `transcode.flow.md` D2.
 - **Reencode** -- Strategy that produces a new encoded video stream. Verify method: VMAF. Source: `transcode.flow.md` ST5 Strategy variants; `Features/TranscodeJob/Worker/Strategies/`.
 - **Remux** -- job label: copy video, copy audio, write mp4 (container change only). Runs through the same pipeline as the other labels (`transcode.flow.md`); not a separate job type. Source: `transcode.flow.md` D2.

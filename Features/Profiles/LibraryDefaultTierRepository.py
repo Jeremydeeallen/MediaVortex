@@ -18,19 +18,6 @@ class LibraryDefaultTierRepository:
     def __init__(self, Db: Optional[DatabaseService] = None):
         self.Db = Db or DatabaseService()
 
-    # directive: tv-video-rule-tier1 | # see transcode.ST4
-    def GetDefaultQualityTier(self, StorageRootId: Optional[int]) -> Optional[int]:
-        if StorageRootId is None:
-            return None
-        Rows = self.Db.ExecuteQuery(
-            "SELECT DefaultQualityTier FROM StorageRoots WHERE Id = %s",
-            (int(StorageRootId),),
-        )
-        if not Rows:
-            return None
-        Value = Rows[0].get('DefaultQualityTier')
-        return int(Value) if Value is not None else None
-
     # directive: tv-video-rule-tier1
     def ListLibraries(self) -> List[LibraryDefaultTier]:
         Rows = self.Db.ExecuteQuery(

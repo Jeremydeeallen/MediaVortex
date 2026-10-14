@@ -582,8 +582,8 @@
                     <h6 class="mb-2">ICQ ladder (per-tier IcqQ)</h6>
                     <div id="IcqLadderContainer" class="mb-3"><em class="text-muted small">Loading&hellip;</em></div>
 
-                    <h6 class="mb-2">Video compliance (per-resolution multiplier over Tier 1 target)</h6>
-                    <p class="text-muted small mb-2">SourceKbps &gt; Tier1TargetKbps &times; Multiplier &rarr; file classified <code>WorkBucket='Transcode'</code>. Otherwise the file falls through to Remux/AudioFix/Compliant depending on other columns. Higher multiplier = stricter (more sources treated compliant).</p>
+                    <h6 class="mb-2">Video compliance (per-resolution multiplier over the file's tier bitrate)</h6>
+                    <p class="text-muted small mb-2">A file needs Transcode when its source video bitrate is above (the bitrate its tier encodes that resolution at) &times; the multiplier. Higher multiplier = more lenient (fewer files re-encoded).</p>
                     <div id="VideoComplianceContainer" class="mb-3"><em class="text-muted small">Loading&hellip;</em></div>
 
                     <h6 class="mb-2">Library default tier</h6>
@@ -2525,12 +2525,12 @@ function RenderVideoCompliance() {
         return;
     }
     var H = '<table class="table table-sm table-bordered mb-0" style="max-width: 640px;">';
-    H += '<thead><tr><th>Resolution</th><th>Multiplier</th><th class="text-muted">Effective floor (Tier 1 target &times; multiplier)</th></tr></thead><tbody>';
+    H += '<thead><tr><th>Resolution</th><th>Multiplier</th><th class="text-muted">Ceiling</th></tr></thead><tbody>';
     Rows.forEach(function(R) {
         H += '<tr data-resolution="' + R.ResolutionCategory + '">';
         H += '<td class="fw-bold">' + R.ResolutionCategory + '</td>';
         H += '<td><input type="number" step="0.05" min="0.01" class="form-control form-control-sm compliance-multiplier" value="' + R.Multiplier + '" style="max-width: 110px;"></td>';
-        H += '<td class="text-muted small">tier1 &times; ' + R.Multiplier.toFixed(2) + '</td>';
+        H += '<td class="text-muted small">tier bitrate &times; ' + R.Multiplier.toFixed(2) + '</td>';
         H += '</tr>';
     });
     H += '</tbody></table>';

@@ -108,7 +108,7 @@ Consequences:
 - Files with an assigned profile whose SourceKbps exceeds the target enter the Transcode operator via the standard compliance path.
 - This decision RETIRES the codec-blind `bpp` gate and the total-bitrate `SizeMB/DurationMinutes` proxy. Both were removed in favor of the direct SourceKbps-vs-TargetKbps comparison.
 
-*Refined by 2026-07-26 (Compliance section): the compliance threshold applies a per-resolution multiplier over Tier 1 target, not the bare Tier 1 target. This entry defines the base concept; the multiplier tunes strictness. See [Video compliance is bitrate-driven](#2026-07-26----video-compliance-is-bitrate-driven-codec-allowlist-retired).*
+*Refined by 2026-07-26 (Compliance section): the compliance threshold applies a per-resolution multiplier over Tier 1 target, not the bare Tier 1 target. This entry defines the base concept; the multiplier tunes strictness. See [Video compliance is bitrate-driven](#2026-07-26----video-compliance-is-bitrate-driven-codec-allowlist-retired). For TV and Movies the target is now the file's own tier (2026-10-06, 2026-10-13); see `transcode.flow.md` D4.*
 
 ### 2026-07-23 -- Transcode job boundary
 
@@ -345,6 +345,8 @@ Consequences:
 ### 2026-07-26 -- Video compliance is bitrate-driven (codec allowlist retired)
 
 Question: What makes a file's video stream "compliant" (i.e. not needing Transcode)?
+
+*Superseded for TV by 2026-10-06 and for Movies by 2026-10-13 (below): the ceiling is the bitrate the file's tier actually encodes at, times the multiplier. XXX keeps this entry's rule until backlog row 1 (`xxx-video-rule`).*
 
 Answer: **Bitrate compared against the profile's Tier 1 target for the file's resolution, multiplied by a per-resolution tunable multiplier. Codec is not a compliance signal.**
 

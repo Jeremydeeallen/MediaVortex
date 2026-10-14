@@ -39,7 +39,7 @@ Column-level ownership per vertical lives in each vertical's `*.feature.md`.
 
 **Compliance (per-domain, no orchestrator):** AudioNormalization, VideoEncoding, ContainerFormat -- each answers one compliance question and writes one boolean. `WorkBucket` = `GENERATED ALWAYS AS (CASE ...) STORED` over the three.
 
-**Profile:** Profiles (definitions + thresholds + assignment), ContentClassifier (auto-assign when `AssignedProfile` NULL).
+**Profile:** Profiles (definitions + thresholds + assignment + a file's quality tier: library default, or genre tier where the library has a genre source), ContentClassifier (auto-assign when `AssignedProfile` NULL; records Movies genres from Radarr at the end of each scan).
 
 **Execution:** TranscodeQueue (populate + route + failure-budget cap), CommandBuilder (`(MediaFile,Job) -> FFmpeg argv` via emitter slots), TranscodeJob (claim + run + record), QualityTesting (VMAF + auto-replace gate), FileReplacement (archive + swap + delegate re-probe), FailureAccounting (per-file failure budget).
 
@@ -61,11 +61,14 @@ Column-level ownership per vertical lives in each vertical's `*.feature.md`.
 | Worker capability gate | `Core/Database/WorkerCapabilityPredicate` |
 | Failure budget gate | `Core/Database/FailureBudgetPredicate` |
 | LIKE escaping | `DatabaseService.EscapeLikePattern` with `ESCAPE '!'` |
+| A file's quality tier | `Features/Profiles/FileTierResolver` (read by video compliance and the classifier) |
+| Radarr reads | `Core/Arr/RadarrClient` |
 
 ## Data Flow
 
 ```
 RootFolder -> FileScanning -> MediaFiles
+   end of scan: Movies genres from Radarr -> MediaFiles.Genres
    MediaProbe + ContentSignals fill metadata + signal columns
    AudioNormalization / VideoEncoding / ContainerFormat write compliance booleans
    -> GENERATED WorkBucket
