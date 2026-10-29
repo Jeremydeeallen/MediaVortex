@@ -10,7 +10,7 @@ Two operator outcomes for the xxx library (`StorageRoots.Id = 3`, canonical `Z:\
 1. Audio is normalized to one consistent level across files. No Dialog Boost track. Source loudness today spans -70 to +10 LUFS with per-folder standard deviation of 5 to 10 LU.
 2. Low-quality videos and videos featuring performers the operator does not want are identified and deleted with one confirmed action.
 
-Three independent units, built in this order: Stash LXC (infra), `xxx-audio-rule` (directive), `xxx-cull` (directive). Unit 1 is executed in the infrastructure repo through its server-deploy and app-deploy pipelines; plan: `docs/superpowers/plans/2026-10-28-stash-lxc.md`.
+Three independent units, built in this order: Stash LXC (infra), `xxx-audio-rule` (directive), `xxx-cull` (directive). Unit 1 is executed in the infrastructure repo through its server-deploy and app-deploy pipelines; plan: `Docs/superpowers/plans/2026-10-28-stash-lxc.md`.
 
 ## Unit 1: Stash LXC (infrastructure, no MediaVortex code)
 
@@ -20,13 +20,13 @@ Three independent units, built in this order: Stash LXC (infra), `xxx-audio-rule
 | Container | Unprivileged Ubuntu 24.04 LXC (repo template), VMID 233, 10.0.0.45, 4 vCPU, 8 GB RAM, 64 GB on `local-zfs` |
 | Media | Bind mount Porky `/tank/media/xxx_videos` to CT `/mnt/xxx` with `ro=1`. Stash never writes media. |
 | Stash | Native Linux binary from the Stash release page, plus ffmpeg/ffprobe, as a systemd unit on port 9999. Data dir on CT disk. |
-| Scrapers | StashDB (free account, API key) and ThePornDB (free API key). Both configured as stash-box endpoints. |
-| Tasks | Scan library, generate perceptual hashes, run Identify against both stash-boxes. Phash matching catches renamed files. |
+| Scrapers | ThePornDB (free API key) as a stash-box endpoint. StashDB is invite-only and optional; added if an invite arrives. |
+| Tasks | Scan library (oshash fingerprints), run Identify against ThePornDB with performers/studios/tags created when missing. Phash generation is deferred: oshash matched most scenes without it. |
 | Manual effort | Operator rates performers 1 to 5 stars in the Stash UI. Rating performers, not files, is the only manual step. |
 
 Reddit clips (1,296 files under random-word names, under 2 minutes) will mostly stay unidentified. They are handled by the quality floor in Unit 3, not by performer rating.
 
-Verification: Stash UI reachable from I9, scene count equals the count of xxx files under `/mnt/xxx`, Identify has attached performers to at least the 1,642 scene-release files.
+Verification: Stash UI reachable from I9, every readable, non-duplicate xxx file under `/mnt/xxx/Videos` is a scene, Identify has attached performers to at least 1,500 scenes.
 
 ## Unit 2: `xxx-audio-rule` directive
 

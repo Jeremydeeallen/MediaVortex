@@ -1,6 +1,6 @@
 # XXX Program Plan (Stash -> audio rule -> cull)
 
-> **For agentic workers:** execute one phase per session. Each phase ends with a commit, a push, a memory handoff update, and a `/clear`. Do not start the next phase in the same context. The spec is `docs/superpowers/specs/2026-10-28-xxx-stash-cull-audio-design.md`; Unit 1 detail is `docs/superpowers/plans/2026-10-28-stash-lxc.md`.
+> **For agentic workers:** execute one phase per session. Each phase ends with a commit, a push, a memory handoff update, and a `/clear`. Do not start the next phase in the same context. The spec is `Docs/superpowers/specs/2026-10-28-xxx-stash-cull-audio-design.md`; Unit 1 detail is `Docs/superpowers/plans/2026-10-28-stash-lxc.md`.
 
 **Goal:** xxx library audio is normalized with no Dialog Boost; low-quality videos and unwanted performers are deleted through one confirmed action; every doc, comment and line of code left behind is correct.
 
@@ -31,11 +31,11 @@ Only after step 8 is printed does the session end. If any item in 1 to 7 cannot 
 
 ## Phase 1: Stash identify + close Unit 1  (infra repo)
 
-**Status:** CT 233 live, scan running (started 2026-10-29 12:32 UTC, ~90 min). ThePornDB endpoint configured and validated. StashDB pending an invite code (optional).
+**Status 2026-10-29:** steps 1, 2, 3 and 5 done; Identify (job 4) running; step 7 hygiene done except the criterion 8/9 evidence lines. StashDB pending an invite code (optional).
 
-1. Wait for the scan queue to empty: `curl -s -X POST http://10.0.0.45:9999/graphql -H 'Content-Type: application/json' -d '{"query":"{ jobQueue { id status progress } }"}'` returns `[]`.
+1. Wait for the scan queue to empty: `curl -s -X POST http://10.0.0.45:9999/graphql -H 'Content-Type: application/json' -d '{"query":"{ jobQueue { id status progress } }"}'` returns `null` (Stash reports an empty queue as null).
 2. Verify scene count = file count (9,097 video files under `/mnt/xxx/Videos` at scan start; recount if it differs).
-3. Start Identify: `mutation { metadataIdentify(input:{sources:[{source:{stash_box_endpoint:"https://theporndb.net/graphql"}}], options:{setOrganized:false}}) }`. Wait for the queue to empty.
+3. Start Identify: `mutation { metadataIdentify(input:{sources:[{source:{stash_box_endpoint:"https://theporndb.net/graphql"}}], options:{setOrganized:false, includeMalePerformers:true, fieldOptions:[{field:"performers", strategy:MERGE, createMissing:true},{field:"studio", strategy:MERGE, createMissing:true},{field:"tags", strategy:MERGE, createMissing:true}]}}) }`. Without `createMissing` Stash attaches zero performers. Wait for the queue to empty.
 4. Record counts: scenes with performers, distinct performers, unmatched scenes. Criterion 8 target is 1,500 or more scenes with a performer.
 5. Explain the 9,097 vs 3,880 gap: `SELECT split_part(RelativePath,'/',2), count(*) FROM MediaFiles WHERE StorageRootId=3 GROUP BY 1` against `find /mnt/xxx/Videos -mindepth 1 -maxdepth 1 -type d -exec sh -c 'echo "$(find "$1" -type f | wc -l) $1"' _ {} \;` inside the CT. Write the finding into `docs/architecture/xxx-curation.md` under Deferred or Invariants, whichever fits. If MediaVortex is missing folders it should scan, file a MediaVortex bug with `/b`; do not fix it here.
 6. Operator rates performers (criterion 9). Verify with the `findPerformers` rating query.
