@@ -17,7 +17,7 @@ Three independent units, built in this order: Stash LXC (infra), `xxx-audio-rule
 | Item | Decision |
 |---|---|
 | Host | Porky (Proxmox, 10.0.0.43). The xxx dataset is Porky-local ZFS `tank/media/xxx_videos`; Larry only sees it over backplane NFS. |
-| Container | Unprivileged Ubuntu 24.04 LXC (repo template), VMID 233, 10.0.0.44, 4 vCPU, 8 GB RAM, 64 GB on `local-zfs` |
+| Container | Unprivileged Ubuntu 24.04 LXC (repo template), VMID 233, 10.0.0.45, 4 vCPU, 8 GB RAM, 64 GB on `local-zfs` |
 | Media | Bind mount Porky `/tank/media/xxx_videos` to CT `/mnt/xxx` with `ro=1`. Stash never writes media. |
 | Stash | Native Linux binary from the Stash release page, plus ffmpeg/ffprobe, as a systemd unit on port 9999. Data dir on CT disk. |
 | Scrapers | StashDB (free account, API key) and ThePornDB (free API key). Both configured as stash-box endpoints. |
