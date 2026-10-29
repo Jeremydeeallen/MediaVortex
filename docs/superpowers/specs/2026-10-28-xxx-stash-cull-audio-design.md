@@ -5,20 +5,20 @@
 
 ## Goal
 
-Two operator outcomes for the xxx library (`StorageRoots.Id = 3`, canonical `Z:\`, NFS `10.0.0.42:/mnt/xxx`):
+Two operator outcomes for the xxx library (`StorageRoots.Id = 3`, canonical `Z:\`, Porky export `10.0.0.43:/srv/nfs-media-xxx_videos`):
 
 1. Audio is normalized to one consistent level across files. No Dialog Boost track. Source loudness today spans -70 to +10 LUFS with per-folder standard deviation of 5 to 10 LU.
 2. Low-quality videos and videos featuring performers the operator does not want are identified and deleted with one confirmed action.
 
-Three independent units, built in this order: Stash LXC (infra), `xxx-audio-rule` (directive), `xxx-cull` (directive).
+Three independent units, built in this order: Stash LXC (infra), `xxx-audio-rule` (directive), `xxx-cull` (directive). Unit 1 is executed in the infrastructure repo through its server-deploy and app-deploy pipelines; plan: `docs/superpowers/plans/2026-10-28-stash-lxc.md`.
 
 ## Unit 1: Stash LXC (infrastructure, no MediaVortex code)
 
 | Item | Decision |
 |---|---|
-| Host | larry (Proxmox, 10.0.0.42), beside Postgres CT 203 and workers CT 218 |
-| Container | Unprivileged Debian 12 LXC, 2 vCPU, 4 GB RAM, 32 GB disk, static IP on 10.0.0.0/24 |
-| Media | Bind mount larry `/mnt/xxx` to CT `/mnt/xxx`, read-only. Stash never writes media. |
+| Host | Porky (Proxmox, 10.0.0.43). The xxx dataset is Porky-local ZFS `tank/media/xxx_videos`; Larry only sees it over backplane NFS. |
+| Container | Unprivileged Ubuntu 24.04 LXC (repo template), VMID 233, 10.0.0.44, 4 vCPU, 8 GB RAM, 64 GB on `local-zfs` |
+| Media | Bind mount Porky `/tank/media/xxx_videos` to CT `/mnt/xxx` with `ro=1`. Stash never writes media. |
 | Stash | Native Linux binary from the Stash release page, plus ffmpeg/ffprobe, as a systemd unit on port 9999. Data dir on CT disk. |
 | Scrapers | StashDB (free account, API key) and ThePornDB (free API key). Both configured as stash-box endpoints. |
 | Tasks | Scan library, generate perceptual hashes, run Identify against both stash-boxes. Phash matching catches renamed files. |
