@@ -7,8 +7,25 @@
 **Operating rules for every phase**
 - Read only: `.claude/rules/*.md` (auto), this file, the phase's named docs. Nothing else until a step needs it.
 - Infra work happens in `C:\Code\infrastructure`, MediaVortex work in `C:\Code\MediaVortex`. Each repo gets its own commits.
-- Hygiene is part of every phase, not a final sweep: delete stale comments and docs the phase touched, remove dead code it orphaned, commit with the phase.
-- Phase exit = criteria verified live + docs updated + commit + push + memory `project_handoff_xxx_program.md` updated + `/clear`.
+- Hygiene is part of every phase, not a final sweep. The **Phase Exit Checklist** below runs at the end of every phase, in full, before the clear. Phase 5 only re-runs the same checks and must find nothing.
+
+**Resume protocol (start of every session)**
+1. Read memory `project_handoff_xxx_program.md` (it is the RESUME HERE entry in `MEMORY.md`).
+2. Open this plan, go to the phase the handoff names, start at its first unticked step.
+3. Operator trigger phrase: "continue xxx program". Nothing else is needed from the operator to resume.
+
+**Phase Exit Checklist (mandatory, every phase)**
+1. **Criteria**: every criterion the phase owns is verified live and its evidence line is written in the owning feature doc.
+2. **Design decisions, single-sourced**: every decision the phase made lives in exactly one durable doc (infra: `docs/architecture/xxx-curation.md`; MediaVortex: `transcode.flow.md` Domain Decisions or the vertical's `*.feature.md`). Grep the repo for a second statement of the same decision; delete the copy, leave a one-line pointer.
+3. **Stale text deleted**: every comment, docstring, feature-doc sentence, flow-doc row or memory line that the phase made false is deleted, not annotated. Grep for the old term (examples: `AuthorizedKeysFile`, `no_dialog_boost`, `HasDialogBoostTrack` as a compliance test, `larry` as the Stash host, `10.0.0.44`).
+4. **Dead code removed**: for every function or script the phase bypassed or replaced, `grep -rn "<Name>" --include='*.py'` across the production tree; zero callers means delete in the same commit.
+5. **Tests**: contract tests for the touched verticals pass; the command and result are in the feature doc evidence.
+6. **Commit + push**: one logical change per commit, every commit pushed, `git status --short` clean except operator-owned untracked files.
+7. **Summary**: append a dated "Phase N done" paragraph to memory `project_handoff_xxx_program.md`: what shipped, operator-visible behaviour, decisions made, explicitly "nothing deferred". Set the "Next" line to the following phase and its first step.
+8. **Tell the operator to clear**, verbatim shape:
+   > Phase N complete and pushed. Clear now (`/clear`). To resume: say "continue xxx program". Next session starts Phase N+1 step 1: <one line>.
+
+Only after step 8 is printed does the session end. If any item in 1 to 7 cannot be completed, the phase is not done: say which item and why, and do not print step 8.
 
 ---
 
@@ -55,10 +72,12 @@ Spec Unit 3. Opens only after Phase 1 step 6 (performers rated).
 4. Hygiene: feature doc for the vertical, flow doc only if it is pipeline-shaped (it is not; one request path), GLOSSARY entries for "cull candidate" and "performer rating".
 5. Deliver, close, commit, push, handoff memory, `/clear`.
 
-## Phase 5: Program close-out  (both repos)
+## Phase 5: Program close-out  (both repos, verification only)
 
-1. Spec file: status line set to complete; delete the "Deviations" prose that the body already states once.
-2. Infra: `docs/architecture/xxx-curation.md` is the only place the domain decisions live; `stash-deploy.feature.md` COMPLETE; the pipeline fixes made in Phase 1 (`ro` flag, quoted tags, host enum, node-name lookup, AuthorizedKeysCommand, `sys.executable`, Git Bash, URL packages) each have their rationale in the code comment or the colocated doc, nowhere else.
-3. MediaVortex: `ARCHITECTURE.md` lists the Cull vertical; `GLOSSARY.md` terms added; `memory/KNOWN-ISSUES.md` entries this program closed are moved to the archive with `/bs`.
-4. Dead code: grep for `DialogBoost` helpers with zero callers after Phase 3; grep for any `xxx` path translation helper duplicated between repos.
-5. Commit, push both repos. Write the summary: what shipped per phase, operator-visible behaviour, decisions made, nothing deferred.
+If Phases 1 to 4 ran their exit checklists, this phase changes nothing. It re-runs the checks and proves it.
+
+1. Spec file status line reads complete (set in Phase 4's exit).
+2. Re-run checklist items 2, 3 and 4 across both repos with the full grep list: `AuthorizedKeysFile`, `no_dialog_boost`, `HasDialogBoostTrack`, `10.0.0.44`, `larry` near `stash`, `Debian 12` near `stash`, `DialogBoost` helpers with zero callers, duplicated xxx path translation between repos. Expected: zero hits that need action.
+3. `git status --short` clean in both repos; `git log origin/main..HEAD` empty in both.
+4. Write the program summary into memory `project_handoff_xxx_program.md` (one paragraph per phase, already present from each exit) and print it to the operator. State plainly: no deferred work, no known gaps.
+5. If step 2 or 3 finds anything, that is a defect in an earlier phase's exit: fix it here, commit, push, and note which phase missed it.
