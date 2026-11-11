@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-11-11
-**Status:** Active -- phase: NEEDS_STANDARDS_REVIEW
+**Status:** Active -- phase: NEEDS_PLAN
 **Slug:** farm-server
 **Replaces:** `directives/closed/2026-11-11-movies-video-rule.md` (closed Success)
 
@@ -33,7 +33,7 @@ First of three, in order. `push-to-deploy` comes next: CI on GitHub-hosted runne
 
 ## Call-Graph Audit
 
-Initial findings from discovery; to be completed during NEEDS_STANDARDS_REVIEW.
+Completed at NEEDS_PLAN.
 
 - **Signal 1 (two flow docs for one operation):** a new server-deploy flow would duplicate `deploy/worker-deploy-baremetal.flow.md`, because both deploy versioned code to a Linux host as a systemd service. Resolution: generalize that flow to a host deploy with a role per service (worker, server). Do not add a parallel flow doc. This also closes BUG-0064 (single deploy script, one strategy per host shape).
 - **Signal 2 (mode branch at orchestration):** `deploy/deploy-worker.py` `RestartWindowsLocal` (L93-104) restarts WebService inside the I9 worker path. This directive removes that WebService restart. The remaining I9 branch is handled by `push-to-deploy`, which leaves I9 out of automatic deploys by data, not by a flag.
@@ -42,20 +42,34 @@ Initial findings from discovery; to be completed during NEEDS_STANDARDS_REVIEW.
 - **Seam, WebService identity:** `WebService/Main.py` L132 takes its identity from `socket.gethostname()`. That identity selects ffmpeg paths and path resolution for audio remeasurement. It already violates `claim-authority.md` (identity must be deploy-assigned), and on the server it becomes load-bearing, so it is absorbed here. Identity will come from a deploy-assigned env var. The server identity gets share mappings, but no capability that makes its rows a claim target.
 - **Seam, single instance across hosts:** `WebService/Main.py` `_SupersedeExistingInstance` (L224-295) and `ServiceStatusService.RegisterServiceStartup` (L135) compare the recorded PID only against the local host. A WebService on another host sees the server's PID as stale and starts anyway. Absorbed here (criterion 9).
 - **Seam, Windows-only dependency:** `WebService/requirements.txt` L28 `WinTmp` cannot install on Linux. It gets a platform marker.
+- **Cross-owner terminal write:** WebService startup (`Main.py` ~L157) sets every host's Running/Pending `ScanJobs` to Stopped. With deploys every few minutes, this would kill worker scans on each deploy. Absorbed: narrowed to the WebService's own WorkerName.
+- **Host source sync:**
+  - `SyncSource.py` ships the working tree, including uncommitted files and untracked junk (372 extra files on CT 218).
+  - It also rsyncs into an existing `src-<sha>`, which violates "never mutated after creation".
+  - The fingerprint hashes working-tree bytes (CRLF on Windows), not the deployed sha, so `--sha` and rollback would select the wrong venv.
+  - `StepShipSchemaSnapshot` re-ships a file that git already tracks.
+  - All four are absorbed: `git archive <sha>`, a fingerprint taken from git blobs, and the snapshot step deleted.
+- **Shared DeployHistory:** the fleet's PriorSha is the latest OK row of any kind, so server rows would corrupt it. Absorbed: queries are scoped by `HostsAttempted`.
+- **App factory side effects:** two contract tests construct `WebServiceApp()`, which runs supersede (it can kill a live local WebService) and the single-instance gate. Absorbed: the gate moves to `Main()`, the serving-process entry.
+- **Signal 5 re-check:** the host role (worker or server) is data: unit body, identity env file, and requirements list. Both roles run the same host-sync call graph.
 
 ## Out of Scope
 
 - (b) Pull-based CD agent, GitHub Actions CI, automatic fleet deploys, and taking I9 out of fleet deploys. These belong to the next directive, `push-to-deploy`.
 - (b) Faster host code staging (artifact build, rsync link-dest). Belongs to the conditional directive `fast-code-staging`.
 - (b) Plaintext *arr credentials in `docker-compose.yml` and the hard-coded Flask secret key. Pre-existing; filed as bugs, not fixed here.
-- (a) The worker deploy pipeline keeps its behavior. Only shared host-deploy steps are factored out, so the server reuses them instead of duplicating them.
+- (a) The worker deploy pipeline keeps its shape. Its host-sync steps become role-driven, so the server reuses them instead of duplicating them. Two visible effects for workers:
+  - They now receive committed content only (`git archive`).
+  - Each worker host does a one-time venv rebuild, because the fingerprint now comes from git blobs.
 - Worker drain is untouched. It stays mandatory per `worker-deploy.md`.
+- (b) The UI's ServiceControl start/stop buttons act on processes local to the WebService host. After cutover they act on the server, not I9. This is pre-existing design; filed.
+- (b) WebService init swallows SchemaChecker and WorkerContext failures as warnings. Contract tests that build the app also start its background runners. Both pre-existing; filed.
 
 ## Constraints
 
 - Provisioning goes through the infra repo pipeline (`server-deploy.py`, then `app-deploy.py`). The operator approves the terraform apply.
 - Versioned dirs follow the same rules as the workers: `src-<sha>` and `host-venv-<fp>` are never mutated after creation, the unit renders resolved paths, and GC keeps 5.
-- The deploy refuses a dirty tree or a sha that is not on `origin/main`.
+- The deploy ships only the committed tree of a sha reachable from `origin/main` (`git archive`). Any other sha is refused, and local working-tree state is irrelevant.
 - No new operator-tunable knob without a GUI handler (`gui-editable-knobs.md`).
 - Fail loud: a start failure is a non-zero exit, never a silent fallback.
 
@@ -74,25 +88,115 @@ Initial findings from discovery; to be completed during NEEDS_STANDARDS_REVIEW.
 
 Phases advance by editing the `**Status:**` header line at the top of this file: `**Status:** Active -- phase: <NEXT>`. The PreToolUse hook reads ONLY that header line (NOT this section). See `.claude/standards/index.md` for the phase machine.
 
+### Plan
+
+1. **Infra row (infra repo).**
+   - Insert `mediavortex-server` into infra-db `services` as `inventory_rw`, under `SET LOCAL app.actor`. Values:
+     - vmid 237, ip 10.0.0.49, port 5000
+     - internal, proxy=true, `proxmox_lxc` on larry, ct
+     - 4 cores, 8192 MB, 32 GB, privileged, nesting
+     - CT 218's three bind mounts
+     - ssh root, monitor ct, backup true, `app_type none`, tags mediavortex+server
+   - Run `regenerate-inventory-toml.sh` and commit in the infra repo.
+2. **Host sync takes a role and a sha** (`deploy/deploy-baremetal-worker.py`).
+   - New args: `--role worker|server` (default worker) and `--sha` (default HEAD).
+   - A role table supplies the unit file name and body, the identity env file(s), and one requirements list. That list feeds both the fingerprint and `pip install -r ...`.
+   - Source: `git archive <sha>` is piped over ssh into `src-<sha16>.tmp`, VERSION is stamped, and the dir is renamed to `src-<sha16>`. An existing dir whose VERSION matches is reused and touched.
+   - The fingerprint hashes the git blobs of the role's requirements at `<sha>`. A reused venv is touched so mtime GC never removes it.
+   - Delete `SyncSource.py`, `.deployignore`, StepStampVersion, and StepShipSchemaSnapshot. Deleted-code buckets:
+     - **Pure redundancy:**
+       - SyncSource and `.deployignore` are replaced by the archive. The archive ships no untracked files, and the excluded tracked files (`.claude/*`, about 20 MB total) are harmless.
+       - StepStampVersion is folded into the archive step.
+       - StepShipSchemaSnapshot re-shipped a file git already tracks.
+     - **Replaced:** WebService's `GetWorkerConfig` ffmpeg lookup becomes discovery, which returns the same `FFmpegMaster` path on I9.
+   - Server role:
+     - Unit `mediavortex-server.service` with `Restart=always`.
+     - Identity file `/etc/mediavortex/server.env` (`MEDIAVORTEX_WORKER_NAME=mediavortex-server`).
+     - Requirements: root + `WebService`.
+3. **`deploy/deploy-server.py [--sha S | --rollback]`.**
+   - Target: `origin/main` after `git fetch`. `--sha` must be an ancestor of `origin/main`. `--rollback` uses the PriorSha of the latest OK server row.
+   - PriorSha = VERSION in the running unit's WorkingDirectory.
+   - Insert a DeployHistory row (`HostsAttempted='mediavortex-server'`, RUNNING).
+   - Run the host sync with `--role server --sha`, `systemctl restart`, then poll `/api/Version` until its Sha equals the target (60s deadline).
+   - On failure: re-run the same steps for PriorSha, mark the row FAILED with the reason, and exit 1.
+   - On success: mark the row OK.
+   - Print per-step timings.
+   - The fleet's PriorSha query excludes server rows.
+4. **WebService identity and version.**
+   - `Main()` resolves `MEDIAVORTEX_WORKER_NAME` (exit 1 if unset), runs supersede and the single-instance gate, then builds `WebServiceApp(InstanceName)`.
+   - WorkerContext gets InstanceName plus FFmpeg/FFprobe paths from `FFmpegService.FindFFmpegPath/FindFFprobePath`, made static. The server gets no Workers row.
+   - `Core/CodeVersion.py` holds the sha resolver, extracted from WorkerService `_ResolveWorkerVersion`; WorkerService delegates to it. WebService resolves the sha once at startup.
+   - `GET /api/Version` returns `Data: {Sha, Instance}`.
+   - The startup ScanJobs cleanup is narrowed to `WorkerName = InstanceName`.
+   - The two contract tests that build the app pass an instance name.
+5. **Single instance across hosts.**
+   - Migration `AddServiceStatusInstanceName`: nullable `InstanceName TEXT`. Regenerate the schema snapshot.
+   - `RegisterServiceStartup` refuses when the row's InstanceName is set, differs from this instance's, and `UpdatedAt` is within 90s (three 30s heartbeats). Otherwise the existing local-PID logic applies, and registration writes InstanceName.
+   - Supersede acts only when the recorded InstanceName equals this instance's.
+6. **I9 dev.**
+   - `StartMediaVortex.py` launches WorkerService only.
+   - `deploy-worker.py` `RestartWindowsLocal` stops restarting WebService.
+   - WinTmp gets `; sys_platform == "win32"`, in its own commit (that commit is the C6 drill target).
+7. **SRR seed.** `SeedServerStorageRootResolutions.py` is an idempotent upsert of 3 linux rows for `mediavortex-server` (T `/mnt/media_tv/`, M `/mnt/movies/`, X `/mnt/xxx/`), via `RegisterStorageRootResolutions`.
+8. **Linux import probe.** On CT 218, run `import WebService.Main` from an extracted archive using the host venv plus a `--target` dir for waitress and flask-compress. The worker venv is not modified.
+9. **Tests.**
+   - Blob fingerprint: stable per sha and role.
+   - CodeVersion: VERSION vs `.git/HEAD`.
+   - `/api/Version` route.
+   - `RegisterServiceStartup` cross-host refusal, using a test-only ServiceName row.
+   - Run TestFailLoud plus the deploy contract tests.
+10. **Operator runbook** (`deploy/bringup.md`), the "ready, please execute" steps:
+    1. `server-deploy.py --name mediavortex-server` (approve the terraform apply).
+    2. Stop the WebService on I9.
+    3. `py deploy/deploy-server.py`.
+    4. Smoke C1-C9: reboot, rollback, a C6 drill with `--sha <WinTmp commit>` (no `/api/Version`), and a second WebService on I9 being refused.
+    5. Fleet deploy: verifies the worker path and the one-time venv rebuild.
+
+### Seams
+
+Changed or added by this directive. Existing worker seams are in `worker-deploy-baremetal.flow.md`.
+
+| ID | Seam | Producer | Wire shape | Consumer expects | Verification |
+|---|---|---|---|---|---|
+| N1 | identity -> WebService | host sync writes `/etc/mediavortex/server.env` | `MEDIAVORTEX_WORKER_NAME=mediavortex-server` | `WebService/Main.Main` exits 1 if unset | `/api/Version` Data.Instance |
+| N2 | identity -> path resolution | SRR seed | 3 rows (StorageRootId 1-3, linux, `/mnt/...`) | `Core/Path/Worker.py` resolves media paths | C8 remeasurement completes |
+| N3 | ServiceStatus across hosts | `RegisterServiceStartup` + 30s heartbeat | `InstanceName TEXT NULL`, `UpdatedAt` set by DB `NOW()` | another host refuses when fresh (<90s) and different | contract test + C9 drill |
+| N4 | running sha | host sync stamps `src-<sha16>/VERSION` | 40-char sha | `/api/Version` Data.Sha == target | C3, C4 |
+| N5 | DeployHistory | `deploy-server.py` | one row, `HostsAttempted='mediavortex-server'` | fleet PriorSha excludes server rows; rollback reads latest OK server row | SQL after deploy and rollback |
+| N6 | sha -> src tree | `git archive <sha>` | committed tree + VERSION, renamed into place | unit WorkingDirectory; never mutated | same-sha redeploy reuses dir |
+| N7 | requirements -> venv | blob fingerprint per role | sha256(variant, torch pin, role file blobs) | `host-venv-<fp16>` + `.deps-fingerprint` | unit test; SKIPPED when unchanged |
+| N8 | ffmpeg discovery | `FFmpegService.FindFFmpegPath` | absolute path or None | `WorkerContext.FFmpegPath` for EBU R128 | C8 |
+
 ### Files
 
 ```
-C:\Code\infrastructure\terraform\inventory.toml   -- EDIT (infra repo): mediavortex-server LXC entry on larry
-deploy/deploy-baremetal-worker.py                 -- EDIT: shared host-deploy steps take a role (worker | server)
+C:\Code\infrastructure (infra-db row + regenerated terraform\inventory.toml) -- mediavortex-server LXC on larry
+deploy/deploy-baremetal-worker.py                 -- EDIT: role table, --sha, git archive, blob fingerprint, touch on reuse
+deploy/SyncSource.py, .deployignore               -- DELETE: replaced by git archive
 deploy/deploy-server.py                           -- CREATE: one-command server deploy + rollback
-deploy/mediavortex-server.service                 -- CREATE: systemd unit template, resolved versioned paths
+deploy/deploy-fleet.py                            -- EDIT: PriorSha excludes server rows
+deploy/common.py                                  -- EDIT: shared server target name
 deploy/deploy-worker.py                           -- EDIT: I9 path stops restarting WebService
-deploy/worker-deploy-baremetal.flow.md            -- EDIT: host deploy with roles
+deploy/worker-deploy-baremetal.flow.md            -- EDIT: host deploy with roles, git archive
 deploy/bringup.md                                 -- EDIT: server bring-up + cutover runbook
 StartMediaVortex.py                               -- EDIT: no longer launches WebService
-WebService/Main.py                                -- EDIT: deploy-assigned identity; host-aware single instance
+WebService/Main.py                                -- EDIT: identity + gate in Main(); ScanJobs cleanup scoped; app version
 WebService/requirements.txt                       -- EDIT: WinTmp platform marker
 WebService/startup.flow.md                        -- EDIT: server host, identity, systemd lifecycle
 WebService/single-instance-startup.feature.md     -- EDIT: single instance across hosts
+WorkerService/Main.py                             -- EDIT: version resolver delegates to Core/CodeVersion.py
+Core/CodeVersion.py                               -- CREATE: running-sha resolver
+Services/FFmpegService.py                         -- EDIT: FindFFmpegPath/FindFFprobePath static
 Features/ServiceControl/ServiceStatusService.py   -- EDIT: host-aware RegisterServiceStartup
-Features/ServiceControl/ServiceStatusController.py -- EDIT: running-sha endpoint
-.claude/rules/worker-deploy.md                    -- EDIT (operator approval): server role
-memory/KNOWN-ISSUES.md                            -- EDIT: BUG-0064 resolved; file *arr creds + secret key bugs
+Features/ServiceControl/ServiceControlRepository.py -- EDIT: fresh-other-instance query
+Features/ServiceControl/ServiceStatusController.py -- EDIT: GET /api/Version
+Scripts/SQLScripts/AddServiceStatusInstanceName_2026_11_11.py -- CREATE: idempotent migration
+Scripts/SQLScripts/SeedServerStorageRootResolutions.py -- CREATE: idempotent SRR seed
+.claude/schema/snapshot.json                      -- REGENERATE: ServiceStatus.InstanceName
+Tests/Contract/TestFarmServer.py                  -- CREATE: fingerprint, CodeVersion, /api/Version, cross-host gate
+Tests/Contract/TestWorkBucketController.py, TestTranscodingSettingsRoundTrip.py -- EDIT: pass instance name
+DOMAIN.md, .claude/rules/worker-deploy.md         -- EDIT: git archive, server role
+memory/KNOWN-ISSUES.md                            -- EDIT: BUG-0064 resolved; file OOS (b) items
 ```
 
 ### Promotions
@@ -120,7 +224,18 @@ Required when phase advances to VERIFYING. One entry per acceptance criterion. C
 
 Engineering calls made under ambiguity during execution. These live with the directive (not with features/flows) because they describe THIS directive's reasoning, not the vertical's contract.
 
-- `<decision + one-line rationale>`
+- **VMID 237 / IP 10.0.0.49.** 237 is the next free VMID on larry. 10.0.0.48 answers ping but is missing from inventory, so it is skipped.
+- **nginx internal-only.** MediaVortex has no auth and includes an ad-hoc SQL page.
+- **`app_type none`.** `deploy-server.py` owns the app install, not the infra app-deploy step.
+- **No Workers row for the server.** It is not a claim target. It gets SRR rows only (deploy-time path plumbing). There is no SRR GUI for any identity today.
+- **The role is a `--role` argument, not an inventory field.** infra-db `services` has a fixed column list.
+- **The server unit body lives inline in the role table,** matching the worker unit. No separate template file.
+- **`git archive` replaces `SyncSource.py`.** It ships committed content only (about 20 MB, under 1s to build) and never writes into an existing `src-<sha>`.
+- **The fingerprint comes from git blobs at the deployed sha.** Cost: a one-time venv rebuild (torch reinstall) on each worker host at the next fleet deploy.
+- **Rollback = PriorSha of the latest OK server row.** A second rollback toggles back.
+- **Cross-host liveness = heartbeat freshness under 90s, not the Status column.** WebService never writes Running, and it exits on SIGTERM without updating the row.
+- **The single-instance gate lives in `Main()`.** Building the app (tests) has no effect on other instances.
+- **C6 drill: deploy the WinTmp-marker commit.** Its deps install, but it has no `/api/Version`, so verification fails and the deploy reverts to the prior sha.
 
 ---
 
