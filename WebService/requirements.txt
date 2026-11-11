@@ -25,4 +25,4 @@ setproctitle
 # Database
 psycopg2-binary>=2.9.0
 
-WinTmp
+WinTmp ; sys_platform == "win32"
