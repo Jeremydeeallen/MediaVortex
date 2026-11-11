@@ -25,12 +25,8 @@ NetworkDrives = [
     {"Letter": "M", "UncPath": r"\\10.0.0.61\volume1\_video\Adults\Movies", "Required": True},
 ]
 
+# directive: farm-server | # see single-instance-startup.C8 -- the WebService runs only on the farm server (deploy/deploy-server.py); I9 launches its worker only
 Services = [
-    {
-        "Name": "WebService",
-        "Directory": os.path.join(RootDirectory, "WebService"),
-        "MainFile": "Main.py",
-    },
     {
         "Name": "WorkerService",
         "Directory": os.path.join(RootDirectory, "WorkerService"),

@@ -184,7 +184,8 @@ class WorkerServiceApp:
             MaxCpuThreadsEnv = os.environ.get('MEDIAVORTEX_MAX_CPU_THREADS')
             MaxCpuThreads = int(MaxCpuThreadsEnv) if MaxCpuThreadsEnv else None
 
-            Version, BuildInfo = self._ResolveWorkerVersion()
+            from Core.CodeVersion import ResolveCodeVersion
+            Version, BuildInfo = ResolveCodeVersion()
 
             # Register worker (UPSERT - creates or updates)
             self.WorkersRepository.RegisterWorker(
@@ -250,42 +251,6 @@ class WorkerServiceApp:
         if FromPath:
             return FromPath
         return ""
-
-    def _ResolveWorkerVersion(self):
-        # see .claude/rules/worker-lifecycle-invariants.md I3 -- prefer .git/HEAD (same-host = no stamp needed); fall back to VERSION file (remote hosts don't ship .git).
-        from Core.Path.LocalPath import LocalExists, LocalJoin, LocalDirname
-        try:
-            ProjectRoot = LocalDirname(LocalDirname(os.path.abspath(__file__)))
-            BuildInfoFile = LocalJoin(ProjectRoot, "BUILD_INFO")
-            BuildInfo = None
-            if LocalExists(BuildInfoFile):
-                with open(BuildInfoFile, "r", encoding="utf-8") as Fh:
-                    BuildInfo = Fh.read()
-
-            HeadFile = LocalJoin(ProjectRoot, ".git", "HEAD")
-            if LocalExists(HeadFile):
-                with open(HeadFile, "r", encoding="utf-8") as Fh:
-                    Head = Fh.read().strip()
-                if Head.startswith("ref: "):
-                    RefPath = LocalJoin(ProjectRoot, ".git", Head[5:])
-                    if LocalExists(RefPath):
-                        with open(RefPath, "r", encoding="utf-8") as Fh:
-                            Sha = Fh.read().strip()
-                        if Sha:
-                            return (Sha[:64], BuildInfo)
-                elif Head:
-                    return (Head[:64], BuildInfo)
-
-            VersionFile = LocalJoin(ProjectRoot, "VERSION")
-            if LocalExists(VersionFile):
-                with open(VersionFile, "r", encoding="utf-8") as Fh:
-                    Sha = Fh.read().strip()
-                if Sha:
-                    return (Sha[:64], BuildInfo)
-        except Exception as Ex:
-            LoggingService.LogException("Version resolve failed", Ex, "WorkerService", "_ResolveWorkerVersion")
-
-        return ("unknown", None)
 
     # directive: transcode-flow-canonical
     def _LoadCapabilitiesFromDB(self):

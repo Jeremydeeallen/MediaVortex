@@ -16,7 +16,8 @@ Manages the lifecycle and health of microservices (WebService, WorkerService). P
 6. Inter-service commands are queued via the ServiceCommands table (no direct inter-process messaging).
 7. System resource monitoring (CPU usage, memory, disk space) is displayed on the /Status page.
 8. CPU core temperatures are displayed individually when available.
-9. StartMediaVortex.py launches WebService + WorkerService. StopMediaVortex.py gracefully shuts them down.
+9. On the dev box, StartMediaVortex.py launches WorkerService only; the WebService runs on the farm server (`WebService/single-instance-startup.feature.md` C8). StopMediaVortex.py gracefully shuts down what is running locally.
+10. A running service can report the exact code revision it is serving over HTTP, so a deploy can prove the new revision is live.
 
 ## Status
 
@@ -34,7 +35,9 @@ Features/ServiceControl/**
 |------|------|
 | Features/ServiceControl/ServiceControlController.py | Flask Blueprint -- service control endpoints |
 | Features/ServiceControl/StuckJobDetectionService.py | Stuck job detection and reset |
-| StartMediaVortex.py | Launch all services |
+| Features/ServiceControl/ServiceStatusController.py | `/api/Version` (C10) + status endpoints |
+| Features/ServiceControl/ServiceStatusService.py | Startup registration + cross-host single-instance gate |
+| StartMediaVortex.py | Launch local WorkerService |
 | StopMediaVortex.py | Graceful shutdown |
 
 ## Cross-Vertical Contract
@@ -59,7 +62,7 @@ Features/ServiceControl/**
 
 | Class.method | External caller(s) |
 |---|---|
-| ServiceStatusService.RegisterServiceStartup(name, MaxConcurrentJobs) | WebService + WorkerService bootstrap |
+| ServiceStatusService.RegisterServiceStartup(name, InstanceName, MaxConcurrentJobs) | WebService + WorkerService bootstrap; refuses when another host's instance of `name` is fresh |
 | StuckJobDetectionService.DetectAndCleanStuckJobs() | Background thread |
 
 ### HTTP API surface
@@ -71,6 +74,7 @@ Features/ServiceControl/**
 | POST /api/Services/Stop | Stop a service |
 | POST /api/Services/Pause | Pause |
 | POST /api/Services/Resume | Resume |
+| GET /api/Version | `{Success, Message, Data: {Sha, Instance}}` -- the revision this process loaded at boot and its instance name |
 
 ### What is EXPLICITLY NOT a contract
 

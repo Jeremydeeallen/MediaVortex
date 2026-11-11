@@ -11,7 +11,7 @@ class TestWorkBucketController(unittest.TestCase):
     # directive: work-transcode-unified | # see work-bucket.C1
     def setUpClass(cls):
         os.environ.setdefault('MEDIAVORTEX_DB_HOST', '10.0.0.15')
-        cls.App = WebServiceApp().App
+        cls.App = WebServiceApp('ContractTestWebService').App
         cls.App.config['TESTING'] = True
         cls.Client = cls.App.test_client()
 

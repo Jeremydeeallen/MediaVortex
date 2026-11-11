@@ -132,7 +132,8 @@ class ServiceStatusService:
                                       "ServiceStatusService", "IsServiceProcessActuallyRunning")
             return False
 
-    def RegisterServiceStartup(self, ServiceName: str, MaxConcurrentJobs: int = 1) -> bool:
+    # directive: farm-server | # see single-instance-startup.C7 -- InstanceName-aware: a fresh record owned by another instance refuses; the local PID check only judges this instance's own record
+    def RegisterServiceStartup(self, ServiceName: str, InstanceName: str, MaxConcurrentJobs: int = 1) -> bool:
         """
         Combined service startup registration logic.
         Returns True if service is already running (prevent duplicate), False if safe to start.
@@ -147,8 +148,18 @@ class ServiceStatusService:
                                       "ServiceStatusService", "RegisterServiceStartup")
                 return True  # Prevent startup if we can't create record
 
+            Owner = self.ServiceControlRepository.GetServiceOwnership(ServiceName)
+            ForeignOwner = Owner['InstanceName'] is not None and Owner['InstanceName'] != InstanceName
+            if ForeignOwner and Owner['IsFresh']:
+                LoggingService.LogInfo(f"Service {ServiceName} is held by instance {Owner['InstanceName']} with a fresh heartbeat. Current instance: {InstanceName} - PREVENTING DUPLICATE",
+                                     "ServiceStatusService", "RegisterServiceStartup")
+                return True
+
             # Step 2: Check if service is marked as running in database
-            if self.IsServiceRunningInDatabase(ServiceName):
+            if ForeignOwner:
+                LoggingService.LogInfo(f"Service {ServiceName} record held by {Owner['InstanceName']} has a stale heartbeat. Instance {InstanceName} taking over.",
+                                     "ServiceStatusService", "RegisterServiceStartup")
+            elif self.IsServiceRunningInDatabase(ServiceName):
                 # Get the ProcessId from database
                 service_status = self.ServiceControlRepository.GetServiceStatus(ServiceName)
                 process_id = service_status.get('ProcessId', 0) if service_status else 0
@@ -178,6 +189,7 @@ class ServiceStatusService:
             self.ServiceControlRepository.UpdateServiceStatus(ServiceName, {
                 'Status': 'Starting',
                 'ProcessId': current_pid,
+                'InstanceName': InstanceName,
                 'IsProcessing': False,
                 'ActiveJobsCount': 0
             })

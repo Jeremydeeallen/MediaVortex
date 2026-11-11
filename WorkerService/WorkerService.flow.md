@@ -47,18 +47,17 @@ Replaces the former `TranscodeService/Main.py` + `QualityTestService/Main.py` du
 
 ## Version
 
-Each worker stamps `Workers.Version` (and `BuildInfo` when available) at registration so the operator can see what code each worker is running from the Activity page. Resolver (`WorkerService/Main.py::_ResolveWorkerVersion`):
+Each worker stamps `Workers.Version` (and `BuildInfo` when available) at registration so the operator can see what code each worker is running from the Activity page. Resolver (`Core/CodeVersion.py::ResolveCodeVersion`, shared with the WebService's `/api/Version`):
 
-1. Read `<repo>/VERSION` (and `<repo>/BUILD_INFO` when present) -- written by the deploy event for this worker.
-2. Return the literal `"unknown"` when the file is missing or empty.
+1. `<repo>/.git/HEAD` (resolved through its ref) when the tree is a git checkout.
+2. Otherwise `<repo>/VERSION` -- written by the deploy into the versioned source dir.
+3. Otherwise the literal `"unknown"`.
 
-The worker never resolves the version live (no `git rev-parse HEAD`, no environment lookup), so the displayed value cannot drift past the code the process actually loaded at startup.
+`BuildInfo` is `<repo>/BUILD_INFO` when present. The sha is read once at boot from files on disk (no `git` subprocess, no environment lookup), so the displayed value cannot drift past the code the process loaded.
 
-**Who writes `VERSION` + `BUILD_INFO`:**
-- **Bare-metal Linux:** `deploy/deploy-baremetal-worker.py` `StepStampVersion` writes both files to `/opt/mediavortex/src/` on the target via SSH after each rsync.
-- **I9-2024 (local):** `StartWorker.py` runs `Scripts/StampVersion.py` at every launch, so an operator restart picks up the local HEAD without any deploy step.
-
-The bare-metal deploy asserts, after restart, that `Workers.Version` equals the SHA it just stamped. Mismatch fails the deploy with exit code 3.
+**Who writes `VERSION`:**
+- **Bare-metal Linux:** `deploy/deploy-baremetal-worker.py::StepSyncSource` writes it into `/opt/mediavortex/src-<sha16>/` alongside the `git archive` of the deployed sha (`worker-deploy-baremetal.S1`).
+- **I9-2024 (local):** the tree is a git checkout, so `.git/HEAD` wins; `StartWorker.py` also refreshes `VERSION` + `BUILD_INFO` via `Scripts/StampVersion.py`.
 
 The Activity page tile shows the short SHA next to the worker name; the tooltip shows the full SHA + BuildInfo. A fleet-wide mismatch banner (`/api/TeamStatus/Workers/VersionStatus`) appears when two or more enabled workers report different non-unknown versions. See `.claude/rules/worker-lifecycle-invariants.md` I3 for the current contract.
 

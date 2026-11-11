@@ -975,3 +975,30 @@ The pipeline had TWO fallbacks stacked: (1) Strategy classifier silently demoted
 
 ---
 
+### [BUG-0064] Deploy story not cleanly documented -- I9 local-vs-remote split missing; remote-worker deploy has inter-worker dependencies; two scripts where one SOLID script belongs | resolved: 2026-11-11
+**Date:** 2026-06-23 | **Area:** deploy
+
+**What breaks:** The deploy contract conflates two fundamentally different operations: (a) bringing remote worker hosts (bare-metal Linux / Windows SMB) online, and (b) cycling local I9 WebService + WorkerService processes that run directly from the live source tree. Today both go through the deploy/ surface, references to "deploy I9" exist in flow docs + bringup, and there's no single operator-facing script that captures the policy. Three concrete acceptance criteria from operator:
+
+1. **Local I9 services have NO deploy.** They are the active codebase -- code changes apply on restart. Operator-facing command starts both services from their respective venvs (`venv/` for the worker, `WebService/venv/` for the WebService -- see memory `feedback_webservice_venv_drift.md`), **WebService ALWAYS first online**, and **must check for any running WorkerService process on I9 and stop it before starting a new one** (see memory `feedback_one_i9_worker_instance.md` + `feedback_worker_restart_protocol.md`). No SyncSource, no Task Scheduler registration.
+
+2. **Remote worker deploys are independent.** Deploying larry/wakko/dot or any future host MUST NOT depend on the state of any other worker. Today `deploy-fleet.py`-style orchestration creates cross-worker dependencies (one host's deploy can stall waiting on another's heartbeat). Each remote deploy is a self-contained unit; failure on host A does not block or roll back host B.
+
+3. **Single SOLID deploy script.** Today there is `deploy-baremetal-worker.py` plus a fleet wrapper. Collapse to ONE entry-point script with a Strategy pattern per host shape (bare-metal Linux / I9-local NO-OP). SRP: per-shape strategy owns its bring-up steps; the entry script owns CLI parsing + inventory lookup + verification polling only. Constructor-DI throughout. 100% clean code -- no scripts-shaped-as-bash-pipelines, no shared mutable state, no copy-paste between OS branches.
+
+**Violates:** `.claude/rules/worker-deploy.md` (SoT for deploy behavior). Also touches:
+- `feature-docs.md` / `flow-docs.md` -- the I9-local-vs-remote split must be reflected in feature + flow contracts
+- `scope-discipline.md` -- a perfect-implementation directive cannot leave the I9 case smudged across "Code updates on I9-2024" prose
+
+**Look first:**
+- `.claude/rules/worker-deploy.md` -- the deploy rule; the I9-local (no deploy path, just start/stop) contract belongs here
+- `deploy/bringup.md` -- the runbook should route I9 to a local start command, not a deploy
+- `deploy/deploy-baremetal-worker.py` + `deploy/deploy-fleet.py` -- audit for inter-worker dependencies
+- `StartMediaVortex.py` -- already exists as the local lifecycle entry point; the I9-local "deploy" probably collapses into this
+- The two host-shape strategies that need to exist: bare-metal Linux (larry, wakko, dot) and the I9-local NO-OP
+
+**Resolution (2026-11-11, directive `farm-server`):** each criterion is met or superseded by a later operator decision; no code was written for this bug alone.
+
+1. I9 local-start policy -- superseded. The WebService no longer runs on I9; it runs on the farm server and is released by `py deploy/deploy-server.py`. `StartMediaVortex.py` on I9 starts only the local WorkerService.
+2. Independent remote deploys -- met. `.claude/rules/worker-deploy.md` domain rule 2 (per-worker independence): each worker gates only on its own host's sync; one host's drain or failure does not block another.
+3. Single strategy script -- superseded by the operator's 2026-08-02 deploy rules: zero-parameter `deploy-fleet.py` plus per-worker `deploy-worker.py` for recovery. Host shapes are roles of one sync script (`deploy-baremetal-worker.py --role worker|server`), not separate scripts.

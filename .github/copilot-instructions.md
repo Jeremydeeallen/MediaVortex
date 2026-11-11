@@ -5,14 +5,14 @@ MediaVortex is a media transcoding and management system built with Python/Flask
 ## Commands
 
 ```bash
-# Start all services (web + worker)
+# Start the local WorkerService
 py StartMediaVortex.py
 
-# Stop all services
+# Stop local services
 py StopMediaVortex.py
 
-# Start only the web service (Flask on port 5000)
-py WebService/Main.py
+# Release origin/main to the farm-server WebService (port 5000); --rollback reverts
+py deploy/deploy-server.py
 
 # Run tests
 py -m pytest Tests/Contract/
@@ -59,7 +59,7 @@ Separate processes coordinated via database records:
 - **WebService** -- Flask web app (API + UI), port 5000
 - **WorkerService** -- Unified worker: transcoding, VMAF quality testing, and file scanning. Each worker reads capability flags (TranscodeEnabled, QualityTestEnabled, ScanEnabled) and status (Online/Draining/Offline) from its Workers table row.
 
-`ServiceLifecycleManager` orchestrates startup/shutdown. `StartMediaVortex.py` launches WebService + WorkerService.
+`ServiceLifecycleManager` orchestrates startup/shutdown. `StartMediaVortex.py` launches the local WorkerService; the WebService runs once, on the farm server, released by `deploy/deploy-server.py`.
 
 ## Core Data Flow
 

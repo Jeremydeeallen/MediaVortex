@@ -14,7 +14,7 @@ except Exception:
 
 from deploy.common import (
     MediaVortexRoot, HostFromWorkerName, IsWindowsLocal,
-    GitHead, GitOriginMain, Sh,
+    GitHead, GitOriginMain, Sh, ServerDeployTarget,
 )
 
 
@@ -83,7 +83,8 @@ def Main() -> int:
     from Core.Database.DatabaseService import DatabaseService
     Db = DatabaseService()
 
-    _PriorShaRow = Db.ExecuteQuery("SELECT NewSha FROM DeployHistory WHERE Outcome='OK' ORDER BY Id DESC LIMIT 1")
+    # directive: farm-server | # see worker-deploy-baremetal.S7 -- server deploys own their own PriorSha chain (deploy-server.py); fleet rollback base ignores them
+    _PriorShaRow = Db.ExecuteQuery("SELECT NewSha FROM DeployHistory WHERE Outcome='OK' AND HostsAttempted IS DISTINCT FROM %s ORDER BY Id DESC LIMIT 1", (ServerDeployTarget,))
     _PriorSha = _PriorShaRow[0].get('newsha') if _PriorShaRow else None
     Db.ExecuteNonQuery(
         "INSERT INTO DeployHistory (StartedAt, PriorSha, NewSha, Outcome) "

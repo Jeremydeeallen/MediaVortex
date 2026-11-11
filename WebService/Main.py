@@ -25,19 +25,9 @@ from Services.LoggingService import LoggingService
 class WebServiceApp:
     """Main Flask application for MediaVortex WebService."""
     
-    def __init__(self):
-        # Single-instance startup: kill any prior WebService process before
-        # claiming port 5000. See WebService/single-instance-startup.feature.md
-        # and WebService/startup.flow.md.
-        self._SupersedeExistingInstance()
-
-        # Final safety net -- after the supersede, the prior PID record (if any)
-        # should be stale and RegisterServiceStartup will clean it up. If a new
-        # process somehow appeared in the small window between kill and here,
-        # refuse to start.
-        if self.PrivateIsServiceAlreadyRunning():
-            print("ERROR: WebService is already running. Preventing duplicate instance.")
-            sys.exit(1)
+    # directive: farm-server | # see startup.ST0 -- identity is deploy-assigned (MEDIAVORTEX_WORKER_NAME); the single-instance gate runs in Main() before construction
+    def __init__(self, InstanceName: str):
+        self.InstanceName = InstanceName
             
         # Set template and static folders to parent directory
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,6 +38,9 @@ class WebServiceApp:
                         template_folder=template_dir,
                         static_folder=static_dir)
         self.App.config['SECRET_KEY'] = 'mediavortex-secret-key-2024'
+        from Core.CodeVersion import ResolveCodeVersion
+        self.App.config['CodeSha'] = ResolveCodeVersion()[0]
+        self.App.config['InstanceName'] = InstanceName
 
         self._StaticDir = static_dir
         self.App.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000
@@ -121,24 +114,21 @@ class WebServiceApp:
         self.CurrentStatus = "Stopped"  # Track current service status
 
         # Load worker config and initialize WorkerContext singleton
-        import socket
         import platform as platform_mod
         try:
-            from Repositories.DatabaseManager import DatabaseManager
             from Core.WorkerContext import WorkerContext
+            from Services.FFmpegService import FFmpegService
             # directive: transcode-flow-canonical -- fail-loud on schema drift before we start serving
             from Core.Database.SchemaChecker import SchemaChecker
             SchemaChecker().AssertMatches()
-            WorkerName = socket.gethostname()
+            WorkerName = InstanceName
             WorkerPlatform = platform_mod.system().lower()
-            db_init = DatabaseManager()
-            WorkerConfig = db_init.GetWorkerConfig(WorkerName) or {}
-            # see startup.ST4
+            # see startup.ST4 | directive: farm-server -- the WebService has no Workers row; ffmpeg/ffprobe are discovered (bundled FFmpegMaster first, PATH second)
             WorkerContext.Initialize(
                 WorkerName=WorkerName,
                 Platform=WorkerPlatform,
-                FFmpegPath=WorkerConfig.get('FFmpegPath') or WorkerConfig.get('ffmpegpath'),
-                FFprobePath=WorkerConfig.get('FFprobePath') or WorkerConfig.get('ffprobepath'),
+                FFmpegPath=FFmpegService.FindFFmpegPath(),
+                FFprobePath=FFmpegService.FindFFprobePath(),
             )
             LoggingService.LogInfo(f"WorkerContext initialized for {WorkerName}", "WebService", "__init__")
         except Exception as e:
@@ -161,14 +151,16 @@ class WebServiceApp:
             db_manager = DatabaseManager()
 
             # Mark any running/pending scans as stopped (they're from a previous session)
+            # directive: farm-server -- owner-scoped: only scans this WebService instance started (claim-authority)
             cleanup_query = """
                 UPDATE ScanJobs
                 SET Status = 'Stopped',
                     ErrorMessage = 'Application restarted',
                     EndTime = NOW()
                 WHERE Status IN ('Running', 'Pending')
+                  AND WorkerName = %s
             """
-            db_manager.DatabaseService.ExecuteNonQuery(cleanup_query)
+            db_manager.DatabaseService.ExecuteNonQuery(cleanup_query, (InstanceName,))
             LoggingService.LogInfo("Cleaned up stale scan jobs from previous session", "WebService", "__init__")
 
             # Run database migrations
@@ -221,89 +213,6 @@ class WebServiceApp:
         thread.start()
         LoggingService.LogInfo("Started Jellyfin auto-sync background thread", "WebService", "_start_jellyfin_sync")
 
-    def _SupersedeExistingInstance(self) -> None:
-        """Kill any prior WebService process recorded in ServiceStatus, then wait
-        for port 5000 to release. No-op if no prior PID or the PID is stale.
-
-        Validates the target process before killing -- if PID was recycled to a
-        non-WebService process, skips the kill (no false positives).
-        """
-        try:
-            import socket as _socket
-            import psutil
-            from Repositories.DatabaseManager import DatabaseManager
-
-            current_pid = os.getpid()
-            db = DatabaseManager()
-            status = db.GetServiceStatus("WebService")
-            prior_pid = status.get('ProcessId') if status else None
-            if not prior_pid or prior_pid == current_pid:
-                return
-
-            try:
-                proc = psutil.Process(prior_pid)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                print(f"Supersede: prior WebService PID {prior_pid} not running. Proceeding.")
-                return
-
-            # Confirm this PID is actually a WebService -- guard against PID recycle.
-            try:
-                cmdline = " ".join(proc.cmdline() or [])
-                proc_name = (proc.name() or "").lower()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                cmdline, proc_name = "", ""
-            looks_like_webservice = (
-                "webservice" in cmdline.lower()
-                or "main.py" in cmdline.lower() and "webservice" in cmdline.lower()
-                or proc_name == "webservice"
-            )
-            if not looks_like_webservice:
-                print(f"Supersede: PID {prior_pid} is not WebService ('{proc_name}' / '{cmdline[:80]}'). Skipping kill.")
-                return
-
-            print(f"Supersede: terminating prior WebService PID {prior_pid} ('{proc_name}')...")
-            try:
-                proc.terminate()
-                proc.wait(timeout=5)
-                print(f"Supersede: PID {prior_pid} exited cleanly.")
-            except psutil.TimeoutExpired:
-                print(f"Supersede: PID {prior_pid} did not exit in 5s; force killing.")
-                proc.kill()
-                try:
-                    proc.wait(timeout=3)
-                except psutil.TimeoutExpired:
-                    pass
-
-            # Wait up to 10s for port 5000 to release.
-            deadline = time.time() + 10
-            while time.time() < deadline:
-                s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-                s.settimeout(0.5)
-                try:
-                    rc = s.connect_ex(("127.0.0.1", 5000))
-                finally:
-                    s.close()
-                if rc != 0:
-                    print(f"Supersede: port 5000 released. Proceeding.")
-                    return
-                time.sleep(0.5)
-            print("ERROR: port 5000 still bound after 10s; another process holds it. Exiting.")
-            sys.exit(1)
-        except Exception as e:
-            # Don't let supersede errors block startup. The downstream
-            # RegisterServiceStartup check will still gate on real duplicates.
-            print(f"Supersede: non-fatal error -- {e}. Continuing with normal duplicate check.")
-
-    def PrivateIsServiceAlreadyRunning(self) -> bool:
-        """Check if another WebService instance is already running using ServiceStatusService."""
-        try:
-            from Services.ServiceStatusService import ServiceStatusService
-            status_service = ServiceStatusService()
-            return status_service.RegisterServiceStartup("WebService", MaxConcurrentJobs=1)
-        except Exception as e:
-            LoggingService.LogException("Exception checking for existing WebService instances", e, "WebService", "PrivateIsServiceAlreadyRunning")
-            return True  # Prevent startup on error
-    
     def _register_path_scope_middleware(self):
         """Pin a StorageRoots snapshot per request -- str(path)/CanonicalDisplay/GetPrefixMap reuse one DB read."""
         # directive: path-class-perfection | # see path.C25
@@ -720,6 +629,95 @@ class WebServiceApp:
         except Exception as e:
             LoggingService.LogException("Error during WebService shutdown", e, "WebService", "Shutdown")
 
+# directive: farm-server | # see startup.ST0 -- WebService identity is deploy-assigned like workers (server: /etc/mediavortex/server.env)
+def _ResolveInstanceName() -> str:
+    Name = os.environ.get('MEDIAVORTEX_WORKER_NAME')
+    if not Name or not Name.strip():
+        raise RuntimeError(
+            "MEDIAVORTEX_WORKER_NAME is unset. The WebService instance name MUST be deploy-assigned "
+            "(farm server: EnvironmentFile=/etc/mediavortex/server.env). See .claude/rules/claim-authority.md."
+        )
+    return Name.strip()
+
+
+# directive: farm-server | # see startup.ST1 -- same-instance supersede only; a record owned by another instance is the gate's concern
+def _SupersedeExistingInstance(InstanceName: str) -> None:
+    try:
+        import socket as _socket
+        import psutil
+        from Repositories.DatabaseManager import DatabaseManager
+
+        current_pid = os.getpid()
+        db = DatabaseManager()
+        status = db.GetServiceStatus("WebService")
+        if not status or status.get('InstanceName') != InstanceName:
+            return
+        prior_pid = status.get('ProcessId')
+        if not prior_pid or prior_pid == current_pid:
+            return
+
+        try:
+            proc = psutil.Process(prior_pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            print(f"Supersede: prior WebService PID {prior_pid} not running. Proceeding.")
+            return
+
+        # Confirm this PID is actually a WebService -- guard against PID recycle.
+        try:
+            cmdline = " ".join(proc.cmdline() or [])
+            proc_name = (proc.name() or "").lower()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            cmdline, proc_name = "", ""
+        looks_like_webservice = (
+            "webservice" in cmdline.lower()
+            or "main.py" in cmdline.lower() and "webservice" in cmdline.lower()
+            or proc_name == "webservice"
+        )
+        if not looks_like_webservice:
+            print(f"Supersede: PID {prior_pid} is not WebService ('{proc_name}' / '{cmdline[:80]}'). Skipping kill.")
+            return
+
+        print(f"Supersede: terminating prior WebService PID {prior_pid} ('{proc_name}')...")
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+            print(f"Supersede: PID {prior_pid} exited cleanly.")
+        except psutil.TimeoutExpired:
+            print(f"Supersede: PID {prior_pid} did not exit in 5s; force killing.")
+            proc.kill()
+            try:
+                proc.wait(timeout=3)
+            except psutil.TimeoutExpired:
+                pass
+
+        # Wait up to 10s for port 5000 to release.
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            try:
+                rc = s.connect_ex(("127.0.0.1", 5000))
+            finally:
+                s.close()
+            if rc != 0:
+                print(f"Supersede: port 5000 released. Proceeding.")
+                return
+            time.sleep(0.5)
+        print("ERROR: port 5000 still bound after 10s; another process holds it. Exiting.")
+        sys.exit(1)
+    except Exception as e:
+        # Supersede errors never block startup; the RegisterServiceStartup gate still refuses real duplicates.
+        print(f"Supersede: non-fatal error -- {e}. Continuing with normal duplicate check.")
+
+
+# directive: farm-server | # see startup.ST6 -- refuses when this instance's prior PID is alive OR another instance holds a fresh heartbeat
+def _RefuseIfAlreadyRunning(InstanceName: str) -> None:
+    from Services.ServiceStatusService import ServiceStatusService
+    if ServiceStatusService().RegisterServiceStartup("WebService", InstanceName, MaxConcurrentJobs=1):
+        print("ERROR: WebService is already running. Preventing duplicate instance.")
+        sys.exit(1)
+
+
 def SignalHandler(signum, frame):
     """Handle shutdown signals immediately."""
     print("\nWebService shutting down...")
@@ -731,13 +729,17 @@ def SignalHandler(signum, frame):
         pass
     os._exit(0)
 
+# directive: farm-server | # see startup.ST0 -- identity, supersede and gate all run before the app is constructed
 def Main():
     """Main entry point for WebService."""
     try:
         LoggingService.LogInfo("Starting WebService...", "WebService", "main")
         
         # Initialize the application
-        app = WebServiceApp()
+        InstanceName = _ResolveInstanceName()
+        _SupersedeExistingInstance(InstanceName)
+        _RefuseIfAlreadyRunning(InstanceName)
+        app = WebServiceApp(InstanceName)
         Main.app = app  # Store reference for signal handler
         
         # Register signal handlers

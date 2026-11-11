@@ -140,6 +140,14 @@ class ServiceControlRepository(BaseRepository):
             LoggingService.LogException("Exception getting service status", e, "ServiceControlRepository", "GetServiceStatus")
             return None
 
+    # directive: farm-server | # see single-instance-startup.C7 -- owner + heartbeat freshness judged on the DB clock so hosts with skewed clocks agree
+    def GetServiceOwnership(self, ServiceName: str) -> Dict[str, Any]:
+        Rows = self.ExecuteQuery(
+            "SELECT InstanceName, UpdatedAt > NOW() - INTERVAL '90 seconds' AS IsFresh FROM ServiceStatus WHERE ServiceName = %s",
+            (ServiceName,),
+        )
+        return Rows[0]
+
     # ─── ServiceCommands Methods ─────────────────────────────────────────
 
     def CreateServiceCommand(self, CommandData: Dict[str, Any]) -> int:

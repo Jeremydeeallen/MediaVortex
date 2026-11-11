@@ -124,6 +124,9 @@ Amplification: `tv-tier1-classifier-pin` directive (2026-08-25) retiered 188 TV 
 
 ### contract-tests
 
+- BUG-0116 | `TestDeployIdempotenceInvariants::test_systemd_unit_uses_per_instance_env_file` reads `deploy/baremetal/mediavortex-worker@.service`, deleted 2026-08-02 (eb8ddea3) when the unit became rendered by `_WorkerUnitBody`; the test has failed with FileNotFoundError since | criterion: .claude/rules/claim-authority.md (worker identity is deploy-assigned) | 2026-11-11
+  First place to look: assert on `_WorkerUnitBody(...)` output in `deploy/deploy-baremetal-worker.py` (contains `EnvironmentFile=/etc/mediavortex/instance-%i.env`) instead of the deleted file.
+
 ### [BUG-0092] Contract tests leak Running TranscodeQueue rows on tearDown; abandonment sweeper does not catch them
 **Date:** 2026-08-22 | **Area:** contract-tests
 
@@ -150,6 +153,11 @@ Amplification: `tv-tier1-classifier-pin` directive (2026-08-25) retiered 188 TV 
 ---
 
 ### deploy
+
+- BUG-0109 | `deploy/deploy-fleet.py` never closes its DeployHistory row: every fleet deploy stays `Outcome='RUNNING'` with CompletedAt, HostsAttempted and HostsSucceeded NULL | criterion: .claude/rules/worker-deploy.md (DeployHistory audit) | 2026-11-11
+  Repro: run `py deploy/deploy-fleet.py`, then `SELECT Id, Outcome, CompletedAt, HostsAttempted FROM DeployHistory ORDER BY Id DESC LIMIT 5`.
+  Evidence: 2026-11-11, rows 66-75 are all `RUNNING` with CompletedAt and HostsAttempted NULL. The INSERT has no `RETURNING`, so `Db.GetLastInsertId()` returns 0 and `_FinishHist` returns before its UPDATE. Impact: no fleet row ever reaches `Outcome='OK'`, so the fleet `PriorSha` chain is never advanced by a fleet run. The rule's "next fleet start sweeps RUNNING rows to KILLED" has no code. Server releases (`deploy/deploy-server.py`) use `ExecuteReturning` and close their rows.
+  First place to look: `deploy/deploy-fleet.py` INSERT + `GetLastInsertId()` at the top of the run; copy `INSERT ... RETURNING Id` via `ExecuteReturning` from `deploy/deploy-server.py`.
 
 ### disposition
 
@@ -694,32 +702,6 @@ The principle: each pick decision must either (a) be a single explicit rule with
 **Decision needed at fix time:** does the English-default rule sit BEFORE or AFTER `disposition.default` from source? The user's phrasing ("audio should default to english if it has multiple languages") suggests English wins over source disposition. Confirm during `/t`.
 
 **Fix with:** `/t BUG-0065`.
-
----
-
-### [BUG-0064] Deploy story not cleanly documented -- I9 local-vs-remote split missing; remote-worker deploy has inter-worker dependencies; two scripts where one SOLID script belongs
-**Date:** 2026-06-23 | **Area:** deploy
-
-**What breaks:** The deploy contract conflates two fundamentally different operations: (a) bringing remote worker hosts (bare-metal Linux / Windows SMB) online, and (b) cycling local I9 WebService + WorkerService processes that run directly from the live source tree. Today both go through the deploy/ surface, references to "deploy I9" exist in flow docs + bringup, and there's no single operator-facing script that captures the policy. Three concrete acceptance criteria from operator:
-
-1. **Local I9 services have NO deploy.** They are the active codebase -- code changes apply on restart. Operator-facing command starts both services from their respective venvs (`venv/` for the worker, `WebService/venv/` for the WebService -- see memory `feedback_webservice_venv_drift.md`), **WebService ALWAYS first online**, and **must check for any running WorkerService process on I9 and stop it before starting a new one** (see memory `feedback_one_i9_worker_instance.md` + `feedback_worker_restart_protocol.md`). No SyncSource, no Task Scheduler registration.
-
-2. **Remote worker deploys are independent.** Deploying larry/wakko/dot or any future host MUST NOT depend on the state of any other worker. Today `deploy-fleet.py`-style orchestration creates cross-worker dependencies (one host's deploy can stall waiting on another's heartbeat). Each remote deploy is a self-contained unit; failure on host A does not block or roll back host B.
-
-3. **Single SOLID deploy script.** Today there is `deploy-baremetal-worker.py` plus a fleet wrapper. Collapse to ONE entry-point script with a Strategy pattern per host shape (bare-metal Linux / I9-local NO-OP). SRP: per-shape strategy owns its bring-up steps; the entry script owns CLI parsing + inventory lookup + verification polling only. Constructor-DI throughout. 100% clean code -- no scripts-shaped-as-bash-pipelines, no shared mutable state, no copy-paste between OS branches.
-
-**Violates:** `.claude/rules/worker-deploy.md` (SoT for deploy behavior). Also touches:
-- `feature-docs.md` / `flow-docs.md` -- the I9-local-vs-remote split must be reflected in feature + flow contracts
-- `scope-discipline.md` -- a perfect-implementation directive cannot leave the I9 case smudged across "Code updates on I9-2024" prose
-
-**Look first:**
-- `.claude/rules/worker-deploy.md` -- the deploy rule; the I9-local (no deploy path, just start/stop) contract belongs here
-- `deploy/bringup.md` -- the runbook should route I9 to a local start command, not a deploy
-- `deploy/deploy-baremetal-worker.py` + `deploy/deploy-fleet.py` -- audit for inter-worker dependencies
-- `StartMediaVortex.py` -- already exists as the local lifecycle entry point; the I9-local "deploy" probably collapses into this
-- The two host-shape strategies that need to exist: bare-metal Linux (larry, wakko, dot) and the I9-local NO-OP
-
-**Fix with:** `/t BUG-0064`.
 
 ---
 
@@ -1912,6 +1894,38 @@ Tier 2 (upstream, cross-vertical): a previous transcode wrote a corrupt `-mv.mp4
   Repro: encode Spider-Man Brand New Day (MediaFile 751016) at Tier 1 with the production wakko command (`-hwaccel qsv -hwaccel_output_format qsv ... -c:v av1_qsv -preset 1 -b:v 1000k -maxrate:v 2000k -bufsize:v 2000k -extbrc 1 -look_ahead 1 -look_ahead_depth 8 -vf scale_qsv=w=1280:h=-1`) and the production NVENC command on I9; VMAF both against the original. Test files + logs: `C:\MediaVortex\spiderman_tier1_test\` (clip tests in `isolate\`); scripts in the 2026-10-14 session scratchpad.
   Evidence: full film (208,607 frames): NVENC VMAF 96.4 at encoded resolution / 92.9 upscaled-to-source (TV view); QSV 84.1 / 77.0; sizes 1.443 vs 1.451 GB. Same 60-second stream-copied clip on wakko: production 85.4; same hardware resize at 20 Mbps 89.7; software resize (`-vf scale=w=1280:h=-2,format=p010le`, no qsv hwaccel) + same av1_qsv 1000k 95.7 at the same size. Brightness/colour levels identical across versions; gap uniform across the film (83-86 per tenth). Not proven visible: frame at 41:00 looks as sharp as the original; suspected resize sampling difference that VMAF punishes. Impact: every wakko Tier 1 downscale; wakko quality-gate VMAF understated. Mitigation 2026-10-14: `wakko-worker-1` `TranscodeEnabled=FALSE` (Remux/Audio still on); set back to TRUE when fixed. Side note: pipeline VMAF scores at the encoded resolution, so it never measures downscale loss.
   First place to look: QSV video slot -- `WorkerEncoderResolver.QSV_OVERRIDES` and the QSV branch of `VideoSlot` that emits `-hwaccel qsv -hwaccel_output_format qsv` and `scale_qsv`. Measure full-film encode speed + VMAF with software resize before changing it.
+
+---
+
+### service-control
+
+- BUG-0110 | WebService heartbeat is not owner-scoped: any constructed WebService refreshes the owning instance's `ServiceStatus` row | criterion: WebService/single-instance-startup.feature.md#C7 | 2026-11-11
+  Repro: stop the farm server and wait 90s; run `py -m pytest Tests/Contract/TestWorkBucketController.py` (constructs `WebServiceApp('ContractTestWebService')`); start the server within 90s: it is refused.
+  Evidence: `WebService/Main.py` `PrivateUpdateServiceStatus` runs `UPDATE ServiceStatus SET HealthStatus=..., UpdatedAt=NOW() WHERE ServiceName='WebService'` with no InstanceName filter, at app construction and every 30s. Errs safe (false refusal, never two owners).
+  First place to look: `PrivateUpdateServiceStatus` and `ServiceControlRepository.UpdateServiceStatus`; scope the heartbeat to `InstanceName = <this instance>`.
+- BUG-0111 | A WebService that lost ownership keeps running: two WebServices can serve after a stall | criterion: WebService/single-instance-startup.feature.md#C7 | 2026-11-11
+  Repro: freeze the farm server's WebService for more than 90s (e.g. `kill -STOP <pid>`), start a WebService under another instance name (takes ownership), resume the first (`kill -CONT`): both serve and both run the background runners.
+  Evidence: ownership is checked once at startup (`_RefuseIfAlreadyRunning`); `PrivateServiceStatusLoop` and `PrivateStatusPollingLoop` never re-read `InstanceName`. Unlikely on the farm (systemd restarts a dead process; a live one keeps its heartbeat fresh), but the "at most one WebService" guarantee is startup-only.
+  First place to look: `PrivateServiceStatusLoop` -- exit when `ServiceStatus.InstanceName` is no longer this instance.
+- BUG-0112 | `/Status` graceful stop sends SIGTERM to `ServiceStatus.ProcessId` on the WebService's own host, whichever host recorded the PID | criterion: Features/ServiceControl/ServiceControl.feature.md#C6 | 2026-11-11
+  Repro: on the farm server UI, POST graceful stop for `QualityTestService` (row holds ProcessId 2392 from 2026-01-26); the server signals its local PID 2392, whatever process that is.
+  Evidence: `ServiceControlController.PrivateGracefulStopService` calls `os.kill(process_id, SIGTERM)` with the PID from the DB row. With the WebService on the farm server, PIDs recorded on I9 or workers are foreign. C6 says inter-service commands go through the DB, not direct process messaging.
+  First place to look: `Features/ServiceControl/ServiceControlController.py` `PrivateGracefulStopService`; route through the `Status='GracefulStop'` DB write only.
+- BUG-0113 | WebService startup swallows schema-drift and WorkerContext/ffmpeg-discovery failures, so a broken server release still passes deploy verification | criterion: .claude/rules/fail-loud.md | 2026-11-11
+  Repro: release a commit whose schema snapshot mismatches the DB (or a host without ffmpeg); the WebService logs a warning, serves `/api/Version`, and `deploy-server.py` reports success.
+  Evidence: `WebServiceApp.__init__` wraps `SchemaChecker().AssertMatches()` + `WorkerContext.Initialize(... FFmpegService.FindFFmpegPath() ...)` in `try/except Exception` + `LogWarning`. Fix constraint: `Tests/Contract/TestWorkBucketController.py` and `TestTranscodingSettingsRoundTrip.py` construct `WebServiceApp` in one pytest process, and a second `WorkerContext.Initialize` raises "already initialized" -- today swallowed by the same block.
+  First place to look: `WebService/Main.py` `WebServiceApp.__init__` WorkerContext block (`startup.flow.md` ST4).
+
+---
+
+### security
+
+- BUG-0114 | Plaintext service credentials committed in tracked `docker-compose.yml` | criterion: none (operator credential hygiene) | 2026-11-11
+  Evidence: `docker-compose.yml` sets `POSTGRES_PASSWORD` (L9), `PROWLARR_PASSWORD` (L26), `NZBGET_PASS` (L61), `SONARR_PASSWORD` (L80), `RADARR_PASSWORD` (L100) as literals; the file is in git history. The homelab MediaVortex DB password is documented in CLAUDE.md by design; the *arr / NZBGet passwords are not.
+  First place to look: move values to an untracked `.env` (compose `${VAR}` substitution) or Vaultwarden via `infrastructure/terraform/secrets.py`; rotate the *arr / NZBGet passwords since history keeps the old values.
+- BUG-0115 | Hard-coded Flask `SECRET_KEY` | criterion: none (session-cookie integrity) | 2026-11-11
+  Evidence: `WebService/Main.py` `WebServiceApp.__init__` sets `self.App.config['SECRET_KEY']` to a literal string in source; anyone with repo access can forge Flask session cookies for the farm server UI.
+  First place to look: have the server role provision a random key once (preserved across deploys; `server.env` is rewritten each deploy today) and fail loud when unset.
 
 ---
 

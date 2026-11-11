@@ -2,7 +2,7 @@
 
 **Slug:** transcode
 
-Entry point: `StartMediaVortex.py` (all services) or individual service scripts.
+Entry point: `StartMediaVortex.py` (dev-box WorkerService), the farm server's `mediavortex-server.service` (WebService), or individual service scripts.
 
 ## Domain Decisions
 
@@ -505,10 +505,10 @@ TranscodeAttempt.FileReplaced -- set at REPLACE, prevents re-replacement
 
 | Service | Process | Port | Role |
 |---------|---------|------|------|
-| WebService | `WebService/Main.py` | 5000 | Flask API + UI. Handles stages 1-4 and 7 |
+| WebService | `WebService/Main.py` | 5000 | Flask API + UI. Handles stages 1-4 and 7. One instance, on the farm server (`mediavortex-server.service`) |
 | WorkerService | `WorkerService/Main.py` | -- | Stages 5-6. Transcode, VMAF, and scanning based on per-worker capability flags |
 
-Coordinated via `ServiceLifecycleManager` in `StartMediaVortex.py`.
+The WebService is released with `deploy/deploy-server.py` (`deploy/worker-deploy-baremetal.flow.md` ST7); workers with `deploy/deploy-fleet.py`. On the dev box `StartMediaVortex.py` starts WorkerService only.
 
 ## SystemSettings Infrastructure
 
@@ -615,11 +615,9 @@ See `WorkerService/WorkerService.flow.md` `## Boot Recovery (ST5)`.
 
 ### ServiceLifecycleManager
 
-`StartMediaVortex.py` uses `ServiceLifecycleManager` to start both services:
-- WebService (Flask, port 5000) -- in-process
-- WorkerService -- separate process via subprocess
+`StartMediaVortex.py` uses `ServiceLifecycleManager` to start the dev-box WorkerService as a separate process. The WebService is a systemd unit on the farm server, never started by this launcher (`WebService/single-instance-startup.feature.md` C8).
 
-Each service registers in `ServiceStatus` table with ProcessId, enabling cross-service health monitoring.
+Each service registers in `ServiceStatus` table with ProcessId and InstanceName, enabling cross-service health monitoring and the cross-host single-instance gate.
 
 ### Worker Registration (Distributed)
 

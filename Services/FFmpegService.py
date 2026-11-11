@@ -56,8 +56,9 @@ class FFmpegService:
             FFmpegService._logged_initialization = True
         self.SystemSettingsRepository = SystemSettingsRepositoryInstance or SystemSettingsRepository()
     
-    # directive: path-schema-migration | # see path.S8
-    def FindFFmpegPath(self) -> Optional[str]:
+    # directive: farm-server | # see path.S8 -- static so the WebService can discover binaries before WorkerContext exists
+    @staticmethod
+    def FindFFmpegPath() -> Optional[str]:
         """Find FFmpeg executable path."""
         try:
             # Use local project FFmpeg from FFmpegMaster\bin folder
@@ -75,8 +76,9 @@ class FFmpegService:
             LoggingService.LogException("Error finding FFmpeg path", e, 'FindFFmpegPath', 'FFmpegService')
             return None
     
-    # directive: path-schema-migration | # see path.S8
-    def FindFFprobePath(self) -> Optional[str]:
+    # directive: farm-server | # see path.S8
+    @staticmethod
+    def FindFFprobePath() -> Optional[str]:
         """Find FFprobe executable path."""
         try:
             # Use local project FFprobe from FFmpegMaster\bin folder

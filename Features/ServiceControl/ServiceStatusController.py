@@ -3,7 +3,7 @@ Service Status Controller
 Handles monitoring and management of microservices
 """
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, current_app
 from typing import Dict, Any, List
 from Repositories.DatabaseManager import DatabaseManager
 from Core.Logging.LoggingService import LoggingService
@@ -263,3 +263,13 @@ def GetSystemResources():
         error_msg = f"Exception getting system resources: {str(e)}"
         LoggingService.LogException(error_msg, e, "ServiceStatusController", "GetSystemResources")
         return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
+
+
+@ServiceStatusBlueprint.route('/Version', methods=['GET'])
+# directive: farm-server | # see startup.S5 -- the sha the running process loaded at startup; deploy verification reads this
+def GetCodeVersion():
+    return jsonify({
+        'Success': True,
+        'Message': 'Running code version',
+        'Data': {'Sha': current_app.config['CodeSha'], 'Instance': current_app.config['InstanceName']},
+    }), 200

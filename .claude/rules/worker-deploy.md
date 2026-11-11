@@ -15,7 +15,7 @@ Set by the operator (2026-08-02); do NOT re-derive.
 
 ```
 /opt/mediavortex/
-  src-<sha_current>/                    <-- rsync target for current deploy
+  src-<sha_current>/                    <-- git archive of the deployed sha + VERSION
   src-<sha_prior>/                      <-- older; draining workers still cwd'd here
   host-venv-<fp_current>/               <-- per-fingerprint venv (installed if fingerprint changed)
   host-venv-<fp_prior>/                 <-- older; draining workers still bound here
@@ -26,16 +26,18 @@ Set by the operator (2026-08-02); do NOT re-derive.
 /etc/mediavortex/worker.env                       <-- DB credentials, bootstrapped once
 ```
 
+The farm server (`mediavortex-server`) uses the same layout with role `server`: one `mediavortex-server.service` unit + `server.env`, released by `py deploy/deploy-server.py` (`deploy/worker-deploy-baremetal.flow.md` ST7). The fleet script never touches it.
+
 **Invariants:**
 
-- `rsync` only ever writes to a NEW `src-<sha>` dir. Never touches existing dirs.
+- Sync only ships committed trees (`git archive <sha>`), staged in a temp dir and renamed into a NEW `src-<sha>` dir. A dir already holding the sha is reused untouched.
 - New `host-venv-<fp>` only when deps fingerprint changed. Same-fp reuse skips reinstall.
 - Systemd unit rewritten per deploy with resolved absolute paths pointing at `src-<sha_current>` + `host-venv-<fp_current>`. Draining worker's running process is bound to whatever the unit said at its exec time; symlink swaps do not affect a running process's argv.
 - `systemctl daemon-reload` happens once per deploy. Running workers' argv is frozen; only next `systemctl restart` picks up new unit config.
 - GC keeps last 5 versioned `src-*` and last 5 versioned `host-venv-*`. Legacy dirs (`-legacy-*`) never GC'd.
 - Migration: one-time detection of pre-versioned real dirs at `/opt/mediavortex/src` and `/opt/mediavortex/host-venv`, renamed to `-legacy-<timestamp>`. Idempotent.
 
-**Zero mixed-state risk:** draining worker's `cwd` = `src-<old_sha>` (real path, not symlink). Its Python binary = `host-venv-<old_fp>/bin/python` (bound by `execve` at start). Rsync of new code writes to a different dir. New venv install writes to a different dir. Lazy imports resolve to old dir. Restart picks up new dir. Never both simultaneously.
+**Zero mixed-state risk:** draining worker's `cwd` = `src-<old_sha>` (real path, not symlink). Its Python binary = `host-venv-<old_fp>/bin/python` (bound by `execve` at start). Sync of new code writes to a different dir. New venv install writes to a different dir. Lazy imports resolve to old dir. Restart picks up new dir. Never both simultaneously.
 
 ## Windows-local (I9-2024)
 
@@ -55,7 +57,7 @@ Same shape for baremetal and windows-local; only step 3 mechanism differs.
 `deploy/deploy-fleet.py` shape (see the code for the exact ThreadPoolExecutor pattern):
 
 - One `ThreadPoolExecutor` sized to `remote_host_count + enabled_worker_count`.
-- Per remote host: one Future runs `deploy-baremetal-worker.py <host>` (rsync + venv + unit render + GC).
+- Per remote host: one Future runs `deploy-baremetal-worker.py <host>` (git archive sync + venv + unit render + GC).
 - Per Enabled worker: one Future gates on ITS host's sync Future (or `None` for windows-local), then runs `deploy-worker.py <WorkerName>` subprocess.
 - Windows-local workers have no host-sync dependency; their Future runs immediately.
 - `DeployHistory` row inserted at fleet-script entry, updated at exit.

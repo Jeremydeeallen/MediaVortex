@@ -5,6 +5,8 @@ from pathlib import Path
 
 MediaVortexRoot = Path(__file__).resolve().parent.parent
 
+# directive: farm-server -- inventory name of the always-on WebService host; also the DeployHistory.HostsAttempted value for server deploys
+ServerDeployTarget = "mediavortex-server"
 SshOpts = ["-o", "ConnectTimeout=5", "-o", "BatchMode=yes",
            "-o", "StrictHostKeyChecking=accept-new"]
 

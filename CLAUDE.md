@@ -18,9 +18,9 @@ MediaVortex: Python/Flask media transcoding system. Scans files, runs FFmpeg, in
 ## Commands
 
 ```bash
-py StartMediaVortex.py                              # start all services
-py StopMediaVortex.py                               # stop all services
-py WebService/Main.py                               # web only (port 5000)
+py StartMediaVortex.py                              # start local WorkerService
+py StopMediaVortex.py                               # stop local services
+py deploy/deploy-server.py                          # release origin/main to the farm WebService (--rollback)
 py -m pytest Tests/Contract/                        # all contract tests
 py -m pytest Tests/Contract/TestQueueGet.py         # single test
 py Scripts/SQLScripts/QueryDatabase.py tables       # list tables
@@ -65,7 +65,7 @@ from Core.Path.LocalPath import LocalExists, LocalBasename, LocalDirname, LocalJ
 - **WebService** (Flask + UI, port 5000)
 - **WorkerService** (unified: transcoding + VMAF + scanning; reads capability flags from `Workers` table)
 
-Started/stopped via `ServiceLifecycleManager` from `StartMediaVortex.py`. Architecture documented in `ARCHITECTURE.md` (vertical roster, cross-cutting concerns, data flow); per-feature contracts in `Features/<Name>/*.feature.md`; pipeline detail in `transcode.flow.md`.
+Started/stopped via `ServiceLifecycleManager` from `StartMediaVortex.py` (dev-box WorkerService). The WebService runs once, on the farm server (`mediavortex-server.service`), released by `deploy/deploy-server.py`. Architecture documented in `ARCHITECTURE.md` (vertical roster, cross-cutting concerns, data flow); per-feature contracts in `Features/<Name>/*.feature.md`; pipeline detail in `transcode.flow.md`.
 
 ## Python environment
 

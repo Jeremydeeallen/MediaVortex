@@ -164,7 +164,7 @@
     "WebService/Main.py": 28,
     "WebService/TestNetworkDriveValidation.py": 1,
     "WorkerService/LanguageWorker.py": 9,
-    "WorkerService/Main.py": 55,
+    "WorkerService/Main.py": 54,
     "WorkerService/ProbeWorker.py": 6
   }
 }

@@ -329,8 +329,7 @@ Answer: **Only commits that touch worker-runtime code require a fleet redeploy. 
   - `Tests/`
   - `Scripts/`
   - `deploy/deploy-*.py` (dev-host tooling)
-  - `deploy/SyncSource.py`
-  - `.gitignore`, `.deployignore`
+  - `.gitignore`
 
 Consequences:
 - The fleet-on-HEAD invariant becomes: `Workers.Version` must equal the SHA of the most recent commit that touched a worker-runtime path.

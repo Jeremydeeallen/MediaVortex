@@ -1,16 +1,17 @@
-# Flow: Bare-Metal Linux Worker Deploy
+# Flow: Bare-Metal Linux Host Deploy (worker + server roles)
 
 **Slug:** worker-deploy-baremetal
 
-Deploys the MediaVortex `WorkerService` directly on a bare-metal Linux host with no containers. Covers all Linux hosts: LXC containers (larry CT 218), Intel Arc / Xe workstations (wakko) where hardware demucs runs against `torch.xpu`, and NVIDIA workstations (dot). Runs one systemd unit per configured worker slot, all from a single Python venv on the host.
+Deploys MediaVortex directly on a bare-metal Linux host with no containers, in one of two roles. The `worker` role runs `WorkerService` on every Linux worker host: LXC containers (larry CT 218), Intel Arc / Xe workstations (wakko) where hardware demucs runs against `torch.xpu`, and NVIDIA workstations (dot); one systemd unit per configured worker slot, all from a single Python venv on the host. The `server` role runs the always-on `WebService` on the farm server (`mediavortex-server`); one systemd unit, released by `deploy/deploy-server.py` (ST7).
 
 ## Entry Point
 
 ```bash
-py deploy/deploy-baremetal-worker.py <target>
+py deploy/deploy-baremetal-worker.py <target> [--role worker|server] [--sha <commit>]
+py deploy/deploy-server.py [--sha <commit> | --rollback]
 ```
 
-`<target>` is the host's friendly name from `infrastructure/terraform/inventory.toml` (e.g. `wakko`) or its IP. The script reads SSH user, IP, worker count, and torch variant, then runs the pipeline. Idempotent.
+`<target>` is the host's friendly name from `infrastructure/terraform/inventory.toml` (e.g. `wakko`) or its IP. The script reads SSH user, IP, worker count, and torch variant, then runs the pipeline. `--sha` (default `HEAD`) names the committed tree to ship; the working tree is never shipped. The script syncs and renders units only; restarts happen in `deploy/deploy-worker.py` (workers) and `deploy/deploy-server.py` (server). Idempotent.
 
 ## Host Inventory
 
@@ -19,6 +20,7 @@ py deploy/deploy-baremetal-worker.py <target>
 | wakko | client-b450m-01 | 10.0.0.230 | bare-metal (Linux Mint 22.3 Zena / Ubuntu 24.04 base) | Ryzen 7 3700X, 8C/16T | Intel Arc B580 (Battlemage) | `wakko-worker-1..2` |
 | dot | client-z490v-01 | 10.0.0.193 | bare-metal (Linux Mint 22.3 / Ubuntu 24.04 base) | i9-10850K, 10C/20T | NVIDIA RTX 4060 (AD107) | `dot-worker-1..2` |
 | mediavortex-workers | mediavortex-workers (CT 218) | 10.0.0.42 | LXC on Proxmox larry | Xeon (32 threads allocated) | none (CPU-only transcode) | `mediavortex-workers-worker-1..4` |
+| mediavortex-server | mediavortex-server (CT 237) | 10.0.0.49 | LXC on Proxmox larry, same media bind mounts as CT 218 | 4 cores | none | role `server`: `WebService` (instance `mediavortex-server`) |
 
 When adding a new bare-metal Linux worker host:
 
@@ -45,10 +47,11 @@ When adding a new bare-metal Linux worker host:
 |---|---|---|
 | ST1 | Pre-Flight Checks | SSH reachability, Python 3.12 presence, DB reachability, mount non-empty, Intel Arc device visible |
 | ST2 | Detect torch variant | `nvidia-smi` -> cu124, else `lspci` Intel Arc `[8086:e*xx]` -> xpu, else cpu |
-| ST3 | Sync + Install | Pre-sync GC pass (`StepGarbageCollect`) frees disk BEFORE tar to avoid death-spiral on full disk; then rsync source to `/opt/mediavortex/src-<sha>`, create venv at `/opt/mediavortex/host-venv-<fp>`, install torch wheel from `download.pytorch.org/whl/<variant>` (only exception to requirements.txt rule -- needs variant-specific index-url), then `pip install -r WorkerService/requirements.txt` for every other dep. All non-torch software installs go through requirements.txt; enforced by `Tests/Contract/TestDeployPipInstallsRequirementsTxt.py`. Post-sync GC pass runs as final step to prune the current deploy's cohort. |
-| ST4 | Systemd Apply | Render one `mediavortex-worker@<n>.service` per worker slot from template; `systemctl daemon-reload` + `enable` + `restart` |
+| ST3 | Sync + Install | Pre-sync GC pass (`StepGarbageCollect`) frees disk BEFORE the sync to avoid death-spiral on full disk; then `git archive <sha>` streams the committed tree over SSH into `/opt/mediavortex/src-<sha16>` (VERSION file = full sha; a dir already holding that sha is reused untouched), venv at `/opt/mediavortex/host-venv-<fp16>` where `fp` hashes the torch variant + pin + the role's committed requirement blobs at `<sha>`, torch wheel from `download.pytorch.org/whl/<variant>` (only exception to requirements.txt rule -- needs variant-specific index-url), then `pip install -r` the role's requirement files (worker: `requirements.txt` + `WorkerService/requirements.txt`; server: `requirements.txt` + `WebService/requirements.txt`) only when the fingerprint changed. All non-torch software installs go through requirements.txt; enforced by `Tests/Contract/TestDeployPipInstallsRequirementsTxt.py`. Post-sync GC pass runs as final step to prune the current deploy's cohort. |
+| ST4 | Systemd Apply | Render the role's unit with fully-resolved `src-<sha16>` + `host-venv-<fp16>` paths (worker: template `mediavortex-worker@.service`; server: `mediavortex-server.service`), write the role's identity env files, `systemctl daemon-reload` + `enable`. No restart. |
 | ST5 | Post-Deploy Verification | `systemctl is-active` all N units; `Workers` rows Online/Paused; `WorkerShareMappings` populated; version match |
 | ST6 | Runtime Pipeline | Per-worker startup -> `WorkerService.flow.md::ST0..ST13` ownership |
+| ST7 | Server Release | `deploy/deploy-server.py`: ST3+ST4 with `--role server --sha <target>`, `systemctl restart mediavortex-server.service`, then `GET /api/Version` must report the target sha within 60s; otherwise the prior sha is redeployed the same way. One `DeployHistory` row per run. |
 
 ## Pre-Flight Checks (`ST1`)
 
@@ -82,19 +85,22 @@ Wheels come from `https://download.pytorch.org/whl/<variant>`:
 ## Sync + Install (`ST3`)
 
 ```bash
-# 1. Sync source tree to target
-rsync -az --delete --exclude-from=deploy/.deployignore ./ root@<ip>:/opt/mediavortex/src/
+# 1. Ship the committed tree of <sha> (git archive; no working-tree files, no .git)
+git archive --format=tar <sha> | ssh root@<ip> '
+  rm -rf /opt/mediavortex/src-<sha16>.tmp && mkdir -p /opt/mediavortex/src-<sha16>.tmp &&
+  tar -x -C /opt/mediavortex/src-<sha16>.tmp &&
+  printf %s <sha> > /opt/mediavortex/src-<sha16>.tmp/VERSION &&
+  mv /opt/mediavortex/src-<sha16>.tmp /opt/mediavortex/src-<sha16>'
 
-# 2. Create / reuse venv (torch pinned via index-url; everything else via requirements.txt)
+# 2. Create / reuse venv (torch pinned via index-url; everything else via the role's requirement files)
 ssh root@<ip> '
-  python3.12 -m venv /opt/mediavortex/host-venv --upgrade-deps
-  /opt/mediavortex/host-venv/bin/pip install --index-url https://download.pytorch.org/whl/<variant> torch==2.6.0 torchaudio==2.6.0
-  /opt/mediavortex/host-venv/bin/pip install -r /opt/mediavortex/src/WorkerService/requirements.txt
+  python3.12 -m venv /opt/mediavortex/host-venv-<fp16>
+  /opt/mediavortex/host-venv-<fp16>/bin/pip install --index-url https://download.pytorch.org/whl/<variant> torch==2.6.0 torchaudio==2.6.0
+  /opt/mediavortex/host-venv-<fp16>/bin/pip install -r /opt/mediavortex/src-<sha16>/requirements.txt -r /opt/mediavortex/src-<sha16>/<Role>/requirements.txt
 '
-
-# 3. Stamp the deployed SHA into /opt/mediavortex/VERSION
-ssh root@<ip> 'echo "<git rev-parse HEAD>" > /opt/mediavortex/VERSION'
 ```
+
+A deploy whose requirement blobs and torch variant are unchanged reuses the venv (`.deps-fingerprint` matches) and installs nothing; a sha already present on the host is not re-shipped. Those two skips are what keep a code-only server release inside its time budget.
 
 ### Required-device check and GPU package hold (end of `ST3`)
 
@@ -107,7 +113,7 @@ A host with no `Workers` rows yet (first deploy) skips both steps with `[SKIP]`;
 
 ## Systemd Apply (`ST4`)
 
-Systemd template unit at `/etc/systemd/system/mediavortex-worker@.service`:
+Worker role -- template unit at `/etc/systemd/system/mediavortex-worker@.service` (paths are the resolved versioned dirs of this deploy, never symlinks):
 
 ```ini
 [Unit]
@@ -118,12 +124,12 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/mediavortex/src
+WorkingDirectory=/opt/mediavortex/src-<sha16>
 EnvironmentFile=/etc/mediavortex/worker.env
 EnvironmentFile=/etc/mediavortex/instance-%i.env
 Environment=PYTHONUNBUFFERED=1
 Environment=HOME=/root
-ExecStart=/opt/mediavortex/host-venv/bin/python /opt/mediavortex/src/WorkerService/Main.py
+ExecStart=/opt/mediavortex/host-venv-<fp16>/bin/python /opt/mediavortex/src-<sha16>/WorkerService/Main.py
 Restart=always
 RestartSec=10
 TimeoutStopSec=1800
@@ -135,7 +141,9 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 ```
 
-Per-instance identity: `deploy-baremetal-worker.py::StepInstallSystemdUnit` writes one `/etc/mediavortex/instance-<N>.env` per slot with `MEDIAVORTEX_WORKER_NAME=<friendly>-worker-<N>`. Systemd's `%i` substitution selects the right env file per instance. `WorkerService.Main._ResolveWorkerName` reads `MEDIAVORTEX_WORKER_NAME` and fail-louds when unset. See `.claude/rules/claim-authority.md#worker-identity-is-deterministic-deploy-assigned`.
+Per-instance identity: `deploy-baremetal-worker.py::StepRenderSystemdUnit` writes one `/etc/mediavortex/instance-<N>.env` per slot with `MEDIAVORTEX_WORKER_NAME=<friendly>-worker-<N>`. Systemd's `%i` substitution selects the right env file per instance. `WorkerService.Main._ResolveWorkerName` reads `MEDIAVORTEX_WORKER_NAME` and fail-louds when unset. See `.claude/rules/claim-authority.md#worker-identity-is-deterministic-deploy-assigned`.
+
+Server role -- single unit `/etc/systemd/system/mediavortex-server.service`: same shape with `Description=MediaVortex WebService`, `EnvironmentFile=/etc/mediavortex/worker.env` + `EnvironmentFile=/etc/mediavortex/server.env`, `ExecStart=<venv>/bin/python <src>/WebService/Main.py`, `Restart=always`, `RestartSec=2`, `TimeoutStopSec=15`. `server.env` holds `MEDIAVORTEX_WORKER_NAME=<friendly>` (`mediavortex-server`), the WebService instance name that `single-instance-startup` keys ownership on. The unit is enabled, so the WebService starts at boot.
 
 Per-host MemoryMax cap (`_MemoryMaxByHost` in `deploy-baremetal-worker.py`) is sized to host RAM minus kernel + OS + service headroom. Cgroup cap must sit under host RAM so the cgroup gets the OOM kill instead of the kernel choosing an arbitrary victim.
 
@@ -145,6 +153,7 @@ Per-host MemoryMax cap (`_MemoryMaxByHost` in `deploy-baremetal-worker.py`) is s
 | wakko | 15 GB | 14G | Host RAM ceiling forces low cap. Occasional OOM until RAM upgrade (`memory/KNOWN-ISSUES.md`). |
 | mediavortex-workers (larry LXC 218) | 96 GB | 18G | 4 workers × 18G = 72G, leaves 24G for LXC host + Proxmox overhead. |
 | larry (host) | 96 GB | 18G | Same as LXC. |
+| mediavortex-server (larry LXC 237) | 8 GB | 6G | WebService + background runners only; 2G left for the OS. |
 
 Default cap (`_MemoryMaxDefault`) is 18G — matches prior fleet-wide setting from `memorymax-and-single-remux-per-host` (2026-09-08). New hosts start at 18G until per-host tuning is added to `_MemoryMaxByHost`.
 
@@ -279,12 +288,15 @@ Common causes:
 
 | ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
 |---|---|---|---|---|---|
-| S1 | `ST3 -> ST4` (venv install -> systemd apply) | Deploy script rsyncs source + installs wheels + writes `/opt/mediavortex/VERSION` | Filesystem tree under `/opt/mediavortex/` + `VERSION` file | Systemd unit starts, `WorkerService/Main.py` reads `VERSION` at boot | `ssh root@<ip> 'cat /opt/mediavortex/VERSION'` matches dev `git rev-parse HEAD` |
+| S1 | `ST3 -> ST4` (sync -> systemd apply) | `StepSyncSource` ships `git archive <sha>` and writes `VERSION` inside the versioned dir | `/opt/mediavortex/src-<sha16>/` = committed tree of `<sha>` + `VERSION` file holding the full sha | The unit's `WorkingDirectory` points at that dir; `Core.CodeVersion.ResolveCodeVersion` reads its `VERSION` at boot (no `.git` on a deployed tree) | `ssh root@<ip> 'cat $(systemctl show -p WorkingDirectory --value <unit>)/VERSION'` equals the deployed sha |
 | S2 | `ST5` Workers row check | `WorkerService.flow.md::S1` (worker registration) | `Workers.(WorkerName, Status, FFmpegPath, Version)` | Deploy verification SQL within 90s window | `SELECT Status, FFmpegPath, SUBSTRING(Version,1,7) FROM Workers WHERE WorkerName LIKE '<friendly>-worker-%'` -- Online/Paused, non-NULL FFmpegPath, matching Ver |
 | S3 | `ST5` share mappings | `WorkerService.flow.md::S2` (env var -> WorkerShareMappings) | `WorkerShareMappings.(WorkerName, DriveLetter, LocalMountPrefix)` -- 3 rows per worker (T, M, Z) | Used by every read/write of paths inside the process | `SELECT COUNT(*) FROM WorkerShareMappings WHERE WorkerName LIKE '<friendly>-worker-%'` = N_workers * 3 |
 | S4 | host mount source-of-truth | Operator writes `infrastructure/terraform/inventory.toml` `fstab_mounts` | TOML config consumed by bare-metal bootstrap script | Systemd `RequiresMountsFor=` and env-var `MEDIAVORTEX_SHARE_MAPPINGS` reference the same paths | Diff systemd unit env against inventory entries -- mount paths match |
 | S5 | `ST5 -> ST6` (version assertion) | Deploy script | Exit code 3 if `Workers.Version` (per worker) != stamped SHA from dev HEAD | Operator sees deploy failure; rolls back or retries | Console line `version=<sha7>` on success; exit 3 on mismatch |
 | S6 | XPU device -> demucs | Host `/dev/dri/renderD*` + `libze1` + torch xpu wheel | `torch.xpu.is_available() == True`; `torch.xpu.get_device_name(0)` matches inventory GPU | Audio pre-encode pipeline calls `demucs.separate -d xpu` | `ST5` step 4 torch xpu smoke output |
+| S7 | `--role` -> ST3/ST4 | `Roles` table in `deploy-baremetal-worker.py` | Per role: `Requirements` (fingerprint + pip), `UnitFile` + `UnitBody`, `IdentityFiles` (`instance-<N>.env` per worker slot / one `server.env`), `Units` to enable | ST3 installs exactly the role's requirement files; ST4 renders and enables exactly the role's units; the server's `DeployHistory` rows (`HostsAttempted='mediavortex-server'`) are excluded from the fleet's PriorSha | `Tests/Contract/TestFarmServer.py::TestHostRoles` |
+| S8 | ST7 -> `DeployHistory` | `deploy-server.py` INSERT ... RETURNING Id at start, UPDATE at exit | `DeployHistory.(PriorSha, NewSha, HostsAttempted='mediavortex-server', HostsSucceeded, Outcome IN ('OK','FAILED'), ElapsedSeconds, ErrorMessage)` | `--rollback` reads `PriorSha` of the newest `Outcome='OK'` server row; operator audit | `SELECT Id, Outcome, SUBSTRING(PriorSha,1,8), SUBSTRING(NewSha,1,8), ElapsedSeconds FROM DeployHistory WHERE HostsAttempted='mediavortex-server' ORDER BY Id DESC LIMIT 5` |
+| S9 | ST7 restart -> verify | Restarted WebService (`startup.S5`) | `GET http://<server>:5000/api/Version` -> `Data.Sha` | `deploy-server.py` declares success only when `Data.Sha` equals the target sha within 60s; anything else reverts to the prior sha | Deploy console `== SERVER ON <sha8> (DeployHistory Id=<n>) ==`; C6 drill: deploying a sha without `/api/Version` reverts |
 
 ## Runtime Pipeline (per worker) (`ST6`)
 
@@ -302,3 +314,25 @@ The deploy verifies the worker reaches Online. The per-step behavior that produc
 | Health loop | -- | Heartbeat every 30s |
 | Status poll | `worker-lifecycle.feature.md` crit 1-5 | Online/Paused transitions |
 | Capability poll | `WorkerService.feature.md` crit 2 | Capability + concurrency changes within 15s |
+
+## Server Release (`ST7`)
+
+```bash
+py deploy/deploy-server.py               # release CI-green origin/main
+py deploy/deploy-server.py --sha <sha>   # release a specific commit already on origin/main
+py deploy/deploy-server.py --rollback    # re-release the sha the last OK server deploy replaced
+```
+
+1. `git fetch origin main`; resolve the target sha. `--sha` must be an ancestor of `origin/main` (only committed main history ships). `--rollback` reads `PriorSha` of the newest `Outcome='OK'` server row (S8); two consecutive rollbacks toggle between the same two shas.
+2. Read the running sha from the unit's `WorkingDirectory/VERSION` (empty on first deploy). INSERT the `DeployHistory` row (`Outcome='RUNNING'`).
+3. Ship: `deploy-baremetal-worker.py mediavortex-server --role server --sha <target>` (ST3 + ST4), then `systemctl restart mediavortex-server.service`.
+4. Verify: poll `GET /api/Version` every second for up to 60s until `Data.Sha` equals the target (S9).
+5. Failure at any of 3-4: ship + restart the prior sha the same way, mark the row `FAILED` with both errors, exit 1. Success: mark the row `OK`, print per-step timings, exit 0.
+
+There is no drain (seconds of downtime are acceptable for the server). Background runs the WebService started are cut off by the restart; its scans are marked Stopped by `startup.ST3` on the next start. Workers keep running throughout; they coordinate through the DB, not the WebService (`admin-workers.C8`).
+
+| Failure | Symptom | Resolution |
+|---|---|---|
+| New sha does not start or does not serve `/api/Version` | `[FAIL] <sha8>: /api/Version did not report ...`; `reverting to <prior8>`; row `FAILED` | `journalctl -u mediavortex-server.service -n 100` on the server; fix forward and redeploy. |
+| Revert also fails | Row `FAILED` with `revert to <prior8> FAILED: ...` | Server is down. Check `journalctl`; `--sha <known good>` once the cause is fixed. |
+| `--sha` not on main | `[FAIL] <sha8> is not on origin/main` | Push/merge first; the server only runs main history. |

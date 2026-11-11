@@ -1115,6 +1115,11 @@
       "is_generated": "NEVER",
       "is_nullable": "NO"
     },
+    "priorfailureclass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
     "priorfailurecount": {
       "data_type": "integer",
       "is_generated": "NEVER",
@@ -1124,6 +1129,60 @@
       "data_type": "timestamp without time zone",
       "is_generated": "NEVER",
       "is_nullable": "NO"
+    }
+  },
+  "failureclasses": {
+    "classname": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "createdat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "errorpattern": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "priority": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "remediation": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "terminal": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "updatedat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "genrequalitytiers": {
+    "genre": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "lastupdated": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "qualitytier": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
     }
   },
   "jellyfinoperations": {
@@ -1520,10 +1579,25 @@
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
+    "genres": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
     "hasbframes": {
       "data_type": "bigint",
       "is_generated": "NEVER",
       "is_nullable": "YES"
+    },
+    "hasdialogboosttrack": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "hasdoubleboostsuspect": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
     },
     "hasexplicitenglishaudio": {
       "data_type": "boolean",
@@ -3768,6 +3842,11 @@
       "data_type": "text",
       "is_generated": "NEVER",
       "is_nullable": "NO"
+    },
+    "preencodesavingsthresholdpercent": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
     }
   },
   "remuxrules_old_2026_06_21": {
@@ -4207,6 +4286,11 @@
       "is_generated": "NEVER",
       "is_nullable": "NO"
     },
+    "instancename": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
     "isprocessing": {
       "data_type": "boolean",
       "is_generated": "NEVER",
@@ -4395,7 +4479,17 @@
       "is_generated": "NEVER",
       "is_nullable": "NO"
     },
+    "defaultqualitytier": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
     "description": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "genresource": {
       "data_type": "text",
       "is_generated": "NEVER",
       "is_nullable": "YES"
@@ -4580,6 +4674,11 @@
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
+    "dialogboostemitted": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
     "disposition": {
       "data_type": "text",
       "is_generated": "NEVER",
@@ -4596,6 +4695,11 @@
       "is_nullable": "YES"
     },
     "errormessage": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "failureclass": {
       "data_type": "text",
       "is_generated": "NEVER",
       "is_nullable": "YES"
@@ -4722,6 +4826,11 @@
     },
     "videobitratekbps": {
       "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "videoslotstrategy": {
+      "data_type": "text",
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
@@ -5125,6 +5234,11 @@
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
+    "audioslotoverride": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
     "claimedat": {
       "data_type": "timestamp without time zone",
       "is_generated": "NEVER",
@@ -5161,6 +5275,11 @@
       "is_nullable": "NO"
     },
     "mediafileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "parenttranscodeattemptid": {
       "data_type": "bigint",
       "is_generated": "NEVER",
       "is_nullable": "YES"

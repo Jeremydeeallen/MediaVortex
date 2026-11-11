@@ -90,6 +90,7 @@ def _SpawnDetached(ServiceDir: str, LogPath: Path, WorkerName: str) -> subproces
     )
 
 
+# directive: farm-server | # see single-instance-startup.C8 -- the WebService lives on the farm server (mediavortex-server); a fleet deploy restarts only this host's WorkerService
 def RestartWindowsLocal(WorkerName: str) -> bool:
     print(f"[3/4] restart backend: windows-local ({WorkerName})", flush=True)
     try:
@@ -98,16 +99,13 @@ def RestartWindowsLocal(WorkerName: str) -> bool:
         print(f"[FAIL] psutil not installed", flush=True)
         return False
     _KillLocalProcs("WorkerService", psutil)
-    _KillLocalProcs("WebService", psutil)
-    WebLog = MediaVortexRoot / "WebService" / "deploy-worker.log"
     WorkerLog = MediaVortexRoot / "WorkerService" / "deploy-worker.log"
-    WebProc = _SpawnDetached("WebService", WebLog, WorkerName)
     WorkerProc = _SpawnDetached("WorkerService", WorkerLog, WorkerName)
     time.sleep(1)
-    if WebProc.poll() is not None or WorkerProc.poll() is not None:
-        print(f"[FAIL] one or both services died immediately", flush=True)
+    if WorkerProc.poll() is not None:
+        print(f"[FAIL] WorkerService died immediately", flush=True)
         return False
-    print(f"       started web pid={WebProc.pid} worker pid={WorkerProc.pid}", flush=True)
+    print(f"       started worker pid={WorkerProc.pid}", flush=True)
     return True
 
 
