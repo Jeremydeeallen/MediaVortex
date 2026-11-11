@@ -220,8 +220,21 @@ If a directive has no durable content to promote (e.g. pure bugfix, no contract 
 
 Required when phase advances to VERIFYING. One entry per acceptance criterion. Concrete evidence (command output, SQL result, file path) -- not "tested it works."
 
-- **Criterion 1:** `<evidence>`
-- **Criterion 2:** `<evidence>`
+Pre-smoke (47589757):
+- `TestFarmServer` 10 passed. `TestClaimAuthority`, `TestDeployPipInstallsRequirementsTxt`, and `TestDeployIdempotenceInvariants` pass (44 passed), except the pre-existing BUG-0116 failure.
+- Linux import probe on CT 218 (python 3.12.3, host venv plus a `--target` dir with waitress 3.0.2 and flask_compress 1.26): `import WebService.Main, Core.CodeVersion, ServiceStatusController` -> `IMPORT_OK True`.
+- Migration `AddServiceStatusInstanceName` and the SRR seed applied live.
+
+Smoke (operator-executed; evidence recorded per criterion):
+- **C1:** pending -- HTTP 200 at the nginx name and at 10.0.0.49:5000 with the I9 WebService stopped
+- **C2:** pending -- `pct reboot 237`, then HTTP 200 within 60s
+- **C3:** pending -- `GET /api/Version` Data.Sha equals the deployed sha
+- **C4:** pending -- elapsed time from the `deploy-server.py` banner and DeployHistory.ElapsedSeconds, deps unchanged
+- **C5:** pending -- `deploy-server.py --rollback`, then `/api/Version` shows the prior sha within 30s
+- **C6:** pending -- `deploy-server.py --sha ea0b57a5` exits 1, the row is FAILED, and `/api/Version` shows the prior sha
+- **C7:** pending -- DeployHistory rows for the C4/C5/C6 runs
+- **C8:** pending -- status pages refresh; one audio remeasurement completes on the server's mounts
+- **C9:** pending -- `StartMediaVortex.py` on I9 starts WorkerService only; fleet deploy leaves I9 with no WebService; `py WebService/Main.py` on I9 exits 1
 
 ### Decisions Made
 
@@ -239,6 +252,9 @@ Engineering calls made under ambiguity during execution. These live with the dir
 - **Cross-host liveness = heartbeat freshness under 90s, not the Status column.** WebService never writes Running, and it exits on SIGTERM without updating the row.
 - **The single-instance gate lives in `Main()`.** Building the app (tests) has no effect on other instances.
 - **C6 drill: deploy the WinTmp-marker commit.** Its deps install, but it has no `/api/Version`, so verification fails and the deploy reverts to the prior sha.
+- **BUG-0064 closed, not carried.** Its three asks are now either met (independent remote deploys, worker-deploy.md rule 2) or no longer apply (I9 local-start policy; a single strategy script, replaced by roles of one sync script).
+- **BUG-0113 is filed, not fixed.** Making WebService init fail loudly breaks two contract tests that build the app twice in one process (the second `WorkerContext.Initialize` raises). Fixing it needs a test-fixture change outside this scope.
+- **The host sync runs `apt-get update` before installs, and the ffmpeg install is verified (fail-loud).** A fresh CT that never ran the bare-metal bootstrap has an empty apt cache.
 
 ---
 
