@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-11-11
-**Status:** Active -- phase: NEEDS_PLAN
+**Status:** Active -- phase: IMPLEMENTING
 **Slug:** farm-server
 **Replaces:** `directives/closed/2026-11-11-movies-video-rule.md` (closed Success)
 
@@ -196,6 +196,9 @@ Scripts/SQLScripts/SeedServerStorageRootResolutions.py -- CREATE: idempotent SRR
 Tests/Contract/TestFarmServer.py                  -- CREATE: fingerprint, CodeVersion, /api/Version, cross-host gate
 Tests/Contract/TestWorkBucketController.py, TestTranscodingSettingsRoundTrip.py -- EDIT: pass instance name
 DOMAIN.md, .claude/rules/worker-deploy.md         -- EDIT: git archive, server role
+WorkerService/WorkerService.flow.md, WorkerService.feature.md -- EDIT: version stamp via archive; C8 I9 launches WorkerService only
+Features/ServiceControl/ServiceControl.feature.md  -- EDIT: C9 launcher scope; RegisterServiceStartup signature
+transcode.flow.md                                  -- EDIT: ServiceLifecycleManager section (server hosts WebService)
 memory/KNOWN-ISSUES.md                            -- EDIT: BUG-0064 resolved; file OOS (b) items
 ```
 
