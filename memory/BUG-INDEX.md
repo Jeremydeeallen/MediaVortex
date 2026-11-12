@@ -62,6 +62,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0114 | active | security | Plaintext *arr / NZBGet / Postgres credentials committed in tracked docker-compose.yml (in git history; rotate after moving) | 2026-11-11
 - BUG-0115 | active | security | Hard-coded Flask SECRET_KEY in WebService/Main.py; session cookies forgeable by anyone with repo access | 2026-11-11
 - BUG-0116 | active | contract-tests | TestDeployIdempotenceInvariants per-instance-env-file test reads deploy/baremetal/mediavortex-worker@.service, deleted 2026-08-02 (unit now rendered by _WorkerUnitBody); FileNotFoundError since | 2026-11-11
+- BUG-0117 | active | service-control | Jellyfin auto-sync fails on the farm server: SystemSettings.JellyfinSSHKeyPath is a Windows path (C:\Users\jerem\.ssh\id_ed25519); needs a key on the server + setting change | 2026-11-12
 
 ## Recently Resolved (last 10)
 

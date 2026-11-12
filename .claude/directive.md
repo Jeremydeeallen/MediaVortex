@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-11-11
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: VERIFYING
 **Slug:** farm-server
 **Replaces:** `directives/closed/2026-11-11-movies-video-rule.md` (closed Success)
 
@@ -225,16 +225,16 @@ Pre-smoke (47589757):
 - Linux import probe on CT 218 (python 3.12.3, host venv plus a `--target` dir with waitress 3.0.2 and flask_compress 1.26): `import WebService.Main, Core.CodeVersion, ServiceStatusController` -> `IMPORT_OK True`.
 - Migration `AddServiceStatusInstanceName` and the SRR seed applied live.
 
-Smoke (operator-executed; evidence recorded per criterion):
-- **C1:** pending -- HTTP 200 at the nginx name and at 10.0.0.49:5000 with the I9 WebService stopped
-- **C2:** pending -- `pct reboot 237`, then HTTP 200 within 60s
-- **C3:** pending -- `GET /api/Version` Data.Sha equals the deployed sha
-- **C4:** pending -- elapsed time from the `deploy-server.py` banner and DeployHistory.ElapsedSeconds, deps unchanged
-- **C5:** pending -- `deploy-server.py --rollback`, then `/api/Version` shows the prior sha within 30s
-- **C6:** pending -- `deploy-server.py --sha ea0b57a5` exits 1, the row is FAILED, and `/api/Version` shows the prior sha
-- **C7:** pending -- DeployHistory rows for the C4/C5/C6 runs
-- **C8:** pending -- status pages refresh; one audio remeasurement completes on the server's mounts
-- **C9:** pending -- `StartMediaVortex.py` on I9 starts WorkerService only; fleet deploy leaves I9 with no WebService; `py WebService/Main.py` on I9 exits 1
+Smoke (2026-11-12, CT 237 at 10.0.0.49, server on 1a6bb82c):
+- **C1:** `GET http://10.0.0.49:5000/` 200 and `GET http://mediavortex-server/` 200 (nginx, name resolved via Pi-hole); the I9 WebService had not been running.
+- **C2:** `pct reboot 237`; the container's `uptime -p` read "up 0 minutes", the unit started 2s after boot, and `/api/Version` answered 200 after 8s with no operator action.
+- **C3:** `GET /api/Version` -> `{"Sha":"1a6bb82c6e4ef6abb9dbadb070c111fb93773a94","Instance":"mediavortex-server"}`.
+- **C4:** `deploy-server.py --sha 47589757` (deps unchanged) -> `== SERVER ON 47589757 ==`, total 9.8s (DeployHistory Id=77, ElapsedSeconds 9). The first deploy built the venv: 183s (Id=76).
+- **C5:** `deploy-server.py --rollback` -> `== SERVER ON 1a6bb82c ==`, total 7.6s (Id=78); `/api/Version` showed 1a6bb82c.
+- **C6:** `deploy-server.py --sha ea0b57a5` -> `/api/Version` 404 for 60s, reverted to 1a6bb82c, exit 1, row Id=79 `FAILED` ("revert to 1a6bb82c OK"); `/api/Version` showed 1a6bb82c afterwards.
+- **C7:** `SELECT ... FROM DeployHistory WHERE HostsAttempted='mediavortex-server'` -> Ids 76 OK, 77 OK, 78 OK, 79 FAILED, each with PriorSha, NewSha, ElapsedSeconds.
+- **C8:** `/mnt/media_tv` (777 entries), `/mnt/movies` (3473) and `/mnt/xxx` (9) are visible on the server; ffmpeg at `/usr/local/bin`. `AudioRemeasurementService.MarkForRemeasurement(16802)`; within 30s the server's runner (the only one running) cleared `AdmissionDeferReason` and rewrote the loudness values through `/mnt/media_tv`. Before: LUFS -20.0, LRA 8.3, TP -2.2, threshold -30.8. After: -15.4, 4.4, -3.0, -25.9.
+- **C9:** `MEDIAVORTEX_WORKER_NAME=I9-dev; py WebService/Main.py` on I9 printed "WebService is already running. Preventing duplicate instance." and exited 1. `StartMediaVortex.py` launching only WorkerService is asserted by `TestDeployAssignedIdentity`. UNVERIFIED live: a fleet deploy leaving I9 without a WebService (no fleet deploy run yet).
 
 ### Decisions Made
 
@@ -252,6 +252,10 @@ Engineering calls made under ambiguity during execution. These live with the dir
 - **Cross-host liveness = heartbeat freshness under 90s, not the Status column.** WebService never writes Running, and it exits on SIGTERM without updating the row.
 - **The single-instance gate lives in `Main()`.** Building the app (tests) has no effect on other instances.
 - **C6 drill: deploy the WinTmp-marker commit.** Its deps install, but it has no `/api/Version`, so verification fails and the deploy reverts to the prior sha.
+- **Infra row needed `disk_storage = zfs-containers`.** larry has no `local-lvm`; without it `pct create` failed while Terraform recorded success. The CT was created on the second apply after tainting the false-success resources.
+- **Short name, not FQDN.** nginx serves `http://mediavortex-server` (internal bare-name convention); `generate-dns.py --dns-only` was run to publish the record instead of waiting for the 15-minute reconcile.
+- **Prometheus target left for the monitoring owner.** `prometheus.yml` is on 10.0.0.239 but the container's bind mount is stale, and `docker compose up --force-recreate` refuses (compose references external volume `sphinxteslamate_prometheus-data`; the host has `monitoring_prometheus-data`). Prometheus was left running untouched.
+- **One real row remeasured for C8.** MediaFiles Id 16802 was flagged and remeasured by the server's runner; its original loudness values are recorded under Verification.
 - **BUG-0064 closed, not carried.** Its three asks are now either met (independent remote deploys, worker-deploy.md rule 2) or no longer apply (I9 local-start policy; a single strategy script, replaced by roles of one sync script).
 - **BUG-0113 is filed, not fixed.** Making WebService init fail loudly breaks two contract tests that build the app twice in one process (the second `WorkerContext.Initialize` raises). Fixing it needs a test-fixture change outside this scope.
 - **The host sync runs `apt-get update` before installs, and the ffmpeg install is verified (fail-loud).** A fresh CT that never ran the bare-metal bootstrap has an empty apt cache.
