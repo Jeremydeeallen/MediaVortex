@@ -1926,10 +1926,6 @@ Tier 2 (upstream, cross-vertical): a previous transcode wrote a corrupt `-mv.mp4
 - BUG-0115 | Hard-coded Flask `SECRET_KEY` | criterion: none (session-cookie integrity) | 2026-11-11
   Evidence: `WebService/Main.py` `WebServiceApp.__init__` sets `self.App.config['SECRET_KEY']` to a literal string in source; anyone with repo access can forge Flask session cookies for the farm server UI.
   First place to look: have the server role provision a random key once (preserved across deploys; `server.env` is rewritten each deploy today) and fail loud when unset.
-- BUG-0117 | Jellyfin auto-sync fails on the farm server: `SystemSettings.JellyfinSSHKeyPath` is a Windows path | criterion: none (Jellyfin sync) | 2026-11-12
-  Repro: `journalctl -u mediavortex-server` on 10.0.0.49 after any start shows `WARNING: Jellyfin auto-sync failed: [Errno 2] No such file or directory: 'C:\Users\jerem\.ssh\id_ed25519'`.
-  Evidence: the key path is one global setting (`JellyfinSSHKeyPath`) written for I9; the WebService now runs on Linux where that file does not exist. Needs a key provisioned on the server and the setting changed (operator decision: which credential).
-  First place to look: `Features/Settings` Jellyfin SSH settings; `WebService/Main.py` `_start_jellyfin_sync`.
 
 ---
 

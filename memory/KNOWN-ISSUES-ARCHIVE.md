@@ -1002,3 +1002,9 @@ The pipeline had TWO fallbacks stacked: (1) Strategy classifier silently demoted
 1. I9 local-start policy -- superseded. The WebService no longer runs on I9; it runs on the farm server and is released by `py deploy/deploy-server.py`. `StartMediaVortex.py` on I9 starts only the local WorkerService.
 2. Independent remote deploys -- met. `.claude/rules/worker-deploy.md` domain rule 2 (per-worker independence): each worker gates only on its own host's sync; one host's drain or failure does not block another.
 3. Single strategy script -- superseded by the operator's 2026-08-02 deploy rules: zero-parameter `deploy-fleet.py` plus per-worker `deploy-worker.py` for recovery. Host shapes are roles of one sync script (`deploy-baremetal-worker.py --role worker|server`), not separate scripts.
+
+- BUG-0117 | Jellyfin auto-sync fails on the farm server: `SystemSettings.JellyfinSSHKeyPath` is a Windows path | criterion: none (Jellyfin sync) | 2026-11-12 | resolved: 2026-11-12
+  Repro: `journalctl -u mediavortex-server` on 10.0.0.49 after any start shows `WARNING: Jellyfin auto-sync failed: [Errno 2] No such file or directory: 'C:\Users\jerem\.ssh\id_ed25519'`.
+  Evidence: the key path is one global setting (`JellyfinSSHKeyPath`) written for I9; the WebService now runs on Linux where that file does not exist. Needs a key provisioned on the server and the setting changed (operator decision: which credential).
+  First place to look: `Features/Settings` Jellyfin SSH settings; `WebService/Main.py` `_start_jellyfin_sync`.
+  Resolution (2026-11-12): dedicated ed25519 key generated on the server (`/root/.ssh/mediavortex_jellyfin`, never leaves it); its public half authorized for `adroit@10.0.0.179`; `SystemSettings.JellyfinSSHKeyPath` set to that path. Verified: `GET /api/Optimization/JellyfinAnalysis` on the server returned Jellyfin data with no further `[Errno 2]` errors.
