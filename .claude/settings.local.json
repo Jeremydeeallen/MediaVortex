@@ -94,7 +94,9 @@
       "PowerShell(git *)",
       "PowerShell(ssh root@larry \"pct list; echo ---; cat /etc/pve/lxc/218.conf; echo ---; mount | grep -E 'xxx|movies|media_tv'; echo ---; cat /etc/exports; echo ---; pveam list local | grep -i debian; echo ---; ip -4 -br addr; echo ---; pvesm status\")",
       "WebFetch(domain:docs.stashapp.cc)",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api.github.com)",
+      "PowerShell(py deploy/deploy-fleet.py *)",
+      "PowerShell(py deploy/deploy-server.py *)"
     ],
     "defaultMode": "bypassPermissions"
   }
