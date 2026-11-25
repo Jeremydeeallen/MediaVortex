@@ -154,6 +154,11 @@ Amplification: `tv-tier1-classifier-pin` directive (2026-08-25) retiered 188 TV 
 
 ### deploy
 
+- BUG-0123 | Farm-server start logs `ERROR: FFprobe path from settings not found: /opt/mediavortex/src-<sha>/FFmpegMaster\bin\ffprobe.exe` (and the ffmpeg twin) on every boot | criterion: WebService/startup.flow.md ST4 | 2026-11-25
+  Repro: `journalctl -u mediavortex-server -b | grep 'path from settings not found'` after any server start (seen on ce4f064f and f00f5593).
+  Evidence: `SystemSettings` FFmpeg/FFprobe paths are I9's Windows relative paths (`FFmpegMaster\bin\ffmpeg.exe`); on Linux `FFmpegService` joins them to the deployed tree, misses, logs ERROR, then discovers `/usr/local/bin/ffmpeg` and runs. Noise, not a failure, but it is an ERROR line on every start and the setting is per-system while the hosts differ.
+  First place to look: `Services/FFmpegService.FindFFmpegPath` and the `/settings` FFmpeg path fields; the setting should be per-host (worker/server identity) or discovery-only on Linux.
+
 ### disposition
 
 ### failure-accounting

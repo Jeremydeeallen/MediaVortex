@@ -63,6 +63,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0116 | active | contract-tests | TestDeployIdempotenceInvariants per-instance-env-file test reads deploy/baremetal/mediavortex-worker@.service, deleted 2026-08-02 (unit now rendered by _WorkerUnitBody); FileNotFoundError since | 2026-11-11
 - BUG-0118 | active | service-control | Three ActiveJobs inserters (ProbeWorker, LanguageWorker, ActiveJobRepository.CreateActiveJob) duplicate one INSERT with different column sets | 2026-11-25
 - BUG-0119 | active | fail-loud | Insert helpers log and return 0/None/False on a failed INSERT (outer try/except) so callers carry on with no row; ids are now real, the swallow remains | 2026-11-25
+- BUG-0123 | active | deploy | Farm-server start logs ERROR for I9's Windows FFmpeg/FFprobe setting paths before discovery falls back to /usr/local/bin; noise on every boot, setting is per-system but hosts differ | 2026-11-25
 - BUG-0122 | active | quality-testing | Test-variant runs fail: VariantJobProcessor calls Worker.Current on a thread with no WorkerContext.Bind(); last success 2026-07-03 | 2026-11-25
 
 ## Recently Resolved (last 10)
