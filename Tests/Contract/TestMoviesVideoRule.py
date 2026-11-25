@@ -218,7 +218,11 @@ _FILE_TIER_CTE = (
     "         COALESCE((SELECT MAX(COALESCE(g.QualityTier, sr.DefaultQualityTier)) "
     "                   FROM unnest(string_to_array(mf.Genres, ',')) AS x(Genre) "
     "                   LEFT JOIN GenreQualityTiers g ON g.Genre = x.Genre "
-    "                   WHERE x.Genre <> ''), sr.DefaultQualityTier) AS Tier "
+    "                   WHERE x.Genre <> ''), sr.DefaultQualityTier) AS Tier, "
+    "         COALESCE((SELECT g.ContentClass "
+    "                   FROM unnest(string_to_array(mf.Genres, ',')) WITH ORDINALITY AS x(Genre, Pos) "
+    "                   JOIN GenreQualityTiers g ON g.Genre = x.Genre AND g.ContentClass IS NOT NULL "
+    "                   ORDER BY x.Pos LIMIT 1), sr.DefaultContentClass) AS ContentClass "
     "  FROM MediaFiles mf JOIN StorageRoots sr ON sr.Id = mf.StorageRootId "
     "  WHERE sr.GenreSource IS NOT NULL AND sr.DefaultQualityTier IS NOT NULL AND mf.Genres IS NOT NULL) "
 )
@@ -231,14 +235,14 @@ class TestMoviesVideoRuleLive(unittest.TestCase):
     def _Count(self, Sql):
         return int(DatabaseService().ExecuteQuery(Sql)[0].get('N'))
 
-    # directive: movies-video-rule | # see video-encoding.C1
+    # directive: movies-video-rule, profile-row-lookup | # see video-encoding.C1, profile-tier-ladder.C10 -- the row is the file's class row (genre class, else library default)
     def test_stored_verdicts_match_the_genre_tier_rule(self):
         self.assertEqual(self._Count(
             _FILE_TIER_CTE +
             "SELECT COUNT(*) AS N FROM FileTier ft "
             "JOIN Profiles p ON p.Family = 'ANY' AND p.QualityTier = ft.Tier AND p.QualityLabel IS NOT NULL "
-            "JOIN ProfileThresholds src ON src.ProfileId = p.Id AND src.ContentClass = 'live_action' AND src.Resolution = ft.ResolutionCategory "
-            "JOIN ProfileThresholds tgt ON tgt.ProfileId = p.Id AND tgt.ContentClass = 'live_action' "
+            "JOIN ProfileThresholds src ON src.ProfileId = p.Id AND src.ContentClass = ft.ContentClass AND src.Resolution = ft.ResolutionCategory "
+            "JOIN ProfileThresholds tgt ON tgt.ProfileId = p.Id AND tgt.ContentClass = ft.ContentClass "
             "  AND tgt.Resolution = CASE WHEN src.TranscodeDownTo IN ('', 'No downscaling') THEN src.Resolution ELSE src.TranscodeDownTo END "
             "JOIN VideoComplianceThresholds m ON m.ResolutionCategory = ft.ResolutionCategory "
             "WHERE ft.VideoBitrateKbps > 0 AND ft.VideoCompliantReason IS DISTINCT FROM 'non_video_scope' "

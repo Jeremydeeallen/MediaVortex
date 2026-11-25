@@ -67,8 +67,8 @@ class VideoVertical:
         Src = int(SrcKbps)
 
         if Src <= Ceiling:
-            return (True, f'source_at_or_below_ceiling:{Src}<={Ceiling}(profile={AssignedProfile}:{ProfileTargetKbps}*{Multiplier})')
-        return (False, f'source_above_ceiling:{Src}>{Ceiling}(profile={AssignedProfile}:{ProfileTargetKbps}*{Multiplier})')
+            return (True, f'source_at_or_below_ceiling:{Src}<={Ceiling}(profile={AssignedProfile}:{ProfileTargetKbps}*{Multiplier},class={ContentClass})')
+        return (False, f'source_above_ceiling:{Src}>{Ceiling}(profile={AssignedProfile}:{ProfileTargetKbps}*{Multiplier},class={ContentClass})')
 
     # directive: movies-video-rule | # see video-encoding.C1
     def _EvaluateAgainstTier(self, Src: int, ResolutionCategory: str, ContentClass: str, Resolved: FileTier) -> Tuple[Optional[bool], Optional[str]]:
