@@ -157,6 +157,8 @@ function Get-SessionState {
     # because SessionStart runs once at session boot and phase advances happen later via directive edits).
     $DirSlug = Get-DirectiveSlug
     $DirPhase = Get-DirectivePhase
+    # directive: profile-row-lookup -- template directive (no slug) means no directive; the state file's phase is the closed directive's and must not gate.
+    if (-not $DirSlug) { return $null }
     if (Test-Path $StateFile) {
         try {
             $S = Get-Content $StateFile -Raw | ConvertFrom-Json
