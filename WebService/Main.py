@@ -36,7 +36,8 @@ class WebServiceApp:
         
         self.App = Flask(__name__,
                         template_folder=template_dir,
-                        static_folder=static_dir)
+                        static_folder=static_dir,
+                        static_url_path='/static')
         self.App.config['SECRET_KEY'] = 'mediavortex-secret-key-2024'
         from Core.CodeVersion import ResolveCodeVersion
         self.App.config['CodeSha'] = ResolveCodeVersion()[0]

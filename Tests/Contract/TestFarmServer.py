@@ -1,5 +1,6 @@
 import ast
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -152,13 +153,22 @@ class TestDeployAssignedIdentity(unittest.TestCase):
         self.assertGreaterEqual(Rows[0]['N'], 3)
 
     # directive: farm-server | # see startup.ST5
-    def test_asset_dirs_match_shipped_tree_case(self):
+    def test_asset_paths_match_shipped_tree_case(self):
         Source = (REPO_ROOT / 'WebService' / 'Main.py').read_text(encoding='utf-8')
-        Shipped = set(subprocess.run(['git', 'ls-tree', '--name-only', 'HEAD'], cwd=REPO_ROOT,
-                                     capture_output=True, text=True, check=True).stdout.split())
+        Shipped = set(subprocess.run(['git', 'ls-files'], cwd=REPO_ROOT,
+                                     capture_output=True, text=True, check=True).stdout.splitlines())
         for Name in ('Templates', 'Static'):
             self.assertIn(f"os.path.join(project_root, '{Name}')", Source)
-            self.assertIn(Name, Shipped)
+            self.assertTrue(any(F.startswith(Name + '/') for F in Shipped), Name)
+        self.assertIn("static_url_path='/static'", Source)
+        Templates = list((REPO_ROOT / 'Templates').rglob('*.html')) + list((REPO_ROOT / 'Features').rglob('templates/*.html'))
+        Refs = []
+        for Template in Templates:
+            Text = Template.read_text(encoding='utf-8')
+            Refs += [(Template.name, R) for R in re.findall(r'["\'(]/static/([^"\'?)\s{]+)', Text)]
+            Refs += [(Template.name, R) for R in re.findall(r'url_for\(\s*[\'"]static[\'"]\s*,\s*filename\s*=\s*[\'"]([^\'"]+)', Text)]
+        self.assertGreater(len(Refs), 0)
+        self.assertEqual([f'{T}: {R}' for T, R in Refs if 'Static/' + R not in Shipped], [])
 
 
 if __name__ == '__main__':
