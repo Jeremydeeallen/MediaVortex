@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-11-25
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: VERIFYING
 **Slug:** profile-row-lookup
 **Replaces:** `directives/closed/2026-11-25-insert-returning-id.md` (closed Success)
 
@@ -124,10 +124,35 @@ memory/KNOWN-ISSUES.md, memory/BUG-INDEX.md, memory/KNOWN-ISSUES-ARCHIVE.md -- E
 
 | Source artifact | Target file | Commit |
 |---|---|---|
+| One row lookup (C9), content class as operator data resolved at read (C10), seams S4/S5, workflows W2/W4 | `Features/Profiles/profile-tier-ladder.feature.md` | TBD until close |
+| Upscale judged on the file's own row target (2b) | `Features/TranscodeQueue/marginal-savings-gate.feature.md` | TBD until close |
+| Compliance reason names the class; `missing_input:ContentClass` | `Features/VideoEncoding/video-encoding.feature.md` (C1) | TBD until close |
+| Classifier never writes a class | `Features/ContentClassifier/classifier.feature.md` | TBD until close |
+| ST4/ST5 point at the lookup | `transcode.flow.md` | TBD until close |
+| "Content class" term | `GLOSSARY.md` | TBD until close |
+| Stale lookup names replaced | `Features/Profiles/Profiles.feature.md`, `Core/Resolution/resolution-types.feature.md`, `Features/TranscodeQueue/TranscodeQueue.feature.md`, `Features/TranscodeQueue/priority-materialization.feature.md`, `Features/TranscodeJob/TranscodeJob.feature.md`, `Docs/Workflows/TranscodingWorkflow.md` | TBD until close |
+| Hook: template directive means no directive | `.claude/hooks/pre-edit-standards.ps1` (no doc; behaviour pinned by C8) | 7de06eff |
+| xxx program spec + plan (Units 0-4) | `Docs/superpowers/specs/2026-10-28-xxx-stash-cull-audio-design.md`, `Docs/superpowers/plans/2026-10-29-xxx-program.md` | 74b0f38a |
 
 ### Verification
 
+Pre-smoke (code complete, not yet deployed):
+- **C1:** `TestProfileRowLookup::test_four_consumers_agree_on_the_row` (live DB): Tier 1 live_action 1080p fixture -> `EncoderKnobs` (720p, 1000 kbps), `EffectiveProfile` (T720p, 1000), admission not `Upscale`, compliance reason carries `class=live_action` and `:1000*`. `test_encode_row_is_the_row_at_the_target_resolution`: animation 1080p stays 1080p.
+- **C3:** `TestContentClassResolver` three cases; `test_missing_class_is_reported_not_substituted` -> `(None, 'missing_input:ContentClass')`. Live grep of `'live_action'` in `Features/` pending at VERIFYING.
+- **C4:** `test_duplicate_lookups_are_gone`: 0 hits for the four names; no `FROM ProfileThresholds` in `EffectiveProfileResolver.py` / `EncoderKnobRepository.py`. Also deleted as dead: `EffectiveProfileResolver._LookupThresholdsRow` + `_ResolveTargetVideoKbps` (no callers), `QueueManagementBusinessService._LoadPriorityLookupTable` + `_BuildEffectiveProfileObj` (sixth lookup; replaced by `_EncodeTargets` over the one lookup). Net -264 lines.
+- Affected suites: 81 passed (`TestProfileRowLookup`, `TestUpscaleBlockEnforcement`, `TestEncoderKnobNormalizeResolution`, `TestTvVideoRuleTier1`, `TestMoviesVideoRule`, `TestVerticalsAreProfileIndependent`, `TestNextTierAdjuster`, `TestWorkerEncoderResolver`, `TestClassifierCascade`, `TestTvPinTier1Classification`). `TestProfileTierLadder`'s 4 failures are in the pre-change baseline (stale CANARY-family expectations).
+- Migration `AddContentClassDefaults_2026_11_25.py` applied live and re-run idempotently; snapshot regenerated (+10 lines).
+
 ### Decisions Made
+
+- **Two rows, one lookup.** `GetProfileRow` returns the file's source row (its `TranscodeDownTo` decides upscale and the target); `GetEncodeRow` is `GetProfileRow` applied at that target and is the row the encoder, the estimate and the compliance ceiling read. `GetProfileTarget` now returns the encode row's `TargetKbps` (before: the source row's), so compliance ceilings match the rate the encoder actually runs.
+- **`TargetKbps` is the rate.** Estimates and priority use `TargetKbps` (what `VideoSlot` emits, ladder C5), not the legacy `VideoBitrateKbps`.
+- **Ladder editor keyed by the row's class.** `GetBitrateLadder`/`UpdateBitrateCell`/`GetIcqLadder`/`UpdateIcqCell` grouped and updated by `Profiles.ContentClass` (always live_action), so the animation ladder was invisible on `/settings` and a bitrate save hit both class rows. They now use `ProfileThresholds.ContentClass`.
+- **Compliance reason names the class** in the tier path too (`(tier=1:1000*2.0,class=live_action)`); `video-encoding.feature.md` C1 and three tests updated.
+- **`EffectiveProfileResolver` keeps the profile-level bar columns** (`StreamCodecName`, `AllowUpscale`, `AudioCodec`, `Container`) and takes the targets from the encode row. `Profiles.TargetResolutionCategory` / `TargetVideoKbps` / `TargetAudioKbps` are no longer read anywhere; left in the schema for a later drop.
+- **Per-genre class is a column on `GenreQualityTiers`**, not a hardcoded "Animation" string; seeded for `Animation` only.
+- **`RecalculateQueuePriorities.py` rewritten over `DatabaseService`** (R4: its raw `psycopg2` + env-var connection was the only edit path the hook allowed to fix).
+- **R12 collapses while editing:** two multi-line docstrings and one 4-line section comment in `QueueManagementBusinessService` collapsed to single lines (WHAT-redundant; contracts live in `marginal-savings-gate.feature.md`).
 
 ---
 
