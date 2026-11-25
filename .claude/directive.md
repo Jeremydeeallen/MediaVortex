@@ -210,7 +210,16 @@ Each row promotes durable content out of this directive into its permanent home 
 
 | Source artifact | Target file | Commit |
 |---|---|---|
-| `<what content / decision>` | `<path/to/target.feature.md or .flow.md>` | `<sha or "TBD until close">` |
+| Host deploy with roles (worker, server), `git archive` sync, blob fingerprint, `deploy-server.py` deploy + rollback + revert-on-failure | `deploy/worker-deploy-baremetal.flow.md` (ST7, S7) | 47589757 |
+| Server role, git-archive invariant, `deploy-server.py` command | `.claude/rules/worker-deploy.md`, `DOMAIN.md` | 47589757 |
+| Deploy-assigned WebService identity, single-instance gate in `Main()`, owner-scoped ScanJobs cleanup, `/api/Version` (S5), server storage roots (S6) | `WebService/startup.flow.md` (ST0-ST8, S1-S6) | 47589757 |
+| Single instance across hosts (InstanceName + 90s heartbeat freshness) | `WebService/single-instance-startup.feature.md` | 47589757 |
+| I9 launcher starts WorkerService only; `RegisterServiceStartup` signature | `Features/ServiceControl/ServiceControl.feature.md`, `WorkerService/WorkerService.feature.md` | 47589757 |
+| Version stamp comes from the archive (`Core/CodeVersion.py`) | `WorkerService/WorkerService.flow.md` | 47589757 |
+| The farm server hosts WebService (ServiceLifecycleManager section) | `transcode.flow.md` | 47589757 |
+| Server bring-up and cutover runbook | `deploy/bringup.md` | 47589757 |
+| BUG-0064 resolved; OOS (b) items filed (BUG-0113, BUG-0117 resolved) | `memory/KNOWN-ISSUES.md`, `memory/KNOWN-ISSUES-ARCHIVE.md` | 47589757, 849b5247 |
+| Static assets served from tracked `Static/` at URL `/static` on case-sensitive hosts | `Tests/Contract/TestFarmServer.py::test_asset_paths_match_shipped_tree_case` (contract, no doc change) | f4023975, 4260e3d1 |
 
 If a row's content is "new vertical entirely" or "new pipeline entirely," the Target is a NEW `*.feature.md` / `*.flow.md` -- R13 allows creation during DELIVERING for exactly this case (`.claude/rules/doc-layering.md`).
 
