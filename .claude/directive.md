@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-11-11
-**Status:** Active -- phase: VERIFYING
+**Status:** Active -- phase: DELIVERING
 **Slug:** farm-server
 **Replaces:** `directives/closed/2026-11-11-movies-video-rule.md` (closed Success)
 
@@ -219,6 +219,7 @@ Each row promotes durable content out of this directive into its permanent home 
 | The farm server hosts WebService (ServiceLifecycleManager section) | `transcode.flow.md` | 47589757 |
 | Server bring-up and cutover runbook | `deploy/bringup.md` | 47589757 |
 | BUG-0064 resolved; OOS (b) items filed (BUG-0113, BUG-0117 resolved) | `memory/KNOWN-ISSUES.md`, `memory/KNOWN-ISSUES-ARCHIVE.md` | 47589757, 849b5247 |
+| Fleet DeployHistory row lifecycle (RETURNING Id, KILLED sweep) | `deploy/worker-deploy-baremetal.flow.md` (S10) | 258c0ccf |
 | Static assets served from tracked `Static/` at URL `/static` on case-sensitive hosts | `Tests/Contract/TestFarmServer.py::test_asset_paths_match_shipped_tree_case` (contract, no doc change) | f4023975, 4260e3d1 |
 
 If a row's content is "new vertical entirely" or "new pipeline entirely," the Target is a NEW `*.feature.md` / `*.flow.md` -- R13 allows creation during DELIVERING for exactly this case (`.claude/rules/doc-layering.md`).
@@ -244,7 +245,8 @@ Smoke (2026-11-12, CT 237 at 10.0.0.49, server on 1a6bb82c):
 - **C6:** `deploy-server.py --sha ea0b57a5` -> `/api/Version` 404 for 60s, reverted to 1a6bb82c, exit 1, row Id=79 `FAILED` ("revert to 1a6bb82c OK"); `/api/Version` showed 1a6bb82c afterwards.
 - **C7:** `SELECT ... FROM DeployHistory WHERE HostsAttempted='mediavortex-server'` -> Ids 76 OK, 77 OK, 78 OK, 79 FAILED, each with PriorSha, NewSha, ElapsedSeconds.
 - **C8:** `/mnt/media_tv` (777 entries), `/mnt/movies` (3473) and `/mnt/xxx` (9) are visible on the server; ffmpeg at `/usr/local/bin`. `AudioRemeasurementService.MarkForRemeasurement(16802)`; within 30s the server's runner (the only one running) cleared `AdmissionDeferReason` and rewrote the loudness values through `/mnt/media_tv`. Before: LUFS -20.0, LRA 8.3, TP -2.2, threshold -30.8. After: -15.4, 4.4, -3.0, -25.9.
-- **C9:** `MEDIAVORTEX_WORKER_NAME=I9-dev; py WebService/Main.py` on I9 printed "WebService is already running. Preventing duplicate instance." and exited 1. `StartMediaVortex.py` launching only WorkerService is asserted by `TestDeployAssignedIdentity`. UNVERIFIED live: a fleet deploy leaving I9 without a WebService (no fleet deploy run yet).
+- **C9:** `MEDIAVORTEX_WORKER_NAME=I9-dev; py WebService/Main.py` on I9 printed "WebService is already running. Preventing duplicate instance." and exited 1. `StartMediaVortex.py` launching only WorkerService is asserted by `TestDeployAssignedIdentity`. Fleet deploys (2026-11-25) of aac21429, then 258c0ccf (DeployHistory Id=84 OK, 46s, 9/9 workers): I9 afterwards runs only `WorkerService\Main.py` (parent + child), and `ServiceStatus` for WebService stays owned by `mediavortex-server`. Each worker host rebuilt its venv on the blob fingerprint (dot d944cec8, wakko 24e233f8, mediavortex-workers 129b7371), and every Enabled worker came back on the new sha with its Online/Paused state unchanged.
+- **Fleet DeployHistory (Signal 3, found at the C9 smoke):** fleet rows were never finalized: the INSERT had no RETURNING, `GetLastInsertId()` returned 0, and `_FinishHist` returned early. Rows 70-75, 82 and 83 were stuck at RUNNING, and the fleet's PriorSha read a stale October row. Fixed in 258c0ccf, which inserts via `ExecuteReturning` and sweeps older non-server RUNNING rows to KILLED. Evidence: Id=84 `OK` with ElapsedSeconds and HostsSucceeded, and 70-75, 82, 83 marked `KILLED` ("never finalized; swept by fleet deploy 84"). Pre-existing contract failures, the same with the change stashed: TestFailLoud baseline drift in `Features/` (stale ratchet + `ContentClassificationRulesController` growth) and BUG-0116.
 
 ### Decisions Made
 
