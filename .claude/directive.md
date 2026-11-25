@@ -110,6 +110,17 @@ memory/KNOWN-ISSUES.md, memory/BUG-INDEX.md               -- EDIT: close BUG-010
 
 ### Verification
 
+Pre-smoke (02ad9e81, deployed 1f3836b8: server Id=85, fleet 9/9 workers):
+- **C1-C3:** `TestInsertReturningId` 7 passed. Against the old code (new test file only) 6 of them fail: the tree scan and every per-function check. The 2x50 race test passed on old code too; it asserts the property but did not reproduce the old race. Full contract suite: 80 failed / 28 errors before and after, identical sets; no new failures. Live race test left 0 `_test-insert-returning-id` ActiveJobs rows.
+- **C4/C5 blocked (2026-11-25):** no transcode can be queued. `POST /api/TranscodeQueue/AddJob` for MediaFile 751897 (1080p) and 751839 (720p) both return "Upscale (source ... < profile target 2160p)". `QueueManagementBusinessService` upscale gate compares the source to `ProfileRepository.GetProfileMaxTarget`, the highest `TranscodeDownTo` across all of the profile's rows (BUG-0054, a31e4d9e). Tiered profiles (`AV1 Tier 1 Efficient`) have one row per source resolution up to 2160p, so every sub-4K source is refused. Last transcode attempt: 2026-10-20. Separate vertical (queue admission); not fixed here.
+
+Smoke (2026-11-25, operator approved one real TV transcode; 720p source so both ProfileThresholds rows target 720p and ForceAdd cannot upscale):
+- **C4:** `AddJob` (ForceAdd) MediaFile 751839 (The Mentalist S01E21, 720p) -> queue 229520, claimed by dot-worker-1. ActiveJobs 1567926 (`QueueId=229520`) was created, then deleted by its id at job end. One TranscodeProgress row (104398) was updated in place, reaching 57.5% at frame 12092. TemporaryFilePaths 98828 carries `TranscodeAttemptId=103992`. Attempt 103992 `Success=TRUE`, `Disposition=Replace`.
+- **C5:** VMAF on wakko-worker-1: QualityTestingQueue 3262 matches the VMAF ActiveJobs `QueueId=3262`. QualityTestResults 2303 `Success`. QualityTestProgress 2077 reached `Processing`; the old shared-id bug left it stuck at `Started`. Score 94.83, `DispositionReason=VmafPassed`.
+- **C6:** `POST /api/MediaFiles/617831/Refresh` on the server -> I9 ProbeWorker wrote ActiveJobs 1567930 (`ProbeService`, `QueueId=617831`, Probing) and deleted it. Afterwards no ProbeService rows remained, and `NeedsReprobe=FALSE` with no probe error.
+- **C7:** `POST /api/QualityTest/QueueTestRun` (set 2, MediaFile 751897) on the server returned `QueueId 229521`, and TranscodeQueue 229521 was that row (`TestVariantSetId=2`, Pending).
+- Side effects: the replaced file's audio was still non-compliant, so the system queued AudioFix 229522 automatically (wakko-worker-1, attempt 103994). The C7 variant job then failed on dot (attempt 103993): "WorkerContext.Current called on unbound thread" at `VariantJobProcessor` L68 `Worker.Current(...)`, after `CreateActiveJob` had returned its id. That path was last run 2026-07-03; pre-existing, not this change.
+
 ### Decisions Made
 
 ---
