@@ -38,10 +38,18 @@ class _StubThresholds:
         return self._M
 
 
+# directive: profile-row-lookup | # see profile-tier-ladder.C10
+class _StubClasses:
+    # directive: profile-row-lookup | # see profile-tier-ladder.C10
+    def Resolve(self, _StorageRootId, _MediaFileId):
+        return 'live_action'
+
+
 class TestVideoVerticalCodecMatch(unittest.TestCase):
 
+    # directive: profile-row-lookup | # see profile-tier-ladder.C10
     def _Vert(self, TargetCodec='av1', TargetKbps=400, Multiplier=4.0):
-        return VideoVertical(Thresholds=_StubThresholds(Multiplier), Tiers=_StubTiers(TargetCodec, TargetKbps))
+        return VideoVertical(Thresholds=_StubThresholds(Multiplier), Tiers=_StubTiers(TargetCodec, TargetKbps), Classes=_StubClasses())
 
     def test_src_matches_target_codec_is_compliant(self):
         Mf = _FakeMf(Codec='av1', VideoBitrateKbps=1500)

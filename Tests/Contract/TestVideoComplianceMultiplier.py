@@ -3,12 +3,14 @@ import unittest
 from dataclasses import dataclass
 from typing import Optional
 
+from Core.Database.DatabaseService import CaseInsensitiveDict
 from Features.VideoEncoding.VideoVertical import VideoVertical
 
 
 @dataclass
 class _FakeMf:
     Id: int = 1
+    StorageRootId: int = 1
     Codec: Optional[str] = 'h264'
     Resolution: Optional[str] = '1280x720'
     ResolutionCategory: Optional[str] = '720p'
@@ -25,12 +27,18 @@ class _StubDb:
         self._Target = ProfileTargetKbps
         self._Multiplier = Multiplier
 
+    # directive: profile-row-lookup | # see profile-tier-ladder.S5 -- answers the one row lookup plus the class resolver's two reads
     def ExecuteQuery(self, Sql, Params=None):
         SqlLower = Sql.lower()
-        if 'from profiles p' in SqlLower and 'profilethresholds' in SqlLower and 'profilename' in SqlLower:
+        if 'from profilethresholds pt join profiles p' in SqlLower:
             if self._Target is None:
                 return []
-            return [{'targetkbps': self._Target}]
+            return [CaseInsensitiveDict({'profileid': 475, 'profilename': Params[0], 'contentclass': Params[1], 'resolution': Params[2],
+                                         'transcodedownto': None, 'targetkbps': self._Target, 'codec': 'av1'})]
+        if 'from storageroots' in SqlLower:
+            return [CaseInsensitiveDict({'defaultcontentclass': 'live_action'})]
+        if 'select genres from mediafiles' in SqlLower:
+            return [CaseInsensitiveDict({'genres': None})]
         if 'videocompliancethresholds' in SqlLower:
             if self._Multiplier is None:
                 return []
