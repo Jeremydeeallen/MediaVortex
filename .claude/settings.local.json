@@ -88,7 +88,13 @@
       "Skill(update-config)",
       "Write(.claude/commands/**)",
       "Edit(.claude/commands/**)",
-      "Bash(scp *)"
+      "Bash(scp *)",
+      "PowerShell(ssh root@dot \"ls -la '/mnt/media_tv/Community/Season 1/' | head -40; ffmpeg -hide_banner -version | head -3; nvidia-smi --query-gpu=name,driver_version --format=csv\")",
+      "PowerShell(ssh root@dot \"cd '/mnt/media_tv/Community/Season 1/' && ffmpeg -hide_banner -loglevel info -t 2 -i 'Community - S01E01 - Pilot Bluray-720p Remux-mv.mp4' -map 0:v:0 -c copy -bsf:v trace_headers -f null - 2>&1 | grep -iE 'obu_type|metadata|timecode|counting|n_frames|seconds|minutes|hours|time_offset|error|invalid|out of range' | sort | uniq -c | sort -rn | head -40\")",
+      "PowerShell(git *)",
+      "PowerShell(ssh root@larry \"pct list; echo ---; cat /etc/pve/lxc/218.conf; echo ---; mount | grep -E 'xxx|movies|media_tv'; echo ---; cat /etc/exports; echo ---; pveam list local | grep -i debian; echo ---; ip -4 -br addr; echo ---; pvesm status\")",
+      "WebFetch(domain:docs.stashapp.cc)",
+      "WebFetch(domain:api.github.com)"
     ],
     "defaultMode": "bypassPermissions"
   }
