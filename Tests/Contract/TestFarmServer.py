@@ -151,6 +151,15 @@ class TestDeployAssignedIdentity(unittest.TestCase):
             "SELECT COUNT(*) AS N FROM StorageRootResolutions WHERE WorkerName = %s AND IsActive", ('mediavortex-server',))
         self.assertGreaterEqual(Rows[0]['N'], 3)
 
+    # directive: farm-server | # see startup.ST5
+    def test_asset_dirs_match_shipped_tree_case(self):
+        Source = (REPO_ROOT / 'WebService' / 'Main.py').read_text(encoding='utf-8')
+        Shipped = set(subprocess.run(['git', 'ls-tree', '--name-only', 'HEAD'], cwd=REPO_ROOT,
+                                     capture_output=True, text=True, check=True).stdout.split())
+        for Name in ('Templates', 'Static'):
+            self.assertIn(f"os.path.join(project_root, '{Name}')", Source)
+            self.assertIn(Name, Shipped)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -32,7 +32,7 @@ class WebServiceApp:
         # Set template and static folders to parent directory
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         template_dir = os.path.join(project_root, 'Templates')
-        static_dir = os.path.join(project_root, 'static')
+        static_dir = os.path.join(project_root, 'Static')
         
         self.App = Flask(__name__,
                         template_folder=template_dir,
