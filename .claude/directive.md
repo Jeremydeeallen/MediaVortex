@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-11-11
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: VERIFYING
 **Slug:** farm-server
 **Replaces:** `directives/closed/2026-11-11-movies-video-rule.md` (closed Success)
 
@@ -226,6 +226,7 @@ Pre-smoke (47589757):
 - Migration `AddServiceStatusInstanceName` and the SRR seed applied live.
 
 Smoke (2026-11-12, CT 237 at 10.0.0.49, server on 1a6bb82c):
+- **C1 reopened (2026-11-25):** the page returned 200 but every `/static/*` asset 404'd, so the UI had no styling or branding. Flask pointed at `static`; the tracked dir is `Static`, and Linux is case-sensitive. Fixed in f4023975 (plus a contract test); re-smoke pending a server deploy.
 - **C1:** `GET http://10.0.0.49:5000/` 200 and `GET http://mediavortex-server/` 200 (nginx, name resolved via Pi-hole); the I9 WebService had not been running.
 - **C2:** `pct reboot 237`; the container's `uptime -p` read "up 0 minutes", the unit started 2s after boot, and `/api/Version` answered 200 after 8s with no operator action.
 - **C3:** `GET /api/Version` -> `{"Sha":"1a6bb82c6e4ef6abb9dbadb070c111fb93773a94","Instance":"mediavortex-server"}`.
