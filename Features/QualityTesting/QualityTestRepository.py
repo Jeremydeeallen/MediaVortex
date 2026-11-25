@@ -121,17 +121,11 @@ class QualityTestRepository(BaseRepository):
                 None
             )
 
-            RowsAffected = self.ExecuteNonQuery(Query, Params)
-
-            if RowsAffected > 0:
-                JobId = self.GetLastInsertId()
-                LoggingService.LogInfo(f"Created quality test queue entry with ID {JobId} for TranscodeAttempt {TranscodeAttemptId}",
-                                     "QualityTestRepository", "CreateQualityTestQueueEntry")
-                return JobId
-            else:
-                LoggingService.LogError(f"Failed to create quality test queue entry for TranscodeAttempt {TranscodeAttemptId}",
-                                      "QualityTestRepository", "CreateQualityTestQueueEntry")
-                return None
+            # see database-architecture.C15
+            JobId = self.DatabaseService.ExecuteReturning(Query, Params)[0]['Id']
+            LoggingService.LogInfo(f"Created quality test queue entry with ID {JobId} for TranscodeAttempt {TranscodeAttemptId}",
+                                 "QualityTestRepository", "CreateQualityTestQueueEntry")
+            return JobId
 
         except Exception as e:
             LoggingService.LogException("Exception creating quality test queue entry", e, "QualityTestRepository", "CreateQualityTestQueueEntry")
@@ -223,19 +217,11 @@ class QualityTestRepository(BaseRepository):
             LoggingService.LogInfo(f"Inserting QualityTestResult with params: {Params}", "QualityTestRepository", "CreateQualityTestResult")
 
             try:
-                AffectedRows = self.ExecuteNonQuery(Query, Params)
-                ResultId = self.GetLastInsertId()
-
-                if ResultId > 0:
-                    LoggingService.LogInfo(f"Created QualityTestResult {ResultId} for TranscodeAttempt {TranscodeAttemptId}",
-                                          "QualityTestRepository", "CreateQualityTestResult")
-                    return ResultId
-                else:
-                    LoggingService.LogError(
-                        f"INSERT failed - no record ID returned. Query: {Query}, Params: {Params}, ParamCount: {len(Params)}, RowCount: {AffectedRows}",
-                        "QualityTestRepository", "CreateQualityTestResult"
-                    )
-                    return 0
+                # see database-architecture.C15
+                ResultId = self.DatabaseService.ExecuteReturning(Query, Params)[0]['Id']
+                LoggingService.LogInfo(f"Created QualityTestResult {ResultId} for TranscodeAttempt {TranscodeAttemptId}",
+                                      "QualityTestRepository", "CreateQualityTestResult")
+                return ResultId
             except Exception as e:
                 LoggingService.LogException(
                     f"Database error during INSERT. Query: {Query}, Params: {Params}, ParamCount: {len(Params)}",
@@ -740,19 +726,12 @@ class QualityTestRepository(BaseRepository):
                 Query = "INSERT INTO TemporaryFilePaths (TranscodeAttemptId, SourceStorageRootId, SourceRelativePath, LocalSourcePath, LocalOutputPath, CreatedDate) VALUES (%s, %s, %s, %s, %s, NOW()) RETURNING Id"
                 Params = (TranscodeAttemptId, SourceStorageRootId, SourceRelativePath, LocalSourcePath, LocalOutputPath)
 
-            RowsAffected = self.ExecuteNonQuery(Query, Params)
-
-            if RowsAffected > 0:
-                RecordId = self.GetLastInsertId()
-                LoggingService.LogInfo(f"Created TemporaryFilePaths row {RecordId} for TranscodeAttempt {TranscodeAttemptId}",
-                                     "QualityTestRepository", "CreateTemporaryFilePath")
-                self.PrivateLogTemporaryFilePathOperation("CREATE", TranscodeAttemptId, RecordId, "SUCCESS")
-                return RecordId
-            else:
-                LoggingService.LogError(f"Failed to create TemporaryFilePaths row for TranscodeAttempt {TranscodeAttemptId}",
-                                      "QualityTestRepository", "CreateTemporaryFilePath")
-                self.PrivateLogTemporaryFilePathOperation("CREATE", TranscodeAttemptId, None, "FAILED")
-                return None
+            # see database-architecture.C15
+            RecordId = self.DatabaseService.ExecuteReturning(Query, Params)[0]['Id']
+            LoggingService.LogInfo(f"Created TemporaryFilePaths row {RecordId} for TranscodeAttempt {TranscodeAttemptId}",
+                                 "QualityTestRepository", "CreateTemporaryFilePath")
+            self.PrivateLogTemporaryFilePathOperation("CREATE", TranscodeAttemptId, RecordId, "SUCCESS")
+            return RecordId
 
         except Exception as e:
             LoggingService.LogException("Exception creating temporary file path record", e, "QualityTestRepository", "CreateTemporaryFilePath")

@@ -6,3 +6,4 @@ worker-memorymax-cgroup
 preencode-loudness-cache-hit
 bug-0095-failure-classification
 movies-video-rule
+insert-returning-id

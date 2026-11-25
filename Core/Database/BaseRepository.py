@@ -22,9 +22,6 @@ class BaseRepository:
     def ExecuteScalar(self, query: str, parameters: tuple = ()):
         return self.DatabaseService.ExecuteScalar(query, parameters)
 
-    def GetLastInsertId(self) -> int:
-        return self.DatabaseService.GetLastInsertId()
-
     # directive: path-schema-migration | # see path.S8
     def LookupMediaFileId(self, FilePathOrPath) -> Optional[int]:
         """Look up MediaFiles.Id from a canonical FilePath string or Path object via typed-pair WHERE."""

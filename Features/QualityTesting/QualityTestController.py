@@ -708,8 +708,8 @@ def QueueTestRun():
                 Rejected.append({'FilePath': Path_, 'Reason': f'already pending for this variant set (queue Id {ExistingRow[0]["Id"]})'})
                 continue
             try:
-                # directive: transcode-flow-canonical | # see transcodequeue.S3
-                Db.ExecuteNonQuery(
+                # directive: transcode-flow-canonical, insert-returning-id | # see transcodequeue.S3, database-architecture.C15
+                NewId = Db.ExecuteReturning(
                     "INSERT INTO TranscodeQueue (StorageRootId, RelativePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, ProcessingMode, MediaFileId, TestVariantSetId, DateAdded) VALUES (%s, %s, %s, %s, %s, %s, %s, 'Pending', 'Transcode', %s, %s, NOW()) RETURNING Id",
                     (
                         MfStorageRootId,
@@ -722,8 +722,7 @@ def QueueTestRun():
                         Mf.get('Id'),
                         VariantSetId,
                     ),
-                )
-                NewId = Db.LastInsertId
+                )[0]['Id']
                 from Features.AudioNormalization.AudioPolicyAdmissionGate import AudioPolicyAdmissionGate
                 AudioPolicyAdmissionGate().BackfillAllPending()
                 Accepted.append({'FilePath': Path_, 'QueueId': NewId, 'Profile': Profile})

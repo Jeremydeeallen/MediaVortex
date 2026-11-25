@@ -116,9 +116,8 @@ def _InsertQueueRow(MediaFileId: int, ProcessingMode: str) -> int:
         SizeMB = SizeBytes / 1024.0 / 1024.0
 
     Now = datetime.now(timezone.utc)
-    # Use ExecuteNonQuery so the INSERT commits; ExecuteQuery does not commit
-    # and the RETURNING row would be rolled back on connection close.
-    Db.ExecuteNonQuery(
+    # see database-architecture.C15
+    QueueId = int(Db.ExecuteReturning(
         "INSERT INTO TranscodeQueue "
         "(StorageRootId, RelativePath, FileName, Directory, "
         "SizeBytes, SizeMB, Priority, Status, DateAdded, ProcessingMode, MediaFileId) "
@@ -136,8 +135,7 @@ def _InsertQueueRow(MediaFileId: int, ProcessingMode: str) -> int:
             ProcessingMode,
             MediaFileId,
         ),
-    )
-    QueueId = int(Db.LastInsertId)
+    )[0]['Id'])
     LoggingService.LogInfo(
         f"Harness enqueued MediaFile {MediaFileId} as {ProcessingMode} "
         f"(QueueId={QueueId})",

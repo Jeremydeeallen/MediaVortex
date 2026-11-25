@@ -164,7 +164,6 @@ class DatabaseService:
 
         self._connection_params = connection_params
         self._ensure_pool()
-        self.LastInsertId = 0
 
     def _ensure_pool(self):
         """Initialize the shared connection pool if it doesn't exist yet."""
@@ -227,13 +226,6 @@ class DatabaseService:
             cursor = connection.cursor()
             cursor.execute(query, parameters)
             connection.commit()
-
-            # Capture last insert ID if the query uses RETURNING
-            if cursor.description is not None:
-                row = cursor.fetchone()
-                if row:
-                    self.LastInsertId = row[0]
-
             return cursor.rowcount
 
         except Exception as e:
@@ -259,7 +251,7 @@ class DatabaseService:
             self.CloseConnection(connection)
 
     def ExecuteReturning(self, query: str, parameters: tuple = ()) -> list:
-        """Execute INSERT/UPDATE/DELETE ... RETURNING atomically. Row fetch happens on the same connection as the write, so no shared-state race with LastInsertId across worker threads."""
+        """Execute INSERT/UPDATE/DELETE ... RETURNING; rows come back from the same cursor that ran the write."""
         connection = self.GetConnection()
         try:
             cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -279,12 +271,3 @@ class DatabaseService:
             raise
         finally:
             self.CloseConnection(connection)
-
-    def GetLastInsertId(self) -> int:
-        """Get the ID of the last inserted row (set by RETURNING clause)."""
-        try:
-            if hasattr(self, 'LastInsertId'):
-                return self.LastInsertId
-            return 0
-        except Exception:
-            return 0

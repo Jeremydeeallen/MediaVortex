@@ -679,14 +679,10 @@ class TranscodeJobRepository(BaseRepository):
                 parameters = (TranscodeAttemptId, 1, "Encoding", CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,
                              CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS)
 
-                RowsAffected = self.DatabaseService.ExecuteNonQuery(insertQuery, parameters)
-                if RowsAffected > 0:
-                    progressId = self.DatabaseService.GetLastInsertId()
-                    LoggingService.LogDebug(f"Inserted new progress record for attempt {TranscodeAttemptId}: {CurrentPhase} ({ProgressPercent}%) - Frame: {CurrentFrame}, FPS: {CurrentFPS}, ETA: {ETA}", "TranscodeJobRepository", "SaveTranscodeProgress")
-                    return progressId
-                else:
-                    LoggingService.LogError(f"Failed to insert progress record for attempt {TranscodeAttemptId}", "TranscodeJobRepository", "SaveTranscodeProgress")
-                    return 0
+                # see database-architecture.C15
+                progressId = self.DatabaseService.ExecuteReturning(insertQuery, parameters)[0]['Id']
+                LoggingService.LogDebug(f"Inserted new progress record for attempt {TranscodeAttemptId}: {CurrentPhase} ({ProgressPercent}%) - Frame: {CurrentFrame}, FPS: {CurrentFPS}, ETA: {ETA}", "TranscodeJobRepository", "SaveTranscodeProgress")
+                return progressId
 
         except Exception as e:
             LoggingService.LogException("Exception saving transcode progress", e, "TranscodeJobRepository", "SaveTranscodeProgress")

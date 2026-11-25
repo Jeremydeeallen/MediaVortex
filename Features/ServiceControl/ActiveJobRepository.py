@@ -152,17 +152,10 @@ class ActiveJobRepository:
                 "RETURNING Id"
             )
 
-            result = self.DatabaseService.ExecuteNonQuery(query, (ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName))
+            job_id = self.DatabaseService.ExecuteReturning(query, (ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName))[0]['Id']
+            LoggingService.LogInfo(f"Created active job {job_id} for {ServiceName} - JobType: {JobType}, QueueId: {QueueId}", "DatabaseManager", "CreateActiveJob")
+            return job_id
 
-            if result > 0:
-                job_id = self.DatabaseService.LastInsertId
-                
-                LoggingService.LogInfo(f"Created active job {job_id} for {ServiceName} - JobType: {JobType}, QueueId: {QueueId}", "DatabaseManager", "CreateActiveJob")
-                return job_id
-            else:
-                LoggingService.LogError(f"Failed to create active job for {ServiceName}", "DatabaseManager", "CreateActiveJob")
-                return 0
-                
         except Exception as e:
             LoggingService.LogException("Exception creating active job", e, "DatabaseManager", "CreateActiveJob")
             return 0

@@ -153,6 +153,12 @@ the contract grep-verifiable.
     CLAUDE.md; reasserted here so a future rename is recognized as a
     schema migration, not a bug fix.
 
+15. **C15 -- An INSERT's new row id comes from that statement's own
+    `RETURNING Id`, read from the same cursor (`ExecuteReturning`).** No
+    code reads an id from state kept between calls: such state is shared
+    across threads and hands back 0 when a capture is missed. Verifiable:
+    `Tests/Contract/TestInsertReturningId.py`.
+
 ### F. Migrations
 
 13. **Every script in `Scripts/SQLScripts/` is idempotent** — re-running

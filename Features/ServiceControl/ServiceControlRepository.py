@@ -4,7 +4,6 @@ Data access for ServiceStatus, ServiceCommands, and ActiveJobs tables.
 Extracted from DatabaseManager as part of vertical slice architecture migration.
 """
 
-import json
 from typing import Dict, Any, Optional, List
 from Core.Database.BaseRepository import BaseRepository
 from Core.Logging.LoggingService import LoggingService
@@ -150,43 +149,7 @@ class ServiceControlRepository(BaseRepository):
 
     # ─── ServiceCommands Methods ─────────────────────────────────────────
 
-    def CreateServiceCommand(self, CommandData: Dict[str, Any]) -> int:
-        """Create a new service command."""
-        try:
-            LoggingService.LogFunctionEntry("CreateServiceCommand", "ServiceControlRepository")
-
-            query = """
-                INSERT INTO ServiceCommands (
-                CommandType, SourceService, TargetService, Parameters, Status,
-                Priority, CreatedBy, CreatedAt, UpdatedAt
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-                RETURNING Id
-            """
-
-            parameters = (
-                CommandData.get('CommandType'),
-                CommandData.get('SourceService', 'ServiceControlController'),
-                CommandData.get('TargetService'),
-                json.dumps(CommandData.get('Parameters', {})),
-                CommandData.get('Status', 'Pending'),
-                CommandData.get('Priority', 1),
-                CommandData.get('CreatedBy', 'Unknown')
-            )
-
-            result = self.ExecuteNonQuery(query, parameters)
-
-            if result:
-                command_id = self.GetLastInsertId()
-                LoggingService.LogInfo(f"Created ServiceCommand {command_id}", "ServiceControlRepository", "CreateServiceCommand")
-                return command_id
-            else:
-                LoggingService.LogError("Failed to create ServiceCommand", "ServiceControlRepository", "CreateServiceCommand")
-                return 0
-
-        except Exception as e:
-            LoggingService.LogException("Error creating ServiceCommand", e, "ServiceControlRepository", "CreateServiceCommand")
-            return 0
-
+    # directive: insert-returning-id | # see database-architecture.C15 -- the unused ServiceCommands inserter that read a shared last-insert field was deleted here
     def UpdateServiceCommandStatus(self, CommandId: int, Status: str, Result: str = None) -> bool:
         """Update service command status."""
         try:
@@ -232,32 +195,7 @@ class ServiceControlRepository(BaseRepository):
 
     # ─── ActiveJobs Methods ──────────────────────────────────────────────
 
-    def CreateActiveJob(self, ServiceName: str, JobType: str, QueueId: int, ProcessId: int = None, ThreadId: int = None) -> int:
-        """Create an active job record for tracking."""
-        try:
-            LoggingService.LogFunctionEntry("CreateActiveJob", "ServiceControlRepository", ServiceName, JobType, QueueId, ProcessId, ThreadId)
-
-            query = """
-                INSERT INTO ActiveJobs (ServiceName, JobType, QueueId, ProcessId, ThreadId, Status, StartedAt)
-                VALUES (%s, %s, %s, %s, %s, 'Running', NOW())
-                RETURNING Id
-            """
-
-            result = self.ExecuteNonQuery(query, (ServiceName, JobType, QueueId, ProcessId, ThreadId))
-
-            if result > 0:
-                job_id = self.DatabaseService.LastInsertId
-
-                LoggingService.LogInfo(f"Created active job {job_id} for {ServiceName} - JobType: {JobType}, QueueId: {QueueId}", "ServiceControlRepository", "CreateActiveJob")
-                return job_id
-            else:
-                LoggingService.LogError(f"Failed to create active job for {ServiceName}", "ServiceControlRepository", "CreateActiveJob")
-                return 0
-
-        except Exception as e:
-            LoggingService.LogException("Exception creating active job", e, "ServiceControlRepository", "CreateActiveJob")
-            return 0
-
+    # directive: insert-returning-id | # see database-architecture.C15 -- the unused ActiveJobs inserter that read a shared last-insert field was deleted here
     def CompleteActiveJob(self, JobId: int, Success: bool = True, ErrorMessage: str = None) -> bool:
         """Complete an active job and remove it from tracking."""
         try:

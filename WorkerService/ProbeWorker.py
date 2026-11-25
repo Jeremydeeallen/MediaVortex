@@ -103,11 +103,10 @@ class ProbeWorker:
     def _CreateActiveJob(self, MediaFileId):
         # directive: probe-worker-decoupled -- record in-flight probe in ActiveJobs so DrainWorker sees us truthfully.
         try:
-            self.Db.ExecuteNonQuery(
+            return self.Db.ExecuteReturning(
                 ACTIVE_JOB_INSERT_SQL,
                 (MediaFileId, os.getpid(), threading.get_ident(), self.WorkerName),
-            )
-            return self.Db.GetLastInsertId()
+            )[0]['Id']
         except Exception as Ex:
             LoggingService.LogException("ProbeWorker._CreateActiveJob failed", Ex, 'ProbeWorker', '_CreateActiveJob')
             return None

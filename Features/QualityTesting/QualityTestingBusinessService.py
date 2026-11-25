@@ -790,18 +790,9 @@ class QualityTestingBusinessService:
         except Exception as e:
             LoggingService.LogException(f"Error monitoring progress for job {JobId}", e, "QualityTestingBusinessService", "MonitorProgress")
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: nvenc-rate-anchored-remediation, insert-returning-id | # see database-architecture.C15
     def CreateProgressRecord(self, JobId: int, JobDetails: dict) -> int:
-        """Create a progress tracking record for the quality test.
-        Uses `RETURNING Id` so DatabaseService.ExecuteNonQuery captures the
-        new row's id into `LastInsertId`. Without RETURNING, GetLastInsertId
-        either returns 0 (no prior INSERT this connection) or a stale id
-        from an unrelated INSERT -- both of which made `progress_id` wrong
-        and caused every subsequent UpdateProgressRecord call to silently
-        no-op. Effect was: Status stayed at 'Started' forever, and the
-        Activity page's `GetRunningQualityTestProgress` query (which
-        filters on Status='Processing') saw nothing. Surfaced 2026-05-10.
-        """
+        """Create the quality test's progress row; its id comes from the INSERT's own RETURNING."""
         try:
             query = (
                 "INSERT INTO QualityTestProgress ("
@@ -814,7 +805,7 @@ class QualityTestingBusinessService:
             current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             transcode_attempt_id = JobDetails.get('TranscodeAttemptId', 0)
 
-            self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (
+            return self.DatabaseManager.DatabaseService.ExecuteReturning(query, (
                 transcode_attempt_id,
                 "Started",
                 0,
@@ -822,10 +813,7 @@ class QualityTestingBusinessService:
                 current_time,
                 current_time,
                 current_time
-            ))
-
-            progress_id = self.DatabaseManager.DatabaseService.GetLastInsertId() or 0
-            return progress_id
+            ))[0]['Id']
 
         except Exception as e:
             LoggingService.LogException(f"Error creating progress record for job {JobId}", e, "QualityTestingBusinessService", "CreateProgressRecord")

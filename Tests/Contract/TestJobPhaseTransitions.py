@@ -72,11 +72,10 @@ class JobPhaseTransitionsTest(unittest.TestCase):
 
     def test_createactivejob_writes_setup_phase_in_insert(self):
         Repo, Db = self._MakeRepo()
-        Db.LastInsertId = 42
-        Db.ExecuteNonQuery.return_value = 1
+        Db.ExecuteReturning.return_value = [{'Id': 42}]
         Result = Repo.CreateActiveJob('TranscodeService', 'Transcode', 999, ProcessId=1, ThreadId=2, WorkerName='wakko-worker-1')
         self.assertEqual(Result, 42)
-        Args, _ = Db.ExecuteNonQuery.call_args
+        Args, _ = Db.ExecuteReturning.call_args
         Sql, _ = Args
         self.assertIn("Phase", Sql)
         self.assertIn("'Setup'", Sql)

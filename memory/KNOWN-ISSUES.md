@@ -154,11 +154,6 @@ Amplification: `tv-tier1-classifier-pin` directive (2026-08-25) retiered 188 TV 
 
 ### deploy
 
-- BUG-0109 | `deploy/deploy-fleet.py` never closes its DeployHistory row: every fleet deploy stays `Outcome='RUNNING'` with CompletedAt, HostsAttempted and HostsSucceeded NULL | criterion: .claude/rules/worker-deploy.md (DeployHistory audit) | 2026-11-11
-  Repro: run `py deploy/deploy-fleet.py`, then `SELECT Id, Outcome, CompletedAt, HostsAttempted FROM DeployHistory ORDER BY Id DESC LIMIT 5`.
-  Evidence: 2026-11-11, rows 66-75 are all `RUNNING` with CompletedAt and HostsAttempted NULL. The INSERT has no `RETURNING`, so `Db.GetLastInsertId()` returns 0 and `_FinishHist` returns before its UPDATE. Impact: no fleet row ever reaches `Outcome='OK'`, so the fleet `PriorSha` chain is never advanced by a fleet run. The rule's "next fleet start sweeps RUNNING rows to KILLED" has no code. Server releases (`deploy/deploy-server.py`) use `ExecuteReturning` and close their rows.
-  First place to look: `deploy/deploy-fleet.py` INSERT + `GetLastInsertId()` at the top of the run; copy `INSERT ... RETURNING Id` via `ExecuteReturning` from `deploy/deploy-server.py`.
-
 ### disposition
 
 ### failure-accounting
@@ -1915,6 +1910,14 @@ Tier 2 (upstream, cross-vertical): a previous transcode wrote a corrupt `-mv.mp4
   Repro: release a commit whose schema snapshot mismatches the DB (or a host without ffmpeg); the WebService logs a warning, serves `/api/Version`, and `deploy-server.py` reports success.
   Evidence: `WebServiceApp.__init__` wraps `SchemaChecker().AssertMatches()` + `WorkerContext.Initialize(... FFmpegService.FindFFmpegPath() ...)` in `try/except Exception` + `LogWarning`. Fix constraint: `Tests/Contract/TestWorkBucketController.py` and `TestTranscodingSettingsRoundTrip.py` construct `WebServiceApp` in one pytest process, and a second `WorkerContext.Initialize` raises "already initialized" -- today swallowed by the same block.
   First place to look: `WebService/Main.py` `WebServiceApp.__init__` WorkerContext block (`startup.flow.md` ST4).
+- BUG-0118 | Three ActiveJobs inserters duplicate one INSERT | criterion: Core/Database/repository-split.feature.md#2 (one home per method) | 2026-11-25
+  Repro: `grep -rn "INSERT INTO ActiveJobs" --include=*.py` -> `WorkerService/ProbeWorker.py` (`ACTIVE_JOB_INSERT_SQL`), `WorkerService/LanguageWorker.py`, `Features/ServiceControl/ActiveJobRepository.CreateActiveJob`.
+  Evidence: three hand-written INSERTs with different column sets (probe and language set `Phase` themselves; the repository writes `Phase='Setup'`). A column added to ActiveJobs has to be added in three places. Found by directive `insert-returning-id`, which kept them separate (DRY is its own change).
+  First place to look: route the two workers through `ActiveJobRepository.CreateActiveJob` with a `Phase` argument.
+- BUG-0119 | Insert helpers log and return 0/None/False when the INSERT fails, so callers carry on with no row | criterion: .claude/rules/fail-loud.md (anti-patterns 1 and 4) | 2026-11-25
+  Repro: make any of these INSERTs fail (e.g. a NOT NULL column left unset) and the function returns 0 or None instead of raising: `ActiveJobRepository.CreateActiveJob`, `ProbeWorker._CreateActiveJob`, `QualityTestRepository.CreateQualityTestQueueEntry` / `CreateQualityTestResult` / `CreateTemporaryFilePath`, `QualityTestingBusinessService.CreateProgressRecord`, `TranscodeJobRepository.SaveTranscodeProgress`.
+  Evidence: directive `insert-returning-id` made each id come from the statement's own `RETURNING` (no more silent 0 from shared state), but kept each function's outer `try/except Exception` that logs and returns a sentinel. Changing these to raise changes control flow in the encode loop, the VMAF monitor and the queue service; each caller needs its own decision. `Tests/Contract/TestFailLoud.py` baseline tracks them.
+  First place to look: callers that test the sentinel (`if not ActiveJobId`, `if ProgressId`); decide raise vs. handle per caller.
 
 ---
 
