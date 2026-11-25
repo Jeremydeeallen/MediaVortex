@@ -599,7 +599,7 @@ class SystemSettingsController:
                 from Features.Profiles.LibraryDefaultTierRepository import LibraryDefaultTierRepository
                 Libraries = LibraryDefaultTierRepository().ListLibraries()
                 return jsonify({'Success': True, 'Data': {'Libraries': [
-                    {'StorageRootId': L.StorageRootId, 'Name': L.Name, 'DefaultQualityTier': L.DefaultQualityTier}
+                    {'StorageRootId': L.StorageRootId, 'Name': L.Name, 'DefaultQualityTier': L.DefaultQualityTier, 'DefaultContentClass': L.DefaultContentClass}
                     for L in Libraries
                 ]}}), 200
             # fail-loud-ok: HTTP boundary; logged and surfaced as Success=False
@@ -608,21 +608,32 @@ class SystemSettingsController:
                 return jsonify({'Success': False, 'Message': 'Could not load library tiers'}), 500
 
         @self.Blueprint.route('/LibraryTiers', methods=['PUT'])
-        # directive: tv-video-rule-tier1 | # see video-encoding.C4
+        # directive: tv-video-rule-tier1, profile-row-lookup | # see video-encoding.C4, profile-tier-ladder.S4 -- body carries DefaultQualityTier and/or DefaultContentClass; each present key is written
         def UpdateLibraryTier():
             try:
                 Data = request.get_json() or {}
                 StorageRootId = Data.get('StorageRootId')
-                Tier = Data.get('DefaultQualityTier')
                 if not isinstance(StorageRootId, int):
                     return jsonify({'Success': False, 'Message': 'StorageRootId (integer) is required'}), 400
+                if 'DefaultQualityTier' not in Data and 'DefaultContentClass' not in Data:
+                    return jsonify({'Success': False, 'Message': 'DefaultQualityTier or DefaultContentClass is required'}), 400
+                Tier = Data.get('DefaultQualityTier')
+                ContentClass = Data.get('DefaultContentClass')
                 if Tier is not None and (not isinstance(Tier, int) or not 1 <= Tier <= 5):
                     return jsonify({'Success': False, 'Message': 'DefaultQualityTier must be 1-5 or null'}), 400
+                if ContentClass is not None and ContentClass not in ('live_action', 'animation'):
+                    return jsonify({'Success': False, 'Message': 'DefaultContentClass must be live_action, animation or null'}), 400
                 from Features.Profiles.LibraryDefaultTierRepository import LibraryDefaultTierRepository
-                if LibraryDefaultTierRepository().SetDefaultQualityTier(StorageRootId, Tier) == 0:
+                Repo = LibraryDefaultTierRepository()
+                Written = 0
+                if 'DefaultQualityTier' in Data:
+                    Written += Repo.SetDefaultQualityTier(StorageRootId, Tier)
+                if 'DefaultContentClass' in Data:
+                    Written += Repo.SetDefaultContentClass(StorageRootId, ContentClass)
+                if Written == 0:
                     return jsonify({'Success': False, 'Message': f'No library with StorageRootId {StorageRootId}'}), 404
                 _SpawnLibraryRecompute(StorageRootId)
-                return jsonify({'Success': True, 'Message': 'Library tier saved; re-evaluating that library in the background', 'Data': {'StorageRootId': StorageRootId, 'DefaultQualityTier': Tier}}), 200
+                return jsonify({'Success': True, 'Message': 'Library settings saved; re-evaluating that library in the background', 'Data': {'StorageRootId': StorageRootId, 'DefaultQualityTier': Tier, 'DefaultContentClass': ContentClass}}), 200
             # fail-loud-ok: HTTP boundary; logged and surfaced as Success=False
             except Exception as e:
                 LoggingService.LogException("Error updating library tier", e, 'UpdateLibraryTier', 'SystemSettingsController')
@@ -640,23 +651,34 @@ class SystemSettingsController:
                 return jsonify({'Success': False, 'Message': 'Could not load genre tiers'}), 500
 
         @self.Blueprint.route('/GenreTiers', methods=['PUT'])
-        # directive: movies-video-rule | # see video-encoding.C4
+        # directive: movies-video-rule, profile-row-lookup | # see video-encoding.C4, profile-tier-ladder.S4 -- body carries QualityTier and/or ContentClass; each present key is written
         def UpdateGenreTier():
             try:
                 Data = request.get_json() or {}
                 Genre = Data.get('Genre')
-                Tier = Data.get('QualityTier')
                 if not isinstance(Genre, str) or not Genre:
                     return jsonify({'Success': False, 'Message': 'Genre (text) is required'}), 400
+                if 'QualityTier' not in Data and 'ContentClass' not in Data:
+                    return jsonify({'Success': False, 'Message': 'QualityTier or ContentClass is required'}), 400
+                Tier = Data.get('QualityTier')
+                ContentClass = Data.get('ContentClass')
                 if Tier is not None and (not isinstance(Tier, int) or not 1 <= Tier <= 5):
                     return jsonify({'Success': False, 'Message': 'QualityTier must be 1-5 or null'}), 400
+                if ContentClass is not None and ContentClass not in ('live_action', 'animation'):
+                    return jsonify({'Success': False, 'Message': 'ContentClass must be live_action, animation or null'}), 400
                 from Features.Profiles.GenreQualityTierRepository import GenreQualityTierRepository
                 from Features.Profiles.LibraryDefaultTierRepository import LibraryDefaultTierRepository
-                if GenreQualityTierRepository().SetTier(Genre, Tier) == 0:
+                Repo = GenreQualityTierRepository()
+                Written = 0
+                if 'QualityTier' in Data:
+                    Written += Repo.SetTier(Genre, Tier)
+                if 'ContentClass' in Data:
+                    Written += Repo.SetContentClass(Genre, ContentClass)
+                if Written == 0:
                     return jsonify({'Success': False, 'Message': f'No genre named {Genre}'}), 404
                 for StorageRootId in LibraryDefaultTierRepository().ListGenreSourcedLibraryIds():
                     _SpawnLibraryRecompute(StorageRootId)
-                return jsonify({'Success': True, 'Message': 'Genre tier saved; re-evaluating movies in the background', 'Data': {'Genre': Genre, 'QualityTier': Tier}}), 200
+                return jsonify({'Success': True, 'Message': 'Genre settings saved; re-evaluating movies in the background', 'Data': {'Genre': Genre, 'QualityTier': Tier, 'ContentClass': ContentClass}}), 200
             # fail-loud-ok: HTTP boundary; logged and surfaced as Success=False
             except Exception as e:
                 LoggingService.LogException("Error updating genre tier", e, 'UpdateGenreTier', 'SystemSettingsController')

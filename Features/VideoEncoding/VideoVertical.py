@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Features.MediaFile.Domain.MediaFileScope import IsAudioOnlyContainer
+from Features.Profiles.ContentClassResolver import ContentClassResolver
 from Features.Profiles.FileTierResolver import FileTier, FileTierResolver
 from Features.Profiles.TierLadderRepository import TierLadderRepository
 from Features.VideoEncoding.VideoComplianceThresholdsRepository import VideoComplianceThresholdsRepository
@@ -12,16 +13,18 @@ from Repositories.DatabaseManager import DatabaseManager
 # directive: pre-encode-savings-gate | # see video-encoding.C1
 class VideoVertical:
 
-    # directive: movies-video-rule
+    # directive: movies-video-rule, profile-row-lookup | # see profile-tier-ladder.C10
     def __init__(self, Db: Optional[DatabaseService] = None, RepoMgr: Optional[DatabaseManager] = None,
                  Thresholds: Optional[VideoComplianceThresholdsRepository] = None,
                  Tiers: Optional[TierLadderRepository] = None,
-                 FileTiers: Optional[FileTierResolver] = None):
+                 FileTiers: Optional[FileTierResolver] = None,
+                 Classes: Optional[ContentClassResolver] = None):
         self._Db = Db or DatabaseService()
         self._RepoMgr = RepoMgr or DatabaseManager()
         self._Thresholds = Thresholds or VideoComplianceThresholdsRepository(self._Db)
         self._Tiers = Tiers or TierLadderRepository(self._Db)
         self._FileTiers = FileTiers or FileTierResolver(self._Db)
+        self._Classes = Classes or ContentClassResolver(self._Db)
 
     # directive: movies-video-rule | # see video-encoding.C1
     def Evaluate(self, Mf) -> Tuple[Optional[bool], Optional[str]]:
@@ -37,7 +40,10 @@ class VideoVertical:
         if not SrcKbps or int(SrcKbps) <= 0:
             return (None, 'missing_input:VideoBitrateKbps')
 
-        ContentClass = getattr(Mf, 'ContentClass', None) or 'live_action'
+        # directive: profile-row-lookup | # see profile-tier-ladder.C10 -- class is operator data; none configured is a reason, never a default
+        ContentClass = self._Classes.Resolve(getattr(Mf, 'StorageRootId', None), getattr(Mf, 'Id', None))
+        if ContentClass is None:
+            return (None, 'missing_input:ContentClass')
         Resolved = self._FileTiers.Resolve(getattr(Mf, 'StorageRootId', None), getattr(Mf, 'Id', None))
         if Resolved is not None:
             if Resolved.Tier is None:
@@ -74,8 +80,8 @@ class VideoVertical:
         Ceiling = int(round(TierKbps * Multiplier))
         Origin = f',{Resolved.Origin}' if Resolved.Origin else ''
         if Src <= Ceiling:
-            return (True, f'source_at_or_below_ceiling:{Src}<={Ceiling}(tier={Tier}:{TierKbps}*{Multiplier}{Origin})')
-        return (False, f'source_above_ceiling:{Src}>{Ceiling}(tier={Tier}:{TierKbps}*{Multiplier}{Origin})')
+            return (True, f'source_at_or_below_ceiling:{Src}<={Ceiling}(tier={Tier}:{TierKbps}*{Multiplier},class={ContentClass}{Origin})')
+        return (False, f'source_above_ceiling:{Src}>{Ceiling}(tier={Tier}:{TierKbps}*{Multiplier},class={ContentClass}{Origin})')
 
     # directive: compliance-reason-full-library-recompute | # see video-encoding.C5 -- Evaluate stays fail-loud (raises); batch orchestrator isolates per-row so one bad row does not abort a 237-row batch (BUG discovered via RetierTvToTier1 2026-08-07).
     def RecomputeFor(self, MediaFileIds: List[int]) -> None:

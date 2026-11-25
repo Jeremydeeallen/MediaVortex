@@ -32,7 +32,7 @@ Controller → Service → Repository → Tool Service
   [x] b. **GetMediaFileData()** → `Repositories/DatabaseManager.py` → `GetMediaFileByPath(job.FilePath)` to get source resolution
   [x] c. **FilePreparation()** → `Services/TranscodingFileManagerService.py` → `SetupTranscodingDirectories()` and `CopyFile(job.FilePath, destination)`
   [ ] d. **GetTranscodingSettings()** → `Repositories/DatabaseManager.py` → calls:
-     [ ] - `GetProfileSettingsForTargetResolution(MediaFile.AssignedProfile, MediaFile.Resolution)` (processes TranscodeDownTo → TargetResolution)
+     [ ] - `EncoderKnobRepository.GetEncoderKnobsForProfile(MediaFile.AssignedProfile, ContentClass, MediaFile.Resolution)` (one row lookup: `TierLadderRepository.GetEncodeRow`, `profile-tier-ladder.feature.md` C9)
      [x] - `Repositories/DatabaseManager.py` → `GetCodecFlagsByCodecName()`
      [x] - `Repositories/DatabaseManager.py` → `GetCodecParametersByCodecFlagsId()`
   [x] e. **BuildTranscodeCommand()** → `Services/CommandBuilderService.py` → `BuildCommand()`
@@ -85,7 +85,7 @@ Controller → Service → Repository → Tool Service
 ### 4. Repository Layer (Data Access)
 **File**: `Repositories/DatabaseManager.py`
 - [x] **GetNextPendingTranscodeJob()**: Gets next job from TranscodeQueue table
-- [x] **GetProfileSettingsForTargetResolution()**: Gets transcoding settings from ProfileThresholds table, processes TranscodeDownTo logic, returns TargetResolution
+- [x] **EncoderKnobRepository.GetEncoderKnobsForProfile()**: reads the file's encode row (`TierLadderRepository.GetEncodeRow` by profile, content class, source resolution) and returns every encoder knob plus TargetResolution
 - [x] **GetCodecFlagsByCodecName()**: Gets codec configuration from CodecFlags table
 - [x] **GetCodecParametersByCodecFlagsId()**: Gets transcoding parameters from CodecParameters table
 - [x] **GetMediaFileByPath()**: Gets MediaFile data by FilePath to retrieve source resolution
@@ -229,7 +229,7 @@ flowchart TD
 a. **Get job from queue** → `Repositories/DatabaseManager.py` → `GetNextPendingTranscodeJob()` (TranscodeQueue)
 b. **Get MediaFile data** → `Repositories/DatabaseManager.py` → `GetMediaFileByPath()` (to retrieve source resolution)
 c. **Setup directories & copy file** → `Services/TranscodingFileManagerService.py` → `SetupTranscodingDirectories()` & `CopyFile()`
-d. **Get profile details** → `Repositories/DatabaseManager.py` → `GetProfileSettingsForTargetResolution(MediaFile.AssignedProfile, MediaFile.Resolution)` (processes TranscodeDownTo → TargetResolution), `GetCodecFlagsByCodecName()`, `GetCodecParametersByCodecFlagsId()`
+d. **Get profile details** → `Features/Profiles/EncoderKnobRepository.py` → `GetEncoderKnobsForProfile(MediaFile.AssignedProfile, ContentClass, MediaFile.Resolution)` (the encode row by profile, content class and source resolution), `GetCodecFlagsByCodecName()`, `GetCodecParametersByCodecFlagsId()`
 e. **Build transcoding command** → `Services/CommandBuilderService.py` → `BuildCommand()` → `Models/CommandBuilder.py` → `BuildCommand()`
 f. **Create transcode attempt** → `Services/ProcessTranscodeQueueService.py` → `CreateTranscodeAttempt()` → `Repositories/DatabaseManager.py` → `SaveTranscodeAttempt()`
 g. **Execute transcoding** → `Services/VideoTranscodingService.py` → `TranscodeVideo()` (with real-time progress tracking to TranscodeProgress via `Repositories/DatabaseManager.py` → `SaveTranscodeProgress()`)

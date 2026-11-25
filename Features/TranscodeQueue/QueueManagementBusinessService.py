@@ -71,6 +71,11 @@ class QueueManagementBusinessService:
         self.CodecCompatibilityRepo = CodecCompatibilityRepository()
         self.ProfileRepository = ProfileRepositoryInstance or ProfileRepository()
         self.Resolver = EffectiveProfileResolver()
+        from Features.Profiles.TierLadderRepository import TierLadderRepository
+        from Features.Profiles.ContentClassResolver import ContentClassResolver
+        # directive: profile-row-lookup | # see profile-tier-ladder.S5 -- admission and priority read the same row the encoder does
+        self.Tiers = TierLadderRepository()
+        self.Classes = ContentClassResolver()
 
     def PopulateQueueFromMediaFiles(self, RootFolderPath: str = None, ProfileId: int = None, CompatibilityOnly: bool = False) -> Dict[str, Any]:
         """Populate transcoding queue from MediaFiles that have assigned profiles, ordered by largest disk space."""
@@ -838,15 +843,6 @@ class QueueManagementBusinessService:
                 LoggingService.LogWarning(f"No profile thresholds found for profile {profile.ProfileName}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
                 return []
 
-            # Step 1: profile-max-target -- # see marginal-savings-gate.C2b
-            targetResolution = self.ProfileRepository.GetProfileMaxTarget(profile.ProfileName)
-
-            if not targetResolution:
-                LoggingService.LogWarning(f"No valid TranscodeDownTo found in profile {profile.ProfileName} thresholds", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
-                return []
-
-            LoggingService.LogInfo(f"Target resolution for profile {profile.ProfileName}: {targetResolution}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
-
             # Normalize the root folder path to match database format (handle Z: vs Z:\)
             # Database paths use backslashes: Z:\Videos\Couple\...
             normalizedRootPath = RootFolderPath.replace('/', '\\').strip()
@@ -882,27 +878,33 @@ class QueueManagementBusinessService:
                     if not sourceResolution:
                         continue
 
-                FileTargetResolution = targetResolution
+                # directive: profile-row-lookup | # see profile-tier-ladder.C9 -- the file's own row decides its target
+                ContentClass = self.Classes.Resolve(mediaFile.StorageRootId, mediaFile.Id)
+                SourceRow = self.Tiers.GetProfileRow(profile.ProfileName, ContentClass, sourceResolution) if ContentClass else None
+                if SourceRow is None:
+                    LoggingService.LogWarning(f"No profile row for {mediaFile.FileName}: profile={profile.ProfileName} class={ContentClass} source={sourceResolution}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+                    continue
+                FileTargetResolution = SourceRow.TargetResolution
 
                 # Compare file resolution to target resolution
                 comparison = resolutionService.CompareResolutions(sourceResolution, FileTargetResolution)
 
                 # If comparison cannot be determined, skip
                 if comparison is None:
-                    LoggingService.LogWarning(f"Cannot compare resolutions for {mediaFile.FileName}: source={sourceResolution}, target={targetResolution}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+                    LoggingService.LogWarning(f"Cannot compare resolutions for {mediaFile.FileName}: source={sourceResolution}, target={FileTargetResolution}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
                     continue
 
                 # Only include files where resolution > target (comparison > 0)
                 if comparison > 0:
                     matchingFiles.append(mediaFile)
-                    LoggingService.LogDebug(f"Including {mediaFile.FileName}: {sourceResolution} > {targetResolution}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+                    LoggingService.LogDebug(f"Including {mediaFile.FileName}: {sourceResolution} > {FileTargetResolution}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
                 else:
-                    LoggingService.LogDebug(f"Skipping {mediaFile.FileName}: {sourceResolution} <= {targetResolution}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+                    LoggingService.LogDebug(f"Skipping {mediaFile.FileName}: {sourceResolution} <= {FileTargetResolution}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
 
             # Sort by size (largest first)
             matchingFiles.sort(key=lambda x: x.SizeMB or 0, reverse=True)
 
-            LoggingService.LogInfo(f"Found {len(matchingFiles)} media files with resolution > {targetResolution} for profile {profile.ProfileName} in folder {RootFolderPath}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+            LoggingService.LogInfo(f"Found {len(matchingFiles)} media files above their row target for profile {profile.ProfileName} in folder {RootFolderPath}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
             return matchingFiles
 
         except Exception as e:
@@ -1371,77 +1373,28 @@ class QueueManagementBusinessService:
             )
             return 1  # Lowest non-zero so the queue item still saves; never 0
 
-    def _LoadPriorityLookupTable(self) -> Dict[tuple, tuple]:
-        """Pre-compute {(ProfileName, SourceResolutionCategory): (TargetVideoKbps, TargetAudioKbps, TargetResolutionCategory)}.
-
-        Resolves TranscodeDownTo: when a source resolution downscales to a different
-        target, the target's bitrates are returned. The third tuple element is the
-        target ResolutionCategory after downscale (same as source if no downscale),
-        used by compliance evaluation to detect "this file is above the configured
-        downscale target." ProfileThresholds is small (~50 rows), so this is one DB
-        round-trip and then everything is in-memory.
-
-        Used by RecomputeForFiles bulk path. Single-file path goes through
-        DatabaseManager.GetProfileSettingsForTargetResolution which has additional
-        VR-resolution fallback logic.
-        """
-        from Core.Database.DatabaseService import DatabaseService
-        rows = DatabaseService().ExecuteQuery("""
-            SELECT p.ProfileName, pt.Resolution, pt.TranscodeDownTo,
-                   pt.VideoBitrateKbps, pt.AudioBitrateKbps
-            FROM ProfileThresholds pt
-            JOIN Profiles p ON pt.ProfileId = p.Id
-        """)
-        by_profile: Dict[str, Dict[str, tuple]] = {}
-        for r in rows:
-            pn = r['ProfileName']
-            by_profile.setdefault(pn, {})[r['Resolution']] = (
-                (r['TranscodeDownTo'] or 'No downscaling'),
-                r['VideoBitrateKbps'],
-                r['AudioBitrateKbps'],
-            )
-        lookup: Dict[tuple, tuple] = {}
-        for pn, by_res in by_profile.items():
-            for src_res, (downto, vk, ak) in by_res.items():
-                if downto and downto != 'No downscaling' and downto in by_res:
-                    _, target_vk, target_ak = by_res[downto]
-                    lookup[(pn, src_res)] = (target_vk, target_ak, downto)
-                else:
-                    lookup[(pn, src_res)] = (vk, ak, src_res)
-        return lookup
-
-    # directive: compliance-solid-refactor | # see compliance-solid-refactor.C12
-    def _BuildEffectiveProfileObj(self, ProfileName: Optional[str], ResolutionCategory: Optional[str], Lookup: Dict[tuple, tuple], VideoBitrateKbps: Optional[int] = None):
-        """Delegate to EffectiveProfileResolver -- profile name + source resolution + optional source video kbps fold into a synthesized MediaFileModel-shaped input; resolver handles fixed/VBR/CRF strategy dispatch."""
-        from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
-        from Models.MediaFileModel import MediaFileModel
-        if not ProfileName:
-            return None
-        SyntheticMf = MediaFileModel(AssignedProfile=ProfileName, ResolutionCategory=ResolutionCategory, VideoBitrateKbps=VideoBitrateKbps)
-        return EffectiveProfileResolver().Resolve(SyntheticMf)
+    # directive: profile-row-lookup | # see profile-tier-ladder.C9 -- the encode row's rates for priority; one lookup, memoised per bulk call
+    def _EncodeTargets(self, ProfileName: Optional[str], StorageRootId, MediaFileId, ResolutionCategory: Optional[str], Memo: Dict[tuple, tuple]) -> Tuple[Optional[int], Optional[int]]:
+        if not ProfileName or not ResolutionCategory:
+            return (None, None)
+        ContentClass = self.Classes.Resolve(StorageRootId, MediaFileId)
+        if ContentClass is None:
+            return (None, None)
+        Key = (ProfileName, ContentClass, ResolutionCategory)
+        if Key not in Memo:
+            Encode = self.Tiers.GetEncodeRow(*Key)
+            Memo[Key] = (Encode.TargetKbps, Encode.AudioBitrateKbps) if Encode else (None, None)
+        return Memo[Key]
 
 
     # ─── Marginal-savings gate (data-driven queue admission) ──────────────
-    # Owns marginal-savings-gate.feature.md criteria 1-7. Two collaborators:
-    #   EstimateTargetSizeMB -- bitrate formula or CRF lookup
-    #   EvaluateQueueAdmission -- upscale + savings checks against config
 
     def EstimateTargetSizeMB(
         self,
         MediaFile: MediaFileModel,
         ProfileSettings: Dict[str, Any],
     ) -> Tuple[Optional[float], bool]:
-        """Estimate the post-transcode size in MB.
-
-        Returns (target_mb, missing_estimate_flag). Branches:
-
-          - Profile.VideoBitrateKbps > 0 -> bitrate formula. Returns (mb, False).
-          - Profile.VideoBitrateKbps == 0 (CRF only) -> CrfBitrateEstimates lookup
-            keyed on (Codec, TargetResolution, Quality/CRF). Found -> (mb, False);
-            not found -> (None, True) -- caller decides admit/block.
-          - DurationMinutes <= 0 -> (None, False). Cannot estimate; not a missing-
-            estimate problem.
-        """
+        """Post-transcode MB as (mb, missing_estimate): Row.TargetKbps + audio when set; else CrfBitrateEstimates by (Codec, TargetResolution, Quality), (None, True) when absent; unknown duration -> (None, False)."""
         if not ProfileSettings:
             return (None, False)
 
@@ -1449,7 +1402,7 @@ class QueueManagementBusinessService:
         if Duration <= 0:
             return (None, False)
 
-        VideoKbps = ProfileSettings.get('VideoBitrateKbps') or 0
+        VideoKbps = ProfileSettings.get('TargetKbps') or 0
         AudioKbps = ProfileSettings.get('AudioBitrateKbps') or 0
 
         if VideoKbps > 0:
@@ -1511,7 +1464,7 @@ class QueueManagementBusinessService:
 
         # 1. Upscale block -- # see marginal-savings-gate.C2b
         SourceResolution = getattr(MediaFile, 'Resolution', None) or ''
-        UpscaleTarget = ProfileSettings.get('ProfileMaxTarget') or ProfileSettings.get('TargetResolution') or ''
+        UpscaleTarget = ProfileSettings.get('TargetResolution') or ''
         if SourceResolution and UpscaleTarget:
             try:
                 from Services.ResolutionService import ResolutionService
@@ -1556,26 +1509,24 @@ class QueueManagementBusinessService:
         ProfileName: str,
         AdmissionConfig=None,
     ) -> Tuple[bool, str]:
-        """Resolve ProfileSettings from ProfileName + MediaFile.Resolution, then
-        delegate to EvaluateQueueAdmission. Convenience wrapper for callers that
-        only have a profile name -- the four queue-admission entry paths.
-        """
+        """Resolve the file's row (profile, content class, source resolution) and delegate to EvaluateQueueAdmission; the four queue-admission entry paths call this."""
         if not ProfileName or not getattr(MediaFile, 'Resolution', None):
             return (True, 'MissingProfile')
-        try:
-            ProfileSettings = self.ProfileRepository.GetProfileSettingsForTargetResolution(
-                ProfileName, MediaFile.Resolution
-            )
-            ProfileMaxTarget = self.ProfileRepository.GetProfileMaxTarget(ProfileName)
-        except Exception as Ex:
-            LoggingService.LogException(
-                f"Failed to load ProfileSettings for {ProfileName} / {MediaFile.Resolution}",
-                Ex, "QueueManagementBusinessService", "EvaluateQueueAdmissionForProfile",
-            )
+        # directive: profile-row-lookup | # see profile-tier-ladder.C9 -- upscale is judged on the source row's target; savings on the encode row's rates
+        ContentClass = self.Classes.Resolve(getattr(MediaFile, 'StorageRootId', None), getattr(MediaFile, 'Id', None))
+        if ContentClass is None:
+            return (True, 'MissingContentClass')
+        SourceRow = self.Tiers.GetProfileRow(ProfileName, ContentClass, MediaFile.Resolution)
+        EncodeRow = self.Tiers.GetEncodeRow(ProfileName, ContentClass, MediaFile.Resolution)
+        if SourceRow is None or EncodeRow is None:
             return (True, 'MissingProfile')
-        Settings = dict(ProfileSettings) if ProfileSettings else {}
-        if Settings and ProfileMaxTarget:
-            Settings['ProfileMaxTarget'] = ProfileMaxTarget
+        Settings = {
+            'TargetResolution': SourceRow.TargetResolution,
+            'TargetKbps': EncodeRow.TargetKbps,
+            'AudioBitrateKbps': EncodeRow.AudioBitrateKbps,
+            'Codec': EncodeRow.Codec,
+            'Quality': EncodeRow.Quality,
+        }
         return self.EvaluateQueueAdmission(MediaFile, Settings, AdmissionConfig)
 
     def ComputePriorityScore(self, MediaFileId: int) -> Optional[int]:
@@ -1594,22 +1545,10 @@ class QueueManagementBusinessService:
                 )
                 return None
 
-            targetVideoKbps = None
-            targetAudioKbps = None
-            if mediaFile.AssignedProfile and mediaFile.Resolution:
-                try:
-                    profileSettings = self.ProfileRepository.GetProfileSettingsForTargetResolution(
-                        mediaFile.AssignedProfile, mediaFile.Resolution
-                    )
-                    if profileSettings:
-                        targetVideoKbps = profileSettings.get('VideoBitrateKbps')
-                        targetAudioKbps = profileSettings.get('AudioBitrateKbps')
-                except Exception as Ex:
-                    LoggingService.LogException(
-                        f"ProfileThresholds lookup failed for MediaFileId={MediaFileId}",
-                        Ex, "QueueManagementBusinessService", "ComputePriorityScore"
-                    )
-                    # Fall through to CalculatePriority's fallback path
+            # directive: profile-row-lookup | # see profile-tier-ladder.C9
+            targetVideoKbps, targetAudioKbps = self._EncodeTargets(
+                mediaFile.AssignedProfile, mediaFile.StorageRootId, mediaFile.Id, mediaFile.ResolutionCategory, {}
+            )
 
             score = self.CalculatePriority(mediaFile, TargetVideoKbps=targetVideoKbps, TargetAudioKbps=targetAudioKbps)
 
@@ -1641,7 +1580,7 @@ class QueueManagementBusinessService:
             VideoVertical().RecomputeFor(MediaFileIds)
             ContainerVertical().RecomputeFor(MediaFileIds)
 
-            Lookup = self._LoadPriorityLookupTable()
+            RowMemo: Dict[tuple, tuple] = {}
 
             # AudioFix folder pins (media-tabs-and-loudness.feature.md C22): boost PriorityScore when WorkBucket='AudioFix' and FilePath matches a hint pattern.
             AudioFixPins = []
@@ -1697,13 +1636,8 @@ class QueueManagementBusinessService:
                     ResKey = r.get('ResolutionCategory')
                     if not ResKey:
                         ResKey = ResolutionTierRegistry().CategoryStringFromResolution(r.get('Resolution'))
-                    TargetVideoKbps = None
-                    TargetAudioKbps = None
-                    if EffectiveProfile and ResKey:
-                        Settings = Lookup.get((EffectiveProfile, ResKey))
-                        if Settings:
-                            TargetVideoKbps = Settings[0]
-                            TargetAudioKbps = Settings[1]
+                    # directive: profile-row-lookup | # see profile-tier-ladder.C9
+                    TargetVideoKbps, TargetAudioKbps = self._EncodeTargets(EffectiveProfile, r.get('StorageRootId'), r.get('Id'), ResKey, RowMemo)
 
                     class _Row:
                         pass

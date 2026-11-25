@@ -21,7 +21,7 @@ C2. **`ResolutionTier` is a data-driven frozen value object backed by the `Resol
 
 C3. **`WidthAnchoredScalePolicy` is the SOLE producer of scale-filter strings.** `IScalePolicy.Decide(Source: Resolution, TargetTier: ResolutionTier) -> Optional[ScaleFilter]`. Returns `None` when `Source.Tier.Rank <= TargetTier.Rank` (same-tier or upscale); else returns `ScaleFilter(Width=TargetTier.CanonicalWidth, HeightExpr='-2')` whose `AsFfmpegArg()` emits `'scale=w=W:h=-2'` (aspect-preserving, codec-legal even height). Verifiable: `Tests/Contract/TestScalePolicy.py` 8/8 + 1 subtest matrix (MIB-II regression `Resolution.FromAny('1916x1040') + T720p -> 'scale=w=1280:h=-2'`; every downscale tier pair).
 
-C4. **`ResolutionCalculator.CalculateScaleFilter` and `EncoderKnobRepository._NormalizeResolution` delegate to the typed shape.** The former composes `Resolution.FromAny` + `Registry.FromCategory` + `WidthAnchoredScalePolicy.Decide`; the latter buckets `WIDTHxHEIGHT` via `Registry.FromDims`. No raw-string `==` / `!=` comparisons on resolution values remain in the encode + compliance call chain (`grep` in `Features/TranscodeJob/Emit/`, `Features/Compliance/`, `Core/Resolution/`, `Features/Profiles/`; one filename-equality match in `OutputFilenameBuilder.py` is naming-only, not scale-decision). Verifiable: `Tests/Contract/TestResolutionCalculator.py` 12/12 + `Tests/Contract/TestEncoderKnobNormalizeResolution.py` 8/8.
+C4. **`ResolutionCalculator.CalculateScaleFilter` and `TierLadderRepository.NormalizeResolution` delegate to the typed shape.** The former composes `Resolution.FromAny` + `Registry.FromCategory` + `WidthAnchoredScalePolicy.Decide`; the latter buckets `WIDTHxHEIGHT` via `Registry.FromDims`. No raw-string `==` / `!=` comparisons on resolution values remain in the encode + compliance call chain (`grep` in `Features/TranscodeJob/Emit/`, `Features/Compliance/`, `Core/Resolution/`, `Features/Profiles/`; one filename-equality match in `OutputFilenameBuilder.py` is naming-only, not scale-decision). Verifiable: `Tests/Contract/TestResolutionCalculator.py` 12/12 + `Tests/Contract/TestEncoderKnobNormalizeResolution.py` 8/8.
 
 C6. **`EffectiveProfileResolver` returns a typed `TargetTier`.** `Features/Profiles/EffectiveProfileResolver.Resolve()` maps the target-resolution string to `ResolutionTier` via the injected `ResolutionTierRegistry` at this single boundary; `EffectiveProfile.TargetResolutionCategory: Optional[ResolutionTier]` (not `str`). The resolver serves profile and priority resolution; the bucket rules do not go through it (`transcode.flow.md` D4). Verifiable: field annotation.
 
@@ -55,7 +55,7 @@ Scripts/SQLScripts/AddResolutionTiersTable.py
 Features/TranscodeJob/Emit/ResolutionCalculator.py (CalculateScaleFilter only)
 Features/Profiles/EffectiveProfile.py
 Features/Profiles/EffectiveProfileResolver.py
-Features/Profiles/EncoderKnobRepository.py (_NormalizeResolution only)
+Features/Profiles/TierLadderRepository.py (NormalizeResolution only)
 ```
 
 ## Files
@@ -69,7 +69,7 @@ Features/Profiles/EncoderKnobRepository.py (_NormalizeResolution only)
 | `Core/Resolution/ScalePolicy.py` | `IScalePolicy` ABC + `WidthAnchoredScalePolicy` + `ScaleFilter` value object |
 | `Scripts/SQLScripts/AddResolutionTiersTable.py` | Idempotent migration; seeds T480p / T720p / T1080p / T2160p |
 | `Features/TranscodeJob/Emit/ResolutionCalculator.py` | `CalculateScaleFilter` thin facade over the policy |
-| `Features/Profiles/EncoderKnobRepository.py` | `_NormalizeResolution` delegates to `Registry.FromDims` |
+| `Features/Profiles/TierLadderRepository.py` | `NormalizeResolution` delegates to `Registry.FromDims`; applied inside `GetProfileRow` |
 | `Features/Profiles/EffectiveProfile.py` | `TargetResolutionCategory: Optional[ResolutionTier]` |
 | `Features/Profiles/EffectiveProfileResolver.py` | Maps `TargetResolutionStr -> ResolutionTier` at the resolver boundary |
 | `Tests/Contract/TestResolution.py` | 12 contract tests |

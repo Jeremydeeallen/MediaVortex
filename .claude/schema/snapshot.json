@@ -1169,6 +1169,11 @@
     }
   },
   "genrequalitytiers": {
+    "contentclass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
     "genre": {
       "data_type": "text",
       "is_generated": "NEVER",
@@ -4478,6 +4483,11 @@
       "data_type": "timestamp without time zone",
       "is_generated": "NEVER",
       "is_nullable": "NO"
+    },
+    "defaultcontentclass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
     },
     "defaultqualitytier": {
       "data_type": "integer",

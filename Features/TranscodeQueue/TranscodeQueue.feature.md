@@ -70,7 +70,7 @@ Features/TranscodeQueue/**
 | Column | Read by | Owner |
 |---|---|---|
 | MediaFiles.{WorkBucket, IsCompliant, AssignedProfile, AudioCompliant, VideoCompliant, ContainerCompliant} | Queue admission + claim path | per-vertical writes; WorkBucket+IsCompliant are GENERATED |
-| Profiles.* + ProfileThresholds.* | _LoadPriorityLookupTable | Profiles vertical |
+| Profiles.* + ProfileThresholds.* | `TierLadderRepository.GetEncodeRow` via `_EncodeTargets` (`profile-tier-ladder.feature.md` C9) | Profiles vertical |
 | Workers.{TranscodeEnabled, Status, ProfileAllowlist} | Claim query | Workers data accessor |
 
 ### Stable function entry points

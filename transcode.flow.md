@@ -174,6 +174,8 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 
 **Output:** Every MediaFiles row carries an up-to-date bucket. `/Work/<bucket>` pages and queue admission read `WorkBucket`; the Activity compliance widget reads `IsCompliant`. No consumer recomputes.
 
+The video ceiling, the queue admission target (ST5) and the encode command (ST6) all read one `ProfileThresholds` row for the file: `TierLadderRepository.GetProfileRow(profile, content class, source resolution)` and its encode row, `Features/Profiles/profile-tier-ladder.feature.md` C9. The content class is operator data on `/settings` (C10).
+
 See `Features/TranscodeQueue/priority-materialization.feature.md` for criteria.
 
 ---
@@ -242,7 +244,7 @@ Both tables are read fresh per call (no caching, per the standing rule against c
 
 Queue insertion writes `Priority = 0`. Workers claim largest non-compliant first, with a 195-200 window reserved for manual overrides (operator Priority modal, AudioFix folder-pin hints). The full contract is owned by `Features/TranscodeQueue/queue-priority.feature.md` -- not restated here.
 
-Queue admission (whether a file enters the queue at all) is owned by `Features/TranscodeQueue/marginal-savings-gate.feature.md`. The estimated-bytes-saved math lives there now, not in the claim path.
+Queue admission (whether a file enters the queue at all) is owned by `Features/TranscodeQueue/marginal-savings-gate.feature.md`. The estimated-bytes-saved math lives there now, not in the claim path. The upscale test and the savings estimate use the file's own row (`profile-tier-ladder.feature.md` C9): source below the row's `TranscodeDownTo` is an upscale; the encode row's `TargetKbps` is the rate.
 
 ---
 

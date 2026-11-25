@@ -2444,7 +2444,7 @@ function LoadGenreTiers() {
     $.get('/api/SystemSettings/GenreTiers').done(function(R) {
         if (!R.Success) { Container.html('<span class="text-danger small">' + (R.Message || 'Load failed') + '</span>'); return; }
         var H = '<table class="table table-sm table-bordered mb-0" style="max-width: 640px;">';
-        H += '<thead><tr><th>Genre</th><th>Movies</th><th>Tier</th><th></th></tr></thead><tbody>';
+        H += '<thead><tr><th>Genre</th><th>Movies</th><th>Tier</th><th>Content class</th><th></th></tr></thead><tbody>';
         (R.Data.Genres || []).forEach(function(G) {
             H += '<tr data-genre="' + $('<span>').text(G.Genre).html() + '"><td class="fw-bold">' + $('<span>').text(G.Genre).html() + '</td><td>' + G.FileCount + '</td>';
             H += '<td><select class="form-select form-select-sm genre-tier" style="max-width: 200px;">';
@@ -2453,6 +2453,11 @@ function LoadGenreTiers() {
                 var Label = (_TranscodingSettings.TierLabels || {})[T];
                 H += '<option value="' + T + '"' + (G.QualityTier === T ? ' selected' : '') + '>Tier ' + T + (Label ? ' (' + Label + ')' : '') + '</option>';
             }
+            H += '</select></td>';
+            H += '<td><select class="form-select form-select-sm genre-class" style="max-width: 160px;">';
+            H += '<option value=""' + (G.ContentClass == null ? ' selected' : '') + '>Library default</option>';
+            H += '<option value="live_action"' + (G.ContentClass === 'live_action' ? ' selected' : '') + '>live_action</option>';
+            H += '<option value="animation"' + (G.ContentClass === 'animation' ? ' selected' : '') + '>animation</option>';
             H += '</select></td><td><button type="button" class="btn btn-sm btn-primary" onclick="SaveGenreTier(this)">Save</button> <span class="text-muted small genre-tier-status"></span></td></tr>';
         });
         H += '</tbody></table>';
@@ -2463,6 +2468,7 @@ function LoadGenreTiers() {
 function SaveGenreTier(Button) {
     var Tr = $(Button).closest('tr');
     var Raw = Tr.find('.genre-tier').val();
+    var RawClass = Tr.find('.genre-class').val();
     var Status = Tr.find('.genre-tier-status').text('Saving…');
     $(Button).prop('disabled', true);
     $.ajax({
@@ -2470,7 +2476,7 @@ function SaveGenreTier(Button) {
         method: 'PUT',
         contentType: 'application/json',
         timeout: 15000,
-        data: JSON.stringify({ Genre: String(Tr.data('genre')), QualityTier: Raw === '' ? null : parseInt(Raw, 10) })
+        data: JSON.stringify({ Genre: String(Tr.data('genre')), QualityTier: Raw === '' ? null : parseInt(Raw, 10), ContentClass: RawClass === '' ? null : RawClass })
     }).done(function(R) {
         Status.text(R.Success ? 'Saved. Re-evaluating movies in background.' : (R.Message || 'Save failed'));
     }).fail(function(X) {
@@ -2483,7 +2489,7 @@ function LoadLibraryTiers() {
     $.get('/api/SystemSettings/LibraryTiers').done(function(R) {
         if (!R.Success) { Container.html('<span class="text-danger small">' + (R.Message || 'Load failed') + '</span>'); return; }
         var H = '<table class="table table-sm table-bordered mb-0" style="max-width: 640px;">';
-        H += '<thead><tr><th>Library</th><th>Default tier</th><th></th></tr></thead><tbody>';
+        H += '<thead><tr><th>Library</th><th>Default tier</th><th>Default content class</th><th></th></tr></thead><tbody>';
         (R.Data.Libraries || []).forEach(function(L) {
             H += '<tr data-storage-root-id="' + L.StorageRootId + '"><td class="fw-bold">' + $('<span>').text(L.Name).html() + '</td>';
             H += '<td><select class="form-select form-select-sm library-tier" style="max-width: 200px;">';
@@ -2492,6 +2498,11 @@ function LoadLibraryTiers() {
                 var Label = (_TranscodingSettings.TierLabels || {})[T];
                 H += '<option value="' + T + '"' + (L.DefaultQualityTier === T ? ' selected' : '') + '>Tier ' + T + (Label ? ' (' + Label + ')' : '') + '</option>';
             }
+            H += '</select></td>';
+            H += '<td><select class="form-select form-select-sm library-class" style="max-width: 160px;">';
+            H += '<option value=""' + (L.DefaultContentClass == null ? ' selected' : '') + '>None (genre only)</option>';
+            H += '<option value="live_action"' + (L.DefaultContentClass === 'live_action' ? ' selected' : '') + '>live_action</option>';
+            H += '<option value="animation"' + (L.DefaultContentClass === 'animation' ? ' selected' : '') + '>animation</option>';
             H += '</select></td><td><button type="button" class="btn btn-sm btn-primary" onclick="SaveLibraryTier(this)">Save</button> <span class="text-muted small library-tier-status"></span></td></tr>';
         });
         H += '</tbody></table>';
@@ -2502,6 +2513,7 @@ function LoadLibraryTiers() {
 function SaveLibraryTier(Button) {
     var Tr = $(Button).closest('tr');
     var Raw = Tr.find('.library-tier').val();
+    var RawClass = Tr.find('.library-class').val();
     var Status = Tr.find('.library-tier-status').text('Saving…');
     $(Button).prop('disabled', true);
     $.ajax({
@@ -2509,7 +2521,7 @@ function SaveLibraryTier(Button) {
         method: 'PUT',
         contentType: 'application/json',
         timeout: 15000,
-        data: JSON.stringify({ StorageRootId: parseInt(Tr.data('storage-root-id'), 10), DefaultQualityTier: Raw === '' ? null : parseInt(Raw, 10) })
+        data: JSON.stringify({ StorageRootId: parseInt(Tr.data('storage-root-id'), 10), DefaultQualityTier: Raw === '' ? null : parseInt(Raw, 10), DefaultContentClass: RawClass === '' ? null : RawClass })
     }).done(function(R) {
         Status.text(R.Success ? 'Saved. Re-evaluating library in background.' : (R.Message || 'Save failed'));
     }).fail(function(X) {

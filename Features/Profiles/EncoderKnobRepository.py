@@ -3,7 +3,7 @@ from typing import Optional, Dict, Any
 
 from Core.Database.BaseRepository import BaseRepository
 from Core.Logging.LoggingService import LoggingService
-from Core.Resolution.ResolutionTierRegistry import ResolutionTierRegistry
+from Features.Profiles.TierLadderRepository import TierLadderRepository
 
 
 @dataclass
@@ -68,55 +68,29 @@ class EncoderKnobs:  # see transcode.ST6
         return asdict(self)
 
 
-# directive: nvenc-rate-anchored-remediation
+# directive: nvenc-rate-anchored-remediation, profile-row-lookup | # see transcode.ST6, profile-tier-ladder.S5
 class EncoderKnobRepository(BaseRepository):
-    """Single read path used by CommandBuilder to fetch encoder knobs for a profile + source resolution."""
+    """Single read path used by CommandBuilder to fetch encoder knobs for a profile + content class + source resolution."""
 
-    # directive: nvenc-rate-anchored-remediation
-    def GetEncoderKnobsForProfile(self, ProfileName: str, SourceResolution: str) -> Optional[EncoderKnobs]:
+    # directive: profile-row-lookup | # see profile-tier-ladder.S5 -- knobs come from the encode row (the source row's target), the same row admission and compliance read
+    def GetEncoderKnobsForProfile(self, ProfileName: str, ContentClass: str, SourceResolution: str) -> Optional[EncoderKnobs]:
         """Fetch every knob CommandBuilder needs. Reads fresh per call; never caches."""
         try:
-            TargetResolution = self._ResolveTargetResolution(ProfileName, SourceResolution)
-            if TargetResolution is None:
-                return None
-
-            NormalizedSource = self._NormalizeResolution(SourceResolution)
-            LookupResolution = NormalizedSource if TargetResolution == 'No downscaling' else TargetResolution
-
-            Query = (
-                "SELECT p.Id AS ProfileId, p.ProfileName, "
-                "       p.Codec, p.Preset, p.FilmGrain, "
-                "       p.YadifMode, p.YadifParity, p.YadifDeint, p.UseNvidiaHardware, p.UseIntelHardware, "
-                "       p.Tune, p.Multipass, p.PixelFormat, "
-                "       p.AudioCodec, p.AudioBitrateKbps, p.AudioChannels, p.AudioFilter, "
-                "       p.Container, p.FastStart, p.AqStrength, p.RateControlMode, "
-                "       p.SpatialAq, p.TemporalAq, p.WeightedPred, p.LowPower, "
-                "       pt.Resolution, pt.Quality, pt.VideoBitrateKbps, pt.ContainerType, "
-                "       pt.SourceBitratePercent, pt.MinBitrateKbps, pt.MaxBitrateKbps, "
-                "       pt.MaxBitrateMultiplier, pt.Gop, "
-                "       pt.RcLookahead, pt.BFrames, pt.BRefMode, "
-                "       pt.ScaleHeight, "
-                "       pt.QsvExtBrc, pt.QsvAdaptiveI, pt.QsvAdaptiveB, pt.QsvLookaheadDepth, "
-                "       pt.QsvBStrategy, pt.QsvTileCols, pt.QsvTileRows, "
-                "       pt.TargetKbps, pt.IcqQ "
-                "FROM Profiles p "
-                "JOIN ProfileThresholds pt ON pt.ProfileId = p.Id "
-                "WHERE p.ProfileName = %s AND pt.Resolution = %s "
-                "LIMIT 1"
-            )
-            Rows = self.ExecuteQuery(Query, (ProfileName, LookupResolution))
-            if not Rows:
+            Tiers = TierLadderRepository(self.DatabaseService)
+            Source = Tiers.GetProfileRow(ProfileName, ContentClass, SourceResolution)
+            Encode = Tiers.GetEncodeRow(ProfileName, ContentClass, SourceResolution)
+            if Source is None or Encode is None:
                 LoggingService.LogWarning(
-                    f"EncoderKnobs not found: profile='{ProfileName}' source='{SourceResolution}' lookup='{LookupResolution}'",
+                    f"EncoderKnobs not found: profile='{ProfileName}' class='{ContentClass}' source='{SourceResolution}'",
                     "EncoderKnobRepository", "GetEncoderKnobsForProfile",
                 )
                 return None
 
-            Row = Rows[0]
-            ActualTarget = SourceResolution if TargetResolution == 'No downscaling' else TargetResolution
+            Row = Encode.Columns
+            ActualTarget = SourceResolution if Source.TargetResolution == Source.Resolution else Source.TargetResolution
             return EncoderKnobs(
-                ProfileId=Row['ProfileId'],
-                ProfileName=Row['ProfileName'],
+                ProfileId=Encode.ProfileId,
+                ProfileName=Encode.ProfileName,
                 Codec=Row.get('Codec'),
                 Preset=Row.get('Preset'),
                 FilmGrain=Row.get('FilmGrain'),
@@ -127,8 +101,8 @@ class EncoderKnobRepository(BaseRepository):
                 Tune=Row.get('Tune'),
                 Multipass=Row.get('Multipass'),
                 PixelFormat=Row.get('PixelFormat'),
-                AudioCodec=Row.get('AudioCodec'),
-                AudioBitrateKbps=Row.get('AudioBitrateKbps'),
+                AudioCodec=Row.get('ProfileAudioCodec'),
+                AudioBitrateKbps=Row.get('ProfileAudioBitrateKbps'),
                 AudioChannels=Row.get('AudioChannels'),
                 AudioFilter=Row.get('AudioFilter'),
                 Container=Row.get('Container'),
@@ -165,40 +139,7 @@ class EncoderKnobRepository(BaseRepository):
             )
         except Exception as e:
             LoggingService.LogException(
-                f"Exception reading encoder knobs for profile '{ProfileName}' at '{SourceResolution}'",
+                f"Exception reading encoder knobs for profile '{ProfileName}' class '{ContentClass}' at '{SourceResolution}'",
                 e, "EncoderKnobRepository", "GetEncoderKnobsForProfile",
             )
             return None
-
-    # directive: nvenc-rate-anchored-remediation
-    def _ResolveTargetResolution(self, ProfileName: str, SourceResolution: str) -> Optional[str]:
-        """Look up TranscodeDownTo for the (Profile, SourceResolution) pair; treat empty as 'No downscaling'."""
-        Query = (
-            "SELECT pt.TranscodeDownTo FROM ProfileThresholds pt "
-            "JOIN Profiles p ON pt.ProfileId = p.Id "
-            "WHERE p.ProfileName = %s AND pt.Resolution = %s LIMIT 1"
-        )
-        Rows = self.ExecuteQuery(Query, (ProfileName, SourceResolution))
-        if not Rows:
-            Normalized = self._NormalizeResolution(SourceResolution)
-            if Normalized != SourceResolution:
-                Rows = self.ExecuteQuery(Query, (ProfileName, Normalized))
-        if not Rows:
-            LoggingService.LogWarning(
-                f"No ProfileThresholds row for profile='{ProfileName}' resolution='{SourceResolution}'",
-                "EncoderKnobRepository", "_ResolveTargetResolution",
-            )
-            return None
-        Value = Rows[0].get('TranscodeDownTo')
-        return Value if Value else 'No downscaling'
-
-    # directive: resolution-types | # see resolution-types.C4
-    def _NormalizeResolution(self, Resolution: str) -> str:
-        """Bucket WIDTHxHEIGHT pixel strings to category labels via the data-driven ResolutionTierRegistry (replaces hardcoded width-primary thresholds that misclassified 1916x1040 to '720p')."""
-        if not Resolution or 'x' not in Resolution:
-            return Resolution
-        Parts = Resolution.lower().split('x')
-        if len(Parts) != 2 or not Parts[0].isdigit() or not Parts[1].isdigit():
-            return Resolution
-        Tier = ResolutionTierRegistry().FromDims(int(Parts[0]), int(Parts[1]))
-        return Tier.Name[1:] if Tier.Name.startswith('T') else Tier.Name

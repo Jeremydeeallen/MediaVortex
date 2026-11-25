@@ -61,9 +61,10 @@ class TestVerticalsAreProfileIndependent(unittest.TestCase):
         Ladder = Mock(**{'GetTierEncodeKbps.return_value': 1000})
         Mult = Mock(**{'GetMultiplier.return_value': 2.0})
         Mf = _FakeMf(AssignedProfile=None)
-        Compliant, Reason = VideoVertical(Db=_StubVideoDb(), Thresholds=Mult, Tiers=Ladder, FileTiers=Tiered).Evaluate(Mf)
+        Compliant, Reason = VideoVertical(Db=_StubVideoDb(), Thresholds=Mult, Tiers=Ladder, FileTiers=Tiered,
+                                          Classes=Mock(**{'Resolve.return_value': 'live_action'})).Evaluate(Mf)
         self.assertTrue(Compliant)
-        self.assertEqual(Reason, 'source_at_or_below_ceiling:500<=2000(tier=1:1000*2.0)')
+        self.assertEqual(Reason, 'source_at_or_below_ceiling:500<=2000(tier=1:1000*2.0,class=live_action)')
 
     # directive: tv-video-rule-tier1 | # see video-encoding.C1
     def test_container_vertical_accepts_null_assigned_profile(self):

@@ -27,19 +27,20 @@ class TestTvVideoRuleTier1(unittest.TestCase):
             Thresholds=Mock(**{'GetMultiplier.return_value': 2.0}),
             Tiers=self.Tiers,
             FileTiers=Mock(**{'Resolve.return_value': FileTier(Tier, '') if Tier is not None else None}),
+            Classes=Mock(**{'Resolve.return_value': 'live_action'}),
         )
 
     # directive: tv-video-rule-tier1 | # see video-encoding.C1
     def test_at_ceiling_is_compliant(self):
         Ok, Reason = self._Vert().Evaluate(_Mf(VideoBitrateKbps=2000))
         self.assertTrue(Ok)
-        self.assertEqual(Reason, 'source_at_or_below_ceiling:2000<=2000(tier=1:1000*2.0)')
+        self.assertEqual(Reason, 'source_at_or_below_ceiling:2000<=2000(tier=1:1000*2.0,class=live_action)')
 
     # directive: tv-video-rule-tier1 | # see video-encoding.C1
     def test_above_ceiling_is_noncompliant(self):
         Ok, Reason = self._Vert().Evaluate(_Mf(VideoBitrateKbps=2001))
         self.assertFalse(Ok)
-        self.assertEqual(Reason, 'source_above_ceiling:2001>2000(tier=1:1000*2.0)')
+        self.assertEqual(Reason, 'source_above_ceiling:2001>2000(tier=1:1000*2.0,class=live_action)')
 
     # directive: tv-video-rule-tier1 | # see video-encoding.C1
     def test_av1_source_above_ceiling_is_noncompliant(self):

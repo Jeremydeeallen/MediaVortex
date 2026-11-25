@@ -11,7 +11,8 @@ Replaces per-profile-name proliferation with a 3-axis tuple: `(Family, QualityTi
 | # | User action | Surface | Handler | Backing |
 |---|---|---|---|---|
 | W1 | Operator edits a tier's TargetKbps on /settings Transcoding card | `/settings` bitrate ladder editor | `PUT /api/SystemSettings/Transcoding` | `SystemSettingsController.SaveTranscodingSettings` -> `ProfileThresholds.TargetKbps` UPDATE |
-| W2 | ContentClassifier auto-assigns a Family + Tier + ContentClass to a new MediaFile | (internal) | ContentClassifier.Classify | `ContentClassifier.Classify` -> writes `MediaFiles.AssignedProfile` (by tuple lookup) |
+| W2 | ContentClassifier assigns a profile to a new MediaFile; its content class is resolved at read, never stored | (internal) | `ContentClassifierService.ClassifyAndAssign` | writes `MediaFiles.AssignedProfile`; `ContentClassResolver.Resolve` supplies the class to every row lookup (C10) |
+| W4 | Operator sets a library's default content class or a genre's class | `/settings` library table "Default content class", genre table class column | `PUT /api/SystemSettings/LibraryTiers` (`DefaultContentClass`), `PUT /api/SystemSettings/GenreTiers` (`ContentClass`) | `LibraryDefaultTierRepository.SetDefaultContentClass`, `GenreQualityTierRepository.SetContentClass`; save re-evaluates the library |
 | W3 | Dispatcher escalates on VMAF fail -> next-tier profile | (internal) | `NextTierAdjuster.Get` | `Features/TranscodeJob/Adjustments/NextTierAdjustmentCalculator` |
 
 ## Success Criteria
@@ -34,6 +35,10 @@ C7. `NextTierAdjuster.Get(currentProfile)` returns `Optional[Profile]` by walkin
 
 C8. `DispositionDispatcher._MaybeScheduleRequeue` passes escalated `ProfileId` to `AddJobToQueue` when adjuster returns non-None. Chain terminates at Tier 5 -> Reject/QualityCeilingReached (folds through RetryBudget). Verifiable: dispatcher contract test proves ProfileId in the requeued queue row differs from previous when adjuster escalates.
 
+C9. **One row lookup.** The `ProfileThresholds` row for a file is chosen by `(ProfileName, ContentClass, SourceResolution)` through `TierLadderRepository.GetProfileRow`, and queue admission, the encode command, the size estimate and the video compliance ceiling all read that one row. Admission refuses an upscale only when the source is below that row's `TranscodeDownTo`. Verifiable: `Tests/Contract/TestProfileRowLookup.py` feeds one fixture to all four consumers and asserts the same row; `grep -rn "GetProfileMaxTarget\|GetProfileSettingsForTargetResolution\|GetProfileQualityForTargetResolution\|_ResolveTargetResolution" --include=*.py .` returns 0.
+
+C10. **Content class is operator data, resolved at read.** `ContentClassResolver.Resolve(StorageRootId, MediaFileId)` returns the class of the first genre in `MediaFiles.Genres` that has one in `GenreQualityTiers.ContentClass`, else `StorageRoots.DefaultContentClass`, else `None`. Both columns are nullable with `CHECK IN ('live_action','animation')` and are edited on `/settings` (library table "Default content class", genre table class column); saving either re-evaluates the library. No code supplies a class: `None` surfaces as `missing_input:ContentClass`. Verifiable: `Tests/Contract/TestProfileRowLookup.py` covers genre class, library default and none; `grep -rn "'live_action'" Features/ --include=*.py` returns only CHECK text.
+
 ## Seams
 
 | ID | Seam | Producer | Wire shape | Consumer expects | Verification |
@@ -41,6 +46,8 @@ C8. `DispositionDispatcher._MaybeScheduleRequeue` passes escalated `ProfileId` t
 | S1 | `Profiles UNIQUE tuple` | Backfill migration | `(Family, QualityTier, ContentClass, TargetResolutionCategory)` | ContentClassifier + NextTierAdjuster | `TestProfileTierLadder` |
 | S2 | `ProfileThresholds.TargetKbps -> VideoSlot NVENC / QSV VBR` | EncoderKnobRepository row | absolute INT kbps | VideoSlot emits `-b:v <TargetKbps>k` | `TestCommandComposer` |
 | S3 | `NextTierAdjuster -> AddJobToQueue` | Dispatcher on Requeue | escalated ProfileId | requeued row uses new profile knobs | `TestNextTierAdjuster` + smoke |
+| S4 | `/settings` knobs -> content class | `PUT /api/SystemSettings/LibraryTiers` (`DefaultContentClass`), `PUT /api/SystemSettings/GenreTiers` (`ContentClass`) | `StorageRoots.DefaultContentClass TEXT NULL`, `GenreQualityTiers.ContentClass TEXT NULL`, both CHECK `('live_action','animation')` | `ContentClassResolver` reads both fresh per call | `TestProfileRowLookup` (C10) |
+| S5 | `(ProfileName, ContentClass, Resolution) -> ProfileRow` | `TierLadderRepository.GetProfileRow` | one joined `Profiles` + `ProfileThresholds` row (`ProfileRow`) or `None` | `EvaluateQueueAdmission`, `EncoderKnobRepository.GetEncoderKnobsForProfile`, `EffectiveProfileResolver`, `VideoVertical` | `TestProfileRowLookup` (C9) |
 
 ## Status
 

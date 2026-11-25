@@ -824,10 +824,19 @@ class ProcessTranscodeQueueService:
         """Reads encoder knobs via EncoderKnobRepository (lifted columns) so CommandBuilder receives data-driven knobs."""
         try:
             from Features.Profiles.EncoderKnobRepository import EncoderKnobRepository
+            from Features.Profiles.ContentClassResolver import ContentClassResolver
             from Core.Database.DatabaseService import DatabaseService
+            # directive: profile-row-lookup | # see profile-tier-ladder.C9 -- the command reads the same (profile, class, resolution) row admission and compliance read
+            ContentClass = ContentClassResolver(DatabaseService()).Resolve(MediaFile.StorageRootId, MediaFile.Id)
+            if ContentClass is None:
+                LoggingService.LogError(
+                    f"No content class for MediaFileId={MediaFile.Id} (no genre class, no library default); cannot pick a profile row",
+                    "ProcessTranscodeQueueService", "GetTranscodingSettings",
+                )
+                return None
             KnobRepo = EncoderKnobRepository(DatabaseService())
             Knobs = KnobRepo.GetEncoderKnobsForProfile(
-                MediaFile.AssignedProfile, MediaFile.Resolution
+                MediaFile.AssignedProfile, ContentClass, MediaFile.Resolution
             )
             if Knobs is None:
                 return None

@@ -74,6 +74,7 @@ class TestMoviesVideoVerdict(unittest.TestCase):
             Thresholds=Mock(**{'GetMultiplier.return_value': 2.0}),
             Tiers=self.Tiers,
             FileTiers=Mock(**{'Resolve.return_value': Resolved}),
+            Classes=Mock(**{'Resolve.return_value': 'live_action'}),
         )
 
     # directive: movies-video-rule | # see video-encoding.C1
@@ -87,13 +88,13 @@ class TestMoviesVideoVerdict(unittest.TestCase):
     def test_reason_names_tier_and_deciding_genre(self):
         Ok, Reason = self._Vert(FileTier(3, 'genre=Action')).Evaluate(self._Mf(6001))
         self.assertFalse(Ok)
-        self.assertEqual(Reason, 'source_above_ceiling:6001>6000(tier=3:3000*2.0,genre=Action)')
+        self.assertEqual(Reason, 'source_above_ceiling:6001>6000(tier=3:3000*2.0,class=live_action,genre=Action)')
 
     # directive: movies-video-rule | # see video-encoding.C1
     def test_at_ceiling_is_compliant(self):
         Ok, Reason = self._Vert(FileTier(2, 'genre=none')).Evaluate(self._Mf(6000))
         self.assertTrue(Ok)
-        self.assertEqual(Reason, 'source_at_or_below_ceiling:6000<=6000(tier=2:3000*2.0,genre=none)')
+        self.assertEqual(Reason, 'source_at_or_below_ceiling:6000<=6000(tier=2:3000*2.0,class=live_action,genre=none)')
 
     # directive: movies-video-rule | # see video-encoding.C1
     def test_genres_not_fetched_leaves_video_undecided(self):

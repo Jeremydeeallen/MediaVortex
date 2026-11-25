@@ -184,7 +184,7 @@ COMPLETE -- all criteria verified 2026-05-09. Two deferred admin items (manual r
 - [x] Flow stage drafted (will land in `transcode.flow.md` Stage 3.5)
 - [x] Feature doc drafted (this file)
 - [x] Schema migration `Scripts/SQLScripts/AddPriorityScoreColumn.py` (idempotent ADD COLUMN). Run on 2026-05-09 -- 59195 MediaFiles rows.
-- [x] `ComputePriorityScore(MediaFileId)` + `ComputePriorityScoresForFiles(MediaFileIds)` bulk variant in `QueueManagementBusinessService.py`. Bulk path uses pre-computed `_LoadPriorityLookupTable` cache and a single UPDATE FROM VALUES per batch.
+- [x] `ComputePriorityScore(MediaFileId)` + `ComputePriorityScoresForFiles(MediaFileIds)` bulk variant in `QueueManagementBusinessService.py`. Bulk path reads each file's encode row through `TierLadderRepository.GetEncodeRow` (memoised per batch in `_EncodeTargets`) and a single UPDATE FROM VALUES per batch.
 - [x] `CalculatePriority` extended with `SuppressFallbackWarning=True` so bulk recompute emits one rolled-up warning per batch instead of per-row spam.
 - [x] Probe-completion hook in `MediaProbeBusinessService._ExecuteProbe` (try/except -- failure logged but does not roll back probe per criterion 14).
 - [x] AssignedProfile bulk-update hook in `ProfileRepository.UpdateMediaFilesProfileByRootFolder` (captures affected IDs before UPDATE, recomputes in 1000-row batches).

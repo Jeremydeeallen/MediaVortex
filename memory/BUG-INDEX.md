@@ -63,12 +63,12 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0116 | active | contract-tests | TestDeployIdempotenceInvariants per-instance-env-file test reads deploy/baremetal/mediavortex-worker@.service, deleted 2026-08-02 (unit now rendered by _WorkerUnitBody); FileNotFoundError since | 2026-11-11
 - BUG-0118 | active | service-control | Three ActiveJobs inserters (ProbeWorker, LanguageWorker, ActiveJobRepository.CreateActiveJob) duplicate one INSERT with different column sets | 2026-11-25
 - BUG-0119 | active | fail-loud | Insert helpers log and return 0/None/False on a failed INSERT (outer try/except) so callers carry on with no row; ids are now real, the swallow remains | 2026-11-25
-- BUG-0120 | active | transcode-queue | Upscale gate compares source to the profile's MAX TranscodeDownTo (2160p on tiered profiles), so every sub-4K file is refused; no transcodes since 2026-10-20 | 2026-11-25
-- BUG-0121 | active | transcode-queue | Encoder target lookup ignores ContentClass (profile+resolution LIMIT 1): 1080p sources get 720p or 1080p arbitrarily | 2026-11-25
 - BUG-0122 | active | quality-testing | Test-variant runs fail: VariantJobProcessor calls Worker.Current on a thread with no WorkerContext.Bind(); last success 2026-07-03 | 2026-11-25
 
 ## Recently Resolved (last 10)
 
+- BUG-0120 | resolved | transcode-queue | Upscale gate compared the source to the profile's MAX TranscodeDownTo (2160p on tiered profiles) and refused every sub-4K file; admission now reads the file's own row via TierLadderRepository.GetProfileRow (directive profile-row-lookup) | 2026-11-25 -> 2026-11-25
+- BUG-0121 | resolved | transcode-queue | Encoder target lookup ignored ContentClass (profile+resolution LIMIT 1); every consumer now keys on (profile, content class from /settings data, resolution) through one lookup (directive profile-row-lookup) | 2026-11-25 -> 2026-11-25
 - BUG-0109 | resolved | deploy | deploy-fleet.py never closed its DeployHistory row (shared last-insert id read as 0); now inserts via ExecuteReturning and sweeps orphaned RUNNING rows to KILLED (258c0ccf, farm-server); the shared id field itself removed by insert-returning-id | 2026-11-11 -> 2026-11-25
 - BUG-0117 | resolved | service-control | Jellyfin auto-sync failed on the farm server (Windows key path in JellyfinSSHKeyPath); fixed with a dedicated server key authorized on the Jellyfin host | 2026-11-12 -> 2026-11-12
 - BUG-0064 | resolved | deploy | Deploy consolidation: (1) I9 local-start policy superseded -- the WebService moved to the farm server (`deploy-server.py`), StartMediaVortex starts only the I9 WorkerService; (2) independent remote deploys met by worker-deploy.md rule 2; (3) single strategy script superseded by the 2026-08-02 zero-param fleet + per-worker scripts (host shapes are roles of one sync script). Closed by directive `farm-server` | 2026-06-23 -> 2026-11-11
