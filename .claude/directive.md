@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-11-25
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: VERIFYING
 **Slug:** insert-returning-id
 **Replaces:** `directives/closed/2026-11-25-farm-server.md` (closed Success)
 
