@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-11-25
-**Status:** Active -- phase: VERIFYING
+**Status:** Active -- phase: DELIVERING
 **Slug:** profile-row-lookup
 **Replaces:** `directives/closed/2026-11-25-insert-returning-id.md` (closed Success)
 
@@ -124,13 +124,14 @@ memory/KNOWN-ISSUES.md, memory/BUG-INDEX.md, memory/KNOWN-ISSUES-ARCHIVE.md -- E
 
 | Source artifact | Target file | Commit |
 |---|---|---|
-| One row lookup (C9), content class as operator data resolved at read (C10), seams S4/S5, workflows W2/W4 | `Features/Profiles/profile-tier-ladder.feature.md` | TBD until close |
-| Upscale judged on the file's own row target (2b) | `Features/TranscodeQueue/marginal-savings-gate.feature.md` | TBD until close |
-| Compliance reason names the class; `missing_input:ContentClass` | `Features/VideoEncoding/video-encoding.feature.md` (C1) | TBD until close |
-| Classifier never writes a class | `Features/ContentClassifier/classifier.feature.md` | TBD until close |
-| ST4/ST5 point at the lookup | `transcode.flow.md` | TBD until close |
-| "Content class" term | `GLOSSARY.md` | TBD until close |
-| Stale lookup names replaced | `Features/Profiles/Profiles.feature.md`, `Core/Resolution/resolution-types.feature.md`, `Features/TranscodeQueue/TranscodeQueue.feature.md`, `Features/TranscodeQueue/priority-materialization.feature.md`, `Features/TranscodeJob/TranscodeJob.feature.md`, `Docs/Workflows/TranscodingWorkflow.md` | TBD until close |
+| One row lookup (C9), content class as operator data resolved at read (C10), seams S4/S5, workflows W2/W4 | `Features/Profiles/profile-tier-ladder.feature.md` | c985991f |
+| Upscale judged on the file's own row target (2b) | `Features/TranscodeQueue/marginal-savings-gate.feature.md` | c985991f |
+| Compliance reason names the class on both paths; `missing_input:ContentClass` | `Features/VideoEncoding/video-encoding.feature.md` (C1) | c985991f, f00f5593 |
+| Classifier never writes a class | `Features/ContentClassifier/classifier.feature.md` | c985991f |
+| ST4/ST5 point at the lookup | `transcode.flow.md` | c985991f |
+| "Content class" term | `GLOSSARY.md` | c985991f |
+| Stale lookup names replaced | `Features/Profiles/Profiles.feature.md`, `Core/Resolution/resolution-types.feature.md`, `Features/TranscodeQueue/TranscodeQueue.feature.md`, `Features/TranscodeQueue/priority-materialization.feature.md`, `Features/TranscodeJob/TranscodeJob.feature.md`, `Docs/Workflows/TranscodingWorkflow.md` | c985991f |
+| BUG-0120, BUG-0121 resolved | `memory/KNOWN-ISSUES-ARCHIVE.md`, `memory/BUG-INDEX.md` | c985991f |
 | Hook: template directive means no directive | `.claude/hooks/pre-edit-standards.ps1` (no doc; behaviour pinned by C8) | 7de06eff |
 | xxx program spec + plan (Units 0-4) | `Docs/superpowers/specs/2026-10-28-xxx-stash-cull-audio-design.md`, `Docs/superpowers/plans/2026-10-29-xxx-program.md` | 74b0f38a |
 
@@ -146,10 +147,23 @@ Pre-smoke (code complete, not yet deployed):
 
 Smoke (2026-11-25, server ce4f064f = DeployHistory Id=87 in 9.0s; fleet 9/9 workers on ce4f064f in 18.5s):
 - **C2:** `EvaluateQueueAdmissionForProfile` for 751839 (720p, now the 720p `-mv` output of the earlier smoke): `MarginalSavings (source=140MB target=128MB savings=13MB threshold=150MB)`, not `Upscale`. `POST /api/TranscodeQueue/AddJob {"MediaFileId": 751897}` (1080p hevc, no ForceAdd) -> `Success=true`, queue 229548. Before this directive both returned `Upscale (... < profile target 2160p)`.
-- **C5:** `GET /api/SystemSettings/LibraryTiers` returns `DefaultContentClass=live_action` for the three roots; `GET /api/SystemSettings/GenreTiers` returns `Animation: ContentClass=animation`. `PUT LibraryTiers {StorageRootId, DefaultContentClass}` for roots 1, 2, 3 -> `Success=true` and the background recompute started. `/settings` markup carries `library-class` and `genre-class` selects. After the Movies recompute: `Kung Fu Panda (2008)` reason `source_at_or_below_ceiling:1149<=2000(tier=1:1000*2.0,class=animation,genre=Action)` (class from the Animation genre, tier from Action).
+- **C5:** `GET /api/SystemSettings/LibraryTiers` returns `DefaultContentClass=live_action` for the three roots; `GET /api/SystemSettings/GenreTiers` returns `Animation: ContentClass=animation`. `PUT LibraryTiers {StorageRootId, DefaultContentClass}` for roots 1, 2, 3 -> `Success=true` and the background recompute started. `/settings` markup carries `library-class` and `genre-class` selects. `GET /api/SystemSettings/Transcoding` `BitrateLadder` now returns cells for both classes (animation 4, live_action 5); before, every cell was live_action. After the Movies recompute: `Kung Fu Panda (2008)` reason `source_at_or_below_ceiling:1149<=2000(tier=1:1000*2.0,class=animation,genre=Action)` (class from the Animation genre, tier from Action).
 - **C6:** queue 229548 claimed by dot-worker-1; attempt 104042 command `-c:v av1_nvenc -b:v 1000k -maxrate:v 2000k ... scale=w=1280:h=-2` = the Tier 1 live_action 720p encode row; `Success=TRUE`, VMAF 95.88, `Disposition=Replace/VmafPassed`. MediaFile 751897 is now `...HDTV-720p-mv.mp4`, 1280x720, 1041 kbps, `TranscodedByMediaVortex=TRUE`, reason `source_at_or_below_ceiling:1041<=2000(tier=1:1000*2.0,class=live_action)`; bucket `AudioFix` (the Audio stage follows, as designed).
 - **C7 Movies:** after the recompute (3,485 of 3,486 rows carry a class) `VideoCompliant` is False 61 / True 3424 / NULL 1 (before: 55 / 3430 / 1). The 6 that flipped are exactly the animated files whose bitrate is above the animation row's ceiling (900*2.0 = 1800) and at or below the old live-action ceiling (2000): `SELECT COUNT(*) ... WHERE StorageRootId=2 AND VideoCompliant=FALSE AND VideoCompliantReason LIKE '%class=animation%' AND VideoBitrateKbps > 1800 AND VideoBitrateKbps <= 2000` = 6.
-- **C7 TV (in progress):** before-counts captured (`scratchpad/c7_before.txt`): TV False 1200 / True 47969 / NULL 271; Movies False 55 / True 3430 / NULL 1; xxx False 3820 / True 325 / NULL 53. Library recompute running on the server (~200 TV rows/min; 49,440 TV rows).
+- **C7 xxx (outside the criterion, reported):** before False 3820 / True 325 / NULL 53; after False 3806 / True 339 / NULL 53. xxx has no library tier, so its files are judged by the assigned profile, and `GetProfileTarget` now returns the encode row's rate (720p row, 1000 kbps) instead of the source row's (900): the ceiling moved from 1800 to 2000 at 1080p and 2700 to 3000 at 2160p. 15 compliant xxx files sit in exactly that band; the net is +14 because one of them was already compliant before (counts only, no per-file baseline).
+- **C8:** verified at close, after the template directive is restored; the result is written in the close commit message because no file edit is allowed without a directive.
+- **Found, not fixed (file at DELIVERING):** every farm-server start logs `ERROR: FFprobe path from settings not found: /opt/mediavortex/src-<sha>/FFmpegMaster\bin\ffprobe.exe` (and the ffmpeg twin): `SystemSettings` still holds I9's Windows relative paths; `FFmpegService` discovery falls back to `/usr/local/bin`, so it is noise, not a failure.
+- **C7 TV:** before (`scratchpad/c7_before.txt`) False 1200 / True 47969 / NULL 271; after the full TV recompute (0 rows left with an old-format `source_*` reason) False 1199 / True 47970 / NULL 271. The one file that moved is MediaFile 751897, the C6 transcode (now 720p @ 1041 kbps, compliant); 0 TV rows carry `class=animation` (TV has no genres), so no TV verdict changed because of the class. The recompute ran at about 3,000 rows/min once restarted on f00f5593 (the server redeploy killed the first run's threads; re-triggered via the same PUT).
+
+### Delivery
+
+DIRECTIVE: one `ProfileThresholds` row per file, chosen by profile, content class and source resolution, read by admission, command, estimate and compliance; content class as `/settings` data; shows queue again.
+STATUS: Done. Criteria 1-7 evidenced above; C8 at close.
+WHAT SHIPPED: c985991f (lookup, resolver, migration, GUI, four lookups + four dead helpers deleted, BUG-0120/0121 closed), eff626e0 + f00f5593 (test stubs; profile-path reason names the class), 7de06eff (hook), 74b0f38a (xxx spec + plan). Server on f00f5593, fleet on ccdf6ccb.
+HOW TO USE IT: `/settings` library table "Default content class" and genre table class column; saving either re-evaluates the library (about 3,000 rows/min). The Transcoding ladder editor now edits animation and live-action cells separately. `AddJob` admits any file whose source is at or above its own row's target.
+WHAT YOU NEED TO EXECUTE: nothing. Shows are queueable again; the queue fills on the next populate run or per-file from `/Work/Transcode`.
+DECISIONS I MADE: see Decisions Made (encode-row rate for compliance ceilings; `TargetKbps` for estimates; ladder keyed by row class; class in every reason; bar columns left in schema).
+KNOWN GAPS / DEFERRED: none from this directive. Pre-existing and unrelated: `TestProfileTierLadder` x4 stale CANARY expectations, `TestFailLoud` growth in 5 untouched files, BUG-0116, `TestWhisperBackendLangDetect` import error, FFprobe-path startup noise on the server (filed as a bug at DELIVERING).
 
 ### Decisions Made
 
