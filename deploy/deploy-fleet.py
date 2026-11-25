@@ -86,16 +86,20 @@ def Main() -> int:
     # directive: farm-server | # see worker-deploy-baremetal.S7 -- server deploys own their own PriorSha chain (deploy-server.py); fleet rollback base ignores them
     _PriorShaRow = Db.ExecuteQuery("SELECT NewSha FROM DeployHistory WHERE Outcome='OK' AND HostsAttempted IS DISTINCT FROM %s ORDER BY Id DESC LIMIT 1", (ServerDeployTarget,))
     _PriorSha = _PriorShaRow[0].get('newsha') if _PriorShaRow else None
-    Db.ExecuteNonQuery(
+    # directive: farm-server | # see worker-deploy-baremetal.S10
+    HistId = Db.ExecuteReturning(
         "INSERT INTO DeployHistory (StartedAt, PriorSha, NewSha, Outcome) "
-        "VALUES (NOW(), %s, %s, 'RUNNING')",
+        "VALUES (NOW(), %s, %s, 'RUNNING') RETURNING Id",
         (_PriorSha, Sha),
+    )[0]["Id"]
+    Db.ExecuteNonQuery(
+        "UPDATE DeployHistory SET Outcome='KILLED', ErrorMessage=%s "
+        "WHERE Outcome='RUNNING' AND Id < %s AND HostsAttempted IS DISTINCT FROM %s",
+        (f"never finalized; swept by fleet deploy {HistId}", HistId, ServerDeployTarget),
     )
-    HistId = Db.GetLastInsertId()
 
+    # directive: farm-server | # see worker-deploy-baremetal.S10
     def _FinishHist(Outcome, Attempted, Succeeded, ErrorMessage=None):
-        if not HistId:
-            return
         Db.ExecuteNonQuery(
             "UPDATE DeployHistory SET CompletedAt=NOW(), "
             "ElapsedSeconds=EXTRACT(EPOCH FROM (NOW() - StartedAt))::int, "
