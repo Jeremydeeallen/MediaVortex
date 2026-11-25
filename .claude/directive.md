@@ -1,130 +1,111 @@
 # Current Directive
 
-**Set:** 2026-11-25
-**Status:** Active -- phase: VERIFYING
-**Slug:** insert-returning-id
-**Replaces:** `directives/closed/2026-11-25-farm-server.md` (closed Success)
+**Set:** YYYY-MM-DD
+**Status:** (no active directive -- task-delegation mode)
+**Slug:** <previous-slug>
+**Replaces:** `directives/closed/<previous-slug>.md` (closed Success | Partial | Abandoned)
 
 ## Outcome
 
-Every row id that code gets back from an INSERT comes from that statement's own `RETURNING Id`, on the connection that ran it. No code reads an id from state shared across calls or threads, and no id lookup can quietly return 0 or None instead of the real id. Today `DatabaseService.LastInsertId` is a per-instance field overwritten by every `RETURNING` write. Readers on another thread can get another row's id, and `GetLastInsertId()` returns 0 instead of raising. That is the defect class behind BUG-0109 (fleet DeployHistory rows never finalized) and the `ActiveJobRepository.CreateActiveJob` "returned 0" note in `2026-07-27-audio-language-detection`.
+One paragraph describing the operator-observable end state. What is true after this directive is done that wasn't true before.
 
 ## Acceptance Criteria
 
-1. No Python file in the repo reads or writes `LastInsertId` or calls `GetLastInsertId`. A contract test scans the tree and fails on any hit.
-2. Each insert function that returns a new row id returns the id of the row it inserted. Verify: a contract test calls each function against the live DB, then SELECTs the row by the returned id and finds the values it wrote. Test rows are removed afterwards.
-3. Two threads inserting through one shared database object at the same time each get their own row's id. Verify: a contract test with 2 threads x 50 inserts finds that every returned id maps to the row that thread wrote.
-4. One real transcode on the I9 worker completes. Its ActiveJobs row is created and then removed, its progress updates land on one TranscodeProgress row, and its TemporaryFilePaths row carries the attempt id.
-5. One real VMAF quality test completes, with its queue entry, its result row, and one progress row.
-6. One probe on a worker writes its ActiveJobs row and removes it when done.
-7. `POST /api/QualityTest/QueueTestRun` on the farm server returns each accepted `QueueId` equal to the TranscodeQueue row it created.
+1. ...
+2. ...
 
-## Call-Graph Audit
-
-- **Signal 1 (two flow docs for one operation):** none added. The touched paths belong to `transcode.flow.md` (progress, temp paths, ActiveJobs), the quality-test pipeline, and the probe worker. No new flow doc.
-- **Signal 2 (mode branch at orchestration):** none. The change sits below orchestration, in repository insert helpers.
-- **Signal 3 (sparse output columns):** none. The written columns are unchanged.
-- **Signal 5 (config changes which code runs):** none.
-- **Duplicate inserters:** `ServiceControlRepository.CreateActiveJob` and `CreateServiceCommand` have no callers (tree-wide grep). Deleted (genuinely-dead orphan bucket). `ProbeWorker._CreateActiveJob`, `LanguageWorker._CreateActiveJob` and `ActiveJobRepository.CreateActiveJob` are three ActiveJobs inserters: see Out of Scope.
-- **Seam, shared id state:** `DatabaseService.ExecuteNonQuery` stores the first `RETURNING` column in `self.LastInsertId`. `ExecuteReturning` already returns rows from the same cursor. The capture, the field, and both `GetLastInsertId` methods are deleted. Call sites use `self.DatabaseService.ExecuteReturning`; `BaseRepository` gets no new passthrough, because `repository-split.feature.md`'s end state has no `BaseRepository` (repositories compose `DatabaseService`).
-- **`ExecuteNonQuery` + `RETURNING` callers that ignore the id** (`MediaFilesRepository`, `ContentClassificationRulesController`, `AudioFixPriorityHintsController`, `TranscodeQueueRepository`): unaffected. They never read the id.
+(Each criterion: observable behavior, verifiable in SQL or by a single command. Rename-test, outsider-test, rewrite-test, negation-test, stability-test per `.claude/rules/feature-criteria.md`.)
 
 ## Out of Scope
 
-- (b) Three ActiveJobs inserters (`ProbeWorker`, `LanguageWorker`, `ActiveJobRepository`) duplicate one INSERT. Collapsing them is a DRY change with its own callers; acknowledged debt, filed.
-- (b) The touched insert functions keep their outer `try/except` that logs and returns 0/None/False. Making them raise changes caller control flow in the encode loop, VMAF monitor and queue service. That is the fail-loud sweep (`TestFailLoud` baseline ratchet), filed separately. The inner `if RowsAffected > 0 ... else return 0` id branches are removed (a), because `ExecuteReturning` yields the row or nothing.
-- (a) Behaviour is otherwise preserved: same SQL, same columns, same return types.
+- ...
 
 ## Constraints
 
-- Fail loud: an insert that returns no row raises; it never substitutes 0.
-- Contract tests that write live rows clean up after themselves and use test-only marker values.
-- Live smoke follows the drain and one-I9-instance rules.
+- ...
 
 ## Escalation Defaults
 
-- Speed vs. completeness -> completeness. Every reader of the shared field is migrated or deleted in this directive.
-- Risk tolerance: low. Transcode, VMAF and probe hot paths are touched.
+- Tradeoff between A and B -> B
+- Risk tolerance: low | medium | high
 
 ## Engineering Calls Already Made
 
-- `ExecuteReturning(...)[0]['Id']` at each call site. No new helper.
-- No runtime guard that makes `ExecuteNonQuery` refuse `RETURNING`. Callers that ignore the id are harmless, and deleting the field turns any leftover reader into an immediate `AttributeError`.
+- ...
 
 ## Status
 
 Phases advance by editing the `**Status:**` header line at the top of this file: `**Status:** Active -- phase: <NEXT>`. The PreToolUse hook reads ONLY that header line (NOT this section). See `.claude/standards/index.md` for the phase machine.
 
-### Plan
-
-1. `Core/Database/DatabaseService.py`: delete the `LastInsertId` init and capture, and `GetLastInsertId`.
-2. `Core/Database/BaseRepository.py`: delete `GetLastInsertId` (no replacement passthrough; see Call-Graph Audit).
-3. Migrate to `ExecuteReturning(...)[0]['Id']`:
-   - `WorkerService/ProbeWorker._CreateActiveJob`
-   - `Features/ServiceControl/ActiveJobRepository.CreateActiveJob`
-   - `Features/QualityTesting/QualityTestRepository.CreateQualityTestQueueEntry`, `.CreateQualityTestResult`, `.CreateTemporaryFilePath`
-   - `Features/QualityTesting/QualityTestingBusinessService.CreateProgressRecord` (drop the `or 0`)
-   - `Features/QualityTesting/QualityTestController.QueueTestRun`
-   - `Features/TranscodeJob/TranscodeJobRepository.SaveTranscodeProgress`
-4. Delete `ServiceControlRepository.CreateActiveJob` and `.CreateServiceCommand` (no callers).
-5. Tests:
-   - `Tests/Pipeline/Harness/Invocation._InsertQueueRow` -> `ExecuteReturning`.
-   - `Tests/Contract/TestJobPhaseTransitions` mock -> `ExecuteReturning` returns `[{'Id': 42}]`.
-   - New `Tests/Contract/TestInsertReturningId.py` covering C1, C2 and C3.
-6. Close BUG-0109 (fixed in 258c0ccf); file the two (b) items.
-7. Smoke C4-C7.
-
-### Seams
-
-| ID | Seam | Producer | Wire shape | Consumer expects | Verification |
-|---|---|---|---|---|---|
-| N1 | insert -> id | `DatabaseService.ExecuteReturning` | `list[CaseInsensitiveDict]`, one row with `Id` | Caller indexes `[0]['Id']`; an empty list raises `IndexError` | C2, C3 |
-| N2 | ActiveJobs id -> completion | `CreateActiveJob` / `_CreateActiveJob` | int `ActiveJobs.Id` | `DELETE FROM ActiveJobs WHERE Id = %s` at job end | C4, C6 |
-| N3 | progress id -> updates | `SaveTranscodeProgress` / `CreateProgressRecord` | int progress row id | Later updates target that id | C4, C5 |
-| N4 | queue id -> HTTP | `QueueTestRun` | `Accepted[].QueueId` int | Operator UI shows queue ids | C7 |
-
 ### Files
 
 ```
-Core/Database/database-architecture.feature.md            -- EDIT: C15 insert id comes from its own RETURNING
-Core/Database/DatabaseService.py                          -- EDIT: delete LastInsertId + GetLastInsertId
-Core/Database/BaseRepository.py                           -- EDIT: delete GetLastInsertId
-WorkerService/ProbeWorker.py                              -- EDIT: _CreateActiveJob via ExecuteReturning
-Features/ServiceControl/ActiveJobRepository.py            -- EDIT: CreateActiveJob via ExecuteReturning
-Features/ServiceControl/ServiceControlRepository.py       -- EDIT: delete dead CreateActiveJob + CreateServiceCommand
-Features/QualityTesting/QualityTestRepository.py          -- EDIT: 3 inserts via ExecuteReturning
-Features/QualityTesting/QualityTestingBusinessService.py  -- EDIT: CreateProgressRecord via ExecuteReturning
-Features/QualityTesting/QualityTestController.py          -- EDIT: QueueTestRun via ExecuteReturning
-Features/TranscodeJob/TranscodeJobRepository.py           -- EDIT: SaveTranscodeProgress via ExecuteReturning
-Tests/Pipeline/Harness/Invocation.py                      -- EDIT: harness insert via ExecuteReturning
-Tests/Contract/TestJobPhaseTransitions.py                 -- EDIT: mock ExecuteReturning
-Tests/Contract/TestInsertReturningId.py                   -- CREATE: C1-C3
-memory/KNOWN-ISSUES.md, memory/BUG-INDEX.md               -- EDIT: close BUG-0109; file OOS (b) items
+path/to/file1.py    -- EDIT: one-line reason
+path/to/file2.py    -- CREATE: one-line reason
 ```
 
 ### Promotions
 
+Required when phase advances to DELIVERING. The hook refuses Status `Active -- phase: DELIVERING` -> `Closed` if this section is empty.
+
+Each row promotes durable content out of this directive into its permanent home (feature/flow doc). On close, the archive keeps only the pointer table -- the design content lives in the target file.
+
 | Source artifact | Target file | Commit |
 |---|---|---|
-| Insert id comes from the statement's own `RETURNING` (no shared last-insert state) | `Core/Database/database-architecture.feature.md` (C15) | TBD until close |
+| `<what content / decision>` | `<path/to/target.feature.md or .flow.md>` | `<sha or "TBD until close">` |
+
+If a row's content is "new vertical entirely" or "new pipeline entirely," the Target is a NEW `*.feature.md` / `*.flow.md` -- R13 allows creation during DELIVERING for exactly this case (`.claude/rules/doc-layering.md`).
+
+If a directive has no durable content to promote (e.g. pure bugfix, no contract change), list one row: `no promotions | n/a | <reason>`. The hook only checks the section is non-empty.
 
 ### Verification
 
-Pre-smoke (02ad9e81, deployed 1f3836b8: server Id=85, fleet 9/9 workers):
-- **C1-C3:** `TestInsertReturningId` 7 passed. Against the old code (new test file only) 6 of them fail: the tree scan and every per-function check. The 2x50 race test passed on old code too; it asserts the property but did not reproduce the old race. Full contract suite: 80 failed / 28 errors before and after, identical sets; no new failures. Live race test left 0 `_test-insert-returning-id` ActiveJobs rows.
-- **C4/C5 blocked (2026-11-25):** no transcode can be queued. `POST /api/TranscodeQueue/AddJob` for MediaFile 751897 (1080p) and 751839 (720p) both return "Upscale (source ... < profile target 2160p)". `QueueManagementBusinessService` upscale gate compares the source to `ProfileRepository.GetProfileMaxTarget`, the highest `TranscodeDownTo` across all of the profile's rows (BUG-0054, a31e4d9e). Tiered profiles (`AV1 Tier 1 Efficient`) have one row per source resolution up to 2160p, so every sub-4K source is refused. Last transcode attempt: 2026-10-20. Separate vertical (queue admission); not fixed here.
+Required when phase advances to VERIFYING. One entry per acceptance criterion. Concrete evidence (command output, SQL result, file path) -- not "tested it works."
 
-Smoke (2026-11-25, operator approved one real TV transcode; 720p source so both ProfileThresholds rows target 720p and ForceAdd cannot upscale):
-- **C4:** `AddJob` (ForceAdd) MediaFile 751839 (The Mentalist S01E21, 720p) -> queue 229520, claimed by dot-worker-1. ActiveJobs 1567926 (`QueueId=229520`) was created, then deleted by its id at job end. One TranscodeProgress row (104398) was updated in place, reaching 57.5% at frame 12092. TemporaryFilePaths 98828 carries `TranscodeAttemptId=103992`. Attempt 103992 `Success=TRUE`, `Disposition=Replace`.
-- **C5:** VMAF on wakko-worker-1: QualityTestingQueue 3262 matches the VMAF ActiveJobs `QueueId=3262`. QualityTestResults 2303 `Success`. QualityTestProgress 2077 reached `Processing`; the old shared-id bug left it stuck at `Started`. Score 94.83, `DispositionReason=VmafPassed`.
-- **C6:** `POST /api/MediaFiles/617831/Refresh` on the server -> I9 ProbeWorker wrote ActiveJobs 1567930 (`ProbeService`, `QueueId=617831`, Probing) and deleted it. Afterwards no ProbeService rows remained, and `NeedsReprobe=FALSE` with no probe error.
-- **C7:** `POST /api/QualityTest/QueueTestRun` (set 2, MediaFile 751897) on the server returned `QueueId 229521`, and TranscodeQueue 229521 was that row (`TestVariantSetId=2`, Pending).
-- Side effects: the replaced file's audio was still non-compliant, so the system queued AudioFix 229522 automatically (wakko-worker-1, attempt 103994). The C7 variant job then failed on dot (attempt 103993): "WorkerContext.Current called on unbound thread" at `VariantJobProcessor` L68 `Worker.Current(...)`, after `CreateActiveJob` had returned its id. That path was last run 2026-07-03; pre-existing, not this change.
+- **Criterion 1:** `<evidence>`
+- **Criterion 2:** `<evidence>`
 
 ### Decisions Made
+
+Engineering calls made under ambiguity during execution. These live with the directive (not with features/flows) because they describe THIS directive's reasoning, not the vertical's contract.
+
+- `<decision + one-line rationale>`
 
 ---
 
 ## Closure (thin-pointer archive shape)
 
-When this directive is ready to close: confirm Promotions, set `Status: Closed -- <outcome>` with a `**Closed:**` line, then `git mv .claude/directive.md .claude/directives/closed/YYYY-MM-DD-<slug>.md` and copy `_template.md` back. Governed by `.claude/rules/doc-layering.md` and `.claude/rules/ceo-mode.md`.
+When this directive is ready to close:
+
+1. **Confirm Promotions table is complete.** Every piece of durable content from this directive has a row pointing at its permanent home. The hook will refuse the close otherwise.
+2. **Confirm directive did not grow during DELIVERING.** The hook recorded a size snapshot at IMPLEMENTING -> DELIVERING transition; the close is refused if the directive grew by more than the configured tolerance (default 10%). Growth during DELIVERING means content was DUPLICATED into the directive rather than PROMOTED out -- fix by moving the content to its target file and shrinking the directive.
+3. **Update Promotions table with commit SHAs** (the commits where each promotion landed).
+4. **Change `Status: Active -- phase: DELIVERING` -> `Status: Closed -- Success | Partial | Abandoned`.** Add a `**Closed:** YYYY-MM-DD` line under Set.
+5. **Archive:**
+
+   ```powershell
+   git mv .claude/directive.md .claude/directives/closed/YYYY-MM-DD-<slug>.md
+   Copy-Item .claude/directives/_template.md .claude/directive.md
+   ```
+
+   The renamed file becomes the archived record; `git log --follow` traces it.
+
+The archived directive holds these sections only:
+
+| Section | Content |
+|---|---|
+| Outcome | (restated; what was true at the start of the ask) |
+| Acceptance Criteria | (restated; the contract that gated success) |
+| Promotions | (the pointer table -- source artifacts and where they live now) |
+| Verification | (per-criterion evidence) |
+| Decisions Made | (engineering calls made under ambiguity) |
+
+The archive does NOT hold:
+
+- Design content that lives in a feature/flow doc (read the target file instead -- this is the whole point of promotion)
+- In-flight planning notes or transient operational state (these served their purpose during execution; they don't belong in the historical record)
+- Re-derivations of standards or rules (those live in `.claude/rules/`)
+
+If a future reader wants to know what a vertical does, they read its feature doc. If they want to know why a directive made the choices it made, they read the archived directive's Decisions Made and Verification sections. If they want to know what was promoted, they follow the pointers in the Promotions table.
+
+This shape is governed by `.claude/rules/doc-layering.md` (the three-tier model) and `.claude/rules/ceo-mode.md` (the directive lifecycle).

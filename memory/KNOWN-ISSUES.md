@@ -1918,6 +1918,18 @@ Tier 2 (upstream, cross-vertical): a previous transcode wrote a corrupt `-mv.mp4
   Repro: make any of these INSERTs fail (e.g. a NOT NULL column left unset) and the function returns 0 or None instead of raising: `ActiveJobRepository.CreateActiveJob`, `ProbeWorker._CreateActiveJob`, `QualityTestRepository.CreateQualityTestQueueEntry` / `CreateQualityTestResult` / `CreateTemporaryFilePath`, `QualityTestingBusinessService.CreateProgressRecord`, `TranscodeJobRepository.SaveTranscodeProgress`.
   Evidence: directive `insert-returning-id` made each id come from the statement's own `RETURNING` (no more silent 0 from shared state), but kept each function's outer `try/except Exception` that logs and returns a sentinel. Changing these to raise changes control flow in the encode loop, the VMAF monitor and the queue service; each caller needs its own decision. `Tests/Contract/TestFailLoud.py` baseline tracks them.
   First place to look: callers that test the sentinel (`if not ActiveJobId`, `if ProgressId`); decide raise vs. handle per caller.
+- BUG-0120 | Queue admission refuses every sub-4K file on tiered profiles as an "Upscale"; nothing has transcoded since 2026-10-20 | criterion: marginal-savings-gate.C2b | 2026-11-25
+  Repro: `POST /api/TranscodeQueue/AddJob {"MediaFileId": 751839}` (The Mentalist S01E21, 720p) -> `Upscale (source 1280x720 < profile target 2160p)`. Same for 1080p (751897).
+  Evidence: `QueueManagementBusinessService` upscale gate compares the source to `ProfileRepository.GetProfileMaxTarget`, the highest `TranscodeDownTo` across all of the profile's rows (BUG-0054 fix a31e4d9e, written when a profile had one target). `AV1 Tier 1 Efficient` has rows per (Resolution, ContentClass): live_action 1080p/2160p -> 720p, animation 2160p -> 2160p, so the max is always 2160p. The operator expects TV live-action to go down to 720p.
+  First place to look: gate on the `TranscodeDownTo` of the row matching the source's resolution and content class (same row the encoder must use; see BUG-0121).
+- BUG-0121 | Encoder target ignores ContentClass: a 1080p source gets whichever of the live_action (720p) or animation (1080p) row Postgres returns first | criterion: transcode.flow.md (label decides the command) | 2026-11-25
+  Repro: `SELECT TranscodeDownTo FROM ProfileThresholds pt JOIN Profiles p ON pt.ProfileId=p.Id WHERE p.ProfileName='AV1 Tier 1 Efficient' AND pt.Resolution='1080p' LIMIT 1` -- two candidate rows, no ORDER BY.
+  Evidence: `Features/Profiles/EncoderKnobRepository._ResolveTargetResolution` filters on profile + resolution only, `LIMIT 1`. 480p and 720p are unaffected (both rows agree); 1080p and 2160p are not.
+  First place to look: add the file's ContentClass to the lookup; fix together with BUG-0120.
+- BUG-0122 | Test-variant runs fail: `WorkerContext.Current called on unbound thread` | criterion: Features/TranscodeJob/multi-variant-testing.feature.md | 2026-11-25
+  Repro: `POST /api/QualityTest/QueueTestRun {"VariantSetId": 2, "FilePaths": ["T:\\Pokémon\\Season 20\\Pokémon - S20E154 - Paldea in Ruin - Charge HDTV-1080p.mkv"]}` -> dot-worker-1 attempt 103993 `Success=FALSE`, "Exception during test variant processing: WorkerContext.Current called on unbound thread...". The queue row is removed.
+  Evidence: `Features/TranscodeJob/Worker/VariantJobProcessor._ProcessImpl` L68 `Worker.Current(Db=...)` runs on a thread that never called `WorkerContext.Bind()`. Last successful variant attempt 2026-07-03. The failed attempt also has `TestVariantSetId` NULL.
+  First place to look: where `VariantJobProcessor.Process` is dispatched (WorkerLoopService) vs. how `JobProcessor` binds WorkerContext.
 
 ---
 
