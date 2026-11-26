@@ -1,82 +1,76 @@
 ---
-description: Enqueue smoke-test transcodes with deterministic worker pinning. Uses Workers.Status='Paused' to steer claims across hosts so 1080p + 4K jobs land on different workers instead of piling on one.
+description: Enqueue smoke-test transcodes pinned to a specific fleet worker (NVENC on dot, QSV on wakko). Uses the production AddJob + worker-capability APIs; never direct SQL.
 argument-hint: <MediaFileId1:ProfileId1:WorkerName1> [MediaFileId2:ProfileId2:WorkerName2 ...]
 ---
 
-Enqueue one or more smoke-test transcodes so each lands on the exact worker the operator wants. Do NOT skip the pause dance -- the TranscodeQueue claim query ignores `MaxConcurrentJobs`, so an unpinned enqueue pile-ups on whichever worker polls first.
+Enqueue one or more smoke-test transcodes so each lands on the exact worker the operator wants. Smoke tests run on fleet machines (`dot-worker-1` = NVIDIA NVENC, `wakko-worker-1` = Intel QSV), never on I9. A profile that passes on both GPUs is accepted; I9 is added back to the queue by the operator afterwards.
+
+Farm WebService: `http://10.0.0.49:5000` (`mediavortex-server`, also `http://mediavortex-server/` through nginx). Every call below goes to that host.
 
 ## When to use this skill
 
-- Testing a new profile end-to-end (Opus codec change, near-lossless CQ profile, etc.)
-- Comparing timing / VMAF / audio across hosts (i9 NVENC vs dot NVENC vs wakko QSV)
-- Deliberately targeting one hardware type (NVENC vs QSV) without waiting for a random claim
-- Any experiment where "which worker ran it" is part of the answer
+- Testing a profile or ladder row end-to-end (new tier target, codec change, CQ profile).
+- Comparing timing / VMAF / size across hardware (dot NVENC vs wakko QSV).
+- Any experiment where "which worker ran it" is part of the answer.
 
 ## Do NOT use this skill
 
-- For real production transcodes (the queue's normal claim path handles those)
-- MaxConcurrentJobs is now boot-fixed via BoundedSemaphore; container-per-worker is honored. This skill retires once fleet-wide pinning becomes unnecessary.
+- For real production transcodes (the queue's normal claim path handles those).
+- To bypass admission: run without `ForceAdd` first. A refusal is a finding, not an obstacle.
 
-## Pre-flight (always run these first)
+## Pre-flight (always run these first, read-only)
 
-1. Verify each target MediaFileId exists + has `KeepSource=true`. Set it if not:
-   ```
-   UPDATE MediaFiles SET KeepSource=true WHERE Id IN (...);
-   ```
-2. Verify each target's `AssignedProfile` matches the intended profile name:
-   ```
-   UPDATE MediaFiles SET AssignedProfile=(SELECT ProfileName FROM Profiles WHERE Id=<ProfileId>) WHERE Id=<MediaFileId>;
-   ```
-3. Verify a `ProfileThresholds` row exists for the profile at the source's resolution. If missing, transcode fails with "Failed to build Transcode command". Insert with quality field set to the CQ/CRF value.
-4. Verify each target worker is Online + has the required hardware flag (`nvenccapable`, `qsvcapable`).
+1. Target file: `SELECT Id, AssignedProfile, AssignedProfileSource, KeepSource, VideoBitrateKbps, ResolutionCategory, round(FileSize/1e6) FROM MediaFiles WHERE Id=<MediaFileId>` and `SELECT count(*) FROM TranscodeAttempts WHERE MediaFileId=<MediaFileId>` (prefer 0 prior attempts). A production smoke replaces the file on success; set `KeepSource=true` only when the operator wants the original kept.
+2. Ladder row: `SELECT Resolution, TargetKbps, TranscodeDownTo FROM ProfileThresholds pt JOIN Profiles p ON p.Id=pt.ProfileId WHERE p.Id=<ProfileId> AND pt.ContentClass=<class> AND pt.Resolution=<source resolution>`. Missing row -> "Failed to build Transcode command".
+3. Workers: `SELECT WorkerName, Status, TranscodeEnabled, QualityTestEnabled, MaxConcurrentJobs, nvenccapable, qsvcapable FROM Workers WHERE Status='Online'`. The target must be Online, `TranscodeEnabled`, and carry the hardware flag the profile needs.
+4. Queue: `SELECT count(*) FROM TranscodeQueue WHERE Status='Pending'` and `SELECT * FROM ActiveJobs`. Know what else can claim.
 
-## The pinning dance (per triple `<MediaFileId>:<ProfileId>:<WorkerName>`)
+## AddJob contract (learned 2026-11-26)
 
-For each triple, in the order listed:
+- The controller forwards ONLY `MediaFileId`, `Priority`, `ProfileId`, `StartTime`, `ForceAdd`. `QualityTier` / `QualityLabel` are accepted by the service but silently dropped by the controller (BUG filed); passing them encodes at the file's CURRENT profile. Always pass `ProfileId`.
+- `ProfileId` writes `MediaFiles.AssignedProfile` (source column untouched) before the queue row is created, so the worker's attempt carries the smoke profile.
+- Verify immediately after enqueue: `SELECT AssignedProfile FROM MediaFiles WHERE Id=<MediaFileId>` and `SELECT WorkerName, ProfileName FROM TranscodeAttempts WHERE MediaFileId=<MediaFileId> ORDER BY Id DESC LIMIT 1`. Wrong profile -> stop the job before QT (below), do not let it run.
 
-1. **Pause every other worker of the same capability** so the target is the only eligible claimer:
-   ```sql
-   UPDATE Workers SET Status='Paused'
-   WHERE (NvencCapable = <ProfileNvenc> OR QsvCapable = <ProfileQsv>)
-     AND WorkerName != '<WorkerName>'
-     AND Status = 'Online';
-   ```
-2. Enqueue the job via the production API (NEVER direct SQL insert -- the API handles ProcessingMode + AudioPolicyJson snapshot + priority logic):
-   ```
-   curl -s -X POST http://10.0.0.7:5000/api/TranscodeQueue/AddJob \
-     -H "Content-Type: application/json" \
-     -d '{"MediaFileId": <MediaFileId>, "Priority": 200, "ForceAdd": true}'
-   ```
-3. Poll `TranscodeQueue.ClaimedBy` every 5s for up to 30s. If ClaimedBy != `<WorkerName>` after 30s, abort and report -- claim went to a stale/wrong worker.
-4. Once ClaimedBy is correct, **unpause the other workers of that capability** so they can claim any subsequent triples in the batch:
-   ```sql
-   UPDATE Workers SET Status='Online'
-   WHERE Status='Paused' AND WorkerName != '<WorkerName>';
-   ```
+## Pinning (per triple `<MediaFileId>:<ProfileId>:<WorkerName>`)
 
-Repeat for the next triple. Each triple's target worker stays free while the others are paused, then everyone unpauses so the next triple can pin its own.
+Per-worker concurrency is DB-enforced at claim (`Workers.MaxConcurrentJobs`, `claim-authority.md`), so a busy worker cannot take a second job. Pin by leaving exactly one eligible idle claimer:
+
+1. Make the target the only idle worker with `TranscodeEnabled` for that hardware. Flip flags through the API, never SQL:
+   ```
+   curl -s -X POST http://10.0.0.49:5000/api/TeamStatus/Workers/<OtherWorker>/Capability -H "Content-Type: application/json" -d '{"TranscodeEnabled": false}'
+   ```
+   The worker reads the flag within 60s. A worker already Running at its cap also cannot claim, so a second triple can be enqueued as soon as the first is Running.
+2. Enqueue via the production API (NEVER direct SQL insert):
+   ```
+   curl -s -X POST http://10.0.0.49:5000/api/TranscodeQueue/AddJob -H "Content-Type: application/json" -d '{"MediaFileId": <MediaFileId>, "ProfileId": <ProfileId>, "Priority": 200}'
+   ```
+   Add `"ForceAdd": true` only after a refusal has been read and understood.
+3. Poll `SELECT Status, ClaimedBy FROM TranscodeQueue WHERE Id=<ItemId>` every 5s for up to 30s. Wrong `ClaimedBy` -> report; do not re-enqueue.
+4. Restore flags you flipped once every triple is claimed.
+
+Windows session note: the auto-mode classifier refuses `Stop-Process`, DB writes and SSH writes from the assistant. When a step is refused, hand the operator the exact command; the `!` prefix runs bash, so use `taskkill //F //IM ffmpeg.exe`, not PowerShell.
+
+## Stopping a wrong job
+
+- Pending QT row: `POST /api/QualityTest/Override {"QueueId": <Id>, "ForceDisposition": "Reject"}`.
+- Running QT row: kill the VMAF ffmpeg on the QT worker; `PostTranscodeGateConfig.WhenVmafUnavailable='block'` leaves the source untouched.
+- Running encode: kill the encode ffmpeg on the owning worker (operator; cross-host kill is not supported). Never `systemctl restart` a worker mid-encode.
+- A `Reject` disposition leaves the staged `<name>-mv.<ext>.ip` on the share; delete it by hand and note it.
 
 ## Never do this
 
-- **NEVER `systemctl restart` a worker while its ffmpeg child is encoding.** The restart sends SIGTERM to the child, wasting all encode work done so far (exit code -15 or 234). Restart workers only when they are idle.
-- **NEVER enqueue multiple heavy transcodes at the same priority to the same host without pinning.** The claim query ignores MaxConcurrentJobs and you will get two heavy jobs on the same 8GB GPU -> VRAM OOM -> SIGKILL.
-- **NEVER pause every worker at once and forget to unpause.** Leaves the queue frozen until manual recovery.
+- Never enqueue to the same host without pinning; two heavy jobs on one 8 GB GPU -> VRAM OOM.
+- Never disable every transcode worker and forget to re-enable.
+- Never pass `QualityTier` to AddJob and assume it applied.
 
 ## Post-completion
 
-After the batch finishes, for each attempt report:
-- `WorkerName` (verify pin held)
-- `Success` + `ErrorMessage`
-- `TranscodeDurationSeconds` (report both minutes and seconds)
-- `OldSizeBytes` -> `NewSizeBytes` + `SizeReductionPercent`
-- `VMAF` (if QualityTestRequired on the profile)
-- For an AudioFix job only (the one label that re-encodes audio -- `transcode.flow.md` D2): post-encode audio loudness on Track 0 + Track 1 via `ffmpeg -i <output> -map 0:a:N -af ebur128=peak=true -f null -`
-- Post-encode audio stream shape (codec, channels, bitrate) via `ffprobe -show_streams -select_streams a`
+For each attempt report: `WorkerName` (pin held), `Success` + `ErrorMessage`, the `EXECUTING COMMAND` log line (encoder, `-b:v`, scale filter present or not), `TranscodeDurationSeconds`, `OldSizeBytes` -> `NewSizeBytes` + `SizeReductionPercent`, `Vmaf` + `Disposition` + `DispositionReason`, `FileReplacedDate`. For an AudioFix job: Track 0 / Track 1 loudness via `ffmpeg -i <output> -map 0:a:N -af ebur128=peak=true -f null -` and stream shape via `ffprobe -show_streams -select_streams a`.
 
-Present as a side-by-side table -- each column a worker/host, each row a metric.
+Present as a side-by-side table: one column per worker, one row per metric.
 
-## Related feature docs
+## Related
 
-- Audio pipeline: `Features/AudioNormalization/audio-normalization.feature.md`
-- VMAF chain: `Features/QualityTesting/QualityTesting.feature.md`
-- Queue claim (contains the MaxConcurrentJobs bug): `Features/TranscodeQueue/TranscodeQueueRepository.py:ClaimNextPendingJob`
+- `Features/QualityTesting/QualityTesting.feature.md` (VMAF chain, Override)
+- `Features/TranscodeQueue/TranscodeQueueRepository.py:ClaimNextPendingJob` + `.claude/rules/claim-authority.md` (DB-enforced cap)
+- `Features/TeamStatus/TeamStatusController.py:SetWorkerCapability`
