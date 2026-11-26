@@ -48,7 +48,7 @@ C7. Audio-only container files are out of video-compliance scope. `VideoVertical
 - **Bucket by default tier, encode by profile.** A profile the operator sets by hand changes what a file is encoded at, never its bucket (operator decision for TV 2026-10-06, extended to Movies 2026-10-13).
 - **External reads happen at ingest, never at evaluation.** Radarr is read once per scan by `MovieGenreSyncService` and stored in `MediaFiles.Genres`; every evaluation reads the database only (`db-is-authority`). `Core/Arr/RadarrClient` is the one Radarr reader; `NoAudioResolver` uses its folder match.
 - **Writers cascade.** `Genres` is a compliance input; its writer reassigns tier profiles and re-evaluates before returning (`writer-owns-cascade`).
-- **Known debt:** a library with no default tier (XXX) still takes the profile-and-codec path, so the vertical has two paths chosen by data (call-graph audit signal 5). It is deleted by backlog row 1 `xxx-video-rule`.
+- **Known debt:** a library with no default tier takes the profile-and-codec path, so the vertical has two paths chosen by data (call-graph audit signal 5). Every library carries a default tier (TV 1, Movies 1, xxx 3), so the path is unreachable by data; deleting it is its own directive.
 
 ## Cross-Vertical Contract
 

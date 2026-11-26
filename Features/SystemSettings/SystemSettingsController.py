@@ -67,11 +67,11 @@ def _CellsToGrid(Cells, ValueKey: str, PerResolution: bool):
     return list(Grouped.values())
 
 
-# directive: tv-video-rule-tier1 | # see video-encoding.C4
-def _SpawnLibraryRecompute(StorageRootId: int):
+# directive: tv-video-rule-tier1, xxx-video-tier | # see video-encoding.C4, classifier.C9 -- IncludeOverrides passes through to ReassignTierProfiles
+def _SpawnLibraryRecompute(StorageRootId: int, IncludeOverrides: bool = False):
     import threading
 
-    # directive: tv-video-rule-tier1 | # see video-encoding.C4
+    # directive: tv-video-rule-tier1, xxx-video-tier | # see video-encoding.C4, classifier.C9
     def _Run():
         try:
             from Core.Database.DatabaseService import DatabaseService
@@ -79,7 +79,7 @@ def _SpawnLibraryRecompute(StorageRootId: int):
             Rows = DatabaseService().ExecuteQuery("SELECT Id FROM MediaFiles WHERE StorageRootId = %s ORDER BY Id", (StorageRootId,))
             Ids = [int(R.get('Id')) for R in Rows]
             from Features.ContentClassifier.ContentClassifierService import ContentClassifierService
-            ContentClassifierService().ReassignTierProfiles(Ids)
+            ContentClassifierService().ReassignTierProfiles(Ids, IncludeOverrides=IncludeOverrides)
             Service = QueueManagementBusinessService()
             for I in range(0, len(Ids), 500):
                 Service.RecomputeForFiles(Ids[I:I + 500])
@@ -608,7 +608,7 @@ class SystemSettingsController:
                 return jsonify({'Success': False, 'Message': 'Could not load library tiers'}), 500
 
         @self.Blueprint.route('/LibraryTiers', methods=['PUT'])
-        # directive: tv-video-rule-tier1, profile-row-lookup | # see video-encoding.C4, profile-tier-ladder.S4 -- body carries DefaultQualityTier and/or DefaultContentClass; each present key is written
+        # directive: tv-video-rule-tier1, profile-row-lookup, xxx-video-tier | # see video-encoding.C4, profile-tier-ladder.S4, classifier.C9 -- body carries DefaultQualityTier and/or DefaultContentClass (each present key is written) and optional ReplaceOverrides (default false)
         def UpdateLibraryTier():
             try:
                 Data = request.get_json() or {}
@@ -619,10 +619,13 @@ class SystemSettingsController:
                     return jsonify({'Success': False, 'Message': 'DefaultQualityTier or DefaultContentClass is required'}), 400
                 Tier = Data.get('DefaultQualityTier')
                 ContentClass = Data.get('DefaultContentClass')
+                ReplaceOverrides = Data.get('ReplaceOverrides', False)
                 if Tier is not None and (not isinstance(Tier, int) or not 1 <= Tier <= 5):
                     return jsonify({'Success': False, 'Message': 'DefaultQualityTier must be 1-5 or null'}), 400
                 if ContentClass is not None and ContentClass not in ('live_action', 'animation'):
                     return jsonify({'Success': False, 'Message': 'DefaultContentClass must be live_action, animation or null'}), 400
+                if not isinstance(ReplaceOverrides, bool):
+                    return jsonify({'Success': False, 'Message': 'ReplaceOverrides must be a boolean'}), 400
                 from Features.Profiles.LibraryDefaultTierRepository import LibraryDefaultTierRepository
                 Repo = LibraryDefaultTierRepository()
                 Written = 0
@@ -632,8 +635,8 @@ class SystemSettingsController:
                     Written += Repo.SetDefaultContentClass(StorageRootId, ContentClass)
                 if Written == 0:
                     return jsonify({'Success': False, 'Message': f'No library with StorageRootId {StorageRootId}'}), 404
-                _SpawnLibraryRecompute(StorageRootId)
-                return jsonify({'Success': True, 'Message': 'Library settings saved; re-evaluating that library in the background', 'Data': {'StorageRootId': StorageRootId, 'DefaultQualityTier': Tier, 'DefaultContentClass': ContentClass}}), 200
+                _SpawnLibraryRecompute(StorageRootId, IncludeOverrides=ReplaceOverrides)
+                return jsonify({'Success': True, 'Message': 'Library settings saved; re-evaluating that library in the background', 'Data': {'StorageRootId': StorageRootId, 'DefaultQualityTier': Tier, 'DefaultContentClass': ContentClass, 'ReplaceOverrides': ReplaceOverrides}}), 200
             # fail-loud-ok: HTTP boundary; logged and surfaced as Success=False
             except Exception as e:
                 LoggingService.LogException("Error updating library tier", e, 'UpdateLibraryTier', 'SystemSettingsController')

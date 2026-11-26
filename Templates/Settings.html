@@ -2489,7 +2489,7 @@ function LoadLibraryTiers() {
     $.get('/api/SystemSettings/LibraryTiers').done(function(R) {
         if (!R.Success) { Container.html('<span class="text-danger small">' + (R.Message || 'Load failed') + '</span>'); return; }
         var H = '<table class="table table-sm table-bordered mb-0" style="max-width: 640px;">';
-        H += '<thead><tr><th>Library</th><th>Default tier</th><th>Default content class</th><th></th></tr></thead><tbody>';
+        H += '<thead><tr><th>Library</th><th>Default tier</th><th>Default content class</th><th>Overrides</th><th></th></tr></thead><tbody>';
         (R.Data.Libraries || []).forEach(function(L) {
             H += '<tr data-storage-root-id="' + L.StorageRootId + '"><td class="fw-bold">' + $('<span>').text(L.Name).html() + '</td>';
             H += '<td><select class="form-select form-select-sm library-tier" style="max-width: 200px;">';
@@ -2503,7 +2503,10 @@ function LoadLibraryTiers() {
             H += '<option value=""' + (L.DefaultContentClass == null ? ' selected' : '') + '>None (genre only)</option>';
             H += '<option value="live_action"' + (L.DefaultContentClass === 'live_action' ? ' selected' : '') + '>live_action</option>';
             H += '<option value="animation"' + (L.DefaultContentClass === 'animation' ? ' selected' : '') + '>animation</option>';
-            H += '</select></td><td><button type="button" class="btn btn-sm btn-primary" onclick="SaveLibraryTier(this)">Save</button> <span class="text-muted small library-tier-status"></span></td></tr>';
+            H += '</select></td>';
+            H += '<td><div class="form-check"><input type="checkbox" class="form-check-input library-replace-overrides" id="LibraryReplaceOverrides' + L.StorageRootId + '">';
+            H += '<label class="form-check-label small" for="LibraryReplaceOverrides' + L.StorageRootId + '">replace per-file and per-series overrides</label></div></td>';
+            H += '<td><button type="button" class="btn btn-sm btn-primary" onclick="SaveLibraryTier(this)">Save</button> <span class="text-muted small library-tier-status"></span></td></tr>';
         });
         H += '</tbody></table>';
         Container.html(H);
@@ -2514,6 +2517,7 @@ function SaveLibraryTier(Button) {
     var Tr = $(Button).closest('tr');
     var Raw = Tr.find('.library-tier').val();
     var RawClass = Tr.find('.library-class').val();
+    var ReplaceOverrides = Tr.find('.library-replace-overrides').is(':checked');
     var Status = Tr.find('.library-tier-status').text('Saving…');
     $(Button).prop('disabled', true);
     $.ajax({
@@ -2521,7 +2525,7 @@ function SaveLibraryTier(Button) {
         method: 'PUT',
         contentType: 'application/json',
         timeout: 15000,
-        data: JSON.stringify({ StorageRootId: parseInt(Tr.data('storage-root-id'), 10), DefaultQualityTier: Raw === '' ? null : parseInt(Raw, 10), DefaultContentClass: RawClass === '' ? null : RawClass })
+        data: JSON.stringify({ StorageRootId: parseInt(Tr.data('storage-root-id'), 10), DefaultQualityTier: Raw === '' ? null : parseInt(Raw, 10), DefaultContentClass: RawClass === '' ? null : RawClass, ReplaceOverrides: ReplaceOverrides })
     }).done(function(R) {
         Status.text(R.Success ? 'Saved. Re-evaluating library in background.' : (R.Message || 'Save failed'));
     }).fail(function(X) {

@@ -98,19 +98,21 @@ class ContentClassifierService:
             raise RuntimeError(f"No Family='ANY' profile exists for tier {Resolved.Tier}")
         return (ProfileName, _GENRE_TIER_SOURCE if Resolved.Origin else _LIBRARY_TIER_SOURCE)
 
-    # directive: movies-video-rule | # see classifier.C9
-    def ReassignTierProfiles(self, MediaFileIds: List[int]) -> int:
+    # directive: movies-video-rule, xxx-video-tier | # see classifier.C9 -- any library with a default tier; IncludeOverrides also moves operator/series-sourced files
+    def ReassignTierProfiles(self, MediaFileIds: List[int], IncludeOverrides: bool = False) -> int:
         Ids = [int(I) for I in (MediaFileIds or [])]
         if not Ids:
             return 0
-        Rows = self.Db.ExecuteQuery(
+        Sql = (
             "SELECT mf.Id, mf.StorageRootId, mf.AssignedProfile FROM MediaFiles mf "
             "JOIN StorageRoots sr ON sr.Id = mf.StorageRootId "
-            "WHERE mf.Id = ANY(%s) AND sr.GenreSource IS NOT NULL "
-            "  AND COALESCE(mf.AssignedProfileSource, '') <> ALL(%s) "
-            "ORDER BY mf.Id",
-            (Ids, _OPERATOR_SOURCES),
+            "WHERE mf.Id = ANY(%s) AND sr.DefaultQualityTier IS NOT NULL "
         )
+        Params: list = [Ids]
+        if not IncludeOverrides:
+            Sql += "  AND COALESCE(mf.AssignedProfileSource, '') <> ALL(%s) "
+            Params.append(_OPERATOR_SOURCES)
+        Rows = self.Db.ExecuteQuery(Sql + "ORDER BY mf.Id", tuple(Params))
         Targets = {}
         for R in Rows:
             Target = self._TierProfile(R.get('StorageRootId'), R.get('Id'))

@@ -153,13 +153,31 @@ class TestMoviesTierProfile(unittest.TestCase):
         Writer.Assign.assert_any_call([3], 'Profile1', 'genre_tier')
         self.assertEqual(Writer.Assign.call_count, 2)
 
-    # directive: movies-video-rule | # see classifier.C9
+    # directive: movies-video-rule, xxx-video-tier | # see classifier.C9
     def test_reassign_query_excludes_operator_set_profiles(self):
         Svc, _ = self._Service(FileTier(3, 'genre=Action'))
         Svc.ReassignTierProfiles([1])
         Sql, Params = Svc.Db.ExecuteQuery.call_args[0]
-        self.assertIn('GenreSource IS NOT NULL', Sql)
-        self.assertEqual(Params[1], ['operator', 'series', 'root_folder', 'manual_sql'])
+        self.assertIn('DefaultQualityTier IS NOT NULL', Sql)
+        self.assertNotIn('GenreSource', Sql)
+        self.assertIn('AssignedProfileSource', Sql)
+        self.assertEqual(Params, ([1], ['operator', 'series', 'root_folder', 'manual_sql']))
+
+    # directive: xxx-video-tier | # see classifier.C9
+    def test_reassign_with_overrides_drops_the_source_predicate(self):
+        Svc, _ = self._Service(FileTier(3, 'genre=Action'))
+        Svc.ReassignTierProfiles([1], IncludeOverrides=True)
+        Sql, Params = Svc.Db.ExecuteQuery.call_args[0]
+        self.assertIn('DefaultQualityTier IS NOT NULL', Sql)
+        self.assertNotIn('AssignedProfileSource', Sql)
+        self.assertEqual(Params, ([1],))
+
+    # directive: xxx-video-tier | # see classifier.C9
+    def test_reassign_moves_genre_less_library_to_its_library_tier(self):
+        Rows = [{'Id': 7, 'StorageRootId': 3, 'AssignedProfile': 'Profile1'}]
+        Svc, Writer = self._Service(FileTier(3, ''), Rows)
+        self.assertEqual(Svc.ReassignTierProfiles([7], IncludeOverrides=True), 1)
+        Writer.Assign.assert_called_once_with([7], 'Profile3', 'library_default_tier')
 
 
 # directive: movies-video-rule | # see ingest.ST3
