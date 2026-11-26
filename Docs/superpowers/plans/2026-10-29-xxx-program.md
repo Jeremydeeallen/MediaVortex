@@ -64,6 +64,8 @@ Only after step 8 is printed does the session end. If any item in 1 to 7 cannot 
 
 ## Phase 4: `xxx-video-tier` directive  (MediaVortex, spec Unit 2)
 
+**Status 2026-11-25:** steps 1-3 done (7ca3c0be, pushed); farm server release and steps 4-7 pending. Audit finding: the 2160p compliance multiplier is 3.00 (ceiling 24,000 kbps), so only 545 of 1,772 xxx 4K files would queue; recommendation to the operator is 1.25 (ceiling 10,000; Movies has no 4K files, TV's one 4K file is non-compliant either way). Operator decides on `/settings`.
+
 1. `/n xxx-video-tier`. Criteria from the spec: every xxx file on `AV1 Tier 3 Better` after the save; one 12+ Mbps xxx 4K file transcodes to 2160p AV1 at about 8 Mbps and passes VMAF; a 7 Mbps xxx 4K file is refused `MarginalSavings`; TV and Movies assignments unchanged.
 2. `ReassignTierProfiles`: acts for any library with a default tier (drop the `GenreSource IS NOT NULL` filter); accepts `IncludeOverrides`.
 3. `PUT /api/SystemSettings/LibraryTiers` accepts `ReplaceOverrides`; Settings.html checkbox "replace per-file and per-series overrides", default off; passes through to the recompute.

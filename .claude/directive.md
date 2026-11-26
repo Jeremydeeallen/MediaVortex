@@ -98,6 +98,18 @@ Docs/superpowers/plans/2026-10-29-xxx-program.md             -- EDIT: Phase 4 st
 
 ### Verification
 
+- **Criterion 1:** `py -m pytest Tests/Contract/TestMoviesVideoRule.py Tests/Contract/TestClassifierCascade.py Tests/Contract/TestTvPinTier1Classification.py -q` -> 35 passed (2026-11-25, 7ca3c0be). `test_reassign_moves_genre_less_library_to_its_library_tier` asserts `Assign([7], 'Profile3', 'library_default_tier')` for a `GenreSource`-less root; `grep -n "GenreSource IS NOT NULL" Features/ContentClassifier/ContentClassifierService.py` -> 0. Live: pending farm server at 7ca3c0be.
+- **Criterion 2:** `test_reassign_query_excludes_operator_set_profiles` asserts the `AssignedProfileSource <> ALL(%s)` predicate with `['operator','series','root_folder','manual_sql']` when the flag is off; `test_reassign_with_overrides_drops_the_source_predicate` asserts params `([1],)` and no source predicate when on.
+- **Criterion 3:** Flask test client (scratchpad `CheckReplaceOverrides.py`, venv interpreter): `ReplaceOverrides:'yes'` -> 400 `ReplaceOverrides must be a boolean`; `true` -> 200 and `_SpawnLibraryRecompute(3, IncludeOverrides=True)`; absent -> `IncludeOverrides=False`. Page-load check (box unchecked) pending farm server.
+- **Criterion 4:** pending operator GUI step.
+- **Criterion 5:** smoke candidate MediaFile 55384 (`Videos/Masterbate/Watch4Beauty.25.10.18.Lilith.Baph...2160p.MP4-WRB.mp4`, h264, 25,438 kbps, 1,183 MB, 6.1 min; today Tier 1 `series`). Transcode-capable worker Online: `dot-worker-1` (NVENC) only. Pending.
+- **Criterion 6:** pending (pick after reassign from the 1,139 files between 8,001 and 24,000 kbps, or below the operator's new ceiling).
+- **Criterion 7:** baseline recorded in the criterion; re-count pending.
+- **Criterion 8:** `grep -rn "GenreSource" --include=*.md Features/ | grep -i reassign` -> 0; `grep -n "no default tier (XXX)" Features/VideoEncoding/video-encoding.feature.md` -> 0 (7ca3c0be). C9 evidence line pending live counts.
+
 ### Decisions Made
 
+- `Tests/Contract/TestFailLoud.py::test_no_growth_against_baseline` fails on clean HEAD (c97eb25f) for `JobProcessor.py` (6 > 5) and `DemucsChunking.py` (1 > 0), neither touched here; tracked in `memory/KNOWN-ISSUES.md` (insert-returning-id note). Not this directive's bug; not blocking verification.
+- Code and directive landed in one commit (7ca3c0be) because the code commit's `-m` here-string was split on an inner quoted phrase and the staged files rolled into the directive commit. Message is incomplete for the code change; not amended (already pushed; force-push is operator authority).
+- `py deploy/deploy-server.py` is refused by the session classifier; the operator runs it (`! py deploy/deploy-server.py`).
 - Criterion 6 is phrased against the live ceiling, not the spec's "7 Mbps": under multiplier 3.00 a 7 Mbps 4K file is compliant and never reaches the marginal-savings gate, so `MarginalSavings` cannot be the observed reason. The observable contract is "at or below the ceiling -> compliant -> not queued".
