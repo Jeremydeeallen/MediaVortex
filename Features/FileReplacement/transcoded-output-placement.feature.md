@@ -61,6 +61,10 @@ Operator dogfood, 2026-05-10. Two adjacent topics surfaced in the same conversat
 
 13. When `_UpdateMediaFilesAfterReplacement` returns `Success=False` after the `.ip` -> `<basename>-mv.<ext>` rename has landed, `Execute` rolls the rename back and returns `Success=False` carrying the actual `_UpdateMediaFilesAfterReplacement` error. No orphan `-mv.<ext>` is left on disk; the source survives bit-identical. The `FinalizePartialReplacement` crash-recovery path returns `Success=False` with the real error rather than masking the failure as success. Verifiable: `Tests/Contract/TestFileReplacementRollbackOnUpdateFailure.py` mocks `_UpdateMediaFilesAfterReplacement` to return `Success=False` for both same-slot and non-same-slot inputs; the test asserts `Execute['Success']==False`, the target `-mv.<ext>` is absent, and the source file is intact at its pre-call path.
 
+### F. Keep the original on request (BUG-0125)
+
+14. **[BUG-0125]** When `MediaFiles.KeepSource` is true, a `Replace` disposition renames the original to a sibling `<basename>.<ext>.old` instead of deleting it, and the VMAF comparison page finds that backup; when false, behaviour is C4 (source removed). The flag is settable from the GUI or an API, not only SQL. Verifiable: set `KeepSource=true` on one file, run a transcode that passes VMAF; `<basename>-mv.mp4` and `<basename>.<ext>.old` both exist and `GET /api/QualityTest/...Compare` for that attempt returns stills rather than the "no `.old` backup" error; with `KeepSource=false` only `-mv.mp4` remains.
+
 ## Status
 
 **ACTIVE.** Side-by-side placement + `-mv` naming + `Workers.StagingDirectory` migration shipped 2026-05-10 / 2026-05-21. SOLID decomposition shipped 2026-06-02 via `filereplacement-decompose` -- the rename + MediaFiles refresh + source delete extracted to `TranscodedOutputPlacement.Execute`; orchestration is `FileReplacementBusinessService.ProcessFileReplacement`. C13 (rollback on `_UpdateMediaFilesAfterReplacement` failure) + S4 (rollback seam) shipped 2026-06-23 via `/t BUG-0067`.

@@ -67,6 +67,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0122 | active | quality-testing | Test-variant runs fail: VariantJobProcessor calls Worker.Current on a thread with no WorkerContext.Bind(); last success 2026-07-03 | 2026-11-25
 
 - BUG-0124 | active | transcode-queue | AddJob API silently drops QualityTier/QualityLabel; only ProfileId reaches the service, job runs at the file's existing profile | 2026-11-26
+- BUG-0125 | active | file-replacement | MediaFiles.KeepSource is dead (no reader); placement deletes the original unconditionally, so a smoke/review cannot keep a source; smoke 104045 deleted 55384's 4K source | 2026-11-26
 
 ## Recently Resolved (last 10)
 

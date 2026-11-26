@@ -221,6 +221,13 @@ Returns 15 rows; the operator has no automated way to know which of the 15 need 
 
 ---
 
+### file-replacement
+
+- BUG-0125 | `MediaFiles.KeepSource` is dead: `TranscodeJobRepository.GetKeepSourceSetting` has no callers and `TranscodedOutputPlacement.Execute` deletes the original unconditionally after `Replace`, so no smoke test or operator review can keep an original | criterion: Features/FileReplacement/transcoded-output-placement.feature.md#14 | 2026-11-26
+  Repro: set `KeepSource=true` on a MediaFile, run a transcode that passes VMAF; the source is deleted and only `<name>-mv.mp4` remains. 2026-11-26: smoke attempt 104045 deleted MediaFile 55384's 25 Mbps h264 4K60 source (`Watch4Beauty.25.10.18...2160p.MP4-WRB.mp4`, 1,183 MB) for an 8 Mbps AV1 at VMAF 90.4 before the output had been judged.
+  Evidence: `grep -rn GetKeepSourceSetting --include=*.py` -> definition only; `grep -rn KeepSource Features/FileReplacement` -> 0; `QualityTestingBusinessService.py:1351` already expects a sibling `.old` backup "when KeepSource was true", so the comparison page assumes a behaviour nothing implements; no GUI or API sets `MediaFiles.KeepSource` (`ProfileThresholds.KeepSource` is a different, also unread, column).
+  First place to look: `Features/FileReplacement/TranscodedOutputPlacement.py:246-260` (the delete), `Features/TranscodeJob/TranscodeJobRepository.py:978` (the unread reader). Smoke harness now runs on a copy instead (`.claude/commands/mediavortex-smoke-transcode.md`).
+
 ### file-scanning
 
 ### [BUG-0097] Scan write path ASCII-coerces non-ASCII filename chars to literal `?`, producing Windows-invalid FileName rows that break every downstream `os.stat`

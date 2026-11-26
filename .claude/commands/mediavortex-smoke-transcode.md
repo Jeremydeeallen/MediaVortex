@@ -18,9 +18,19 @@ Farm WebService: `http://10.0.0.49:5000` (`mediavortex-server`, also `http://med
 - For real production transcodes (the queue's normal claim path handles those).
 - To bypass admission: run without `ForceAdd` first. A refusal is a finding, not an obstacle.
 
+## A smoke never replaces a library file
+
+A smoke proves the command, the encoder, the size and the VMAF. It does not decide that the output is good; the operator does, after looking. The pipeline has no hold state: a VMAF between the gate's min and max is `Replace`, and `TranscodedOutputPlacement` deletes the source unconditionally (`MediaFiles.KeepSource` has no reader -- BUG-0125). 2026-11-26: smoke attempt 104045 replaced MediaFile 55384's 25 Mbps h264 4K60 source with an 8 Mbps AV1 at VMAF 90.4 before anyone had judged what success looks like. Do not repeat.
+
+Therefore every smoke runs on a COPY:
+
+1. Copy the source into a scanned folder of the same library with a `smoke-` prefix (`cp "<src>" "<dir>/smoke-<name>"`), run one scan tick (or wait for the continuous scan) so the copy has its own `MediaFiles` row, and smoke THAT row. Replacement, if it happens, destroys only the copy. Delete the copy row's files when the operator has finished looking.
+2. Until BUG-0125 is fixed there is no in-pipeline way to keep the original. `KeepSource`, pausing QT, and the Override API (Pending rows only; QT claims within seconds) do not protect it.
+3. Say in the report which rows are copies so nobody mistakes a smoke output for library state.
+
 ## Pre-flight (always run these first, read-only)
 
-1. Target file: `SELECT Id, AssignedProfile, AssignedProfileSource, KeepSource, VideoBitrateKbps, ResolutionCategory, round(FileSize/1e6) FROM MediaFiles WHERE Id=<MediaFileId>` and `SELECT count(*) FROM TranscodeAttempts WHERE MediaFileId=<MediaFileId>` (prefer 0 prior attempts). A production smoke replaces the file on success; set `KeepSource=true` only when the operator wants the original kept.
+1. Target row is the COPY: `SELECT Id, FileName, AssignedProfile, AssignedProfileSource, VideoBitrateKbps, FrameRate, ResolutionCategory, round(FileSize/1e6) FROM MediaFiles WHERE Id=<MediaFileId>` and `SELECT count(*) FROM TranscodeAttempts WHERE MediaFileId=<MediaFileId>` (0 prior attempts). Record `FrameRate`: `TargetKbps` is frame-rate-blind, and 8000k scored 90.4 at 59.94 fps vs 98.9 at 29.97 fps on the same ladder row.
 2. Ladder row: `SELECT Resolution, TargetKbps, TranscodeDownTo FROM ProfileThresholds pt JOIN Profiles p ON p.Id=pt.ProfileId WHERE p.Id=<ProfileId> AND pt.ContentClass=<class> AND pt.Resolution=<source resolution>`. Missing row -> "Failed to build Transcode command".
 3. Workers: `SELECT WorkerName, Status, TranscodeEnabled, QualityTestEnabled, MaxConcurrentJobs, nvenccapable, qsvcapable FROM Workers WHERE Status='Online'`. The target must be Online, `TranscodeEnabled`, and carry the hardware flag the profile needs.
 4. Queue: `SELECT count(*) FROM TranscodeQueue WHERE Status='Pending'` and `SELECT * FROM ActiveJobs`. Know what else can claim.
