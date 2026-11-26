@@ -403,6 +403,11 @@ INFO    Auto-captured 0/4 stills for attempt 40985 (policy=All)
 
 ### transcode-queue
 
+- BUG-0124 | `POST /api/TranscodeQueue/AddJob` silently drops `QualityTier` and `QualityLabel`; only `ProfileId` reaches `AddJobToQueue`, so the job runs at the file's existing profile while the API answers `Success=true` | criterion: Features/TranscodeQueue/TranscodeQueue.feature.md#14 | 2026-11-26
+  Repro: `curl -X POST http://10.0.0.49:5000/api/TranscodeQueue/AddJob -d '{"MediaFileId": 55384, "QualityTier": 3, "Priority": 200}'` on a Tier 1 file -> 200 Success; attempt 104044 ran `AV1 Tier 1 Efficient` (720p @ 900k from a 4K source), VMAF 81.68, Reject.
+  Evidence: `TranscodeQueueController.AddJob` reads only `MediaFileId`, `Priority`, `ProfileId`, `StartTime`, `ForceAdd`; `TranscodeQueueViewModel.AddJobToQueue` has no `QualityTier` / `QualityLabel` parameters; `QueueManagementBusinessService.AddJobToQueue` accepts both. Log at 11:30:16: "Created queue item ... with profile AV1 Tier 1 Efficient". The staged `...720p.MP4-WRB-mv.mp4.ip` remained on the share after Reject.
+  First place to look: `Features/TranscodeQueue/TranscodeQueueController.py:AddJob` (accepted keys) and `TranscodeQueueViewModel.AddJobToQueue` (pass-through). Related: the same path writes `MediaFiles.AssignedProfile` via `SaveMediaFile`, bypassing `ProfileAssignmentService.Assign` (no source column, no cascade) -- writer-owns-cascade.
+
 ### [BUG-0078 -- RESOLVED 2026-07-02] AddJobToQueue silently rejects ForceAdd when latest attempt VMAF>=80; API returns Success=True with no queue row
 **Date:** 2026-07-02 | **Area:** transcode-queue / admission
 

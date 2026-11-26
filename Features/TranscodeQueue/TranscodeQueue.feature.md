@@ -26,6 +26,8 @@ Populates and manages the queue of files awaiting FFmpeg transcoding. Filters fi
 
 13. **[BUG-0092]** Contract tests that claim TranscodeQueue rows (via hardcoded test-worker names like _test-*) must either DELETE the row or release it back to Status=Pending in tearDown. And/or the abandonment sweeper widens to catch TranscodeQueue rows whose ClaimedBy has no matching Workers row. Verifiable: SELECT COUNT(*) FROM TranscodeQueue WHERE ClaimedBy LIKE _test-% returns 0 after any pytest run plus a fresh sweep cycle.
 
+14. **[BUG-0124]** `POST /api/TranscodeQueue/AddJob` either forwards `QualityTier` / `QualityLabel` to `AddJobToQueue` or refuses them with 400; no body key the service understands is dropped on the floor. Verifiable: `POST {MediaFileId, QualityTier: 3}` against a Tier 1 file yields a queue row whose attempt carries the Tier 3 profile, or a 400 naming the key; contract test asserts the controller's accepted-key set equals the service's parameter set.
+
 ## Concurrency Notes
 
 The TranscodeQueue admission path is race-safe by construction. The invariant is **at most one Pending non-variant TranscodeQueue row per MediaFileId**, enforced atomically by a partial unique index plus `INSERT ... ON CONFLICT DO NOTHING`.

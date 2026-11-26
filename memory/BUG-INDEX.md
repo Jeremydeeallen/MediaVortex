@@ -66,6 +66,8 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0123 | active | deploy | Farm-server start logs ERROR for I9's Windows FFmpeg/FFprobe setting paths before discovery falls back to /usr/local/bin; noise on every boot, setting is per-system but hosts differ | 2026-11-25
 - BUG-0122 | active | quality-testing | Test-variant runs fail: VariantJobProcessor calls Worker.Current on a thread with no WorkerContext.Bind(); last success 2026-07-03 | 2026-11-25
 
+- BUG-0124 | active | transcode-queue | AddJob API silently drops QualityTier/QualityLabel; only ProfileId reaches the service, job runs at the file's existing profile | 2026-11-26
+
 ## Recently Resolved (last 10)
 
 - BUG-0120 | resolved | transcode-queue | Upscale gate compared the source to the profile's MAX TranscodeDownTo (2160p on tiered profiles) and refused every sub-4K file; admission now reads the file's own row via TierLadderRepository.GetProfileRow (directive profile-row-lookup) | 2026-11-25 -> 2026-11-25
