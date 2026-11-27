@@ -141,9 +141,22 @@ Features/ContentClassifier/classifier.feature.md           -- EDIT: genre sync p
 
 ### Verification
 
-(filled at VERIFYING)
+In progress (2026-11-27). Done so far, before the migration is applied:
+
+- **Criterion 1:** `py -m pytest Tests/Contract/TestGoldenTvCommands.py` -> 3 passed; both `.argv` files equal attempts 104042 / 104043 after the three-value mask (first run, no fixture edits).
+- **Criterion 2:** `Scripts/Golden/SnapshotCompliance.py --write` -> 53,030 files; `TestComplianceCountsUnchanged` -> 2 passed, `moved_by_pipeline=0 new=0 deleted=0`.
+- **Criterion 3:** addendum in `Docs/superpowers/audits/2026-11-26-knob-inventory.md` (commit 0db8512a).
+- **Criterion 6 (code half):** `Features/Profiles/` gone; `grep Features[./]Profiles` over the tree = 0 outside `.claude/directive.md`, `ARCHITECTURE.md` gap row, closed/backlog directives, `Docs/superpowers/`; `TestTargetAuthority` + `TestGoldenTvCommands` + `TestCommandComposer` + `TestMoviesVideoRule` + `TestTvVideoRuleTier1` + `TestEncoderKnobNormalizeResolution` + `TestNoParallelProfileCascade` + `TestProfileRowLookup` -> 86 passed; every renamed module imports.
+- Pending the live migration: criteria 4, 5, 6 (`TestTargetResolver`), 7 (deploys), 8 (post-deploy golden + snapshot + full suite + schema snapshot).
 
 ### Decisions Made
 
 - xxx `DefaultQualityTier` stays NULL in this phase. Setting it to 3 today would make `VideoVertical` judge 4,900 xxx files against the tier-3 ceiling on the next recompute, queue them, and the two Online transcode workers would REPLACE them (BUG-0125: `KeepSource` is dead, `Hold` does not exist until Phase 4). The view's `Undecided('Tier')` is the correct state until `Hold` ships; the plan's Phase 1a item and Phase 6 "set by Phase 1 migration" are amended to "set at the start of Phase 6, after Phase 4".
 - Phase 1a does the mechanical module rename with `git mv` + a scripted import rewrite (one commit); behaviour edits go through the editor tools with their doc prereads.
+- Series overrides migrate only when the named profile is a tier profile (`Family='ANY'`): 212 of 218 `SeriesProfiles` rows. The xxx `Videos` row names `STREAMING QSV AV1 P1 HQ -2160p` (an encoder choice, not a tier) and Grey's Anatomy names a deleted CANARY profile; both are printed and dropped.
+- The 2,101 `operator`-sourced `AssignedProfile` rows are all xxx `Videos` files set to `AV1 Tier 1 Efficient` by the 2026-07 folder assignment. They are not migrated: the library has no default tier, its tier is the operator's Phase 6 decision (3, with review), and 2,101 tier-1 file overrides would both pre-empt that decision and, from Phase 1b, queue xxx for unreviewed replacement. Rows in tiered libraries (0 today) would migrate.
+- `libsvtav1` `EncoderSettings` rows seed `Crf 30` from `CodecParameters` (the codec's documented default), not the tier rows' `ProfileThresholds.Quality 0`, which would mean a near-lossless encode; no Enabled worker encodes with libsvtav1, so nothing observable changes.
+- The four held-frame acceptance columns are added NULL: no live table carries them (`post-transcode-disposition.feature.md` describes columns that were never migrated). The view reports `Undecided('VmafMin')` only for the VMAF floor; Phase 4 seeds the held-frame values with the decider.
+- `TestFailLoud::test_no_growth_against_baseline` fails on `HEAD` before this directive (five files this directive never touched: `ContentClassificationRulesController`, `FailedJobsController`, `TranscodeJobRepository`, `JobProcessor`, `DemucsChunking`); none of this directive's files appear in the growth list. Pre-existing; not absorbed (KISS).
+- `TestWhisperBackendLangDetect.py` fails to import on `HEAD` (missing `WhisperFfmpegBackend`); excluded from the baseline and post-change suite runs, unchanged by this directive.
+- The auto-mode classifier refuses the live migration run and both deploy scripts from this session; the operator runs them with the `!` prefix (or adds a permissions rule). Nothing else in the phase was blocked.
