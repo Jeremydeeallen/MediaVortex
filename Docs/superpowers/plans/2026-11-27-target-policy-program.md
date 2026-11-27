@@ -33,7 +33,7 @@ Only after step 9 is printed does the session end. If 1 to 8 cannot complete, th
 
 ---
 
-## Phase 0: Reconcile and write the architecture  (docs only)
+## Phase 0: Reconcile and write the architecture  (docs only) -- done 2026-11-27 (`target-policy-architecture`)
 
 1. `/n target-policy-architecture`. Docs-first directive (R13 override rows for the new `Features/Policy/policy.feature.md`).
 2. Copy the two audit reports to `Docs/superpowers/audits/` (done 2026-11-27 if present; verify).
@@ -41,7 +41,7 @@ Only after step 9 is printed does the session end. If 1 to 8 cannot complete, th
 4. `ARCHITECTURE.md`: Vertical Roster `Profile` row -> `Policy`; Database Invariants also name the `WorkBucket` expression as the one home of D7 (spec 3) (owns the tables of spec 4.1-4.5, the view, `TargetResolver`, `EncoderSelector`, genre sync); remove `ContentClassifier`; Cross-Cutting Concerns add `MediaFileTargets` view + `Target`; Data Flow drops the "ContentClassifier assigns Profile" line; Database Invariants add "policy tables read only by `Features/Policy/`" and "no stored derived target"; `## Gap to Target` lists Phases 1-7 with their slugs.
 5. `transcode.flow.md`: D2 "Copy untouched" reads the policy's default track; D4 dimension table becomes one video row (tier path) and the audio row becomes "tracks match policy"; D6 "tracks per policy"; D7 "our output whose tracks matched policy"; new D13 "target is resolved by `MediaFileTargets`, never stored"; ST3 marked deleted (ID retained); ST7 decision table from spec section 6 (adds `Hold`). `ingest.flow.md`: ST5 Classify deleted, genre sync named under Policy.
 6. `GLOSSARY.md`: `Target`, `LadderCell`, `FrameRateClass`, `TargetOverride`, `Hold`; deprecate `AssignedProfile`, `profile assignment`, `classifier`.
-7. Create `Features/Policy/policy.feature.md` (Slug `policy`) with W/C/S IDs for: resolve target, override tier, edit ladder, edit encoder settings, edit tier acceptance; criteria from spec section 9.
+7. Create `Features/Profiles/policy.feature.md` (Slug `policy`; colocated with the code Phase 1a renames to `Features/Policy/`, the `git mv` carries it) with W/C/S IDs for: resolve target, override tier, edit ladder, edit encoder settings, edit tier acceptance, edit library/genre/frame-rate policy; criteria from spec section 9.
 8. Deliver, close, commit, push, handoff memory, `/clear`.
 
 ## Phase 1: Policy vertical, view, resolver, consumers switched

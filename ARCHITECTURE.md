@@ -39,7 +39,7 @@ Column-level ownership per vertical lives in each vertical's `*.feature.md`.
 
 **Compliance (per-domain, no orchestrator):** AudioNormalization, VideoEncoding, ContainerFormat -- each answers one compliance question and writes one boolean. `WorkBucket` = `GENERATED ALWAYS AS (CASE ...) STORED` over the three.
 
-**Profile:** Profiles (definitions + thresholds + assignment + a file's quality tier: library default, or genre tier where the library has a genre source), ContentClassifier (auto-assign when `AssignedProfile` NULL; records Movies genres from Radarr at the end of each scan).
+**Policy:** `Features/Policy/` owns every table that says what a file should become -- `StorageRoots` tier/class/review flag, `GenreQualityTiers`, `TargetOverrides` (file > series), `Profiles` (one row per tier: label, quality-test switch, VMAF and held-frame acceptance), `LadderCells` (tier x class x source resolution x frame-rate class -> target resolution + kbps), `FrameRateClasses`, `EncoderSettings` (encoder x tier knobs), `AudioPolicyTracks` -- plus the SQL VIEW `MediaFileTargets`, `TargetResolver` (view row -> frozen `Target` or `Undecided`), `EncoderSelector` (worker capability flags -> encoder) and `MovieGenreSyncService` (Movies genres from Radarr at the end of each scan). No other vertical reads a policy table; consumers take `Target` as an argument. A new library, codec, frame-rate class, encoder or tier is a row.
 
 **Execution:** TranscodeQueue (populate + route + failure-budget cap), CommandBuilder (`(MediaFile,Job) -> FFmpeg argv` via emitter slots), TranscodeJob (claim + run + record), QualityTesting (VMAF + auto-replace gate), FileReplacement (archive + swap + delegate re-probe), FailureAccounting (per-file failure budget).
 
@@ -61,21 +61,21 @@ Column-level ownership per vertical lives in each vertical's `*.feature.md`.
 | Worker capability gate | `Core/Database/WorkerCapabilityPredicate` |
 | Failure budget gate | `Core/Database/FailureBudgetPredicate` |
 | LIKE escaping | `DatabaseService.EscapeLikePattern` with `ESCAPE '!'` |
-| A file's quality tier | `Features/Profiles/FileTierResolver` (read by video compliance and the classifier) |
+| A file's target | SQL VIEW `MediaFileTargets` read by `Features/Policy/TargetResolver`; every consumer (three verticals, admission, command composer, disposition decider, placement hand-off) takes the resulting `Target` as an argument and holds no policy repository |
 | Radarr reads | `Core/Arr/RadarrClient` |
 
 ## Data Flow
 
 ```
 RootFolder -> FileScanning -> MediaFiles
-   end of scan: Movies genres from Radarr -> MediaFiles.Genres
+   end of scan: Movies genres from Radarr -> MediaFiles.Genres (Policy.MovieGenreSyncService)
    MediaProbe + ContentSignals fill metadata + signal columns
-   AudioNormalization / VideoEncoding / ContainerFormat write compliance booleans
-   -> GENERATED WorkBucket
-   -> ContentClassifier assigns Profile if NULL
-   -> TranscodeQueue populates
-   -> TranscodeJob (claim + FFmpeg)
-   -> QualityTesting (VMAF or checksum) -> Disposition
+   Policy.TargetResolver reads MediaFileTargets -> Target (or Undecided)
+   AudioNormalization / VideoEncoding / ContainerFormat: Evaluate(Facts, Target) -> compliance booleans
+   -> GENERATED WorkBucket (names the job label)
+   -> TranscodeQueue admits (Target: upscale, savings, budget, audio policy)
+   -> TranscodeJob (claim + FFmpeg from Target + EncoderSettings)
+   -> QualityTesting (VMAF or checksum) -> Disposition (Target acceptance) -> Replace | Hold | Requeue | Reject
    -> FileReplacement (archive + rename + delegate reprobe)
    -> MediaProbe reprobes -> compliance columns refresh -> WorkBucket recomputes
 ```
@@ -91,6 +91,9 @@ Cross-vertical reads asymmetric; per-vertical Cross-Vertical Contract lists legi
 - No boot-cached config (`db-is-authority`).
 - Postgres `ENCODING 'UTF8' LC_COLLATE='en_US.UTF-8'`.
 - Every vertical has a `*.feature.md` with a Cross-Vertical Contract.
+- Policy tables (`StorageRoots` tier/class, `GenreQualityTiers`, `TargetOverrides`, `Profiles`, `LadderCells`, `FrameRateClasses`, `EncoderSettings`, `AudioPolicyTracks`) are read for decisions only by `Features/Policy/` (`TestTargetAuthority`); every column has a `/settings` control and a decision reader (`TestKnobInventory`).
+- No stored derived target: `MediaFiles` carries facts (probe/scan writers) and the three compliance booleans; what a file should become is the view `MediaFileTargets`, computed at read. A requeue escalation is a `TargetOverrides` row, not a stored field.
+- `WorkBucket` expression is the one home of D7 (`transcode.flow.md`): `CASE WHEN TranscodedByMediaVortex THEN 'Compliant' WHEN any <Dim>Compliant IS NULL THEN 'Unclassified' WHEN all three THEN 'Compliant' WHEN NOT VideoCompliant THEN 'Transcode' WHEN NOT ContainerCompliant THEN 'Remux' ELSE 'AudioFix' END`; `TestWorkBucketGeneratedColumn` asserts it whole. An `Undecided` target is stored as a NULL compliance boolean with the reason, so the row is `Unclassified`.
 
 ## Failure Modes (no failsafes)
 
@@ -116,10 +119,17 @@ Updated as a `Promotions` row at the end of any directive landing architectural 
 
 ## Gap to Target
 
-Re-audited 2026-07-03 during `transcode-flow-canonical` post-Reset-9.
+Re-audited 2026-11-27 (`target-policy-architecture`). Schedule and exit checklist: `Docs/superpowers/plans/2026-11-27-target-policy-program.md`; evidence: `Docs/superpowers/audits/2026-11-26-*.md`.
 
 | Gap | Evidence | Directive |
 |---|---|---|
-| `quality-test.flow.md` does not exist | -- | C1 (parked for DELIVERING promotion) |
-| `.claude/rules/fail-loud.md` grep-audit not run | -- | C7 (Reset 10) |
-| AdjustmentRegistry knob-override on requeued attempts | Requeued rows re-use original profile; no CRF adjustment | Follow-up: `adjustment-registry-wiring` |
+| Policy tables, `MediaFileTargets` view, `TargetResolver`, `EncoderSelector` do not exist; `Features/Profiles` not yet `Features/Policy`; capability flags have no deploy-time writer | 18 facts with two or more authorities; 8/9/9/7 functions answer the four target questions | `target-policy-1a-tables` |
+| Verticals hold repositories and side effects; `RecomputeForFiles` resolves profile per file; `WorkBucket` expression carries `HasDialogBoostTrack` | `VideoVertical` tier-vs-profile branch; `AudioVertical` admission-gate writes | `target-policy-1b-verticals` |
+| Admission, command composer, claim SQL and disposition read `AssignedProfile` / `Profiles` / `ProfileThresholds` / code dictionaries | claim joins `Profiles` on `AssignedProfile`; `WorkerEncoderResolver` overrides 10 GUI columns | `target-policy-1c-pipeline` |
+| Ladder has no frame-rate tab; no encoder-settings, tier-acceptance, override or review-before-replace controls | 8,000 kbps = VMAF 90.4 at 59.94 fps, 98.9 at 29.97 fps | `target-policy-1d-gui` |
+| `MediaFiles.AssignedProfile/AssignedProfileSource/KeepSource`, `ContentClassifier`, `SeriesProfiles`, `ContentClassificationRules`, `ProfileThresholds`, `CodecFlags`, dead `Profiles` columns, 39 dead `SystemSettings` keys still exist | knob inventory dead-column list | `target-policy-delete-stored` |
+| Audio tracks defined in six places; `no_dialog_boost` compliance rule; Demucs unconditional | loudness target x3, codec/bitrate x6 | `target-policy-audio` |
+| Disposition has no `Hold`; smart-confidence replaces without VMAF; two retry budgets; larger output rejected after commit | `VmafConfidenceStats`, `RetryBudgetService` + `FailureBudgetService` | `target-policy-verification` |
+| Container defined in four places; `ResolutionCategory` derived four ways; duplicate Remux/AudioFix strategy classes | `ContainerSlot` hard-codes mp4 | `target-policy-command` |
+| xxx library policy is operator data not yet set (2160p ceiling, `high` ladder cells, review flag) | 545 xxx 4K files above the 24,000 kbps ceiling | `xxx-target-data` |
+| Program criteria 1-9 not re-run end to end | -- | `target-policy-closeout` |

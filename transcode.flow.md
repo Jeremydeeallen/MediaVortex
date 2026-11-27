@@ -14,9 +14,9 @@ Single source of truth for Transcode / Remux / Audio pipeline shape. Sibling doc
 
 | Label | Video | Audio | Container | Stage is verified by |
 |---|---|---|---|---|
-| `Transcode` | Re-encode at the file's tier | Copy untouched | mp4 | output probes; smaller than source |
-| `Remux` | Copy | Copy untouched | mp4 | video stream checksum equals source |
-| `AudioFix` | Copy | Re-encode: Dialog Boost + Original (D6) | mp4 | video stream checksum equals source; Dialog Boost emitted |
+| `Transcode` | Re-encode at `Target` (the file's `LadderCell` + the worker's `EncoderSettings` row) | Copy untouched | `Target.OutputContainer` | output probes; smaller than source by `MinOutputSavingsPercent` |
+| `Remux` | Copy | Copy untouched | `Target.OutputContainer` | video stream checksum equals source |
+| `AudioFix` | Copy | Re-encode: the policy's tracks (D6) | `Target.OutputContainer` | video stream checksum equals source; emitted track labels equal the policy's |
 
 | File needs | Path |
 |---|---|
@@ -24,7 +24,7 @@ Single source of truth for Transcode / Remux / Audio pipeline shape. Sibling doc
 | Video fine, container wrong | Remux -> Audio |
 | Video and container fine | Audio |
 
-A stage whose verification fails does not replace the file; the previous stage's file stays and only the failed stage is retried. A finished transcode is kept even though it carries no Dialog Boost yet. "Copy untouched" means stream copy when the audio codec is in `AudioComplianceRules.AcceptableAudioCodecsCsv`; otherwise a plain aac conversion at `Track0BitratePerChannelKbps` x channels, no loudness work. Subtitles are converted to mov_text by every stage.
+A stage whose verification fails does not replace the file; the previous stage's file stays and only the failed stage is retried. A finished transcode is kept even though it carries no Dialog Boost yet. "Copy untouched" means stream copy when the audio codec is in `AudioComplianceRules.AcceptableAudioCodecsCsv`; otherwise a conversion to the audio policy's default track codec and bitrate (`AudioPolicyTracks` row with `IsDefault`, D6), no loudness work. Subtitles are converted to mov_text by every stage.
 
 **D4. `WorkBucket` = generated column from the three compliance flags. This section is the single canonical definition -- every other doc points here; none restate it.**
 
@@ -32,7 +32,7 @@ Bucket, first matching row wins:
 
 | # | Bucket | A file lands here when |
 |---|---|---|
-| 1 | `Compliant` | It is our own finished output: `TranscodedByMediaVortex` AND `HasDialogBoostTrack` (D7) |
+| 1 | `Compliant` | It is our own finished output: `TranscodedByMediaVortex` (D7) |
 | 2 | `Unclassified` | Any of the three dimensions below is undecided. Held out of the queue |
 | 3 | `Compliant` | Video, Container and Audio all pass |
 | 4 | `Transcode` | Video fails |
@@ -41,28 +41,29 @@ Bucket, first matching row wins:
 
 The three dimensions:
 
+Every dimension is `Evaluate(Facts, Target) -> Verdict`: a pure function of the file's probed facts and its resolved `Target` (D13). A vertical holds no repository and has no side effects. `Undecided` (the target could not be resolved) writes NULL + the missing input's name; the row is `Unclassified`.
+
 | Dimension | Fails when | Undecided when | Operator knobs |
 |---|---|---|---|
-| Video, library with a default tier (TV = Tier 1, Movies = Tier 2) | source video kbps > (kbps the file's tier encodes this resolution at) x (multiplier for this resolution). Assigned profile and source codec play no part | no resolution or bitrate probed; no ladder cell for that tier + resolution; audio-only container; genres not fetched yet in a library that tiers by genre | `/settings`: Library default tier, Genre tiers, Bitrate ladder, Video compliance multipliers |
-| Video, library with no default tier (XXX) | source codec differs from the assigned profile's codec AND source kbps > (assigned profile's target for this resolution) x multiplier | no assigned profile; no resolution or bitrate; no target cell; audio-only container | same, plus the file's profile |
-| Container | container not in the acceptable list (mp4/mov/m4v and mkv/matroska/webm are alias groups) | no container probed; audio-only container | `/Admin/Compliance` Container rules |
-| Audio | audio codec not in the acceptable list, OR no Dialog Boost track | audio marked corrupt; no audio stream; loudness never validly measured; no audio policy; every track ungainable; audio-only container | `/Admin/Compliance` Audio rules |
+| Video | source video kbps > `Target.TargetKbps` x `Target.CeilingMultiplier` (the file's `LadderCell` for its tier, class, source resolution and frame-rate class; the multiplier for its source resolution). Source codec plays no part | `Target` is `Undecided`: no resolution, bitrate or frame rate probed; no ladder cell; no frame-rate class; genres not fetched in a genre-tiered library; conflicting genre classes; audio-only container | `/settings`: library tier + class, genre tiers + classes, tier overrides on `/Work`, ladder grid (per frame-rate class), ceiling multipliers |
+| Container | container not in `Target.AcceptableContainersCsv` (mp4/mov/m4v and mkv/matroska/webm are alias groups) | no container probed; audio-only container | `/Admin/Compliance` Container rule |
+| Audio | the latest successful attempt's emitted track labels differ from the policy's labels per kept language, OR any track's integrated loudness is outside `LoudnessTolerance` of its target, OR the codec is not in the acceptable list | audio marked corrupt; no audio stream; loudness never validly measured; no audio policy; every track ungainable; audio-only container | `/AudioNormalization` policy rows + tracks; `/Admin/Compliance` audio engine constants |
 
-"Kbps that tier encodes at" follows the tier's downscale: Tier 1 outputs 720p for 720p, 1080p and 2160p sources, so all three use the Tier 1 720p cell. A library's default tier also gives its unprofiled files that tier's profile; a per-series profile changes what a series is encoded at, never its bucket.
+"Kbps the file's tier encodes at" follows the cell's downscale: Tier 1 outputs 720p for 720p, 1080p and 2160p sources, so all three use the Tier 1 720p cell. Judge and encode read the same `Target`; an override is a tier and changes both.
 
-The file's tier: in a library with a genre source (Movies, genres from Radarr) each genre carries a tier on `/settings`, and a movie takes the highest tier among its genres. A genre set to "Library default", and a movie with no genre, use the library's default tier. In a library with no genre source (TV) the file's tier is the library's default tier. A movie's profile follows its genre tier unless the operator set that movie's profile by hand; a hand-set profile changes what the movie is encoded at, never its bucket.
+The file's tier is `MediaFileTargets.Tier` (D13): a file override, else a series override, else the highest tier among its genres that carry one, else the library's default tier. Every library has a default tier.
 
 The bucket names the next stage (D2). A stage fixes its own dimension only (Transcode and Remux both write mp4, so container is fixed by either); the file then re-buckets and moves to the next stage until all three pass.
 
-Terminal-state exception: see D7 -- MediaVortex's own Dialog-Boost-carrying outputs short-circuit straight to `Compliant` ahead of the three checks above (we never re-encode our own output).
+Terminal-state exception: see D7 -- MediaVortex's own outputs short-circuit straight to `Compliant` ahead of the three checks above (we never re-encode our own output).
 
-Executable SSoT (must match this section exactly): `Scripts/SQLScripts/RewriteWorkBucketGeneratedColumn_2026_08_13.py`. Verify: `SELECT generation_expression FROM information_schema.columns WHERE table_name='mediafiles' AND column_name='workbucket'`.
+Executable SSoT (must match this section exactly): the `WorkBucket` generation expression, asserted whole by `Tests/Contract/TestWorkBucketGeneratedColumn.py`. Verify: `SELECT generation_expression FROM information_schema.columns WHERE table_name='mediafiles' AND column_name='workbucket'`.
 
-**D5. Container target = `.mp4` always.** MP4 mux writes `handler_name` (not `title`) for track identity -- MP4 spec drops `title` on audio streams.
+**D5. Container target = `ContainerComplianceRules.OutputContainer` (`mp4`), read through `Target.OutputContainer` by the container slot and the output filename; no other home.** MP4 mux writes `handler_name` (not `title`) for track identity -- MP4 spec drops `title` on audio streams.
 
-**D6. The Audio stage emits 2 tracks per kept source language.** Track 0 (default) = Dialog Boost from Demucs vocals-isolation on the source (once per encode). Track 1+ = Original per source stream, LRA-preserved. Details in `Features/AudioNormalization/audio-normalization.feature.md`.
+**D6. The Audio stage emits the resolved audio policy's tracks (`AudioPolicyTracks`, ordered by `Ordinal`) per kept source language.** A `Dialog Boost` track = Demucs vocals-isolation on the source (once per encode; the Demucs pre-pass runs only when the policy has such a track). An `Original` track = one loudnorm block per kept source stream at the track's targets. The global policy carries Dialog Boost (default) + Original; a library policy may carry one `Original` track only. Details in `Features/AudioNormalization/audio-normalization.feature.md`.
 
-**D7. `TranscodedByMediaVortex = TRUE` with a Dialog Boost track is a terminal state.** We do not re-encode our own outputs. To change encoding, re-acquire source via Sonarr/Radarr -> fresh scan -> new MediaFile row without the flag. Generated-column implementation of this short-circuit: see D4.
+**D7. `TranscodedByMediaVortex = TRUE` is a terminal state.** We do not re-encode our own outputs. To change encoding, re-acquire source via Sonarr/Radarr -> fresh scan -> new MediaFile row without the flag. Its one implementation is the first branch of the `WorkBucket` generated column (D4); no vertical reads the flag.
 
 **D8. Source file deleted after successful `ProcessFileReplacement`** (`Features/FileReplacement/TranscodedOutputPlacement.py:220`). Once transcode succeeds + MediaFiles row updated, the original .mkv/.mp4 is removed from disk. Sonarr/Radarr re-fetch is the only way to restore.
 
@@ -74,19 +75,21 @@ Executable SSoT (must match this section exactly): `Scripts/SQLScripts/RewriteWo
 
 **D12. Fail-loud everywhere.** Probe failure = LastFFprobeError + one-shot NeedsReprobe. No silent retry caps. Stuck-detect = progress-tick staleness, not wall-clock. Delete failures = raise, not LogWarning.
 
+**D13. A file's target is resolved by the SQL VIEW `MediaFileTargets`, never stored.** One row per `MediaFiles` row: `Tier` = `COALESCE(file override, series override, MAX(genre tier), library tier)` with `TierOrigin`; `ContentClass` = the single explicit genre class, else the library class; `FrameRateClass` = first `FrameRateClasses` row with `FrameRate <= MaxFps`; the `LadderCell` for `(Tier, ContentClass, SourceResolution, FrameRateClass)` gives `TargetResolution`, `TargetKbps`, `IcqQ`; the tier's `Profiles` row gives `QualityLabel`, `QualityTestRequired`, `VmafMin`, `VmafMax`, held-frame and live-action thresholds; `AudioPolicyId` (item > library > global); `OutputContainer`, `AcceptableContainersCsv`, `AcceptableAudioCodecsCsv`; `CeilingMultiplier`; `ReviewBeforeReplace`; `Undecided` = NULL when every field is non-null, else the first missing input's name. `Features/Policy/TargetResolver` is the only Python that reads the view for decisions; it returns a frozen `Target` or `Undecided(reason)`, and the verticals (D4), admission (ST5), the command composer (ST6), the disposition decider (ST7) and the placement hand-off (ST9) take it as an argument. Policy tables are read only by `Features/Policy/`; encoder knobs are `EncoderSettings` rows chosen by `EncoderSelector` from `Workers.nvenccapable` / `qsvcapable`. An operator choice is a `TargetOverrides` row (file > series); a Requeue escalation is a file override at `Tier + 1`. Column list and seams: `Features/Profiles/policy.feature.md`.
+
 ## Stage Overview
 
 ```
-SCAN -> PROBE -> ASSIGN -> RECOMPUTE -> QUEUE -> TRANSCODE -> DISPOSITION -> VERIFY -> ACTION
- ST1     ST2      ST3        ST4         ST5       ST6          ST7          ST8       ST9
+SCAN -> PROBE -> RECOMPUTE -> QUEUE -> TRANSCODE -> DISPOSITION -> VERIFY -> ACTION
+ ST1     ST2       ST4         ST5       ST6          ST7          ST8       ST9
 ```
 
-ST<N> stage IDs are stable; never renumbered (`.claude/rules/flow-docs.md`). The detailed stage headings below carry both the historical "Stage N" label and the ST<N> ID so existing references in feature docs ("Stage 6", "Stage 3.5") still resolve. New code anchors use `# see transcode.ST<N>`.
+ST<N> stage IDs are stable; never renumbered (`.claude/rules/flow-docs.md`). ST3 is deleted (D13: nothing assigns a target); its ID is retained and not reused. The detailed stage headings below carry both the historical "Stage N" label and the ST<N> ID so existing references in feature docs ("Stage 6", "Stage 3.5") still resolve. New code anchors use `# see transcode.ST<N>`.
 
 Stages ST1-ST5 require user action. Stages ST6-ST9 are automatic once WorkerService is running:
 - QUEUE -> TRANSCODE (ST5 -> ST6): automatic (service polls for Pending items)
-- TRANSCODE -> DISPOSITION -> VERIFY or ACTION (ST6 -> ST7 -> ST8 or ST9): `Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.Decide` is the single decision function -- reads `TranscodeAttempts.QualityTestRequired` + `VMAF` + `PostTranscodeGateConfig` and returns one of `Replace`/`Pending`/`Requeue`/`Reject`. `DispositionDispatcher.Dispatch` routes accordingly: `Pending` enqueues to QualityTestingQueue (ST8); any other disposition goes straight to ST9.
-- VERIFY -> ACTION (ST8 -> ST9): automatic if verify-score is within threshold range (default 80-100 for VMAF-verifying Reencode strategy; 100 for checksum-verifying StreamCopy strategy). Verify method is Strategy-per; result written to `TranscodeAttempts.VMAF` in both cases.
+- TRANSCODE -> DISPOSITION -> VERIFY or ACTION (ST6 -> ST7 -> ST8 or ST9): `Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.Decide` is the single decision function -- is pure: `Decide(AttemptFacts, Target) -> Replace | Hold | Pending | Requeue | Reject` from the attempt's success, sizes and VMAF percentiles and the `Target`'s acceptance fields. `DispositionDispatcher.Dispatch` routes accordingly: `Pending` enqueues to QualityTestingQueue (ST8); any other disposition goes straight to ST9.
+- VERIFY -> ACTION (ST8 -> ST9): automatic once the verify score lands (VMAF for the Reencode strategy, judged against `Target.VmafMin` / `VmafMax`; 100 for the checksum-verifying StreamCopy strategy). Verify method is Strategy-per; result written to `TranscodeAttempts.VMAF` in both cases.
 
 **Service dependency model:** Both services communicate exclusively via PostgreSQL. No HTTP calls between them. Each polls the database for its own work. FileReplacement is a library (not a service) that runs in whatever process calls it -- WorkerService when QualityTest=OFF, WorkerService's quality test loop when QualityTest=ON, WebService for manual replacement.
 
@@ -98,10 +101,10 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 
 | ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
 |---|---|---|---|---|---|
-| S1 | `ST5 -> ST6` (QUEUE -> TRANSCODE) | `QueueManagementBusinessService` | `TranscodeQueue.(Id BIGINT, StorageRootId BIGINT, RelativePath TEXT, AssignedProfile TEXT, ProcessingMode TEXT, AcceptsInterlaced BOOLEAN) Status='Pending'` | `Features/TranscodeQueue/TranscodeQueueRepository.ClaimNextPendingTranscodeJob` -- atomic claim via `FOR UPDATE OF tq SKIP LOCKED`; gated by two additive filters (a) `BuildClaimPredicate` for `TranscodeEnabled` + `Status='Online'`, (b) NVENC/QSV EXISTS gate (`Profiles.usenvidiahardware=0` + `useintelhardware=0` OR `Workers.nvenccapable/qsvcapable=TRUE`). Family-agnostic AV1 tier profiles let any capable worker claim; per-worker allowlist retired Reset 28. | `SELECT COUNT(*) FROM TranscodeQueue WHERE Status='Pending'` decrements by 1 per claim; `Tests/Contract/TestClaimAuthority.py` |
-| S2 | `ST6 -> ST7` (TRANSCODE -> DISPOSITION) | `ProcessTranscodeQueueService` (on encode success) | `TranscodeAttempts.(Id BIGINT, Success=NULL, QualityTestRequired BOOLEAN, VMAF NULL or score)` + `TemporaryFilePaths.(TranscodeAttemptId, SourceStorageRootId BIGINT, SourceRelativePath TEXT, OutputStorageRootId BIGINT, OutputRelativePath TEXT, LocalSourcePath TEXT NULL, LocalOutputPath TEXT NULL)`. Paths stored as typed pair `(StorageRootId, RelativePath)`; worker-local staging paths persisted in the LocalSourcePath/LocalOutputPath columns when active. Worker resolves canonical to local via `Path.Resolve(Worker)`; UI/logs use `Path.CanonicalDisplay(GetPrefixMap())`. **In-place (default):** resolved output path ends in `-mv.mp4.ip` adjacent to source on shared mount; `TranscodeAttempts.VMAF=NULL` at seam crossing. **Staged Mode B (opt-in, `LocalVmafFirst=FALSE`):** local `.ip` produced in `Workers.LocalScratchDir/<MediaFileId>/`; copy-back step ships it to canonical before this seam fires so downstream consumers see the canonical path unchanged; `VMAF=NULL` at crossing. **Staged Mode A (opt-in, `LocalVmafFirst=TRUE AND QualityTestEnabled=TRUE`):** worker runs libvmaf locally and populates `TranscodeAttempts.VMAF` BEFORE this seam; passing scores get copy-back identical to Mode B, failing scores reach this seam with no canonical `.ip` written | `Features/QualityTesting/Disposition/DispositionDispatcher.Dispatch(AttemptId)` reads `TranscodeAttempts.QualityTestRequired` + `VMAF` + `PostTranscodeGateConfig`; routes to `QualityTestQueueService.AddToQualityTestQueue` (ST8) when VMAF=NULL and QualityTestRequired=TRUE, or directly to the action handler for the disposition `PostTranscodeDispositionDecider.Decide` returned (Mode A staged-VMAF case skips ST8 and decides Replace/Requeue/Reject inline). Reads canonical TFP pair; staging is transparent to the consumer | `SELECT COUNT(*) FROM TemporaryFilePaths WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE Success IS NULL)` -> in-flight count; `Tests/Contract/TestLocalStaging.py` for the staging path; `Tests/Contract/TestDispositionDispatcher.py` for the disposition decomposition. Mode A staged-VMAF case: Decider.Decide inline returns Replace/Requeue/Reject and skips ST8. |
+| S1 | `ST5 -> ST6` (QUEUE -> TRANSCODE) | `QueueManagementBusinessService.AddJobToQueue(MediaFileId, Label)` | `TranscodeQueue.(Id BIGINT, MediaFileId BIGINT, StorageRootId BIGINT, RelativePath TEXT, ProcessingMode TEXT, AcceptsInterlaced BOOLEAN) Status='Pending'`; no target on the row (D13) | `Features/TranscodeQueue/TranscodeQueueRepository.ClaimNextPendingJob` -- atomic claim via `FOR UPDATE OF tq SKIP LOCKED`; gated by `BuildClaimPredicate` (capability flag for the label, `Status='Online'`, in-flight cap) and `ProcessingModes.RequiresInterlacedFilter` vs `Workers.AcceptsInterlaced`. The claim reads no policy table; the worker's encoder is chosen at ST6 by `EncoderSelector`. | `SELECT COUNT(*) FROM TranscodeQueue WHERE Status='Pending'` decrements by 1 per claim; `Tests/Contract/TestClaimAuthority.py` |
+| S2 | `ST6 -> ST7` (TRANSCODE -> DISPOSITION) | `ProcessTranscodeQueueService` (on encode success) | `TranscodeAttempts.(Id BIGINT, Success=NULL, QualityTestRequired BOOLEAN, VMAF NULL or score)` + `TemporaryFilePaths.(TranscodeAttemptId, SourceStorageRootId BIGINT, SourceRelativePath TEXT, OutputStorageRootId BIGINT, OutputRelativePath TEXT, LocalSourcePath TEXT NULL, LocalOutputPath TEXT NULL)`. Paths stored as typed pair `(StorageRootId, RelativePath)`; worker-local staging paths persisted in the LocalSourcePath/LocalOutputPath columns when active. Worker resolves canonical to local via `Path.Resolve(Worker)`; UI/logs use `Path.CanonicalDisplay(GetPrefixMap())`. **In-place (default):** resolved output path ends in `-mv.mp4.ip` adjacent to source on shared mount; `TranscodeAttempts.VMAF=NULL` at seam crossing. **Staged Mode B (opt-in, `LocalVmafFirst=FALSE`):** local `.ip` produced in `Workers.LocalScratchDir/<MediaFileId>/`; copy-back step ships it to canonical before this seam fires so downstream consumers see the canonical path unchanged; `VMAF=NULL` at crossing. **Staged Mode A (opt-in, `LocalVmafFirst=TRUE AND QualityTestEnabled=TRUE`):** worker runs libvmaf locally and populates `TranscodeAttempts.VMAF` BEFORE this seam; passing scores get copy-back identical to Mode B, failing scores reach this seam with no canonical `.ip` written | `Features/QualityTesting/Disposition/DispositionDispatcher.Dispatch(AttemptId)` resolves the file's `Target` and calls `Decide(AttemptFacts, Target)`; routes to `QualityTestQueueService.AddToQualityTestQueue` (ST8) when VMAF=NULL and QualityTestRequired=TRUE, or directly to the action handler for the disposition `PostTranscodeDispositionDecider.Decide` returned (Mode A staged-VMAF case skips ST8 and decides Replace/Requeue/Reject inline). Reads canonical TFP pair; staging is transparent to the consumer | `SELECT COUNT(*) FROM TemporaryFilePaths WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE Success IS NULL)` -> in-flight count; `Tests/Contract/TestLocalStaging.py` for the staging path; `Tests/Contract/TestDispositionDispatcher.py` for the disposition decomposition. Mode A staged-VMAF case: Decider.Decide inline returns Replace/Requeue/Reject and skips ST8. |
 | S3 | `ST7 -> ST8` (DISPOSITION -> VERIFY) | `DispositionDispatcher.Dispatch` when `Disposition='Pending'` (VMAF=NULL AND QualityTestRequired=TRUE) | `QualityTestingQueue.(Id BIGINT, TranscodeAttemptId BIGINT) Status='Pending'`; `TranscodeAttempts.ForceDisposition IS NULL` | `DatabaseManager.ClaimQualityTestJob` -- atomic claim; Strategy-per Verify handler reads source+output paths from `TemporaryFilePaths` (VMAF for Reencode; checksum for StreamCopy) | `SELECT COUNT(*) FROM QualityTestingQueue WHERE Status='Pending'` decrements by 1 per claim |
-| S4 | `ST8 -> ST9` (VERIFY -> ACTION) | Strategy-per Verify handler (`QualityTestingBusinessService.ExecuteVMAF` for Reencode; `ChecksumVerifyService.Compare` for StreamCopy) | `TranscodeAttempts.VMAF DOUBLE PRECISION NOT NULL, QualityTestCompleted=TRUE`; `ForceDisposition TEXT NULL` (operator override). `VMAF` semantically overloaded: perceptual score for Reencode, `100.0` on-match / `0.0` on-mismatch for StreamCopy (transcode-flow-canonical C6 -- Vmaf column reused, no new schema column) | `Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.Decide` (called by `DispositionDispatcher.Dispatch`) -- Strategy-blind: Replace when `VMAF >= VmafAutoReplaceMinThreshold` and `ForceDisposition IS NULL`; operator `ForceDisposition` bypasses the threshold | `SELECT COUNT(*) FROM TranscodeAttempts WHERE QualityTestCompleted=TRUE AND VMAF IS NULL` -> 0; `Tests/Contract/TestDispositionDecider.py` |
+| S4 | `ST8 -> ST9` (VERIFY -> ACTION) | Strategy-per Verify handler (`QualityTestingBusinessService.ExecuteVMAF` for Reencode; `ChecksumVerifyService.Compare` for StreamCopy) | `TranscodeAttempts.VMAF DOUBLE PRECISION NOT NULL, QualityTestCompleted=TRUE`; `ForceDisposition TEXT NULL` (operator override). `VMAF` semantically overloaded: perceptual score for Reencode, `100.0` on-match / `0.0` on-mismatch for StreamCopy (transcode-flow-canonical C6 -- Vmaf column reused, no new schema column) | `Features/QualityTesting/Disposition/PostTranscodeDispositionDecider.Decide` (called by `DispositionDispatcher.Dispatch`) -- Strategy-blind: Replace (Hold when `Target.ReviewBeforeReplace`) when the VMAF percentiles clear `Target`'s thresholds and `ForceDisposition IS NULL`; operator `ForceDisposition` bypasses the thresholds | `SELECT COUNT(*) FROM TranscodeAttempts WHERE QualityTestCompleted=TRUE AND VMAF IS NULL` -> 0; `Tests/Contract/TestDispositionDecider.py` |
 | S5 | `ST9 -> done` (ACTION -> end) | `FileReplacementBusinessService.ProcessFileReplacement` dispatching to `TranscodedOutputPlacement.Execute` | `MediaFiles.(StorageRootId, RelativePath, FileName, Codec, Resolution, SizeMB, TranscodedByMediaVortex or RemuxedByMediaVortex = TRUE, etc.)` updated; `MediaFilesArchive` row written; `TranscodeAttempts.FileReplaced=TRUE`; `TemporaryFilePaths` row deleted at the disposition chokepoint. On update failure the rename is rolled back; no orphan `-mv.<ext>` on disk; `Success=False` carries the real update error. See `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4 (BUG-0067). | `MediaFiles` is the authoritative post-replacement record; `MediaFilesArchive` has the pre-replacement snapshot | `SELECT COUNT(*) FROM TemporaryFilePaths tfp JOIN TranscodeAttempts ta ON ta.Id = tfp.TranscodeAttemptId WHERE ta.FileReplaced=TRUE` -> 0 (no orphaned TFP after successful replace); `Tests/Contract/TestFileReplacementRollbackOnUpdateFailure.py` (3/3 PASS) for the rollback path |
 | S6 | `ST3 / ST4 / ST5 / ST6 -> any consumer of resolution semantics` | Any scan/compliance/queue/encode code holding a resolution string | `MediaFiles.Resolution TEXT` (raw `'WIDTHxHEIGHT'` from ffprobe) + `MediaFiles.ResolutionCategory TEXT` (`'480p'`/`'720p'`/`'1080p'`/`'2160p'`) | Typed `Resolution` + `ResolutionTier` value objects via `Core/Resolution/`. `Resolution.FromAny` is the sole string parser; `ResolutionTierRegistry.FromDims` (max-edge) + `FromCategory` are the sole boundary maps; `WidthAnchoredScalePolicy.Decide` is the sole producer of `scale=w=...:h=-2` filter strings; tier thresholds live in the `ResolutionTiers` DB table (data-driven, operator-tunable, OCP). No raw resolution-string `==` / `!=` compares remain in the encode + compliance call chain. | `Tests/Contract/TestResolution.py` + `TestResolutionTier.py` + `TestScalePolicy.py` + `TestEncoderKnobNormalizeResolution.py`; live MIB-II re-encode (TranscodeAttempt 37754) -- output 1280x694, FileReplaced=TRUE, 82.94% reduction. See `Core/Resolution/resolution-types.feature.md`. |
 
@@ -124,8 +127,6 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 
 **Output:** MediaFiles rows with basic file info (no metadata yet)
 
-**Orphan-profile claim guard (2026-06-04):** `DatabaseManager.ClaimNextPendingTranscodeJob` joins `TranscodeQueue` to `Profiles` on `AssignedProfile = profilename` and requires `Profiles.profilename IS NOT NULL`. Queue rows whose `AssignedProfile` does not match any current `Profiles.profilename` (renamed, deleted, typo) stay `Pending` -- they are not claimed and are not silently failed. Operator action: fix the queue row's `AssignedProfile` to a live profile name (or update the profile to match), then the worker picks it up on the next poll.
-
 ---
 
 ## Stage 2: PROBE -- FFprobe Metadata Extraction (`ST2`)
@@ -140,7 +141,7 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 - Extracts: Resolution, Codec, VideoBitrateKbps, AudioBitrateKbps, DurationMinutes, FrameRate, AudioLanguages, HasExplicitEnglishAudio, SubtitleFormats, ContainerFormat, etc.
 - After successful probe: calls `RecomputeForFiles([MediaFileId])` which re-evaluates the three compliance dimensions and `PriorityScore` in a single pass (see Stage 3.5).
 
-**Tables written:** MediaFiles (all metadata columns, FFProbeFailureCount, plus the per-dimension compliance columns, PriorityScore and AssignedProfile via the recompute hook)
+**Tables written:** MediaFiles (all metadata columns, FFProbeFailureCount, plus the per-dimension compliance columns and PriorityScore via the recompute hook)
 
 **Safety guards:**
 - FFprobe failure limit: files with 3+ failures are permanently skipped (resettable via ResetFailures endpoint)
@@ -153,28 +154,19 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 
 ---
 
-## Stage 3: ASSIGN -- Profile Assignment (`ST3`)
+## Stage 3: (deleted) (`ST3`)
 
-**Trigger:** User assigns profiles in UI
-
-**Code paths (three ways):**
-1. Per-folder bulk: `POST /api/Profiles/AssignProfileToRootFolder` -> updates `MediaFiles.AssignedProfile` for all files in folder
-2. Per-title via `/Work/<bucket>` page: per-series profile override via `SeriesProfiles` table
-3. At queue time: QueueByFolder and AddSuggestionsToQueue both accept ProfileId and assign it to files before queuing
-
-**Tables written:** MediaFiles.AssignedProfile (stores profile name string, not ID), SeriesProfiles (target resolution per series)
-
-**Note:** AssignedProfile is a string field storing ProfileName, not a foreign key. Profile lookup happens at transcode time.
+There is no assign stage: a file's target is computed at read by `MediaFileTargets` (D13). The ID is retained and not reused. An operator's choice is a `TargetOverrides` row written from `/Work/<bucket>` (series) or `/Work` / `/Optimization` (file); the write cascades into ST4 like any other compliance input.
 
 ---
 
 ## Stage 3.5: RECOMPUTE -- Priority, Compliance, and Routing Materialization (`ST4`)
 
-`RecomputeForFiles(MediaFileIds)` runs the Audio, Video and Container verticals for each file; each writes its own `<Dimension>Compliant` + `<Dimension>CompliantReason`. `WorkBucket` and `IsCompliant` are generated columns over those three (rules: D4). It then writes `AssignedProfile` + `PriorityScore` in one bulk UPDATE per batch. Triggers: probe completion, file replacement completion, AssignedProfile change, library default tier change.
+`RecomputeForFiles(MediaFileIds)` resolves `Target` once per batch (`TargetResolver.ResolveMany`), then runs the Audio, Video and Container verticals as `Evaluate(Facts, Target)` for each file; each writes its own `<Dimension>Compliant` + `<Dimension>CompliantReason` (NULL + reason when `Undecided`). `WorkBucket` and `IsCompliant` are generated columns over those three (rules: D4). It then writes `PriorityScore` (from `Target.TargetKbps` and the policy's default audio track) in one bulk UPDATE per batch. Triggers: probe completion, file replacement completion, genre sync, a `TargetOverrides` write, any `/settings` policy save.
 
 **Output:** Every MediaFiles row carries an up-to-date bucket. `/Work/<bucket>` pages and queue admission read `WorkBucket`; the Activity compliance widget reads `IsCompliant`. No consumer recomputes.
 
-The video ceiling, the queue admission target (ST5) and the encode command (ST6) all read one `ProfileThresholds` row for the file: `TierLadderRepository.GetProfileRow(profile, content class, source resolution)` and its encode row, `Features/Profiles/profile-tier-ladder.feature.md` C9. The content class is operator data on `/settings` (C10).
+The video ceiling, the queue admission target (ST5) and the encode command (ST6) all read the same `Target` (D13): one `LadderCell` for the file's tier, content class, source resolution and frame-rate class. Content class, tier and overrides are operator data on `/settings` and `/Work`.
 
 See `Features/TranscodeQueue/priority-materialization.feature.md` for criteria.
 
@@ -193,11 +185,11 @@ See `Features/TranscodeQueue/priority-materialization.feature.md` for criteria.
 
 **Full populate code path** (most guards):
 - `Features/TranscodeQueue/TranscodeQueueController.py` -> `QueueManagementBusinessService.PopulateQueueFromMediaFiles()`
-- Gets files with assigned profiles, ordered by size DESC
+- Gets files whose `WorkBucket` names a label (D2), ordered by size DESC; `AddJobToQueue(MediaFileId, Label=None)` takes the label from the bucket and refuses an `Undecided` file with its reason
 - For each file, checks:
   1. Already in queue? Skip
-  2. Previously transcoded with VMAF >= 80? Skip
-  3. Previously transcoded with VMAF < 80? Check CRF adjustment. If adjusted CRF < 15 floor -> log to ProblemFiles, skip
+  2. `Target` is `Undecided`? Refuse with the reason
+  3. Failure budget exhausted (`FailureBudgetService`)? Skip
   4. `HasExplicitEnglishAudio = false`? Skip (NULL is allowed through)
   5. **Marginal-savings gate** (new behaviour, criterion-tracked in `marginal-savings-gate.feature.md`): admit when source resolution >= target resolution AND estimated savings >= `SystemSettings('MinTranscodeSavingsMB')`. Same-resolution-target combinations (e.g. 720p -> 720p with a slower preset / lower CRF) are admitted as long as savings clear the threshold. Upscales (source < target) are always blocked.
 - Creates TranscodeQueueModel, saves to TranscodeQueue
@@ -205,30 +197,24 @@ See `Features/TranscodeQueue/priority-materialization.feature.md` for criteria.
 **QueueByFolder code path** (Media page `+` button):
 - `Features/WorkBucket/WorkBucketController.py` -> `QueueByFolder()`
 - SQL query filters: not transcoded, not in queue, `HasExplicitEnglishAudio IS NULL OR true`, SizeMB > 0
-- Passes to `AddSuggestionsToQueue()` which assigns profile and consults the marginal-savings gate before inserting queue rows.
+- Passes to `AddSuggestionsToQueue()` which consults the marginal-savings gate (against each file's `Target`) before inserting queue rows.
 
-**Tables written:** TranscodeQueue (new items), ProblemFiles (if CRF adjustment fails)
+**Tables written:** TranscodeQueue (new items)
 
 **Safety guards summary:**
 - **Audio language** (CRITICAL): files with `HasExplicitEnglishAudio = false` blocked at all queue paths
 - **Compact-source classification** (`video-encoding.feature.md`): `VideoVertical.Evaluate` compares `SourceKbps` against `Tier1TargetKbps * Multiplier` where the multiplier lives in `VideoComplianceThresholds` per resolution. Sources at or below the multiplier floor land in `WorkBucket='Remux'` / `'Audio'` / `'Compliant'` at scan time instead of `'Transcode'`. Admission-time exclusion is no longer needed -- classification IS the gate.
 - **VMAF quality gate**: files with VMAF >= 80 not re-transcoded. Bypassed by `AddJobToQueue(ForceAdd=True)` (used by `QueueAdmissionAppService.AdmitOne` from /Work/<bucket> per-row Queue button); WARN log records the override -- see `TranscodeQueue.feature.md` C11 [BUG-0078]
-- **Tier escalation on Requeue** (Reset 10 C12): `DispositionDispatcher._MaybeScheduleRequeue` calls `NextTierAdjuster.Get(currentProfile)` to escalate to the next `(Family, QualityTier+1, ContentClass, TargetResolutionCategory)` sibling profile. Chain terminates when tuple has no next-tier row -> Reject/QualityCeilingReached (through RetryBudget). Replaces the legacy CRF-only adjustment. See `profile-tier-ladder.feature.md`.
+- **Tier escalation on Requeue**: ST7 `Requeue` writes a file-scope `TargetOverrides` row at `Tier + 1` (D13) before re-adding the job, so the next admission, encode and compliance read the higher tier. No `LadderCell` at `Tier + 1` -> `Reject / QualityCeilingReached`.
 - **Marginal-savings gate** (`marginal-savings-gate.feature.md`): see below.
 - **Dedup**: files already in queue are skipped
-- **No-savings filter**: files with `MediaFiles.LastTranscodeOutcome = 'NoSavings'` are blocked from re-queueing at all entry paths (set by Stage 7 post-flight gate)
+- **Failure budget**: `FailureBudgetService` (the one budget; `VerificationConfig.MaxRequeueAttempts` is its cap) blocks a file whose attempts are exhausted
 
 **Marginal-savings gate (estimated bytes saved):**
 
-Replaces the legacy "source must be strictly greater than target resolution" filter. The new evaluator returns `(admit, reason)` per file. Block reasons: `Upscale`, `MarginalSavings`, `MissingProfile`.
+Replaces the legacy "source must be strictly greater than target resolution" filter. The evaluator takes `Target` and returns `(admit, reason)` per file. Block reasons: `Upscale` (source resolution below `Target.TargetResolution`), `MarginalSavings`, `Undecided:<input>`.
 
-Estimated target size formula:
-
-| Profile shape | Formula | Notes |
-|---|---|---|
-| `ProfileThresholds.VideoBitrateKbps > 0` | `target_mb = ((video_kbps + audio_kbps) * duration_min * 60) / (8 * 1024)` | Same formula as `CalculatePriority`. Used for fixed-bitrate profiles. |
-| `ProfileThresholds.VideoBitrateKbps = 0` (CRF only) | `target_mb = (CrfBitrateEstimates.EstimatedKbps * duration_min * 60) / (8 * 1024)` | Lookup keyed on `(Codec, TargetResolution, CRF)`. The estimate table is normalized, GUI-editable, and seeded from observed `TranscodeAttempts` averages. |
-| Estimate row missing for `(Codec, Resolution, CRF)` | (no estimate computed) | Gate **fails open** -- file admitted, single `WARNING` logged per missing key per populate run. |
+Estimated target size: `target_mb = ((Target.TargetKbps + default audio track kbps) * duration_min * 60) / (8 * 1024)`, the same formula as `CalculatePriority`. Every `Target` carries a kbps, so there is no estimate-missing branch.
 
 Configuration knobs (data-driven, all in **dedicated normalized tables -- not the legacy SystemSettings KV store**, all GUI-editable on the `/settings` page in the "Queue Tuning" card):
 
@@ -244,7 +230,7 @@ Both tables are read fresh per call (no caching, per the standing rule against c
 
 Queue insertion writes `Priority = 0`. Workers claim largest non-compliant first, with a 195-200 window reserved for manual overrides (operator Priority modal, AudioFix folder-pin hints). The full contract is owned by `Features/TranscodeQueue/queue-priority.feature.md` -- not restated here.
 
-Queue admission (whether a file enters the queue at all) is owned by `Features/TranscodeQueue/marginal-savings-gate.feature.md`. The estimated-bytes-saved math lives there now, not in the claim path. The upscale test and the savings estimate use the file's own row (`profile-tier-ladder.feature.md` C9): source below the row's `TranscodeDownTo` is an upscale; the encode row's `TargetKbps` is the rate.
+Queue admission (whether a file enters the queue at all) is owned by `Features/TranscodeQueue/marginal-savings-gate.feature.md`. The estimated-bytes-saved math lives there now, not in the claim path. The upscale test and the savings estimate use the file's `Target` (D13): source below `Target.TargetResolution` is an upscale; `Target.TargetKbps` is the rate.
 
 ---
 
@@ -272,7 +258,7 @@ Queue admission (whether a file enters the queue at all) is owned by `Features/T
 - **Default path (no staging).** FFmpeg reads directly from the network mount. On the primary machine this is the raw DB path (e.g. `T:\ShowName\file.mkv`). On remote workers, `PathTranslationService.ToLocalPath()` converts to the local mount (e.g. `/mnt/media_tv/ShowName/file.mkv`). FFmpeg writes the encoded output as `<basename>-mv.mp4.ip` **next to the source**. `FileReplacement` renames `-mv.mp4.ip` → `-mv.mp4` and deletes the original. See `Features/FileReplacement/transcoded-output-placement.feature.md` for the durable contract.
 - **Opt-in local staging (per `Features/TranscodeJob/local-staging.feature.md`).** When `Workers.LocalStagingEnabled=TRUE`, `Workers.LocalScratchDir` is set, and source `SizeMB >= LocalStagingConfig.MinSizeMB` (default 500), `LocalStagingService.StageSource` bulk-copies the source from the shared mount to `<LocalScratchDir>/<MediaFileId>/<basename>` before ffmpeg runs. The encode produces `<LocalScratchDir>/<MediaFileId>/<basename>-mv.<ext>.ip`. After `_VerifyInProgressFile` succeeds, the worker takes one of two disposition modes per the `Workers.LocalVmafFirst` flag:
   - **Mode B (default, `LocalVmafFirst=FALSE` or `QualityTestEnabled=FALSE`).** `_CopyBackStagedOutput` ships the local `.ip` to the canonical side-by-side path on the shared mount; downstream `FileReplacement` + cross-worker VMAF reach it unchanged.
-  - **Mode A (`LocalVmafFirst=TRUE` AND `QualityTestEnabled=TRUE`).** `QualityTestingBusinessService.RunLocalVmafForAttempt` runs libvmaf against the local source/output pair BEFORE any copy-back, writes the score to `TranscodeAttempts.VMAF`. Score >= `PostTranscodeGateConfig.VmafAutoReplaceMinThreshold` -> falls through to the Mode B copy-back path; `PostTranscodeDispositionService` reads the populated VMAF, decides `Replace`, and `FileReplacement` runs against the canonical paths. Score < min -> `SkipModeBCopyBack=True`, `_CleanupLocalScratchForAttempt` fires, no canonical `.ip` is written, and `PostTranscodeDispositionService` decides `Requeue / VmafBelowMin` from the same VMAF read (no `FileReplacement`, audit only). Mode A `RunLocalVmafForAttempt` failure -> falls through to Mode B so a different worker can claim the canonical VMAF row.
+  - **Mode A (`LocalVmafFirst=TRUE` AND `QualityTestEnabled=TRUE`).** `QualityTestingBusinessService.RunLocalVmafForAttempt` runs libvmaf against the local source/output pair BEFORE any copy-back, writes the score to `TranscodeAttempts.VMAF`. Score clears `Target.VmafMin` (ST7 table) -> falls through to the Mode B copy-back path; the decider reads the populated VMAF, decides `Replace` (or `Hold`), and `FileReplacement` runs against the canonical paths. Score below `VmafMin` -> `SkipModeBCopyBack=True`, `_CleanupLocalScratchForAttempt` fires, no canonical `.ip` is written, and `PostTranscodeDispositionService` decides `Requeue / VmafBelowMin` from the same VMAF read (no `FileReplacement`, audit only). Mode A `RunLocalVmafForAttempt` failure -> falls through to Mode B so a different worker can claim the canonical VMAF row.
   `LocalStagingService.CleanupJobScratchDir` removes the per-job scratch subdir on success; `_CleanupFailedAttemptFiles` does the same on failure via `LocalStagingService.Cleanup` on each local path. `CrashRecoveryService._SweepLocalStagingOrphans` runs on `RecoverServiceJobs("TranscodeService")` startup and deletes numeric scratch subdirs whose `TemporaryFilePaths`/`TranscodeAttempts` rows show no in-flight work for this worker.
   Motivation: the Microsoft SMB client on Windows drops long-duration file handles under GPU-paced reads (per `memory/feedback_ms_nfs_client_unreliable.md`); bulk-copy uses a different IO pattern SMB handles reliably. Worker-gated + size-gated so backplane-NFS workers (Linux containers) keep the in-place path unchanged.
 
@@ -291,11 +277,9 @@ Queue admission (whether a file enters the queue at all) is owned by `Features/T
 
 **FFmpeg command structure:**
 - Executable: from `Workers.FFmpegPath` (falls back to `FFmpegMaster\bin\ffmpeg.exe`)
-- Codec: libsvtav1 (all profiles)
-- Preset: 6-8 (from profile)
-- Quality: CRF from ProfileThresholds.Quality (adaptive if retranscode)
-- Film grain: from profile
-- Output: `<source_dir>/<basename>-mv.mp4.ip` (renamed to drop `.ip` by FileReplacement)
+- Encoder: `EncoderSelector(Worker)` -> `av1_nvenc` / `av1_qsv` / `libsvtav1`; every knob from the `EncoderSettings(Encoder, Target.Tier)` row
+- Rate: `-b:v Target.TargetKbps` with maxrate/bufsize from the row's multipliers; scale to `Target.TargetResolution` when below source
+- Output: `<source_dir>/<basename>-mv.<Target.OutputContainer>.ip` (renamed to drop `.ip` by FileReplacement)
 
 **Tables written:** TranscodeAttempt (new), TranscodeFiles (aggregated), TranscodeProgress (real-time), ActiveJobs (with WorkerName), MediaFilesArchive, TranscodeQueue (status -> Running, ClaimedBy -> WorkerName), TemporaryFilePaths (canonical paths)
 
@@ -338,45 +322,37 @@ Same-slot rename safety: all post-flight modes use `Features/FileReplacement/Fil
 
 The disposition decision is **the only post-transcode branch point**. It reads from data-driven config and returns `(Disposition, Reason, AuditPayload)`. All five legacy decision sites (`ShouldQualityTestService`, `_ReplaceFileDirectly`, `CheckAndTriggerAutoReplace`, `ProcessFileReplacement`'s `BypassVMAFCheck` parameter, `ProcessFileReplacementWithVMAF`) are retired in favor of this one function. See `Features/QualityTesting/post-transcode-disposition.feature.md`.
 
-**Inputs (data-driven):**
+**Inputs:** `Decide(AttemptFacts, Target)` is a pure function with no repository.
 
 | Input | Source |
 |---|---|
-| `TranscodeAttempt.QualityTestRequired` | per-attempt flag, set at attempt creation from `Profiles.QualityTestRequired` (per-profile column, editable on `/settings` profile cogs modal). When the profile's flag is FALSE, every attempt for that profile skips VMAF. |
-| `QualityTestResults.VMAFScore` | populated by VMAF run, NULL when no test ran |
-| `VmafCapableWorkerOnline` (computed) | `SELECT 1 FROM Workers WHERE QualityTestEnabled=TRUE AND Status='Online' AND LastHeartbeat > NOW() - INTERVAL '90 seconds'`. Replaces the legacy `ServiceStatus.QualityTestService` row, which was a fossil written only by the retired QualityTestService process. |
-| `PostTranscodeGateConfig.VmafAutoReplaceMinThreshold` | typed column, default 88 |
-| `PostTranscodeGateConfig.VmafAutoReplaceMaxThreshold` | typed column, default 98 |
-| `PostTranscodeGateConfig.WhenVmafUnavailable` | `'block'` (default, safe) or `'bypass'` (operator opt-in) |
-| `PostTranscodeGateConfig.QualityTestEnabled` | typed BOOLEAN, default TRUE. Advisory: gates which workers CLAIM VMAF jobs. When FALSE with `QualityTestRequired=TRUE`, attempt still lands `Pending/AwaitingVmaf` in `QualityTestingQueue` (operator brings a capable worker online or force-overrides). Editable on `/settings` Post-Transcode card. |
+| `AttemptFacts.Success`, `OldSizeBytes`, `NewSizeBytes` | the attempt row |
+| `AttemptFacts.Vmaf`, `VmafP10`, `VmafP25` | `QualityTestResults` after ST8; NULL when no test ran |
+| `AttemptFacts.RequeueCount` + `VerificationConfig.MaxRequeueAttempts`, `MinOutputSavingsPercent` | `FailureBudgetService` (the one retry budget) and the one verification config row, editable on `/settings` |
+| `Target.QualityTestRequired`, `VmafMin`, `VmafMax`, `HeldFrameDetectionThreshold`, `HeldFrameP25Min`, `HeldFrameMeanMin`, `LiveActionP10Min`, `ContentClass`, `ReviewBeforeReplace` | the file's `Target` (D13): the tier's `Profiles` row and the library's review flag |
 
-**Decision table** (canonical -- code MUST mirror this 1:1). Post `transcode-flow-canonical` C6: enum is closed at `{Pending, Replace, Reject, Requeue}`. `NoReplace` + `Discard` folded into `Reject`; RetainInprogressPolicy consulted per Reason for `.ip` disk semantic (`TestMode` retains; every other reason cleans up). No `BypassReplace`; every attempt verified (VMAF for Reencode, checksum for StreamCopy).
+**Decision table** (canonical -- code mirrors this 1:1; `Tests/Contract/TestPostTranscodeDisposition.py` is table-driven from it). Enum: `{Pending, Replace, Hold, Requeue, Reject}`. Every attempt is verified (VMAF for Reencode, checksum for StreamCopy); nothing replaces without a score. First matching row wins.
 
-Post `transcode-flow-canonical` C14 + C16 (Reset 10):
+| Condition (in order) | Disposition | Reason |
+|---|---|---|
+| attempt failed | `Reject` | `TranscodeFailed` |
+| `NewSizeBytes >= OldSizeBytes x (1 - MinOutputSavingsPercent)` | `Reject` | `NoSavings` |
+| `QualityTestRequired = FALSE` | `Hold` if `ReviewBeforeReplace` else `Replace` | `QualityTestNotRequired` |
+| VMAF missing | `Pending` (QT row created) | `AwaitingVmaf` |
+| held-frame content (`HeldFrameDetectionThreshold`): P25 < `HeldFrameP25Min` or mean < `HeldFrameMeanMin`; live action: P10 < `LiveActionP10Min`; or mean < `VmafMin` | `Requeue` when budget remains and a `LadderCell` exists at `Tier + 1`; else `Reject` | `VmafBelowMin`; `RetryBudgetExhausted` / `QualityCeilingReached` |
+| `VmafMax` set and mean > `VmafMax` | `Hold` | `VmafAboveMax` |
+| otherwise | `Hold` if `ReviewBeforeReplace` else `Replace` | `VmafPassed` |
 
-- `QualityTestEnabled=false` globally (`PostTranscodeGateConfig.QualityTestEnabled`): `Replace/QualityTestingGloballyDisabled` early-return, restored from Reset 9's overshoot. See directive C16 + `vmaf-smart-sampling.feature.md`.
-- `SmartConfidenceSkip` branch: when the source's `(ProfileId, SourceCodec, SourceResolutionTier, BitratePerPixelBucket, ContentClass)` bucket has `SampleCount >= MinConfidenceSampleCount AND PassRate >= MinConfidencePassRate AND (VmafMean - SigmaMargin * VmafStdDev) >= VmafAutoReplaceMinThreshold`, returns `Replace/QualityTestConfident`. VMAF skipped; bucket stats trusted. Rolling window in `VmafConfidenceStats`; DB-fresh per call. See `vmaf-smart-sampling.feature.md`.
-
-Output size is not an input: a successful encode is never rejected for saving too little space, or for being larger than its source.
-
-| Success | QualityTestRequired | VMAF score | Disposition | Reason |
-|---|---|---|---|---|
-| false | n/a | n/a | `Reject` | `TranscodeFailed` |
-| true | false | n/a | `Replace` | `QualityTestNotRequired` |
-| true | true | NULL | `Pending` | `AwaitingVmaf` |
-| true | true | < min | `Requeue` | `VmafBelowMin` |
-| true | true | >= min, <= max | `Replace` | `VmafPassed` |
-| true | true | > max | `Reject` | `VmafAboveMax` |
-
-**Note (2026-05-29):** the legacy `VmafCapableWorkerOnline` / `WhenVmafUnavailable` branching is retired. `Pending/AwaitingVmaf` is now the only outcome when VMAF is required and no score is available -- the row is enqueued to `QualityTestingQueue` regardless of whether a capable worker is currently online. Operators see the pending work in the queue surface (Stage 7) and either bring a capable worker online OR override the row to force an immediate disposition. `VmafServicePaused` / `VmafServicePausedBypassed` reasons remain in the closed enum for audit history (legacy attempts) but are no longer emitted by new decisions. See `Features/QualityTesting/qt-queue-visibility-and-override.feature.md`.
+An exception inside `Decide` or `Dispatch` propagates (D12); it never becomes `Pending`.
 
 **Disposition outcomes:**
 
 | Disposition | What happens |
 |---|---|
 | `Replace` | FileReplacement proceeds: archive original, rename `.ip` -> `-mv.<ext>`, re-probe, update MediaFiles, delete source. On post-rename update failure the rename is rolled back (no orphan, source intact) and `Success=False` is returned with the real error. See `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4. |
-| `Reject` | Verify-failure / operator-fail terminal. Reasons: `VmafAboveMax`, `TranscodeFailed`, `RetryBudgetExhausted`, `OperatorDiscarded`, `TestMode`. `RetainInprogressPolicy.ShouldRetain(Reason)` decides `.ip` disposal: `TestMode` retains for A/B comparison; every other reason deletes. TFP row always cleared. |
-| `Requeue` | Staged file deleted; TFP row cleared; `NextTierAdjuster.Get(currentProfile)` returns next-tier sibling Profile via `(Family, QualityTier+1, ContentClass, TargetResolutionCategory)` tuple lookup. If non-None, new `TranscodeQueue` row inserted for the same `MediaFileId` with the escalated ProfileId via canonical `AddJobToQueue(ForceAdd=True)`. Chain terminates at Tier 5 -> Reject/QualityCeilingReached. `RetryBudgetService.HasBudgetRemaining=False` overrides to `Reject/RetryBudgetExhausted` regardless of tier. BUG-0079 + `profile-tier-ladder.feature.md`. |
+| `Hold` | Review state. The `.ip` stays on disk and its `TemporaryFilePaths` row stays; `RetainInprogressPolicy.ShouldRetain('Hold')` is TRUE and `CrashRecoveryService` / `OrphanCleanupService` skip attempts with `Disposition='Hold'`. `/QualityTesting` lists the row with stills and VMAF percentiles; the operator's Replace or Reject through the Override API is the only exit. Smoke tests on copies end here. |
+| `Reject` | Verify-failure / operator-fail terminal. Reasons: `TranscodeFailed`, `NoSavings`, `RetryBudgetExhausted`, `QualityCeilingReached`, `OperatorDiscarded`, `TestMode`. `RetainInprogressPolicy.ShouldRetain(Reason)` decides `.ip` disposal: `TestMode` retains for A/B comparison; every other reason deletes. TFP row always cleared. |
+| `Requeue` | Staged file deleted; TFP row cleared; a file-scope `TargetOverrides` row is upserted at `Tier + 1` (`SetBy='requeue:<AttemptId>'`, D13); the cascade recomputes the file; a new `TranscodeQueue` row for the same `MediaFileId` is inserted via `AddJobToQueue(ForceAdd=True)`. |
 | `Pending` | Awaiting VMAF. The row lands in `QualityTestingQueue`; disposition re-evaluated when the score lands. |
 
 **Audit trail (queryable):**
@@ -397,7 +373,7 @@ WHERE Success=true AND FileReplaced=false AND Disposition <> 'Pending'
 ORDER BY DispositionDecidedAt DESC;
 ```
 
-**Tables written:** TranscodeAttempts (Disposition, DispositionReason, DispositionDecidedAt), QualityTestQueue (when disposition='Pending' and not yet queued), TranscodeQueue (new row on Requeue via canonical AddJobToQueue -- BUG-0079), MediaFiles (LastTranscodeOutcome on Reject/NoSavings), ProblemFiles (when Requeue with adjusted CRF below floor), TemporaryFilePaths (DELETE at the chokepoint for terminal dispositions; `Replace` defers TFP cleanup to FileReplacement's success branch since the canonical paths are still needed).
+**Tables written:** TranscodeAttempts (Disposition, DispositionReason, DispositionDecidedAt), QualityTestQueue (when disposition='Pending' and not yet queued), TargetOverrides + TranscodeQueue (on Requeue), TemporaryFilePaths (DELETE at the chokepoint for `Reject` and `Requeue`; `Replace` defers TFP cleanup to FileReplacement's success branch since the canonical paths are still needed; `Hold` keeps the row).
 
 ---
 
@@ -460,19 +436,22 @@ Adding a new Strategy verify path is one `Strategy.Verify()` implementation + on
      The `-mv` suffix is the canonical MediaVortex on-disk marker -- structurally distinct from the source filename, defending against same-name collision regressions and giving operators a glance-readable "this was transcoded" signal. See `Features/FileReplacement/transcoded-output-placement.feature.md` C4.
   6. Re-probe new file via FFprobe (worker's local FFprobe path on the worker-resolved path).
   7. Update MediaFiles with new metadata; set ONE of `TranscodedByMediaVortex=True` (Mode='Transcode') or `RemuxedByMediaVortex=True` + `RemuxedByMediaVortexDate=NOW()` (Mode in 'Remux','AudioFix'). `MediaFiles.FilePath` (typed pair) now points at `-mv.<ext>`. **On failure** (unique-key collision on `(StorageRootId, RelativePath)`, re-probe error, or any update error): rollback fires -- non-SameSlot deletes the renamed `-mv.<ext>` orphan; SameSlot renames `target -> staged` then `.bak -> source` then deletes the staging artifact. Returns `Success=False` with the real update error in `ErrorMessage`; source is bit-identical to its pre-call state. See BUG-0067 + `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4. SameSlot only: on update SUCCESS, `.bak` is removed.
-  8. **Recompute compliance**: `RecomputeForFiles([MediaFileId])` re-evaluates the three compliance dimensions, `PriorityScore` and `AssignedProfile`; `WorkBucket` follows (D4), so a finished file leaves its work bucket and is not re-queued. Failure of this recompute does NOT roll back -- the file is on disk correctly and the next scheduled recompute will reconcile.
+  8. **Recompute compliance**: `RecomputeForFiles([MediaFileId])` re-evaluates the three compliance dimensions and `PriorityScore`; `WorkBucket` follows (D4), so a finished file leaves its work bucket and is not re-queued. Failure of this recompute does NOT roll back -- the file is on disk correctly and the next scheduled recompute will reconcile.
   9. Delete source file from disk (non-SameSlot only; SameSlot has no separate source to delete). `MarkAudioComplete` runs if the FFmpeg command contained loudnorm.
   10. **Hand-off** (`TranscodedOutputPlacement._QueueNextStage`): read the file's `WorkBucket` after step 8. If it names a label (D2) other than the one that just ran, insert one Pending job with that label via `QueueManagementBusinessService.AddJobToQueue` (not forced; admission gates still apply). Bucket equal to the label that just ran: log an error, queue nothing. Bucket `Compliant` / `Unclassified`: nothing to queue. Skipped when step 8 failed. A hand-off error is logged and does not fail the placement.
 
-**Requeue path (BUG-0079 fix):**
-- `DispositionDispatcher._MaybeScheduleRequeue` inserts a new `TranscodeQueue` row for the same `MediaFileId` via canonical `QueueManagementBusinessService.AddJobToQueue(ForceAdd=True)`, unless `RetryBudgetService.HasBudgetRemaining=False` (in which case Requeue folds to `Reject/RetryBudgetExhausted`).
+**Hold path:**
+- Nothing moves. `TranscodeAttempts.Disposition='Hold'`; the `.ip` and its TFP row stay; every cleanup sweeper skips `Hold` attempts. The operator resolves the row on `/QualityTesting` through the Override API: Replace runs the Replace path above; Reject runs the Reject path.
+
+**Requeue path:**
+- `DispositionDispatcher` upserts the file override at `Tier + 1` (ST7 table), then inserts a new `TranscodeQueue` row for the same `MediaFileId` via canonical `QueueManagementBusinessService.AddJobToQueue(ForceAdd=True)`.
 - `AttemptCleanupService.Cleanup` drops the TFP row + `.ip` output.
-- Next claim picks up the requeued row; adjustment-registry knob overrides apply at admission for CRF/bitrate refinement.
+- Next claim picks up the requeued row; the encode reads the higher tier's `LadderCell` through `Target`.
 
 **Reject path:**
-- Terminal outcome. Committed disposition. `RetainInprogressPolicy.ShouldRetain(Reason)` decides `.ip` disposal: `TestMode` retains for A/B comparison, every other reason deletes. TFP row always cleared. Reasons: `TranscodeFailed`, `NoSavings`, `VmafAboveMax`, `RetryBudgetExhausted`, `OperatorDiscarded`, `TestMode`. When reason is `NoSavings`: `MediaFiles.LastTranscodeOutcome='NoSavings'`.
+- Terminal outcome. Committed disposition. `RetainInprogressPolicy.ShouldRetain(Reason)` decides `.ip` disposal: `TestMode` retains for A/B comparison, every other reason deletes. TFP row always cleared. Reasons: `TranscodeFailed`, `NoSavings`, `RetryBudgetExhausted`, `QualityCeilingReached`, `OperatorDiscarded`, `TestMode`.
 
-**Tables written:** MediaFiles (new metadata on Replace), MediaFilesArchive (snapshot before replace), TranscodeAttempts (FileReplaced, FileReplacedDate), TranscodeQueue (new row on Requeue), ProblemFiles (CRF floor breach), QualityTestQueue (cleared on disposition commit).
+**Tables written:** MediaFiles (new metadata on Replace), MediaFilesArchive (snapshot before replace), TranscodeAttempts (FileReplaced, FileReplacedDate), TargetOverrides + TranscodeQueue (on Requeue), QualityTestQueue (cleared on disposition commit).
 
 **Safety guards:**
 - Archive-before-delete: original metadata always saved before the rename.
@@ -482,7 +461,7 @@ Adding a new Strategy verify path is one `Strategy.Verify()` implementation + on
 - `TranscodedByMediaVortex=true` prevents infinite re-queue loops.
 - **Disposition is final** for non-Pending values. The function is idempotent: calling `DecidePostTranscodeDisposition` again on a row that already has Disposition set returns the existing decision unchanged (no double-replace, no decision drift).
 
-**Operator override:** `POST /api/MediaFiles/<id>/ResetTranscodeOutcome` clears `LastTranscodeOutcome` so a NoSavings file can be retried.
+**Operator override:** `POST /api/QualityTest/Override` resolves a `Hold` (or any decided row) to Replace or Reject.
 
 ---
 
@@ -492,7 +471,7 @@ Adding a new Strategy verify path is one `Strategy.Verify()` implementation + on
 MediaFiles.FilePath          -- created at SCAN, used everywhere
 MediaFiles.Resolution        -- set at PROBE, checked at QUEUE
 MediaFiles.HasExplicitEnglishAudio -- set at PROBE, checked at QUEUE
-MediaFiles.AssignedProfile   -- set at RECOMPUTE (cascade from SeriesProfiles/SystemSettings), read at TRANSCODE
+MediaFileTargets (VIEW)      -- computed at read from policy tables + MediaFiles facts (D13); read at RECOMPUTE, QUEUE, TRANSCODE, DISPOSITION, ACTION
 MediaFiles.PriorityScore     -- set at RECOMPUTE, read by non-claim consumers (SmartPopulate helpers, backfill scripts); NOT consulted on the worker claim path (see queue-priority.feature.md)
 MediaFiles.IsCompliant       -- set at RECOMPUTE, checked at QUEUE (compliant files blocked)
 MediaFiles.WorkBucket        -- generated from the three compliance columns (D4); read by /Work pages + admission
@@ -677,7 +656,7 @@ End-to-end trace from worker installation through finished product. Every functi
 | 3.1 | Create attempt record | `CreateTranscodeAttempt(Job)` | `INSERT INTO TranscodeAttempts (FilePath, AttemptDate, Quality, OldSizeBytes, Success=NULL, ...)` | TranscodeAttempts row created |
 | 3.2 | Load media metadata | `GetMediaFileData(Job)` -> `DatabaseManager.GetMediaFileByPath()` | `SELECT * FROM MediaFiles WHERE LOWER(FilePath) = LOWER(%s)` | -- |
 | 3.3 | Archive original | `ArchiveOriginalFileDetails(MediaFile, AttemptId)` | `INSERT INTO MediaFilesArchive (...)` | Archive row created |
-| 3.4 | Load profile + settings | `GetTranscodingSettings(Job, MediaFile)` | `SELECT FROM ProfileThresholds`, `SELECT FROM CodecFlags`, `SELECT FROM CodecParameters`, check CRF overrides in SystemSettings | FFmpegPath + OutputDirectory included in return |
+| 3.4 | Resolve target + encoder settings | `TargetResolver.Resolve(MediaFileId)`, `EncoderSelector(Worker)`, `EncoderSettingsRepository.Get(Encoder, Target.Tier)` | `SELECT ... FROM MediaFileTargets WHERE MediaFileId=%s`; `SELECT ... FROM EncoderSettings WHERE Encoder=%s AND QualityTier=%s` | `Undecided` fails the job loud with the reason |
 | 3.5 | Translate input path | `SetupFilePreparation(Job, MediaFile, AttemptId)` | -- | `PathTranslation.ToLocalPath(Job.FilePath)` converts `T:\...` to `/mnt/media/...` on Linux |
 | 3.6 | Setup staging dir | `TranscodingFileManagerService.SetupTranscodingDirectories(OutputDirectory)` | -- | Creates staging dir if needed |
 | 3.7 | Build FFmpeg command | `BuildTranscodeCommand()` -> `CommandBuilderService.BuildCommand()` -> `CommandBuilder.BuildCommand()` | -- | Reads `FFmpegPath` and `OutputDirectory` from CommandData (with `or` fallback to defaults) |
@@ -727,7 +706,7 @@ Per-step detail of Stage 8 ACTION above (Replace path). Step IDs match the Stage
 | 7.5 | Verify target | `LocalGetSize(target)` | -- | Logs WARN if zero bytes. |
 | 7.6 | Re-probe + update MediaFiles | `_UpdateMediaFilesAfterReplacement(Mode=...)` -- FFprobe the new file, write all metadata columns. Sets ONE flag: `TranscodedByMediaVortex=True` (Mode='Transcode') or `RemuxedByMediaVortex=True` + `RemuxedByMediaVortexDate=NOW()` (Mode in 'Remux','AudioFix'). Mode comes from `TranscodeAttempts.ProfileName`. See `Features/FileReplacement/remuxed-flag.feature.md`. | `UPDATE MediaFiles SET StorageRootId=..., RelativePath=..., FileName=..., Resolution=..., Codec=..., SizeMB=..., <one of Transcoded/RemuxedByMediaVortex>=TRUE, LastScannedDate=NOW(), NeedsReprobe=FALSE WHERE Id = %s` | MediaFiles reflects the new file with the right flag for the mode. **On failure**: rollback fires (BUG-0067 -- non-SameSlot deletes the renamed `-mv.<ext>` orphan; SameSlot renames target back to staged, then `.bak` back to source, then deletes staging artifact). Returns `Success=False` with the real error in `ErrorMessage`. See `Features/FileReplacement/transcoded-output-placement.feature.md` C13/S4. |
 | 7.7 | Remove SameSlot backup | (only when SameSlot AND step 7.6 succeeded) | -- | `os.remove(source + '.bak')`. Deferred from step 7.4 so rollback in 7.6 has a valid backup. |
-| 7.8 | Recompute compliance | `QueueManagementBusinessService().RecomputeForFiles([MediaFileId])` | per-vertical `UPDATE MediaFiles SET <Dimension>Compliant=..., <Dimension>CompliantReason=...` then `SET AssignedProfile=..., PriorityScore=...` | `WorkBucket` regenerates (D4). Failure here does NOT roll back -- file is on disk correctly. |
+| 7.8 | Recompute compliance | `QueueManagementBusinessService().RecomputeForFiles([MediaFileId])` | per-vertical `UPDATE MediaFiles SET <Dimension>Compliant=..., <Dimension>CompliantReason=...` then `SET PriorityScore=...` | `WorkBucket` regenerates (D4). Failure here does NOT roll back -- file is on disk correctly. |
 | 7.9 | Delete source (non-SameSlot only) | `os.remove(LocalOriginalPath)` | -- | SameSlot: no separate source to delete (source path equals target path). |
 | 7.10 | Mark attempt replaced | | `UPDATE TranscodeAttempts SET FileReplaced=TRUE, FileReplacedDate=NOW() WHERE Id = %s` | -- |
 | 7.11 | Cleanup TFP + notify Jellyfin | `PostTranscodeDispositionService.CleanupTemporaryFilePaths(TranscodeAttemptId)` (BUG-0010 chokepoint), `Services/JellyfinNotifyService.NotifyJellyfin([{Path, UpdateType='Modified'}])` | `DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s` | TFP cleared at the disposition chokepoint (one DELETE point, not per-feature). Jellyfin notify posts to `/Library/Media/Updated`; failure is non-fatal (WARNING + continue). Unconditional -- if FileReplacement moved the file, the notify fires. See `jellyfin-push-notify.feature.md`. |
