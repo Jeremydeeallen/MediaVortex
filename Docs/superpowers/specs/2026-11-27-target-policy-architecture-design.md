@@ -18,6 +18,7 @@ Measured 2026-11-26 on `6d06ee9d`:
 - Encoder knobs on `Profiles` are inert for 57,116 of 57,168 files; `WorkerEncoderResolver` overrides them from code dictionaries.
 - The ladder key ignores frame rate: 8,000 kbps scored VMAF 90.4 at 59.94 fps and 98.9 at 29.97 fps.
 - 12 dead columns across policy tables; 39 dead `SystemSettings` keys; `KeepSource` has no reader; a smoke test replaced a library file.
+- Found by the 2026-11-27 completeness review: the transcode claim SQL (`TranscodeQueueRepository.ClaimNextPendingJob`) joins `Profiles` on `AssignedProfile` and gates on `p.codec` / `p.usenvidiahardware` / `p.useintelhardware`, so a file with a NULL or stale profile can never be claimed; the `WorkBucket` generated column carries the D7 terminal rule (`TranscodedByMediaVortex AND HasDialogBoostTrack -> 'Compliant'`) while `VideoVertical` is documented as its home; `CodecFlags` and `CodecParameters` are a third encoder-knob home (read by `ProcessTranscodeQueueService` and `SvtAv1EncoderArgsStrategy`) absent from the knob inventory; `VmafConfidenceStats.ProfileId` cascades on `Profiles` delete.
 
 Each past directive fixed one symptom inside this shape and added a reader or a stored value. The shape, not the fixes, is the cause.
 
@@ -27,7 +28,7 @@ These are structures, not rules. Each makes a wrong state unrepresentable.
 
 | Principle | Structure |
 |---|---|
-| Three kinds of data, never mixed | Facts live on `MediaFiles` (probe/scan writers only). Policy lives in the tables of section 4, each column edited by one `/settings` control. Derived values are not stored; the only stored derived columns are `VideoCompliant`, `AudioCompliant`, `ContainerCompliant` (+ generated `WorkBucket`, `IsCompliant`), maintained by writer-owns-cascade |
+| Three kinds of data, never mixed | Facts live on `MediaFiles` (probe/scan writers only). Policy lives in the tables of section 4, each column edited by one `/settings` control. Derived values are not stored; the only stored derived columns are `VideoCompliant`, `AudioCompliant`, `ContainerCompliant` (+ generated `WorkBucket`, `IsCompliant`), maintained by writer-owns-cascade. `WorkBucket` is exactly `CASE WHEN TranscodedByMediaVortex THEN 'Compliant' WHEN any <Dim>Compliant IS NULL THEN 'Unclassified' WHEN all three THEN 'Compliant' WHEN NOT VideoCompliant THEN 'Transcode' WHEN NOT ContainerCompliant THEN 'Remux' ELSE 'AudioFix' END`; the D7 terminal rule lives in that expression and nowhere else (asserted whole by `TestWorkBucketGeneratedColumn`) |
 | One definition of "target" | SQL VIEW `MediaFileTargets` (section 5). Python, tests, GUI and audits read the view. There is one definition because there is one object |
 | Consumers cannot fetch policy | `TargetResolver` returns a frozen `Target`. Compliance verticals, admission, command composer, disposition decider and placement hand-off take `Target` as an argument and hold no repository. Only `Features/Policy/` depends on the policy tables |
 | No code-side knobs | Encoder knobs are rows in `EncoderSettings`; the override dictionaries are deleted. The mode registry reads `ProcessingModes`; the code mirror is deleted |
@@ -48,10 +49,11 @@ These are structures, not rules. Each makes a wrong state unrepresentable.
 - New `TargetOverrides(Id, StorageRootId, Scope CHECK (series|file), Key TEXT, QualityTier INT NOT NULL, SetBy TEXT, SetAt TIMESTAMP)`, UNIQUE (StorageRootId, Scope, Key). `Key` = first `RelativePath` segment for series, `MediaFiles.Id` text for file. Precedence in the view: file > series > genre > library.
 - Replaces `SeriesProfiles` (218 rows: migrate `AssignedProfile` name -> that profile's `QualityTier`; drop `TargetResolution`, never read) and every hand-set `AssignedProfile` whose source is `operator` or `manual_sql` (migrate to file-scope rows). Bulk/backfill-sourced assignments are derived values and are dropped, not migrated.
 - Editing: `/Work/<bucket>` series dropdown writes a series override (tier labels, not profile names); the per-file control on `/Work` and `/Optimization` writes a file override. Both show the resolved tier next to the control.
+- Requeue escalation is a file override: ST7 `Requeue` upserts `TargetOverrides(file, Key=MediaFileId, QualityTier=Tier+1, SetBy='requeue:<AttemptId>')`. Judge and encode then agree the file needs the higher tier, which is also its correct compliance verdict. No per-queue-row or per-attempt tier exists.
 
 ### 4.3 Tier recipe and acceptance
 
-- `Profiles` becomes one row per tier (`QualityTier UNIQUE`, 5 rows; the 4 unused STREAMING profiles are deleted): `QualityLabel`, `QualityTestRequired BOOL`, `VmafMin NUMERIC NOT NULL`, `VmafMax NUMERIC NULL` (null = no ceiling), `HeldFrameDetectionThreshold`, `HeldFrameP25Min`, `HeldFrameMeanMin`, `LiveActionP10Min`. Seeded from today's `PostTranscodeGateConfig` row.
+- `Profiles` becomes one row per tier (`QualityTier UNIQUE`, 5 rows; the 4 unused STREAMING profiles are deleted): `QualityLabel`, `QualityTestRequired BOOL`, `VmafMin NUMERIC NOT NULL`, `VmafMax NUMERIC NULL` (null = no ceiling), `HeldFrameDetectionThreshold`, `HeldFrameP25Min`, `HeldFrameMeanMin`, `LiveActionP10Min`. Seeded from today's `PostTranscodeGateConfig` row. The five tier rows keep their `Id` and `ProfileName`; `TranscodeAttempts.ProfileName` keeps receiving the tier row's name so dashboards and failure views that join attempt history to `Profiles` stay valid.
 - Dropped from `Profiles`: `Codec, Preset, Tune, Multipass, RateControlMode, PixelFormat, SpatialAq, TemporalAq, WeightedPred, LowPower, UseNvidiaHardware, UseIntelHardware, AqStrength, FilmGrain, CodecFlagsId, YadifMode, YadifParity, YadifDeint, AudioCodec, AudioBitrateKbps, AudioChannels, AudioFilter, Container, FastStart, TargetAudioKbps, TargetVideoKbps, TargetResolutionCategory, AllowUpscale, StreamCodecName, Family, ContentClass, Draft, Active, SortOrder, Description`. Every one is either dead, inert under the code overrides, or a second home for a fact owned elsewhere.
 
 ### 4.4 Ladder
@@ -63,7 +65,9 @@ These are structures, not rules. Each makes a wrong state unrepresentable.
 ### 4.5 Encoder settings
 
 - New `EncoderSettings(Encoder CHECK (av1_nvenc|av1_qsv|libsvtav1), QualityTier, Preset TEXT, Tune TEXT, Multipass TEXT, RateControl TEXT, MaxRateMultiplier NUMERIC, BufSizeMultiplier NUMERIC, SpatialAq INT, TemporalAq INT, PixelFormat TEXT, Gop INT, RcLookahead INT, BFrames INT, BRefMode TEXT, QsvExtBrc INT, QsvAdaptiveI INT, QsvAdaptiveB INT, QsvLookAheadDepth INT, QsvBStrategy INT, QsvTileCols INT, QsvTileRows INT)`, UNIQUE (Encoder, QualityTier). Seeded from today's `WorkerEncoderResolver` dictionaries and `ProfileThresholds` QSV columns, so the first encode after the change is byte-identical to the last before it (golden test, section 9).
-- The worker's encoder = `Workers.nvenccapable` -> `av1_nvenc`, else `qsvcapable` -> `av1_qsv`, else `libsvtav1`. One function in `Features/Policy/EncoderSelector.py`; `WorkerEncoderResolver`, `HwAccelResolver` worker reads and the `Profiles.Codec == 'av1'` guard are deleted.
+- The worker's encoder = `Workers.nvenccapable` -> `av1_nvenc`, else `qsvcapable` -> `av1_qsv`, else `libsvtav1`. One function in `Features/Policy/EncoderSelector.py`; `WorkerEncoderResolver`, `HwAccelResolver` worker reads and the `Profiles.Codec == 'av1'` guard are deleted. The two capability flags are written by the deploy-time probe (`deploy-baremetal-worker.py` runs `Scripts/ReconcileNvencCapability.py` / `ReconcileQsvCapability.py` after restart); nothing else writes them.
+- The transcode claim reads no policy: `ClaimNextPendingJob` drops the `Profiles` join and the `p.codec` / `p.usenvidiahardware` / `p.useintelhardware` gates; worker eligibility is `BuildClaimPredicate` (capability flag, `Status`, in-flight cap) plus `ProcessingModes.RequiresInterlacedFilter` vs `Workers.AcceptsInterlaced`. `ProcessingModes.RequiresProfileGates` is dropped with the gates (`claim-authority.md`, `db-is-authority.md`).
+- `CodecFlags` and `CodecParameters` are folded into `EncoderSettings`: rows that libsvtav1 reads become the `libsvtav1` encoder rows' columns; both tables and their readers are deleted. Variant runs (`multi-variant-testing`) pass an explicit per-attempt `EncoderSettings` delta; they never edit a policy row.
 - Deinterlace: `yadif=1:1:1` stays the one constant in `VideoFilterBuilder`; the dead `Yadif*` columns are dropped.
 
 ### 4.6 Audio
@@ -81,12 +85,14 @@ These are structures, not rules. Each makes a wrong state unrepresentable.
 
 ### 4.8 Ceiling
 
-- `VideoComplianceThresholds(ResolutionCategory, Multiplier)` unchanged. Video compliant when `source kbps <= LadderCell.TargetKbps x Multiplier(source resolution)`. Codec plays no part (operator decision 2026-10-06, now the only path). `TranscodedByMediaVortex AND output matched policy` remains the terminal short-circuit (D7, product decision: our outputs are final; re-acquire to change them).
+- `VideoComplianceThresholds(ResolutionCategory, Multiplier)` unchanged. Video compliant when `source kbps <= LadderCell.TargetKbps x Multiplier(source resolution)`. Codec plays no part (operator decision 2026-10-06, now the only path). D7 (our outputs are final; re-acquire to change them) is the first branch of the `WorkBucket` generated column (section 3); no vertical reads `TranscodedByMediaVortex`. The audio half of today's expression (`AND HasDialogBoostTrack`) is removed in Phase 3 once `AudioCompliant` expresses tracks-match-policy, so the column reads `TranscodedByMediaVortex -> 'Compliant'` alone.
 
 ### 4.9 Verification
 
 - `PostTranscodeGateConfig` is renamed `VerificationConfig` and keeps `MaxRequeueAttempts`, `MinOutputSavingsPercent` (new, seeded 0: a larger output is rejected in the decider, not after commit). Drop `VmafAutoReplaceMinThreshold, VmafAutoReplaceMaxThreshold, FileReplacementCanReplaceThreshold, WhenVmafUnavailable, WorkerHeartbeatWindowSec, QualityTestEnabled, MinConfidenceSampleCount, MinConfidencePassRate, SigmaMargin`. The smart-confidence skip (Replace without VMAF from bucket statistics) is deleted: an unverified replace contradicts section 6. `ProcessingModes.RequiresVmaf/RequiresNvencGate/BucketName` dropped.
 - One retry budget: `FailureBudgetService` stays; `RetryBudgetService` is deleted; `MaxRequeueAttempts` is its cap.
+- `VmafConfidenceStats` (the smart-confidence store, FK cascade on `Profiles`) and `SystemSettings.BitratePerPixelBoundaries` are dropped with the skip.
+- `Hold` is non-terminal for disk: `RetainInprogressPolicy.ShouldRetain('Hold')` is TRUE; `DispositionDispatcher._MaybeCleanupArtifacts`, `CrashRecoveryService` and `OrphanCleanupService` leave `TemporaryFilePaths` rows and `.ip` files of attempts with `Disposition='Hold'` alone. The Override API's Replace/Reject resolution is the only path that releases them.
 
 ### 4.10 SystemSettings and MediaFiles
 
@@ -113,6 +119,10 @@ Undecided TEXT  -- NULL when every field above is non-null; else the first missi
 
 `Features/Policy/TargetResolver.py` reads one row from the view and returns `Target` (frozen dataclass, all fields non-optional) or `Undecided(Reason)`. It is the only Python that reads the view for decisions. The view is the executable SSoT and is asserted against `transcode.flow.md` D4 by `TestPipelineShape`.
 
+View mechanics: `MediaFiles.Genres` is CSV text, aggregated with `unnest(string_to_array(Genres, ','))`; `FrameRateClass` is NULL (so `Undecided('FrameRate')`) when `FrameRate` is NULL; `AudioPolicyId` precedence is `item` (MediaFileId) > `library` (StorageRootId) > `global`, the unused `folder` scope being dropped in Phase 3 unless rows exist then. `TargetResolver.ResolveMany(Ids)` reads the view once per batch for `RecomputeForFiles`.
+
+`Undecided` is stored as NULL: a vertical handed `Undecided(reason)` writes `<Dim>Compliant = NULL, <Dim>CompliantReason = reason`; the generated column makes that row `Unclassified`, which is how a data error reaches `/Work/Unclassified`. Admission refuses an `Undecided` file with that reason; the composer never sees one.
+
 ## 6. Pipeline after the change
 
 ```
@@ -124,12 +134,12 @@ ST3 ASSIGN is deleted (stable IDs are not renumbered). `ingest.flow.md` ST5 Clas
 
 | Stage | Reads `Target` for | Change |
 |---|---|---|
-| ST4 RECOMPUTE | the three verticals: `Evaluate(Facts, Target) -> Verdict`, pure | verticals lose their repositories and side effects |
+| ST4 RECOMPUTE | the three verticals: `Evaluate(Facts, Target) -> Verdict`, pure; `PriorityScore` estimate = `Target.TargetKbps` + default audio track `BitrateKbps` (x channels when per-channel) | verticals lose their repositories and side effects; `_EncodeTargets` reads `Target`, not `ProfileThresholds` |
 | ST5 QUEUE | `AddJob(MediaFileId, Label=None)`; gates: upscale (TargetResolution vs source), marginal savings (`MinTranscodeSavingsMB`, 20% / 150 MB), failure budget, terminal, audio-policy admission (re-measure / review-queue writes happen here) | `ProfileId`, `QualityTier`, `QualityLabel` parameters and the three profile write paths are deleted (BUG-0124 becomes unrepresentable) |
 | ST6 TRANSCODE | `CommandComposer.Build(Facts, Target, EncoderSettings(worker encoder, Target.Tier), Label)` | slot shape unchanged; VideoSlot reads a row, not a dict; AudioSlot reads policy tracks; ContainerSlot reads `OutputContainer` |
 | ST7 DISPOSITION | `Decide(AttemptFacts, Target) -> Replace | Hold | Requeue | Reject`, pure, no repository | adds `Hold`; size check moves here; exception propagates (no `-> Pending`) |
 | ST8 VERIFY | unchanged (VMAF / checksum) | thresholds come from `Target` |
-| ST9 ACTION | Replace unchanged; `Hold` retains `.ip` and writes `Disposition='Hold'`; Requeue = next tier up via `LadderCells(Tier+1)`; Reject per `RetainInprogressPolicy` | `KeepSource` deleted; Override API resolves `Hold` to Replace/Reject |
+| ST9 ACTION | Replace unchanged; `Hold` retains `.ip` and writes `Disposition='Hold'`; Requeue upserts the file override `Tier+1` (section 4.2) and re-adds the job; Reject per `RetainInprogressPolicy` | `KeepSource` deleted; Override API resolves `Hold` to Replace/Reject |
 
 Decision table for ST7:
 
@@ -139,7 +149,7 @@ Decision table for ST7:
 | output size >= source x (1 - MinOutputSavingsPercent) | Reject / NoSavings |
 | `QualityTestRequired = FALSE` | Hold if `ReviewBeforeReplace` else Replace / QualityTestNotRequired |
 | VMAF missing | Pending / AwaitingVmaf (QT row created) |
-| held-frame content: P25 < HeldFrameP25Min or mean < HeldFrameMeanMin; live action: P10 < LiveActionP10Min; or mean < VmafMin | Requeue / VmafBelowMin (budget permitting, else Reject / RetryBudgetExhausted) |
+| held-frame content: P25 < HeldFrameP25Min or mean < HeldFrameMeanMin; live action: P10 < LiveActionP10Min; or mean < VmafMin | Requeue / VmafBelowMin (budget permitting, else Reject / RetryBudgetExhausted; no `LadderCells` row at Tier+1, i.e. Tier 5, -> Reject / QualityCeilingReached) |
 | `VmafMax` set and mean > VmafMax | Hold / VmafAboveMax |
 | otherwise | Hold if `ReviewBeforeReplace` else Replace / VmafPassed |
 
@@ -163,7 +173,7 @@ Every migration is followed by the same-day invariant check: TV and Movies `Vide
 
 ## 9. Acceptance criteria (program level)
 
-1. `grep -rn "AssignedProfile" --include=*.py Features/ Core/ Repositories/ WorkerService/` returns 0; `\d MediaFiles` has no `AssignedProfile`, `AssignedProfileSource`, `KeepSource`.
+1. `grep -rn "AssignedProfile" --include=*.py --include=*.html Features/ Core/ Repositories/ WorkerService/ WebService/ Services/ Templates/ Scripts/*.py Scripts/Smoke/` returns 0 (one-off dated migrations under `Scripts/SQLScripts/` excepted); `\d MediaFiles` and `\d MediaFilesArchive` have no `AssignedProfile`, `AssignedProfileSource`, `KeepSource`.
 2. Exactly one Python module reads `StorageRoots`, `GenreQualityTiers`, `TargetOverrides`, `Profiles`, `LadderCells`, `EncoderSettings`, `FrameRateClasses` for decisions (`TestTargetAuthority`).
 3. `TestFailLoud` baseline for `Features/Policy`, the three verticals, `Features/TranscodeJob/Emit`, `Features/QualityTesting/Disposition`, `Features/FileReplacement` is 0.
 4. Every column of every policy table has a `/settings` control and a decision reader (`TestKnobInventory`); the inventory's dead-column list is empty.
@@ -171,7 +181,7 @@ Every migration is followed by the same-day invariant check: TV and Movies `Vide
 6. Live: a file whose series override is changed on `/Work` recomputes within one cascade with no reassign step; a `/settings` ladder edit changes `VideoCompliantReason` on an affected file with no code restart.
 7. Live, fleet: one xxx 4K >30 fps file and one <=30 fps file encode on dot (NVENC) and wakko (QSV) from COPIES, land in `Hold`, show VMAF and stills on `/QualityTesting`, and are resolved by the operator.
 8. `ARCHITECTURE.md` Vertical Roster names `Policy` and no `ContentClassifier`; `## Gap to Target` is empty; `transcode.flow.md` D2/D4/D6/D7 match the view and the labels.
-9. A `grep` for `WorkerEncoderResolver`, `ProcessingModeMetadata`, `RetryBudgetService`, `SmartConfidence`, `GetKeepSourceSetting`, `ReassignTierProfiles`, `ContentClassificationRules`, `SeriesProfiles`, `EmitTracks`, `no_dialog_boost` across the production tree returns 0.
+9. A `grep` for `WorkerEncoderResolver`, `ProcessingModeMetadata`, `RetryBudgetService`, `SmartConfidence`, `VmafConfidenceStats`, `GetKeepSourceSetting`, `ReassignTierProfiles`, `ContentClassificationRules`, `SeriesProfiles`, `CodecFlags`, `CodecParameters`, `EmitTracks`, `no_dialog_boost` across the production tree returns 0; `ClaimNextPendingJob` SQL contains no `Profiles`.
 
 ## 10. Decisions made (reversals flagged)
 
@@ -184,6 +194,8 @@ Every migration is followed by the same-day invariant check: TV and Movies `Vide
 - D7 terminal state retained. Reason: product decision to never re-encode our own output.
 - D8 source deletion on Replace retained; `Hold` is the review mechanism. `KeepSource` deleted rather than revived.
 - xxx library: tier 3, live_action, `ReviewBeforeReplace TRUE` until the operator has judged the first fleet outputs, then FALSE.
+- Requeue escalation is a stored file override, not a queue-row or attempt field (2026-11-27 review). Reason: the only other representation would be a second stored target.
+- `Hold` artefacts are exempt from every cleanup sweeper (2026-11-27 review). Reason: a Hold whose `.ip` was swept is a Reject the operator never saw.
 
 ## 11. Out of scope
 
