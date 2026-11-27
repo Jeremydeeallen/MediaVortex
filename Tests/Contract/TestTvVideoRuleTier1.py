@@ -4,8 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from Core.Database.DatabaseService import DatabaseService
-from Features.Profiles.FileTierResolver import FileTier
-from Features.Profiles.TierLadderRepository import TierLadderRepository
+from Features.Policy.FileTierResolver import FileTier
+from Features.Policy.TierLadderRepository import TierLadderRepository
 from Features.VideoEncoding.VideoVertical import VideoVertical
 
 

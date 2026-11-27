@@ -229,7 +229,7 @@ flowchart TD
 a. **Get job from queue** → `Repositories/DatabaseManager.py` → `GetNextPendingTranscodeJob()` (TranscodeQueue)
 b. **Get MediaFile data** → `Repositories/DatabaseManager.py` → `GetMediaFileByPath()` (to retrieve source resolution)
 c. **Setup directories & copy file** → `Services/TranscodingFileManagerService.py` → `SetupTranscodingDirectories()` & `CopyFile()`
-d. **Get profile details** → `Features/Profiles/EncoderKnobRepository.py` → `GetEncoderKnobsForProfile(MediaFile.AssignedProfile, ContentClass, MediaFile.Resolution)` (the encode row by profile, content class and source resolution), `GetCodecFlagsByCodecName()`, `GetCodecParametersByCodecFlagsId()`
+d. **Get profile details** → `Features/Policy/EncoderKnobRepository.py` → `GetEncoderKnobsForProfile(MediaFile.AssignedProfile, ContentClass, MediaFile.Resolution)` (the encode row by profile, content class and source resolution), `GetCodecFlagsByCodecName()`, `GetCodecParametersByCodecFlagsId()`
 e. **Build transcoding command** → `Services/CommandBuilderService.py` → `BuildCommand()` → `Models/CommandBuilder.py` → `BuildCommand()`
 f. **Create transcode attempt** → `Services/ProcessTranscodeQueueService.py` → `CreateTranscodeAttempt()` → `Repositories/DatabaseManager.py` → `SaveTranscodeAttempt()`
 g. **Execute transcoding** → `Services/VideoTranscodingService.py` → `TranscodeVideo()` (with real-time progress tracking to TranscodeProgress via `Repositories/DatabaseManager.py` → `SaveTranscodeProgress()`)

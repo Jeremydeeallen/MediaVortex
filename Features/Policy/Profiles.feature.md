@@ -39,7 +39,7 @@ Defines transcode encoding profiles with per-resolution thresholds. Each profile
 
 Architectural debts in the Profiles vertical not addressed by `transcode-worker-unification` (2026-06-28). All are durable doc records, not bug filings.
 
-1. **`ProfileName` VO placement.** The validated VO lives at `Features/WorkBucket/Domain/ProfileName.py` but validates a Profiles-vertical concept (queries `Profiles` table for finalized+active state). Layering inversion. The right placement is `Features/Profiles/Domain/ProfileName.py`; consumers in WorkBucket / QualityTesting / etc. import from Profiles. Move deferred — would touch all consumers, separate scope from the current directive.
+1. **`ProfileName` VO placement.** The validated VO lives at `Features/WorkBucket/Domain/ProfileName.py` but validates a Profiles-vertical concept (queries `Profiles` table for finalized+active state). Layering inversion. The right placement is `Features/Policy/Domain/ProfileName.py`; consumers in WorkBucket / QualityTesting / etc. import from Profiles. Move deferred — would touch all consumers, separate scope from the current directive.
 
 2. **Vestigial threshold columns.** `ProfileThresholds.{Under30MinMB, Under65MinMB, Over65MinMB, FallbackVideoBitrateKbps, FallbackAudioBitrateKbps}` and `Profiles.KeepSource` are round-tripped by the editor UI but read by no production consumer. Schema cleanup candidate. Deferred to future `profiles-schema-prune` directive.
 
@@ -52,18 +52,18 @@ COMPLETE
 ## Scope
 
 ```
-Features/Profiles/**
+Features/Policy/**
 ```
 
 ## Files
 
 | File | Role |
 |------|------|
-| `Features/Profiles/ProfileController.py` | Flask Blueprint -- profile CRUD + PATCH /knobs endpoint |
-| `Features/Profiles/ProfileService.py` | Profile and threshold business logic |
-| `Features/Profiles/ProfileRepository.py` | Profiles and ProfileThresholds database queries |
-| `Features/Profiles/ProfileManagementViewModel.py` | Profile serialization for the settings UI (GET /api/profiles) |
-| `Features/Profiles/EncoderKnobRepository.py` | Single read path: `GetEncoderKnobsForProfile` for CommandBuilder |
+| `Features/Policy/ProfileController.py` | Flask Blueprint -- profile CRUD + PATCH /knobs endpoint |
+| `Features/Policy/ProfileService.py` | Profile and threshold business logic |
+| `Features/Policy/ProfileRepository.py` | Profiles and ProfileThresholds database queries |
+| `Features/Policy/ProfileManagementViewModel.py` | Profile serialization for the settings UI (GET /api/profiles) |
+| `Features/Policy/EncoderKnobRepository.py` | Single read path: `GetEncoderKnobsForProfile` for CommandBuilder |
 | `Templates/Settings.html` | Profile management section of settings page (cogs modal is the canonical editor) |
 
 ## Seams

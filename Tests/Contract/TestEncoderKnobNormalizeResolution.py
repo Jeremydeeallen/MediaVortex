@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from Features.Profiles.TierLadderRepository import TierLadderRepository
+from Features.Policy.TierLadderRepository import TierLadderRepository
 
 
 # directive: resolution-types, profile-row-lookup | # see resolution-types.C4, profile-tier-ladder.C9

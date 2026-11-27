@@ -1,8 +1,8 @@
 from typing import List, Optional, Dict, Any
 from Core.Database.BaseRepository import BaseRepository
 from Core.Database.DatabaseService import EscapeLikePattern
-from Features.Profiles.Models.TranscodeProfileModel import TranscodeProfileModel
-from Features.Profiles.Models.ProfileThresholdModel import ProfileThresholdModel
+from Features.Policy.Models.TranscodeProfileModel import TranscodeProfileModel
+from Features.Policy.Models.ProfileThresholdModel import ProfileThresholdModel
 from Core.Logging.LoggingService import LoggingService
 
 

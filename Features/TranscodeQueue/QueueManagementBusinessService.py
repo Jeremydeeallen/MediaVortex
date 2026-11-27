@@ -4,8 +4,8 @@ import os
 import ntpath
 from Features.TranscodeQueue.Models.TranscodeQueueModel import TranscodeQueueModel
 from Core.Models.MediaFileModel import MediaFileModel
-from Features.Profiles.Models.ProfileThresholdModel import ProfileThresholdModel
-from Features.Profiles.Models.TranscodeProfileModel import TranscodeProfileModel
+from Features.Policy.Models.ProfileThresholdModel import ProfileThresholdModel
+from Features.Policy.Models.TranscodeProfileModel import TranscodeProfileModel
 from Features.TranscodeQueue.TranscodeQueueRepository import TranscodeQueueRepository
 from Features.TranscodeQueue.CrfBitrateEstimateRepository import CrfBitrateEstimateRepository
 from Features.TranscodeQueue.QueueAdmissionConfigRepository import QueueAdmissionConfigRepository
@@ -17,9 +17,9 @@ from Core.Path import Path, PathError
 from Core.Path.LocalPath import LocalExists
 from Services.FileManagerService import FileManagerService
 from Repositories.DatabaseManager import DatabaseManager
-from Features.Profiles.ProfileRepository import ProfileRepository
+from Features.Policy.ProfileRepository import ProfileRepository
 # directive: transcode-worker-unification | # see profiles.C23
-from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
+from Features.Policy.EffectiveProfileResolver import EffectiveProfileResolver
 
 
 # directive: path-class-perfection | # see path.C18
@@ -71,8 +71,8 @@ class QueueManagementBusinessService:
         self.CodecCompatibilityRepo = CodecCompatibilityRepository()
         self.ProfileRepository = ProfileRepositoryInstance or ProfileRepository()
         self.Resolver = EffectiveProfileResolver()
-        from Features.Profiles.TierLadderRepository import TierLadderRepository
-        from Features.Profiles.ContentClassResolver import ContentClassResolver
+        from Features.Policy.TierLadderRepository import TierLadderRepository
+        from Features.Policy.ContentClassResolver import ContentClassResolver
         # directive: profile-row-lookup | # see profile-tier-ladder.S5 -- admission and priority read the same row the encoder does
         self.Tiers = TierLadderRepository()
         self.Classes = ContentClassResolver()

@@ -1,3 +1,3 @@
-# Re-export shim: TranscodeProfileModel has moved to Features/Profiles/Models/TranscodeProfileModel.py
+# Re-export shim: TranscodeProfileModel has moved to Features/Policy/Models/TranscodeProfileModel.py
 # This file exists for backwards compatibility during migration.
-from Features.Profiles.Models.TranscodeProfileModel import TranscodeProfileModel
+from Features.Policy.Models.TranscodeProfileModel import TranscodeProfileModel

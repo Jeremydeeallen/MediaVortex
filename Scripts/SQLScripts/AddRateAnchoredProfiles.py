@@ -1,5 +1,5 @@
 """Seed VBR + anime production profiles per
-Features/Profiles/nvenc-rate-anchored.feature.md C10. Idempotent.
+Features/Policy/nvenc-rate-anchored.feature.md C10. Idempotent.
 """
 
 import sys

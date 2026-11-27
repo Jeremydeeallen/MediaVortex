@@ -47,9 +47,9 @@ def Run() -> int:
         "Tune = COALESCE(Tune, CASE WHEN COALESCE(RateControlMode, 'cq') = 'vbr' THEN 'hq' ELSE 'uhq' END), "
         # from: Models/CommandBuilder.py (legacy line 334: 'uhq' if cq else 'hq')
         "Multipass = COALESCE(Multipass, 'fullres'), "
-        # from: Features/Profiles/nvenc-profiles.feature.md (criterion 4 legacy CQ branch)
+        # from: Features/Policy/nvenc-profiles.feature.md (criterion 4 legacy CQ branch)
         "PixelFormat = COALESCE(PixelFormat, 'p010le'), "
-        # from: Features/Profiles/nvenc-profiles.feature.md (criterion 5 NVENC pix_fmt)
+        # from: Features/Policy/nvenc-profiles.feature.md (criterion 5 NVENC pix_fmt)
         "Container = COALESCE(Container, 'mp4'), "
         "FastStart = COALESCE(FastStart, TRUE) "
         "WHERE UseNvidiaHardware = 1",
@@ -73,7 +73,7 @@ def Run() -> int:
     Db.ExecuteNonQuery(
         "UPDATE Profiles SET "
         "PixelFormat = COALESCE(PixelFormat, 'yuv420p10le'), "
-        # from: Features/Profiles/nvenc-profiles.feature.md (criterion 5 software pix_fmt)
+        # from: Features/Policy/nvenc-profiles.feature.md (criterion 5 software pix_fmt)
         "Container = COALESCE(Container, 'mp4'), "
         "FastStart = COALESCE(FastStart, TRUE) "
         "WHERE UseNvidiaHardware IS DISTINCT FROM 1",
@@ -83,11 +83,11 @@ def Run() -> int:
     Db.ExecuteNonQuery(
         "UPDATE ProfileThresholds pt SET "
         "RcLookahead = COALESCE(pt.RcLookahead, 32), "
-        # from: Features/Profiles/nvenc-profiles.feature.md (criterion 4 rc-lookahead literal)
+        # from: Features/Policy/nvenc-profiles.feature.md (criterion 4 rc-lookahead literal)
         "BFrames = COALESCE(pt.BFrames, 7), "
-        # from: Features/Profiles/nvenc-profiles.feature.md (criterion 4 bf literal)
+        # from: Features/Policy/nvenc-profiles.feature.md (criterion 4 bf literal)
         "BRefMode = COALESCE(pt.BRefMode, 'middle') "
-        # from: Features/Profiles/nvenc-profiles.feature.md (criterion 4 b_ref_mode literal)
+        # from: Features/Policy/nvenc-profiles.feature.md (criterion 4 b_ref_mode literal)
         "FROM Profiles p WHERE pt.ProfileId = p.Id AND p.UseNvidiaHardware = 1",
         (),
     )

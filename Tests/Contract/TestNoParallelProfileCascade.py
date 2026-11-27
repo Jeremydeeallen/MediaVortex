@@ -12,7 +12,7 @@ class TestNoParallelProfileCascade(unittest.TestCase):
     SCAN_DIRS = ['Features', 'Templates', 'WebService', 'Core', 'Services', 'Repositories', 'Models']
 
     EXEMPT_FILES = {
-        'Features/Profiles/EffectiveProfileResolver.py',  # canonical home of the cascade
+        'Features/Policy/EffectiveProfileResolver.py',  # canonical home of the cascade
         'Tests/Contract/TestNoParallelProfileCascade.py',  # this test
         'Features/SystemSettings/SystemSettingsController.py',  # AssignedProfile appears only in a description string, not cascade logic
     }

@@ -658,7 +658,7 @@ def QueueTestRun():
         SetName = SetRows[0].get('Name')
 
         # directive: transcode-worker-unification | # see profiles.C23
-        from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
+        from Features.Policy.EffectiveProfileResolver import EffectiveProfileResolver
         from Core.Models.MediaFileModel import MediaFileModel
         Resolver = EffectiveProfileResolver()
 

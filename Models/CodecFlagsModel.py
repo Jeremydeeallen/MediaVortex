@@ -1,3 +1,3 @@
-# Re-export shim: CodecFlagsModel has moved to Features/Profiles/Models/CodecFlagsModel.py
+# Re-export shim: CodecFlagsModel has moved to Features/Policy/Models/CodecFlagsModel.py
 # This file exists for backwards compatibility during migration.
-from Features.Profiles.Models.CodecFlagsModel import CodecFlagsModel
+from Features.Policy.Models.CodecFlagsModel import CodecFlagsModel

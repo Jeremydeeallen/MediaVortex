@@ -144,7 +144,7 @@ Every encoder knob the operator-validated canary names is now held in a column o
 - [x] 4. Migration `AddRateAnchoredProfiles.py` seeded 3 profiles (Ids 36, 37, 38) + 12 ProfileThresholds rows.
 - [x] 5. Deployed to larry workers; CommandBuilder picks up new profile data on next claim (no per-profile code change needed).
 - [ ] 6. Live canary deferred to first operator-triggered encode against one of the new profiles (visible in TranscodeAttempts.FfpmpegCommand).
-- [x] 7. Cross-referenced from `content-classifier.feature.md` seeded rules + `nvenc-profiles.feature.md` follow-ups link is implicit (both live in `Features/Profiles/`).
+- [x] 7. Cross-referenced from `content-classifier.feature.md` seeded rules + `nvenc-profiles.feature.md` follow-ups link is implicit (both live in `Features/Policy/`).
 - [x] 8. Classifier rules `AnimeByFolder`, `LowBitrateLiveAction` flipped IsActive=TRUE once profiles existed (commit d17e2d1).
 
 ## Scope
@@ -157,8 +157,8 @@ Scripts/SQLScripts/AddCanaryAnchoredProfile_2026-05-30.py  -- canary seed reprod
 Scripts/Smoke/NvencRateAndAnime.matrix.json              -- shootout matrix
 Scripts/Smoke/EncoderShootout.py                         -- VBR branch added to BuildEncodeCmd
 Models/CommandBuilder.py                                 -- VBR + Gop branch + knob lifts
-Features/Profiles/EncoderKnobRepository.py               -- single read path for CommandBuilder knob lookup
-Features/Profiles/nvenc-rate-anchored.feature.md         -- this file
+Features/Policy/EncoderKnobRepository.py               -- single read path for CommandBuilder knob lookup
+Features/Policy/nvenc-rate-anchored.feature.md         -- this file
 ```
 
 ## Files
@@ -175,6 +175,6 @@ None. Reuses the existing Profile + ProfileThresholds pattern. Single CommandBui
 
 ## Related features
 
-- `Features/Profiles/nvenc-profiles.feature.md` -- the original NVENC CQ-anchored profile family; this feature extends it without breaking.
+- `Features/Policy/nvenc-profiles.feature.md` -- the original NVENC CQ-anchored profile family; this feature extends it without breaking.
 - `Features/ContentClassifier/content-classifier.feature.md` -- the consumer that picks WHICH profile (CQ vs VBR vs anime) for which content type.
 - `Features/TranscodeQueue/marginal-savings-gate.feature.md` -- the downstream gate; VBR profiles will always pass the savings check by construction (output always smaller than source).

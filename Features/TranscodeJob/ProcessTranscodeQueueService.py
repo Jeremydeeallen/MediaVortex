@@ -823,8 +823,8 @@ class ProcessTranscodeQueueService:
     def GetTranscodingSettings(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel) -> Optional[Dict[str, Any]]:
         """Reads encoder knobs via EncoderKnobRepository (lifted columns) so CommandBuilder receives data-driven knobs."""
         try:
-            from Features.Profiles.EncoderKnobRepository import EncoderKnobRepository
-            from Features.Profiles.ContentClassResolver import ContentClassResolver
+            from Features.Policy.EncoderKnobRepository import EncoderKnobRepository
+            from Features.Policy.ContentClassResolver import ContentClassResolver
             from Core.Database.DatabaseService import DatabaseService
             # directive: profile-row-lookup | # see profile-tier-ladder.C9 -- the command reads the same (profile, class, resolution) row admission and compliance read
             ContentClass = ContentClassResolver(DatabaseService()).Resolve(MediaFile.StorageRootId, MediaFile.Id)

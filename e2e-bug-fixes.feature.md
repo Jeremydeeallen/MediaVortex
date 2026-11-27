@@ -66,7 +66,7 @@ C20. Post-fix soak: `SELECT LogLevel, FunctionName, LEFT(Message, 200), COUNT(*)
 
 ### Group L -- QSV Tier ladder recalibration (added 2026-07-20 after live VMAF sample + shootout)
 
-C24. QSV preset scale is INVERTED from NVENC and is not intuitive. Document once so it does not re-trip: NVENC `-preset p1` = fastest / worst quality, `p7` = slowest / best quality. QSV `-preset 1` = veryslow / best quality (oneVPL `TargetUsage=1`), `-preset 7` = veryfast / worst quality (`TargetUsage=7`). Verified via `ffmpeg -h encoder=av1_qsv`. Production QSV uses `-preset 1` -- already the best QSV preset. Do NOT propose raising the preset number thinking it slows down -- it speeds up + drops quality. On Arc B580 AV1 the effect is small (<=1.5 VMAF) either way. The quality lever on QSV is the tier bitrate: QSV workers encode by `TargetKbps`, the same as NVENC (`Features/Profiles/profile-tier-ladder.feature.md` C6).
+C24. QSV preset scale is INVERTED from NVENC and is not intuitive. Document once so it does not re-trip: NVENC `-preset p1` = fastest / worst quality, `p7` = slowest / best quality. QSV `-preset 1` = veryslow / best quality (oneVPL `TargetUsage=1`), `-preset 7` = veryfast / worst quality (`TargetUsage=7`). Verified via `ffmpeg -h encoder=av1_qsv`. Production QSV uses `-preset 1` -- already the best QSV preset. Do NOT propose raising the preset number thinking it slows down -- it speeds up + drops quality. On Arc B580 AV1 the effect is small (<=1.5 VMAF) either way. The quality lever on QSV is the tier bitrate: QSV workers encode by `TargetKbps`, the same as NVENC (`Features/Policy/profile-tier-ladder.feature.md` C6).
 
 ### Group M -- Output-file provenance metadata (added 2026-07-20)
 

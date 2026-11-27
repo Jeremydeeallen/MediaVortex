@@ -3,7 +3,7 @@ from flask import Blueprint, jsonify, render_template
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
-from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
+from Features.Policy.EffectiveProfileResolver import EffectiveProfileResolver
 from Features.VideoEncoding.VideoVertical import VideoVertical
 from Features.AudioNormalization.AudioVertical import AudioVertical
 from Features.ContainerFormat.ContainerVertical import ContainerVertical

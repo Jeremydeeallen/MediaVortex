@@ -243,6 +243,24 @@ def StepEnsureFfmpeg(Target: str) -> bool:
     return True
 
 
+# directive: target-policy-1a-tables | # see worker-deploy-baremetal.ST3, policy.S3 -- the host's encoders are a host fact: probed where ffmpeg was just ensured, once per host; EncoderSelector reads the two flags
+def StepReconcileCapabilities(Target: str, Friendly: str, RoleName: str) -> bool:
+    if RoleName != "worker":
+        _Status(4, 10, "probe encoder capability", "SKIPPED", f"role={RoleName}")
+        return True
+    for Script in ("ReconcileNvencCapability.py", "ReconcileQsvCapability.py"):
+        R = subprocess.run(
+            [sys.executable, str(MediaVortexRoot / "Scripts" / Script), Target, "--worker-prefix", f"{Friendly}-worker"],
+            capture_output=True, text=True, timeout=180, cwd=str(MediaVortexRoot),
+        )
+        if R.returncode != 0:
+            _Status(4, 10, "probe encoder capability", "FAILED", f"{Script} rc={R.returncode}: {(R.stderr or R.stdout or '')[-200:]}")
+            return False
+        Lines = [L for L in (R.stdout or "").splitlines() if L.strip()]
+        _Status(4, 10, "probe encoder capability", "OK", f"{Script}: {Lines[-1].strip() if Lines else 'no output'}")
+    return True
+
+
 # directive: farm-server | # see worker-deploy-baremetal.ST3 -- committed tree of Sha only; a src dir whose VERSION already equals Sha is reused, never rewritten
 def StepSyncSource(Target: str, Sha: str) -> tuple:
     SrcPath = f"/opt/mediavortex/src-{Sha[:16]}"
@@ -435,6 +453,8 @@ def main():
     if not Ok:
         return 2
     if not StepEnsureFfmpeg(Target):
+        return 2
+    if not StepReconcileCapabilities(Target, Friendly, Args.role):
         return 2
     # directive: deploy-gc-before-sync -- pre-sync GC frees disk before tar; prevents death-spiral when disk fills mid-deploy
     StepGarbageCollect(Target)

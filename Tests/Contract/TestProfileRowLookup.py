@@ -52,7 +52,7 @@ class TestContentClassResolver(unittest.TestCase):
 
     # directive: profile-row-lookup | # see profile-tier-ladder.C10
     def _Resolve(self, LibraryDefault, Genres, GenreClasses):
-        from Features.Profiles.ContentClassResolver import ContentClassResolver
+        from Features.Policy.ContentClassResolver import ContentClassResolver
         Db = _FakeDb([
             ('FROM StorageRoots', [{'DefaultContentClass': LibraryDefault}]),
             ('FROM MediaFiles', [{'Genres': Genres}]),
@@ -79,7 +79,7 @@ class TestGetProfileRow(unittest.TestCase):
 
     # directive: profile-row-lookup | # see profile-tier-ladder.S5
     def test_row_is_chosen_by_profile_class_and_resolution(self):
-        from Features.Profiles.TierLadderRepository import TierLadderRepository
+        from Features.Policy.TierLadderRepository import TierLadderRepository
         Repo = TierLadderRepository(DatabaseService())
         Live = Repo.GetProfileRow(TierOne, 'live_action', '1080p')
         Anim = Repo.GetProfileRow(TierOne, 'animation', '1080p')
@@ -91,7 +91,7 @@ class TestGetProfileRow(unittest.TestCase):
 
     # directive: profile-row-lookup | # see profile-tier-ladder.S5
     def test_encode_row_is_the_row_at_the_target_resolution(self):
-        from Features.Profiles.TierLadderRepository import TierLadderRepository
+        from Features.Policy.TierLadderRepository import TierLadderRepository
         Repo = TierLadderRepository(DatabaseService())
         Encode = Repo.GetEncodeRow(TierOne, 'live_action', '1920x1080')
         self.assertEqual(Encode.Resolution, '720p')
@@ -102,8 +102,8 @@ class TestGetProfileRow(unittest.TestCase):
     # directive: profile-row-lookup | # see profile-tier-ladder.C9 -- admission, command, estimate and compliance read one row
     def test_four_consumers_agree_on_the_row(self):
         from Core.Models.MediaFileModel import MediaFileModel
-        from Features.Profiles.EncoderKnobRepository import EncoderKnobRepository
-        from Features.Profiles.EffectiveProfileResolver import EffectiveProfileResolver
+        from Features.Policy.EncoderKnobRepository import EncoderKnobRepository
+        from Features.Policy.EffectiveProfileResolver import EffectiveProfileResolver
         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
         from Features.VideoEncoding.VideoVertical import VideoVertical
         Mf = MediaFileModel(StorageRootId=1, AssignedProfile=TierOne, Resolution='1920x1080', ResolutionCategory='1080p',
@@ -139,7 +139,7 @@ class TestGetProfileRow(unittest.TestCase):
             Text = (REPO_ROOT / Rel).read_text(encoding='utf-8', errors='replace')
             Hits += [f'{Rel}:{N}' for N, Line in enumerate(Text.splitlines(), 1) if Names.search(Line)]
         self.assertEqual(Hits, [])
-        for Rel in ('Features/Profiles/EffectiveProfileResolver.py', 'Features/Profiles/EncoderKnobRepository.py'):
+        for Rel in ('Features/Policy/EffectiveProfileResolver.py', 'Features/Policy/EncoderKnobRepository.py'):
             self.assertNotIn('FROM ProfileThresholds', (REPO_ROOT / Rel).read_text(encoding='utf-8'), Rel)
 
 

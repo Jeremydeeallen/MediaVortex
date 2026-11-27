@@ -1,6 +1,6 @@
 from typing import Optional
 from Core.Database.DatabaseService import DatabaseService
-from Features.Profiles.ProfileRepository import ProfileRepository
+from Features.Policy.ProfileRepository import ProfileRepository
 
 
 # directive: work-transcode-unified | # see work-bucket.C3

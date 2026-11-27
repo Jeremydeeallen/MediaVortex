@@ -12,7 +12,7 @@ Replaces per-profile-name proliferation with a 3-axis tuple: `(Family, QualityTi
 |---|---|---|---|---|
 | W1 | Operator edits a tier's TargetKbps on /settings Transcoding card | `/settings` bitrate ladder editor | `PUT /api/SystemSettings/Transcoding` | `SystemSettingsController.SaveTranscodingSettings` -> `ProfileThresholds.TargetKbps` UPDATE |
 | W2 | ContentClassifier assigns a profile to a new MediaFile; its content class is resolved at read, never stored | (internal) | `ContentClassifierService.ClassifyAndAssign` | writes `MediaFiles.AssignedProfile`; `ContentClassResolver.Resolve` supplies the class to every row lookup (C10) |
-| W4 | Operator sets a library's default content class or a genre's class | `/settings` library table "Default content class", genre table class column | `PUT /api/SystemSettings/LibraryTiers` (`DefaultContentClass`), `PUT /api/SystemSettings/GenreTiers` (`ContentClass`) | `LibraryDefaultTierRepository.SetDefaultContentClass`, `GenreQualityTierRepository.SetContentClass`; save re-evaluates the library |
+| W4 | Operator sets a library's default content class or a genre's class | `/settings` library table "Default content class", genre table class column | `PUT /api/SystemSettings/LibraryTiers` (`DefaultContentClass`), `PUT /api/SystemSettings/GenreTiers` (`ContentClass`) | `LibraryPolicyRepository.SetDefaultContentClass`, `GenreQualityTierRepository.SetContentClass`; save re-evaluates the library |
 | W3 | Dispatcher escalates on VMAF fail -> next-tier profile | (internal) | `NextTierAdjuster.Get` | `Features/TranscodeJob/Adjustments/NextTierAdjustmentCalculator` |
 
 ## Success Criteria
@@ -55,8 +55,8 @@ Shipped 2026-07-04 via `transcode-flow-canonical` directive Reset 10 + Reset 14 
 
 ## Files
 
-- `Features/Profiles/EncoderKnobRepository.py` -- reads TargetKbps
-- `Features/Profiles/TierLadderRepository.py` -- (Family, ContentClass[, Resolution]) x Tier grid queries
+- `Features/Policy/EncoderKnobRepository.py` -- reads TargetKbps
+- `Features/Policy/TierLadderRepository.py` -- (Family, ContentClass[, Resolution]) x Tier grid queries
 - `Features/TranscodeJob/Adjustments/NextTierAdjustmentCalculator.py` -- ceiling-terminating walk
 - `Features/TranscodeJob/Emit/Slots/VideoSlot.py` -- consumes TargetKbps
 - `Scripts/SQLScripts/AlignProfileTierModel_2026_07_04.py` -- schema

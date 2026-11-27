@@ -2,9 +2,9 @@ from typing import Optional
 from Core.Database.DatabaseService import DatabaseService
 from Core.Resolution.ResolutionTierRegistry import ResolutionTierRegistry
 from Models.MediaFileModel import MediaFileModel
-from Features.Profiles.ContentClassResolver import ContentClassResolver
-from Features.Profiles.EffectiveProfile import EffectiveProfile
-from Features.Profiles.TierLadderRepository import TierLadderRepository
+from Features.Policy.ContentClassResolver import ContentClassResolver
+from Features.Policy.EffectiveProfile import EffectiveProfile
+from Features.Policy.TierLadderRepository import TierLadderRepository
 
 
 # directive: compliance-solid-refactor, profile-row-lookup | # see compliance-solid-refactor.C12, profile-tier-ladder.S5
@@ -69,7 +69,7 @@ class EffectiveProfileResolver:
 
     # directive: compliance-symmetry | # see work-bucket.G6
     def _IsFinalizedActive(self, ProfileName: str) -> bool:
-        from Features.Profiles.ProfileRepository import ProfileRepository
+        from Features.Policy.ProfileRepository import ProfileRepository
         return ProfileRepository().IsFinalizedActive(ProfileName)
 
     # directive: compliance-symmetry | # see profiles.C23

@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Core.Database.DatabaseService import DatabaseService
 from Features.ContentClassifier.ContentClassifierService import ContentClassifierService
-from Features.ContentClassifier.MovieGenreSyncService import MovieGenreSyncService
+from Features.Policy.MovieGenreSyncService import MovieGenreSyncService
 from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
 
 

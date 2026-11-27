@@ -1,6 +1,6 @@
 """Add rate-anchored mode columns to Profiles + ProfileThresholds.
 
-See Features/Profiles/nvenc-rate-anchored.feature.md criteria 1-6.
+See Features/Policy/nvenc-rate-anchored.feature.md criteria 1-6.
 """
 
 import sys

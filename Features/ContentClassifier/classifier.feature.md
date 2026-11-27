@@ -72,10 +72,10 @@ C9. **A library's default tier beats every rule.** When the file's library has a
 ## What this feature does NOT own
 
 - Probe metadata: `Features/MediaProbe/probe.feature.md`
-- Content class (live_action / animation): resolved at read by `Features/Profiles/ContentClassResolver.py` from the genre and library classes on `/settings` (`profile-tier-ladder.feature.md` C10); the classifier never writes one
+- Content class (live_action / animation): resolved at read by `Features/Policy/ContentClassResolver.py` from the genre and library classes on `/settings` (`profile-tier-ladder.feature.md` C10); the classifier never writes one
 - Compliance rules + evaluation: per-vertical (`video-encoding.feature.md`, `audio-normalization.feature.md`, `container-format.feature.md`)
 - WorkBucket derivation: `Features/WorkBucket/work-bucket.flow.md`
-- Profile catalog: `Features/Profiles/Profiles.feature.md`
+- Profile catalog: `Features/Policy/Profiles.feature.md`
 
 ## Status
 

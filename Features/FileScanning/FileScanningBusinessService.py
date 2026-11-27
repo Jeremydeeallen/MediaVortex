@@ -702,7 +702,7 @@ class FileScanningBusinessService:
             except Exception as AggEx:
                 LoggingService.LogException("Post-scan RootFolder aggregate failed", AggEx, 'PerformScan', 'FileScanningBusinessService')
 
-            from Features.ContentClassifier.MovieGenreSyncService import MovieGenreSyncService
+            from Features.Policy.MovieGenreSyncService import MovieGenreSyncService
             MovieGenreSyncService().SyncMissing()
 
             self.ScanProgress = 100.0

@@ -36,7 +36,7 @@ Outputs land in `Scripts/Smoke/shootout_output/` (encoded mp4s, transient) and `
 
 ## Status
 
-COMPLETE 2026-05-28. Used for the NVENC vs SVT-AV1 production rollout decision (BUG-0022 NVENC arm). Winning variant `nv_cq32_sink` shipped as production Profiles in `Features/Profiles/nvenc-profiles.feature.md`.
+COMPLETE 2026-05-28. Used for the NVENC vs SVT-AV1 production rollout decision (BUG-0022 NVENC arm). Winning variant `nv_cq32_sink` shipped as production Profiles in `Features/Policy/nvenc-profiles.feature.md`.
 
 Harness remains in the tree for future encoder evaluations -- matrix JSON is the only thing that changes per test.
 

@@ -1,7 +1,7 @@
 from typing import Optional
 
 from Core.Database.DatabaseService import DatabaseService
-from Features.Profiles.GenreQualityTierRepository import GenreQualityTierRepository
+from Features.Policy.GenreQualityTierRepository import GenreQualityTierRepository
 
 
 # directive: profile-row-lookup | # see profile-tier-ladder.C10

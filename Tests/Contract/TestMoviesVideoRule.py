@@ -5,8 +5,8 @@ from unittest.mock import Mock, patch
 
 from Core.Database.DatabaseService import DatabaseService
 from Features.ContentClassifier.ContentClassifierService import ContentClassifierService
-from Features.ContentClassifier.MovieGenreSyncService import MovieGenreSyncService
-from Features.Profiles.FileTierResolver import FileTier, FileTierResolver
+from Features.Policy.MovieGenreSyncService import MovieGenreSyncService
+from Features.Policy.FileTierResolver import FileTier, FileTierResolver
 from Features.VideoEncoding.VideoVertical import VideoVertical
 
 

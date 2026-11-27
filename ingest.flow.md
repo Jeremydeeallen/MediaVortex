@@ -145,7 +145,7 @@ Per-stage details live in the colocated feature docs:
 
 - `Features/FileScanning/scan.feature.md` -- ST1/ST2/ST3 details, entry points, RootFolder registration, ScanEnabled, ContinuousScanService cadence.
 - `Features/MediaProbe/probe.feature.md` -- ST4 details, ProbeWorker, cascade behavior, failure semantics.
-- `Features/Profiles/policy.feature.md` -- target resolution (`MediaFileTargets`), genre sync, overrides.
+- `Features/Policy/policy.feature.md` -- target resolution (`MediaFileTargets`), genre sync, overrides.
 - `Features/Failures/failures.feature.md` -- /Failures page + retry endpoint.
 - `Features/Ingest/ingest-webhook.feature.md` -- Sonarr/Radarr webhook contract + payload parsing.
 - `Features/FileScanning/scanners.feature.md` -- shared `Scanners` config table (ScanWorker + ProbeWorker + StuckJobDetection read their config from here).

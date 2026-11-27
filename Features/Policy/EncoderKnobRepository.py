@@ -3,7 +3,7 @@ from typing import Optional, Dict, Any
 
 from Core.Database.BaseRepository import BaseRepository
 from Core.Logging.LoggingService import LoggingService
-from Features.Profiles.TierLadderRepository import TierLadderRepository
+from Features.Policy.TierLadderRepository import TierLadderRepository
 
 
 @dataclass

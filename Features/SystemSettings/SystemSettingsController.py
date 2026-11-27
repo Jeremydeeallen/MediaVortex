@@ -467,7 +467,7 @@ class SystemSettingsController:
         # directive: video-compliance-multiplier | # see video-encoding.C4
         def GetTranscodingSettings():
             try:
-                from Features.Profiles.TierLadderRepository import TierLadderRepository
+                from Features.Policy.TierLadderRepository import TierLadderRepository
                 from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
                 from Features.QualityTesting.VmafConfidenceStatsRepository import VmafConfidenceStatsRepository
                 from Features.VideoEncoding.VideoComplianceThresholdsRepository import VideoComplianceThresholdsRepository
@@ -515,7 +515,7 @@ class SystemSettingsController:
         def UpdateTranscodingSettings():
             try:
                 Data = request.get_json() or {}
-                from Features.Profiles.TierLadderRepository import TierLadderRepository
+                from Features.Policy.TierLadderRepository import TierLadderRepository
                 from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
                 from Features.VideoEncoding.VideoComplianceThresholdsRepository import VideoComplianceThresholdsRepository, ComplianceThreshold
 
@@ -596,8 +596,8 @@ class SystemSettingsController:
         # directive: tv-video-rule-tier1 | # see video-encoding.C4
         def GetLibraryTiers():
             try:
-                from Features.Profiles.LibraryDefaultTierRepository import LibraryDefaultTierRepository
-                Libraries = LibraryDefaultTierRepository().ListLibraries()
+                from Features.Policy.LibraryPolicyRepository import LibraryPolicyRepository
+                Libraries = LibraryPolicyRepository().ListLibraries()
                 return jsonify({'Success': True, 'Data': {'Libraries': [
                     {'StorageRootId': L.StorageRootId, 'Name': L.Name, 'DefaultQualityTier': L.DefaultQualityTier, 'DefaultContentClass': L.DefaultContentClass}
                     for L in Libraries
@@ -626,8 +626,8 @@ class SystemSettingsController:
                     return jsonify({'Success': False, 'Message': 'DefaultContentClass must be live_action, animation or null'}), 400
                 if not isinstance(ReplaceOverrides, bool):
                     return jsonify({'Success': False, 'Message': 'ReplaceOverrides must be a boolean'}), 400
-                from Features.Profiles.LibraryDefaultTierRepository import LibraryDefaultTierRepository
-                Repo = LibraryDefaultTierRepository()
+                from Features.Policy.LibraryPolicyRepository import LibraryPolicyRepository
+                Repo = LibraryPolicyRepository()
                 Written = 0
                 if 'DefaultQualityTier' in Data:
                     Written += Repo.SetDefaultQualityTier(StorageRootId, Tier)
@@ -646,7 +646,7 @@ class SystemSettingsController:
         # directive: movies-video-rule | # see video-encoding.C4
         def GetGenreTiers():
             try:
-                from Features.Profiles.GenreQualityTierRepository import GenreQualityTierRepository
+                from Features.Policy.GenreQualityTierRepository import GenreQualityTierRepository
                 return jsonify({'Success': True, 'Data': {'Genres': GenreQualityTierRepository().ListGenreTiers()}}), 200
             # fail-loud-ok: HTTP boundary; logged and surfaced as Success=False
             except Exception as e:
@@ -669,8 +669,8 @@ class SystemSettingsController:
                     return jsonify({'Success': False, 'Message': 'QualityTier must be 1-5 or null'}), 400
                 if ContentClass is not None and ContentClass not in ('live_action', 'animation'):
                     return jsonify({'Success': False, 'Message': 'ContentClass must be live_action, animation or null'}), 400
-                from Features.Profiles.GenreQualityTierRepository import GenreQualityTierRepository
-                from Features.Profiles.LibraryDefaultTierRepository import LibraryDefaultTierRepository
+                from Features.Policy.GenreQualityTierRepository import GenreQualityTierRepository
+                from Features.Policy.LibraryPolicyRepository import LibraryPolicyRepository
                 Repo = GenreQualityTierRepository()
                 Written = 0
                 if 'QualityTier' in Data:
@@ -679,7 +679,7 @@ class SystemSettingsController:
                     Written += Repo.SetContentClass(Genre, ContentClass)
                 if Written == 0:
                     return jsonify({'Success': False, 'Message': f'No genre named {Genre}'}), 404
-                for StorageRootId in LibraryDefaultTierRepository().ListGenreSourcedLibraryIds():
+                for StorageRootId in LibraryPolicyRepository().ListGenreSourcedLibraryIds():
                     _SpawnLibraryRecompute(StorageRootId)
                 return jsonify({'Success': True, 'Message': 'Genre settings saved; re-evaluating movies in the background', 'Data': {'Genre': Genre, 'QualityTier': Tier, 'ContentClass': ContentClass}}), 200
             # fail-loud-ok: HTTP boundary; logged and surfaced as Success=False

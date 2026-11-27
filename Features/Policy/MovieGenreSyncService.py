@@ -4,7 +4,7 @@ from Core.Arr.RadarrClient import RadarrClient
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Features.ContentClassifier.ContentClassifierService import ContentClassifierService
-from Features.Profiles.GenreQualityTierRepository import GenreQualityTierRepository
+from Features.Policy.GenreQualityTierRepository import GenreQualityTierRepository
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 
 

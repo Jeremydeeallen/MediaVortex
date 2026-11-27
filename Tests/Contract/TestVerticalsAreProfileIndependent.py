@@ -56,7 +56,7 @@ class TestVerticalsAreProfileIndependent(unittest.TestCase):
     # directive: movies-video-rule | # see video-encoding.C1
     def test_video_vertical_accepts_null_assigned_profile(self):
         from unittest.mock import Mock
-        from Features.Profiles.FileTierResolver import FileTier
+        from Features.Policy.FileTierResolver import FileTier
         Tiered = Mock(**{'Resolve.return_value': FileTier(1, '')})
         Ladder = Mock(**{'GetTierEncodeKbps.return_value': 1000})
         Mult = Mock(**{'GetMultiplier.return_value': 2.0})

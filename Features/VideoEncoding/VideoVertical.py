@@ -3,9 +3,9 @@ from typing import List, Optional, Tuple
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 from Features.MediaFile.Domain.MediaFileScope import IsAudioOnlyContainer
-from Features.Profiles.ContentClassResolver import ContentClassResolver
-from Features.Profiles.FileTierResolver import FileTier, FileTierResolver
-from Features.Profiles.TierLadderRepository import TierLadderRepository
+from Features.Policy.ContentClassResolver import ContentClassResolver
+from Features.Policy.FileTierResolver import FileTier, FileTierResolver
+from Features.Policy.TierLadderRepository import TierLadderRepository
 from Features.VideoEncoding.VideoComplianceThresholdsRepository import VideoComplianceThresholdsRepository
 from Repositories.DatabaseManager import DatabaseManager
 

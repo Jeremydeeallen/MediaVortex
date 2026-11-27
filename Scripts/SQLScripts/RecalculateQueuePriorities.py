@@ -18,8 +18,8 @@ def Main():
     DryRun = Args.dry_run or not Args.commit
 
     from Core.Database.DatabaseService import DatabaseService
-    from Features.Profiles.ContentClassResolver import ContentClassResolver
-    from Features.Profiles.TierLadderRepository import TierLadderRepository
+    from Features.Policy.ContentClassResolver import ContentClassResolver
+    from Features.Policy.TierLadderRepository import TierLadderRepository
     from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
     from Models.MediaFileModel import MediaFileModel
 

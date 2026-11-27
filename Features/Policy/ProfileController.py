@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
-from Features.Profiles.ProfileManagementViewModel import ProfileManagementViewModel
-from Features.Profiles.Models.TranscodeProfileModel import TranscodeProfileModel
-from Features.Profiles.Models.ProfileThresholdModel import ProfileThresholdModel
+from Features.Policy.ProfileManagementViewModel import ProfileManagementViewModel
+from Features.Policy.Models.TranscodeProfileModel import TranscodeProfileModel
+from Features.Policy.Models.ProfileThresholdModel import ProfileThresholdModel
 from Core.Logging.LoggingService import LoggingService
 from datetime import datetime
 
@@ -380,7 +380,7 @@ class ProfileController:
                 if not OrderedIds:
                     return jsonify({'success': False, 'error': 'OrderedIds is required'}), 400
 
-                from Features.Profiles.ProfileRepository import ProfileRepository
+                from Features.Policy.ProfileRepository import ProfileRepository
                 Repo = ProfileRepository()
                 Success = Repo.UpdateProfileOrder(OrderedIds)
                 if Success:

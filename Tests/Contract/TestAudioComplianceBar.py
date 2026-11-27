@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from Core.Database.DatabaseService import DatabaseService
-from Features.Profiles.EffectiveProfile import EffectiveProfile
+from Features.Policy.EffectiveProfile import EffectiveProfile
 from Features.AudioNormalization.AudioVertical import AudioVertical
 from Features.AudioNormalization.AudioPolicyAdmissionGate import ADMITTED, AdmissionDecision
 

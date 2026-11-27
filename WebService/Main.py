@@ -136,7 +136,7 @@ class WebServiceApp:
             LoggingService.LogWarning(f"Could not initialize WorkerContext: {e}", "WebService", "__init__")
 
         # Initialize controllers
-        from Features.Profiles.ProfileController import ProfileController
+        from Features.Policy.ProfileController import ProfileController
         from Features.FileScanning.FileScanningController import FileScanningController
         from Features.SystemSettings.SystemSettingsController import SystemSettingsController
         from Features.FileReplacement.FileReplacementController import FileReplacementController
@@ -388,7 +388,7 @@ class WebServiceApp:
         from Features.TranscodeQueue.TranscodeQueueController import TranscodeQueueBlueprint
         from Features.TranscodeJob.TranscodeJobController import TranscodeJobBlueprint
         from Features.FileScanning.FileScanningController import FileScanningController
-        from Features.Profiles.ProfileController import ProfileController
+        from Features.Policy.ProfileController import ProfileController
         from Features.QualityTesting.QualityTestController import QualityTestBlueprint
         from Features.ServiceControl.ServiceStatusController import ServiceStatusBlueprint
         from Features.Optimization.OptimizationController import OptimizationBlueprint

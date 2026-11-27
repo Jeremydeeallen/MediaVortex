@@ -1,3 +1,3 @@
-# Re-export shim: ProfileThresholdModel has moved to Features/Profiles/Models/ProfileThresholdModel.py
+# Re-export shim: ProfileThresholdModel has moved to Features/Policy/Models/ProfileThresholdModel.py
 # This file exists for backwards compatibility during migration.
-from Features.Profiles.Models.ProfileThresholdModel import ProfileThresholdModel
+from Features.Policy.Models.ProfileThresholdModel import ProfileThresholdModel

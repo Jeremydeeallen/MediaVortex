@@ -8,8 +8,8 @@ from Features.ContentClassifier.Models.ContentClassificationRuleModel import (
     ContentClassificationRuleModel,
 )
 from Features.MediaFiles.ProfileAssignmentService import ProfileAssignmentService
-from Features.Profiles.FileTierResolver import FileTierResolver
-from Features.Profiles.TierLadderRepository import TierLadderRepository
+from Features.Policy.FileTierResolver import FileTierResolver
+from Features.Policy.TierLadderRepository import TierLadderRepository
 
 
 _SKIP_SENTINEL = "__skip__"

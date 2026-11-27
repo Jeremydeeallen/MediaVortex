@@ -54,7 +54,7 @@ If future NVENC tuning needs to vary per profile (e.g. tune=hq for fast-motion l
 Scripts/SQLScripts/AddNvencProfiles.py     -- migration (idempotent)
 Models/CommandBuilder.py                   -- NVENC branch in AddCodecParameters + AddPixelFormatParameter
 Repositories/DatabaseManager.py            -- ClaimNextPendingTranscodeJob NVENC capability gate
-Features/Profiles/nvenc-profiles.feature.md -- this file
+Features/Policy/nvenc-profiles.feature.md -- this file
 ```
 
 ## Files

@@ -1,3 +1,3 @@
-# Re-export shim: CodecParametersModel has moved to Features/Profiles/Models/CodecParametersModel.py
+# Re-export shim: CodecParametersModel has moved to Features/Policy/Models/CodecParametersModel.py
 # This file exists for backwards compatibility during migration.
-from Features.Profiles.Models.CodecParametersModel import CodecParametersModel
+from Features.Policy.Models.CodecParametersModel import CodecParametersModel

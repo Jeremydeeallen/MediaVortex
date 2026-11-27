@@ -52,16 +52,16 @@ C9. **Compliance unchanged for TV and Movies.** The counts of `VideoCompliant` /
 
 ## Status
 
-Target state (2026-11-27). Implementation lands by phase; the schedule and the gap per phase live in `ARCHITECTURE.md` `## Gap to Target`. Until `target-policy-1a-tables` ships, this vertical is `Features/Profiles/` (`Profiles.feature.md`, `profile-tier-ladder.feature.md`), which describes the running code.
+W1 implemented by `target-policy-1a-tables` (2026-11-27): the tables, the view, `TargetResolver`, `EncoderSelector` and the repositories exist; no consumer reads `Target` yet. W2-W6 and the consumers land per `ARCHITECTURE.md` `## Gap to Target`. Until `target-policy-delete-stored`, the running encode and compliance code still reads the contracts in this directory's `Profiles.feature.md` and `profile-tier-ladder.feature.md`. `Target.IcqQ` and `Target.VmafMax` are `Optional` because NULL is a value there (no ICQ, no ceiling); the four held-frame thresholds are `Optional` until `target-policy-verification` seeds them; every other field is required and the resolver returns `Undecided(reason)` instead of a partial `Target`.
 
 ### Files
 
 ```
-Features/Policy/TargetResolver.py             -- view row -> Target | Undecided (W1)
-Features/Policy/Target.py                     -- frozen dataclass, all fields non-optional
-Features/Policy/EncoderSelector.py            -- Workers.nvenccapable / qsvcapable -> encoder
+Features/Policy/TargetResolver.py             -- view row -> Target | Undecided (W1); ResolveMany for batches (S2)
+Features/Policy/Target.py                     -- frozen Target + Undecided
+Features/Policy/EncoderSelector.py            -- Workers.nvenccapable / qsvcapable -> encoder (S3)
 Features/Policy/LadderCellRepository.py       -- LadderCells (W3)
-Features/Policy/EncoderSettingsRepository.py  -- EncoderSettings (W4)
+Features/Policy/EncoderSettingsRepository.py  -- EncoderSettings (W4, S3)
 Features/Policy/TierAcceptanceRepository.py   -- Profiles acceptance columns (W5)
 Features/Policy/TargetOverrideRepository.py   -- TargetOverrides (W2, S6)
 Features/Policy/LibraryPolicyRepository.py    -- StorageRoots tier/class/genre source/review flag (W6)
@@ -69,4 +69,9 @@ Features/Policy/GenreQualityTierRepository.py -- GenreQualityTiers (W6)
 Features/Policy/FrameRateClassRepository.py   -- FrameRateClasses (W6)
 Features/Policy/MovieGenreSyncService.py      -- Radarr genres -> MediaFiles.Genres (ingest.flow.md ST3)
 Scripts/SQLScripts/AddTargetPolicyTables_2026_11_27.py -- tables + VIEW MediaFileTargets + data migration
+Scripts/Golden/SnapshotCompliance.py          -- writes Tests/Contract/Golden/compliance-counts.json (C9)
+Tests/Contract/TestTargetAuthority.py         -- C2
+Tests/Contract/TestTargetResolver.py          -- S1 (origins, Undecided reasons, high cell)
+Tests/Contract/TestGoldenTvCommands.py        -- C6 / S3 (Tests/Contract/Golden/*.argv)
+Tests/Contract/TestComplianceCountsUnchanged.py -- C9
 ```

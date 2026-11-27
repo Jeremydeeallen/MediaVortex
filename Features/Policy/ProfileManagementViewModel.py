@@ -1,8 +1,8 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
-from Features.Profiles.Models.TranscodeProfileModel import TranscodeProfileModel
-from Features.Profiles.Models.ProfileThresholdModel import ProfileThresholdModel
-from Features.Profiles.ProfileService import ProfileService
+from Features.Policy.Models.TranscodeProfileModel import TranscodeProfileModel
+from Features.Policy.Models.ProfileThresholdModel import ProfileThresholdModel
+from Features.Policy.ProfileService import ProfileService
 from Core.Logging.LoggingService import LoggingService
 
 

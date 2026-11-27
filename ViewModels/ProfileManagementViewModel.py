@@ -1,3 +1,3 @@
-# Re-export shim: ProfileManagementViewModel has moved to Features/Profiles/ProfileManagementViewModel.py
+# Re-export shim: ProfileManagementViewModel has moved to Features/Policy/ProfileManagementViewModel.py
 # This file exists for backwards compatibility during migration.
-from Features.Profiles.ProfileManagementViewModel import ProfileManagementViewModel
+from Features.Policy.ProfileManagementViewModel import ProfileManagementViewModel
