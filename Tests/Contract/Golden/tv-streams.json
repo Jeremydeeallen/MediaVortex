@@ -1,0 +1,15 @@
+{
+  "_source": "ffprobe shape of AudioStreamProbe.Probe (audio-only indices) and CommandComposer._ProbeSubtitleStreams ((absolute index, codec_name) pairs) for the two inputs; derived from the stored commands' -map arguments and the live file's stream layout",
+  "Transcode": {
+    "Audio": [
+      {"index": 0, "channels": 2, "channel_layout": "stereo", "tags": {"language": "eng"}, "disposition": {"default": 1}}
+    ],
+    "Subtitles": [[2, "subrip"], [3, "subrip"]]
+  },
+  "AudioFix": {
+    "Audio": [
+      {"index": 0, "channels": 2, "channel_layout": "stereo", "tags": {"language": "eng"}, "disposition": {"default": 1}}
+    ],
+    "Subtitles": [[2, "mov_text"], [3, "mov_text"]]
+  }
+}

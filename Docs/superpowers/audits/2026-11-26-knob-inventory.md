@@ -488,3 +488,27 @@ Settings.html also requests five keys that are not in the table: TranscodeCoreTi
 - C:\Code\MediaVortex\Templates\Settings.html
 - C:\Code\MediaVortex\Templates\AdminCompliance.html
 - C:\Code\MediaVortex\Templates\WorkBucket.html
+
+## Addendum 2026-11-27 (target-policy-1a-tables): CodecFlags + CodecParameters, frame-rate classes, ladder seed
+
+Missing from the 2026-11-26 pass; measured live 2026-11-27 before the Phase 1a migration.
+
+**CodecFlags** (15 columns: Id, CodecName, DisplayName, PresetType, PresetMin, PresetMax, PresetDefault, PresetOptions, FilmGrainType, FilmGrainMin, FilmGrainMax, FilmGrainDefault, TuneOptions, CreatedDate, LastModified). 3 rows: `libsvtav1` (Id 5, PresetDefault 6, FilmGrainDefault 10), `av1_nvenc` (Id 6, PresetDefault 7), `av1_qsv` (Id 7, PresetDefault 1).
+
+**CodecParameters** (10 columns: Id, CodecFlagsId, ParameterName, ParameterType, MinValue, MaxValue, DefaultValue, Description, FfmpegFlag, CreatedDate). 12 rows: libsvtav1 `preset` (default 6), `crf` (default 30), `qp`, `film-grain` (default 10), `tune`, `la-depth`, `movflags`, `10bit-encoding`; av1_nvenc `cq`, `preset`; av1_qsv `preset`, `global_quality`.
+
+**Readers.** `Core/Database/CodecFlagsRepository` (`GetCodecFlagsByCodecName`, `GetCodecParametersByCodecFlagsId`) called once, from `ProcessTranscodeQueueService.GetTranscodingSettings` (lines 852-858): a codec with no `CodecFlags` row or no `CodecParameters` row fails the job with "Failed to get transcoding settings" (existence gate). `Context['CodecFlags']` is passed to `CreateTranscodeAttempt` and never read; `Context['CodecParameters']` reaches `VideoSlot` -> `SvtAv1EncoderArgsStrategy`, where only three parameter NAMES act as emit switches on the libsvtav1 path: `crf` (emit `-crf <Profiles... Quality>`), `preset` (emit `-preset <Preset>`), `film-grain` (emit `-svtav1-params film-grain=<Profiles.FilmGrain>`). The NVENC and QSV paths ignore the list. Every Min/Max/Default/Description/Options column and the other nine parameter rows are read by nothing at decision time (the `/settings` profile editor shows preset ranges from `CodecFlags`). Writers: `Scripts/SQLScripts/AddNvencProfiles.py` seeds; `Features/Profiles/Models/CodecFlagsModel.py`, `CodecParametersModel.py` are shims.
+
+| Column family | Class |
+|---|---|
+| `CodecFlags.CodecName` row existence (all 3) | READ-AS-GATE (job fails without it) |
+| `CodecParameters.ParameterName` in (`crf`, `preset`, `film-grain`) for libsvtav1 | READ-AS-SWITCH (presence toggles emission) |
+| all other `CodecFlags` / `CodecParameters` columns and rows | DISP (profile editor ranges) or NEVER |
+
+**Fold rule (spec 4.5, decided here).** `EncoderSettings` gains `Crf INT NULL` and `FilmGrain INT NULL`; "parameter row present" becomes "column non-NULL". The five `libsvtav1` rows seed `Preset 6`, `Crf 30`, `FilmGrain 10`, `RateControl 'crf'`, everything else NULL (today's tier profiles have `Tune`, `PixelFormat` NULL, so nothing else is emitted). The `av1_nvenc` and `av1_qsv` rows carry the `WorkerEncoderResolver` dictionaries (`Features/TranscodeJob/Worker/WorkerEncoderResolver.py`) plus the QSV threshold knobs (`QsvExtBrc 1`, `QsvLookAheadDepth 8`). The gate and the switch move to the `EncoderSettings` row lookup in `target-policy-1c-pipeline`; both tables, `CodecFlagsRepository` and the two shims are deleted in `target-policy-delete-stored`.
+
+**Frame-rate classes (seed).** Live `MediaFiles.FrameRate` distribution 2026-11-27: 55,829 files at or below 30 fps, 2,309 in (30, 120], 276 above 120 (251 of them at 90000 fps and 2 at 16000 fps: probe fact defects, filed as a bug), 7 NULL. `FrameRateClasses` seeds `standard` MaxFps `30.0` and `high` MaxFps `120.0`; files above 120 or NULL resolve `Undecided('FrameRateClass')`. `high` cells seed at the `standard` cell's `TargetKbps` x `1.5` (evidence: tier 3 8,000 kbps scored VMAF 90.4 at 59.94 fps and 98.9 at 29.97 fps in the xxx-video-tier fleet smoke, 2026-11-26); the operator tunes them on `/settings` in `target-policy-1d-gui`.
+
+**Ladder seed.** A `LadderCells` row's `TargetKbps` is the kbps at its `TargetResolution`: today every consumer (`EncoderKnobRepository`, `VideoVertical` via `GetTierEncodeKbps`, admission) reads the ENCODE row (`TierLadderRepository.GetEncodeRow`, the row at `TranscodeDownTo`), so the `TargetKbps 900` stored on the tier 1 live_action 1080p and 2160p SOURCE rows is dead and is not migrated. Source rows: 44 `ProfileThresholds` rows, 40 on the five tier profiles (Ids 475-479), 4 on the STREAMING profiles (not migrated; they go with the profiles in Phase 2).
+
+**Acceptance seed.** `PostTranscodeGateConfig` holds `VmafAutoReplaceMinThreshold 90.0` / `VmafAutoReplaceMaxThreshold 96.0`; those seed `Profiles.VmafMin` / `VmafMax` on the five tier rows. `HeldFrameDetectionThreshold`, `HeldFrameP25Min`, `HeldFrameMeanMin`, `LiveActionP10Min` have no live source (`post-transcode-disposition.feature.md` describes columns that were never migrated; no Python reads them) and stay NULL until `target-policy-verification` seeds them with the decider.
