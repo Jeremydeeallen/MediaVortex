@@ -44,6 +44,8 @@ C11. **Probe never walks directories.** Grep production probe code paths for `sc
 
 C12. **`MediaProbeBusinessService.ProbeFile / .ProbeFilesNeedingMetadata` still callable.** No caller breakage. `ProbeWorker` uses `ProbeFile(MediaFileId, Force=False)` internally.
 
+- [ ] [BUG-0126] **`FrameRate` is a playable frame rate or NULL.** A probe never stores a timebase as a frame rate: when `r_frame_rate` is implausible (above 120 fps, or far from `avg_frame_rate`), the probe stores `avg_frame_rate`, and when both are implausible it stores NULL and `LastFFprobeError` names the stream's raw values. Verifiable: `SELECT COUNT(*) FROM MediaFiles WHERE FrameRate > 120` = 0 after a reprobe of the affected rows; a fixture stream with `r_frame_rate=90000/1, avg_frame_rate=24000/1001` probes to 23.976.
+
 ## Seams
 
 Intra-feature. Cross-stage in `ingest.flow.md`.

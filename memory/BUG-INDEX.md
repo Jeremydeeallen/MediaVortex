@@ -68,6 +68,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 
 - BUG-0124 | active | transcode-queue | AddJob API silently drops QualityTier/QualityLabel; only ProfileId reaches the service, job runs at the file's existing profile | 2026-11-26
 - BUG-0125 | active | file-replacement | MediaFiles.KeepSource is dead (no reader); placement deletes the original unconditionally, so a smoke/review cannot keep a source; smoke 104045 deleted 55384's 4K source | 2026-11-26
+- BUG-0126 | active | media-probe | MediaProbe stores impossible frame rates (251 files at 90000 fps, 2 at 16000, 1 each at 125/240/300; 7 NULL): r_frame_rate timebase stored as a fact; resolves Undecided('FrameRateClass') under target policy | 2026-11-27
 
 ## Recently Resolved (last 10)
 

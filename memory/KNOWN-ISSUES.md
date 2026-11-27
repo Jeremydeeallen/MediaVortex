@@ -353,6 +353,11 @@ This is an architectural violation, not a typo: BUG-0061's fix tightened the col
 
 ### media-probe
 
+- BUG-0126 | MediaProbe stores impossible frame rates (251 files at 90000 fps, 2 at 16000, 1 each at 125/240/300; 7 NULL): the ffprobe `r_frame_rate` timebase leaks through as a fact; under target policy these files resolve `Undecided('FrameRateClass')` and land in `Unclassified` | criterion: Features/MediaProbe/probe.feature.md#BUG-0126 | 2026-11-27
+  Repro: `SELECT FrameRate, COUNT(*) FROM MediaFiles WHERE FrameRate > 120 GROUP BY 1 ORDER BY 2 DESC` -> 90000.0 x251, 200.0 x20, 16000.0 x2, 125/240/300 x1 each (2026-11-27); 7 rows NULL.
+  Evidence: `Services/FFmpegAnalysisService.py:105` takes `r_frame_rate` first and only falls back to `avg_frame_rate` when it is absent, so a stream whose `r_frame_rate` is the container timebase (90000/1 for MPEG-TS-derived MKVs) is stored verbatim; nothing bounds the value. `MediaFileTargets` (Phase 1a) classifies by `FrameRateClasses.MaxFps` (standard 30, high 120); 276 files above 120 resolve `Undecided('FrameRateClass')`, which is the correct visible state for a bad fact.
+  First place to look: `Services/FFmpegAnalysisService.py` frame-rate strategies (lines 105-120) and the `FrameRate` write in `Features/MediaProbe/MediaProbeRepository.py:116`; fix = plausibility bound + `avg_frame_rate` preference, then `NeedsReprobe = TRUE` on the 283 rows.
+
 ### [BUG-0079] Requeue disposition never enqueues a new TranscodeQueue row; .inprogress orphans on disk
 **Date:** 2026-07-02 | **Area:** disposition / transcode-lifecycle
 
