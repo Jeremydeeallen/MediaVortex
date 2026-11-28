@@ -11,6 +11,10 @@ from Features.Policy.TargetResolver import VIEW_COLUMNS, FromRow, TargetResolver
 
 _TV_FIXTURE_ID = 751897
 _SELECT = "SELECT " + ", ".join(VIEW_COLUMNS) + " FROM MediaFileTargets WHERE MediaFileId = %s"
+_DELETE_SERIES_OVERRIDE = (
+    "DELETE FROM TargetOverrides t USING MediaFiles mf WHERE mf.Id = %s AND t.StorageRootId = mf.StorageRootId "
+    "AND t.Scope = 'series' AND t.Key = split_part(mf.RelativePath, '/', 1)"
+)
 
 
 # directive: target-policy-1a-tables | # see policy.S1
@@ -54,15 +58,23 @@ class TestTargetResolver(unittest.TestCase):
         cls.Db = DatabaseService()
         cls.Resolver = TargetResolver(cls.Db)
 
-    # directive: target-policy-1a-tables | # see policy.S1
-    def test_tv_fixture_resolves_the_library_tier_cell(self):
+    # directive: target-policy-1a-tables | # see policy.S1 -- Pokémon carries a migrated SeriesProfiles row at tier 1, so the fixture's origin is the series override
+    def test_tv_fixture_resolves_the_tier_1_cell_through_its_series_override(self):
         T = self.Resolver.Resolve(_TV_FIXTURE_ID)
         self.assertIsInstance(T, Target, getattr(T, 'Reason', None))
-        self.assertEqual((T.Tier, T.TierOrigin, T.ContentClass, T.ClassOrigin), (1, 'library', 'live_action', 'library'))
+        self.assertEqual((T.Tier, T.TierOrigin, T.ContentClass, T.ClassOrigin), (1, 'series_override', 'live_action', 'library'))
         self.assertEqual((T.FrameRateClass, T.SourceResolution, T.TargetResolution, T.TargetKbps), ('standard', '720p', '720p', 1000))
         self.assertEqual((T.VmafMin, T.VmafMax, T.QualityLabel, T.QualityTestRequired), (90.0, 96.0, 'Efficient', True))
         self.assertEqual((T.OutputContainer, T.CeilingMultiplier, T.ReviewBeforeReplace), ('mp4', 2.0, False))
         self.assertGreater(T.AudioPolicyId, 0)
+
+    # directive: target-policy-1a-tables | # see policy.S1 -- without its series override the same file falls through to the library tier, same cell
+    def test_tv_fixture_falls_back_to_the_library_tier_in_a_rolled_back_transaction(self):
+        with _RolledBack(self.Db) as Cur:
+            Cur.execute(_DELETE_SERIES_OVERRIDE, (_TV_FIXTURE_ID,))
+            T = FromRow(_ViewRow(Cur, _TV_FIXTURE_ID))
+        self.assertIsInstance(T, Target)
+        self.assertEqual((T.Tier, T.TierOrigin, T.TargetKbps), (1, 'library', 1000))
 
     # directive: target-policy-1a-tables | # see policy.S2
     def test_resolve_many_returns_one_entry_per_id_and_matches_resolve(self):
@@ -116,9 +128,10 @@ class TestTargetResolver(unittest.TestCase):
         self.assertEqual(T.TargetKbps, int(Cell))
         self.assertEqual(self.Resolver.Resolve(_TV_FIXTURE_ID).Tier, 1)
 
-    # directive: target-policy-1a-tables | # see policy.C4 -- two explicit genre classes make the file Undecided('ContentClassConflict')
+    # directive: target-policy-1a-tables | # see policy.C4 -- two explicit genre classes make the file Undecided('ContentClassConflict'); the series override is removed so the genre tier is visible
     def test_conflicting_genre_classes_are_undecided_in_a_rolled_back_transaction(self):
         with _RolledBack(self.Db) as Cur:
+            Cur.execute(_DELETE_SERIES_OVERRIDE, (_TV_FIXTURE_ID,))
             Cur.execute("INSERT INTO GenreQualityTiers (Genre, QualityTier, ContentClass) VALUES ('_TestA', 2, 'animation'), ('_TestB', NULL, 'live_action')")
             Cur.execute("UPDATE MediaFiles SET Genres = '_TestA,_TestB' WHERE Id = %s", (_TV_FIXTURE_ID,))
             Conflict = FromRow(_ViewRow(Cur, _TV_FIXTURE_ID))

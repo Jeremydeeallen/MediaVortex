@@ -919,6 +919,11 @@
       "data_type": "timestamp without time zone",
       "is_generated": "NEVER",
       "is_nullable": "YES"
+    },
+    "outputcontainer": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
     }
   },
   "contentclassificationrules": {
@@ -1077,6 +1082,133 @@
       "is_nullable": "NO"
     }
   },
+  "encodersettings": {
+    "bframes": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "brefmode": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "bufsizemultiplier": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "crf": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "encoder": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "filmgrain": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "gop": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "maxratemultiplier": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "multipass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "pixelformat": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "preset": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvadaptiveb": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvadaptivei": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvbstrategy": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvextbrc": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvlookaheaddepth": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvtilecols": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qsvtilerows": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qualitytier": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "ratecontrol": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "rclookahead": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "spatialaq": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "temporalaq": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "tune": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
   "failurebudgetconfig": {
     "id": {
       "data_type": "integer",
@@ -1164,6 +1296,18 @@
     },
     "updatedat": {
       "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    }
+  },
+  "framerateclasses": {
+    "maxfps": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "name": {
+      "data_type": "text",
       "is_generated": "NEVER",
       "is_nullable": "NO"
     }
@@ -1280,6 +1424,48 @@
       "data_type": "text",
       "is_generated": "NEVER",
       "is_nullable": "YES"
+    }
+  },
+  "laddercells": {
+    "contentclass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "framerateclass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "icqq": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "qualitytier": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "sourceresolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "targetkbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "targetresolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
     }
   },
   "localstagingconfig": {
@@ -2374,6 +2560,138 @@
       "is_nullable": "YES"
     }
   },
+  "mediafiletargets": {
+    "acceptableaudiocodecscsv": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "acceptablecontainerscsv": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "audiopolicyid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "ceilingmultiplier": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "classorigin": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "contentclass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "framerateclass": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "heldframedetectionthreshold": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "heldframemeanmin": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "heldframep25min": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "icqq": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "liveactionp10min": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "mediafileid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "outputcontainer": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qualitylabel": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "qualitytestrequired": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "reviewbeforereplace": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "sourceresolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "storagerootid": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "targetkbps": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "targetresolution": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "tier": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "tierorigin": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "undecided": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafmax": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafmin": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    }
+  },
   "posttranscodegateconfig": {
     "filereplacementcanreplacethreshold": {
       "data_type": "integer",
@@ -2658,6 +2976,21 @@
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
+    "heldframedetectionthreshold": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "heldframemeanmin": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "heldframep25min": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
     "id": {
       "data_type": "bigint",
       "is_generated": "NEVER",
@@ -2665,6 +2998,11 @@
     },
     "lastmodified": {
       "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "liveactionp10min": {
+      "data_type": "numeric",
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
@@ -2760,6 +3098,16 @@
     },
     "usenvidiahardware": {
       "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafmax": {
+      "data_type": "numeric",
+      "is_generated": "NEVER",
+      "is_nullable": "YES"
+    },
+    "vmafmin": {
+      "data_type": "numeric",
       "is_generated": "NEVER",
       "is_nullable": "YES"
     },
@@ -4513,6 +4861,11 @@
       "data_type": "text",
       "is_generated": "NEVER",
       "is_nullable": "NO"
+    },
+    "reviewbeforereplace": {
+      "data_type": "boolean",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
     }
   },
   "subtitlefixrules_old_2026_06_21": {
@@ -4577,6 +4930,43 @@
       "data_type": "text",
       "is_generated": "NEVER",
       "is_nullable": "YES"
+    }
+  },
+  "targetoverrides": {
+    "id": {
+      "data_type": "bigint",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "key": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "qualitytier": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "scope": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "setat": {
+      "data_type": "timestamp without time zone",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "setby": {
+      "data_type": "text",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
+    },
+    "storagerootid": {
+      "data_type": "integer",
+      "is_generated": "NEVER",
+      "is_nullable": "NO"
     }
   },
   "temporaryfilepaths": {
