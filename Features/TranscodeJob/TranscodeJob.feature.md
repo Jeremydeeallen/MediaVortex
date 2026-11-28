@@ -17,6 +17,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - Failed jobs are marked failed with error message and do not block the queue
 - Completed jobs update TranscodeAttempts with final size, duration, and FFmpeg command
 - ActiveJobs table tracks running processes for stuck-job detection
+- [ ] [BUG-0127] An `ActiveJobs` row never outlives its job on a live worker: when job setup or the failure handler itself raises (for example a queue row with no `MediaFileId`), the row is deleted in the same release path, the queue row is marked Failed with the error, and the worker's next `RuntimeState` is `Idle` with `SELECT COUNT(*) FROM ActiveJobs WHERE WorkerName = <self>` = 0. Verifiable: claim a synthetic queue row with `MediaFileId NULL` on a test worker; after the failure the worker has zero `ActiveJobs` rows and `deploy-worker.py` drains in one poll.
 - Distributed workers claim jobs atomically via SELECT FOR UPDATE SKIP LOCKED
 - Worker isolation: all destructive operations (shutdown cleanup, crash recovery, stuck detection, stop) are scoped to the calling worker via ClaimedBy/WorkerName. No worker may reset, kill, or interfere with another worker's jobs.
 - Interlaced routing: workers with AcceptsInterlaced=FALSE skip interlaced files in the claim query. Interlaced files remain Pending until a capable worker claims them.

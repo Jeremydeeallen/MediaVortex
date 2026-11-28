@@ -413,6 +413,13 @@ INFO    Auto-captured 0/4 stills for attempt 40985 (policy=All)
 
 ---
 
+### transcode-job
+
+- BUG-0127 | `ActiveJobs` row leaks when a claimed job has no `MediaFileId`: `HandleJobFailure` raises inside the failure handler (`ProcessTranscodeQueueService._ResolveMediaFileOrRaise`), so the row stays `Running`/`Setup` forever while the worker goes `Idle`; `deploy-fleet` drain waits on it indefinitely | criterion: Features/TranscodeJob/TranscodeJob.feature.md#BUG-0127 | 2026-11-28
+  Repro: dot-worker-1 (code `ccdf6ccb`) claimed Remux queue 229656 at 2026-11-28 01:54:33 (DB time); the queue row had no `MediaFileId`; `ActiveJobs` 1575893 (`JobType=Remux`, `Phase=Setup`, `FfmpegPid NULL`) was never deleted; the worker completed Transcode attempt 104189 at 02:05 and reported `RuntimeState=Idle`, `CurrentAttemptId NULL`; `py deploy/deploy-fleet.py` drain for dot-worker-1 polled `ActiveJobs=1` for 5 hours (17,000+ s).
+  Evidence: dot journal 18:54:33 -07:00: `EXCEPTION: Exception handling job failure: HandleJobFailure: Job 229656 missing MediaFileId; cannot resolve profile.` raised from `_ResolveMediaFileOrRaise` (ProcessTranscodeQueueService.py:1186 -> 726). Queue row 229656 no longer exists (`MAX(TranscodeQueue.Id)` = 226110), so the claim path handed the worker a row that was deleted or never had a file. Worker-lifecycle I1 deletes own `ActiveJobs` rows only at boot; nothing releases a row when the failure handler itself fails on a live worker.
+  First place to look: `Features/TranscodeJob/ProcessTranscodeQueueService.HandleJobFailure` (the `_ResolveMediaFileOrRaise` call must not gate the `ActiveJobs` release / queue-row failure write; release in `finally`), the claim SQL in `Features/TranscodeQueue/TranscodeQueueRepository.ClaimNextPendingJob` (how a row with `MediaFileId NULL` is claimable), and `deploy/deploy-worker.py` `DrainWorker` (drain reads `ActiveJobs` only; a `RuntimeState=Idle` worker with rows is the leak signature). Immediate unblock used 2026-11-28: operator deletes the row, the fleet drain completes.
+
 ### transcode-queue
 
 - BUG-0124 | `POST /api/TranscodeQueue/AddJob` silently drops `QualityTier` and `QualityLabel`; only `ProfileId` reaches `AddJobToQueue`, so the job runs at the file's existing profile while the API answers `Success=true` | criterion: Features/TranscodeQueue/TranscodeQueue.feature.md#14 | 2026-11-26
