@@ -62,7 +62,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CONTROLLER = REPO_ROOT / 'Features' / 'WorkBucket' / 'WorkBucketController.py'
 ADMISSION_SERVICE = REPO_ROOT / 'Features' / 'WorkBucket' / 'Services' / 'QueueAdmissionAppService.py'
 QUEUE_SERVICE = REPO_ROOT / 'Features' / 'TranscodeQueue' / 'QueueManagementBusinessService.py'
-PROFILE_REPO = REPO_ROOT / 'Features' / 'Profiles' / 'ProfileRepository.py'
+PROFILE_REPO = REPO_ROOT / 'Features' / 'Policy' / 'ProfileRepository.py'
 
 
 # directive: transcode-flow-canonical
